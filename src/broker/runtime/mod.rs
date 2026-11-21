@@ -1,5 +1,4 @@
 mod events;
-pub(crate) mod evidence;
 mod inputs;
 
 use crate::broker::MemberStatus;
@@ -124,7 +123,6 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         resolved_mode: row.get("resolved_mode")?,
         mode_source: row.get("mode_source")?,
         permission_argv_json: json_column(row, "permission_argv_json", true)?,
-        event_evidence: row.get("event_evidence")?,
         coverage: row.get("coverage")?,
         status: row.get("status")?,
         native_version: row.get("native_version")?,
@@ -297,12 +295,12 @@ pub(crate) fn insert_run(conn: &Connection, new: &NewRun) -> Result<RunRecord, C
     conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,database_identity_json,
              launch_nonce,runtime_path,requested_mode,resolved_mode,mode_source,permission_argv_json,
-             event_evidence,coverage,status,native_version,owner_epoch,
+             coverage,status,native_version,owner_epoch,
              owner_kind,owner_pid,owner_start_identity,cleanup_state,event_seq_reserved_through)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'starting',?14,1,'creator',?15,?16,'incomplete',0)",
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'starting',?13,1,'creator',?14,?15,'incomplete',0)",
             params![new.member_id,new.fleet_id,new.director_member_id,new.backend,new.database_identity_json.to_string(),
                 new.launch_nonce,new.runtime_path,new.requested_mode,new.resolved_mode,new.mode_source.as_str(),
-                new.permission_argv_json.to_string(),new.event_evidence.as_str(),new.coverage.as_str(),
+                new.permission_argv_json.to_string(),new.coverage.as_str(),
                 new.native_version,new.owner_pid,new.owner_start_identity],
         )?;
     let run = get_run(conn, conn.last_insert_rowid())?;
@@ -452,7 +450,6 @@ stored_enum!(ModeSource, "member_runs.mode_source", { Default => "default", Expl
 stored_enum!(OwnerKind, "member_runs.owner_kind", { Creator => "creator", Runner => "runner", Reconciler => "reconciler" });
 stored_enum!(CleanupState, "member_runs.cleanup_state", { Complete => "complete", Incomplete => "incomplete" });
 stored_enum!(Coverage, "member_runs.coverage", { Tested => "tested", Unknown => "unknown" });
-stored_enum!(EventEvidence, "member_runs.event_evidence", { Metadata => "metadata", Redacted => "redacted" });
 stored_enum!(test_values InteractionClass, "member_interactions.classification", {
     PermissionRequest => "permission_request", Question => "question",
     UnknownInteraction => "unknown_interaction"
@@ -526,7 +523,6 @@ pub(crate) struct NewRun {
     pub(crate) resolved_mode: String,
     pub(crate) mode_source: ModeSource,
     pub(crate) permission_argv_json: Value,
-    pub(crate) event_evidence: EventEvidence,
     pub(crate) native_version: Option<String>,
     pub(crate) coverage: Coverage,
     pub(crate) owner_pid: i64,
@@ -547,7 +543,6 @@ pub(crate) struct RunRecord {
     pub(crate) resolved_mode: String,
     pub(crate) mode_source: ModeSource,
     pub(crate) permission_argv_json: Value,
-    pub(crate) event_evidence: EventEvidence,
     pub(crate) coverage: Coverage,
     pub(crate) status: RunStatus,
     pub(crate) native_version: Option<String>,
@@ -786,14 +781,6 @@ pub(crate) enum PermissionReservation {
     Reserved(PermissionReceipt),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InteractionEvidenceUpdate {
-    pub(crate) run_id: i64,
-    pub(crate) episode_seq: i64,
-    pub(crate) output_seq: u64,
-    pub(crate) evidence_json: Value,
-}
-
 impl InputOperation {
     pub(crate) fn same_identity(&self, other: &Self) -> bool {
         self.input_id == other.input_id
@@ -865,20 +852,6 @@ pub(crate) mod test_support {
         })
     }
 
-    pub(crate) fn release_permission_claim(
-        conn: &mut Connection,
-        owner: &RunOwner,
-        input_id: i64,
-        proof: &ZeroByteRetirement<'_>,
-        deadline: std::time::Instant,
-    ) -> Result<PermissionReceipt, CafleetError> {
-        crate::runtime::with_database_deadline(conn, deadline, |conn| {
-            owned_transaction(conn, owner, |conn, _| {
-                release_permission_claim_in_transaction(conn, owner, input_id, proof, deadline)
-            })
-        })
-    }
-
     pub(crate) struct Fixture {
         pub(crate) _dir: TempDir,
         pub(crate) conn: Connection,
@@ -930,36 +903,11 @@ pub(crate) mod test_support {
                     "--sandbox",
                     "workspace-write"
                 ]),
-                event_evidence: EventEvidence::Metadata,
                 native_version: Some("0.163.0".into()),
                 coverage: Coverage::Unknown,
                 owner_pid: i64::from(std::process::id()),
                 owner_start_identity: "fixture-start-identity".into(),
             }
-        }
-
-        /// A second running, tested run for a new member `name` of this fleet, owned by its
-        /// runner at epoch 2 with reserved event sequences.
-        pub(crate) fn running_sibling(&mut self, name: &str) -> RunOwner {
-            let member = crate::broker::members::test_support::register(
-                &mut self.conn,
-                self.fleet,
-                name,
-                Some("%3"),
-            );
-            let spec = Self::spec(&self.conn, self.fleet, self.director, member);
-            let run = create_run(&mut self.conn, &spec).unwrap();
-            self.conn
-                .execute(
-                    "UPDATE member_runs SET status='running',owner_kind='runner',owner_epoch=2,coverage='tested' WHERE run_id=?1",
-                    [run.run_id],
-                )
-                .unwrap();
-            let owner = crate::broker::runtime::get_run(&self.conn, run.run_id)
-                .unwrap()
-                .owner();
-            crate::broker::runtime::reserve_event_sequences(&mut self.conn, &owner).unwrap();
-            owner
         }
 
         pub(crate) fn activate(&mut self) -> RunOwner {
@@ -1044,9 +992,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn metadata() -> Value {
-        evidence::EvidencePolicy::metadata()
-            .apply(&raw_evidence(SECRET))
-            .unwrap()
+        crate::broker::runtime::metadata_evidence(&raw_evidence(SECRET)).unwrap()
     }
 
     pub(crate) fn opening(
@@ -1090,30 +1036,6 @@ pub(crate) mod test_support {
         ]
         .map(|table| rows(conn, table))
         .into()
-    }
-
-    pub(crate) fn assert_no_secret(conn: &Connection, secret: &str) {
-        for table in
-            crate::db::test_support::table_snapshot(conn, |name| !name.starts_with("sqlite_"))
-        {
-            for row in table.rows {
-                for value in row {
-                    match value {
-                        rusqlite::types::Value::Text(text) => {
-                            assert!(!text.contains(secret), "secret in {}: {text}", table.name)
-                        }
-                        rusqlite::types::Value::Blob(bytes) => assert!(
-                            !bytes
-                                .windows(secret.len())
-                                .any(|part| part == secret.as_bytes()),
-                            "secret in {} blob",
-                            table.name
-                        ),
-                        _ => {}
-                    }
-                }
-            }
-        }
     }
 
     pub(crate) fn assert_key_order(value: &Value, expected: &[&str]) {
@@ -1162,112 +1084,6 @@ pub(crate) mod test_support {
                 .unwrap()
                 .into();
         create_run(conn, &spec).unwrap()
-    }
-
-    use crate::coding_agent::AnswerCapability;
-    use crate::coding_agent::CodingAgent;
-    use crate::coding_agent::catalog::AnswerKey;
-    use std::time::Duration;
-    use std::time::Instant;
-
-    pub(crate) struct ResponseFixture {
-        pub(crate) base: Fixture,
-        pub(crate) owner: RunOwner,
-        pub(crate) event: RuntimeEventRecord,
-        pub(crate) request: NewPermissionResponse,
-        pub(crate) capability: AnswerCapability,
-    }
-
-    pub(crate) fn deadline() -> Instant {
-        Instant::now() + Duration::from_secs(1)
-    }
-
-    pub(crate) fn capability(decision: PermissionDecision) -> AnswerCapability {
-        keyed_capability(AnswerKey::Decision(decision))
-    }
-
-    pub(crate) fn keyed_capability(key: AnswerKey) -> AnswerCapability {
-        AnswerCapability::fixture_key(
-            CodingAgent::Codex,
-            "0.163.0",
-            "native-tool-permission",
-            "single-request-choice",
-            key,
-        )
-        .unwrap()
-    }
-
-    impl ResponseFixture {
-        pub(crate) fn new() -> Self {
-            Self::opened(
-                InteractionClass::PermissionRequest,
-                AnswerKey::Decision(PermissionDecision::Allow),
-            )
-        }
-
-        /// A response fixture whose open interaction is a question, answered by `choice`.
-        pub(crate) fn question(choice: &str) -> Self {
-            Self::opened(InteractionClass::Question, AnswerKey::Choice(choice.into()))
-        }
-
-        pub(crate) fn opened(classification: InteractionClass, key: AnswerKey) -> Self {
-            let mut base = Fixture::new();
-            base.conn
-                .execute(
-                    "UPDATE member_runs SET coverage='tested' WHERE run_id=?1",
-                    [base.run.run_id],
-                )
-                .unwrap();
-            let owner = base.activate();
-            let event = base.open_as(&owner, classification);
-            let request = NewPermissionResponse {
-                operation_key: "permission:fixture-1".into(),
-                metadata: PermissionResponseMetadata {
-                    event_id: event.event_id,
-                    interaction_id: event.interaction_id.unwrap(),
-                    expected_owner_epoch: owner.owner_epoch,
-                    request_token: "a".repeat(64),
-                    key: key.clone(),
-                    director_member_id: base.director,
-                    director_mode: DirectorMode::Auto,
-                    decision_source: DecisionSource::DirectorAuto,
-                    mode_evidence_ref: "fixture:host-mode".into(),
-                    decision_evidence_ref: "fixture:decision".into(),
-                    answer_rule_id: "single-request-choice".into(),
-                },
-            };
-            Self {
-                base,
-                owner,
-                event,
-                request,
-                capability: keyed_capability(key),
-            }
-        }
-
-        pub(crate) fn identity(&self) -> PermissionReceiptIdentity {
-            PermissionReceiptIdentity {
-                database_identity_json: self.owner.database_identity_json.clone(),
-                run_id: self.owner.run_id,
-            }
-        }
-
-        pub(crate) fn reserve(&mut self) -> PermissionReceipt {
-            match storage::reserve_permission_response(
-                &mut self.base.conn,
-                &self.owner,
-                &self.request,
-                Some(&self.capability),
-                deadline(),
-            )
-            .unwrap()
-            {
-                PermissionReservation::Reserved(receipt) => receipt,
-                PermissionReservation::Retained(receipt) => {
-                    panic!("fresh fixture returned retained receipt: {receipt:?}")
-                }
-            }
-        }
     }
 
     pub(crate) fn replace_public_payload(
@@ -1385,29 +1201,6 @@ mod tests {
     }
 
     #[test]
-    fn current_owner_reserves_disjoint_ranges_of_256_across_reconnections() {
-        let mut fixture = Fixture::new();
-        let owner = fixture.activate();
-        assert_eq!(fixture.reserve(&owner), 1..=256);
-        let mut other = fixture.reopen();
-        assert_eq!(
-            storage::reserve_event_sequences(&mut other, &owner).unwrap(),
-            257..=512
-        );
-        assert_eq!(
-            storage::get_run(&fixture.conn, owner.run_id)
-                .unwrap()
-                .event_seq_reserved_through,
-            512
-        );
-        let transition = opening(owner.run_id, 257, 1, metadata());
-        assert!(
-            storage::persist_transition(&mut other, &owner, &transition, PersistenceMode::Live)
-                .is_ok()
-        );
-    }
-
-    #[test]
     fn stale_owner_kind_epoch_or_database_identity_fences_every_mutation() {
         let mut fixture = Fixture::new();
         let owner = fixture.activate();
@@ -1453,24 +1246,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn failed_sequence_reservation_rolls_back_the_high_water_mark() {
-        let mut fixture = Fixture::new();
-        let owner = fixture.activate();
-        fixture.conn.execute_batch("CREATE TRIGGER fail_reservation BEFORE UPDATE OF event_seq_reserved_through ON member_runs BEGIN SELECT RAISE(ABORT,'injected reservation failure'); END").unwrap();
-        assert!(storage::reserve_event_sequences(&mut fixture.conn, &owner).is_err());
-        assert_eq!(
-            storage::get_run(&fixture.conn, owner.run_id)
-                .unwrap()
-                .event_seq_reserved_through,
-            0
-        );
-        fixture
-            .conn
-            .execute_batch("DROP TRIGGER fail_reservation")
-            .unwrap();
-        assert_eq!(fixture.reserve(&owner), 1..=256);
-    }
     #[test]
     fn concurrent_sequence_reservations_commit_disjoint_ranges() {
         let mut fixture = Fixture::new();

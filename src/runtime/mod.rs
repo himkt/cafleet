@@ -149,7 +149,6 @@ pub(crate) struct SpawnSpec {
     pub(crate) argv: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) environment: Vec<(String, String)>,
-    pub(crate) evidence_policy: Value,
     pub(crate) size: TerminalSize,
 }
 
@@ -172,10 +171,6 @@ impl SpawnSpec {
                 .iter()
                 .all(|(k, v)| !k.is_empty() && !k.contains(['=', '\0']) && !v.contains('\0')),
             "invalid native environment override",
-        )?;
-        ensure(
-            self.evidence_policy.is_object(),
-            "evidence policy must be an object",
         )?;
         self.size.validate()
     }
@@ -300,7 +295,6 @@ pub(crate) mod test_support {
                 resolved_mode: "approve-for-me".into(),
                 mode_source: ModeSource::Default,
                 permission_argv_json: json!(["--approve-for-me"]),
-                event_evidence: EventEvidence::Metadata,
                 native_version: None,
                 coverage: Coverage::Unknown,
                 owner_pid: process.pid,
@@ -355,7 +349,6 @@ pub(crate) mod test_support {
                 ],
                 cwd: self._dir.path().to_path_buf(),
                 environment: Vec::new(),
-                evidence_policy: json!({"mode":"metadata"}),
                 size: TerminalSize { rows: 24, cols: 80 },
             }
         }

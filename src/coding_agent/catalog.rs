@@ -1145,14 +1145,6 @@ impl ProfileCatalog {
             .is_lt()
             .then_some(lowest.min_version_text.as_str())
     }
-    pub(crate) fn rule_ids(&self) -> Vec<String> {
-        self.profiles
-            .iter()
-            .flat_map(|p| p.rules.iter().map(|r| r.id.clone()))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
     pub(crate) fn detection_coverage(
         &self,
         backend: CodingAgent,

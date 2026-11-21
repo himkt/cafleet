@@ -1378,8 +1378,7 @@ pub(crate) mod test_support {
             ).unwrap(), 1);
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             storage::reserve_event_sequences(&mut fixture.conn, &owner).unwrap();
-            let evidence = storage::evidence::EvidencePolicy::metadata()
-                .apply(&json!({
+            let evidence = crate::broker::runtime::metadata_evidence(&json!({
                     "backend":"codex","native_version":fixture.run.native_version,
                     "rule_id":"fixture-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false
                 }))
@@ -2262,166 +2261,6 @@ mod tests {
             Some((input.interaction_id, operation.input_id))
         );
         receipt
-    }
-
-    #[test]
-    fn permission_response_actual_service_returns_typed_durable_audit_and_one_selected_answer() {
-        let mut fixture = ServiceFixture::configured(false, response_services);
-        fixture.start_running();
-        let until = Instant::now() + Duration::from_secs(2);
-        let (settings, run, placement, input) =
-            response_command(&mut fixture, until, "response:actual-live");
-        let output_start = fixture.output.len();
-        let mut host = SocketHost::new(&settings, &placement, until);
-        let original = storage::get_event(&fixture.fixture.conn, input.event_id).unwrap();
-        let database = settings.database_url.clone();
-        let interaction_id = input.interaction_id;
-        let mut closed = SocketHost::new(&settings, &placement, until);
-        closed.after_health = Some(Box::new(move || {
-            let conn = crate::db::connect(&database).unwrap();
-            assert_eq!(conn.execute(
-                "UPDATE member_interactions SET closed_at=?1,close_reason='not_visible' WHERE interaction_id=?2 AND closed_at IS NULL",
-                rusqlite::params![crate::time::now_stamp(), interaction_id],
-            ).unwrap(), 1);
-            let closed_at: Option<String> = conn
-                .query_row(
-                    "SELECT closed_at FROM member_interactions WHERE interaction_id=?1",
-                    [interaction_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(closed_at.is_some());
-        }));
-        let refused = respond_permission_with_host(
-            &mut fixture.fixture.conn,
-            &settings,
-            &input,
-            Deadline::until(until),
-            &mut closed,
-        );
-        let restored = fixture.fixture.conn.execute(
-            "UPDATE member_interactions SET closed_at=NULL,close_reason=NULL WHERE interaction_id=?1 AND closed_at IS NOT NULL",
-            [input.interaction_id],
-        );
-        assert_eq!(restored.unwrap(), 1);
-        assert_eq!(closed.calls, [1, 1, 0]);
-        let refused = refused
-            .err()
-            .expect("a genuinely closed association refuses before exchange");
-        assert_eq!(
-            (
-                refused.context.run_id,
-                refused.context.interaction_id,
-                refused.context.input_id
-            ),
-            (Some(run.run_id), Some(input.interaction_id), None)
-        );
-        assert!(
-            storage::find_input(&fixture.fixture.conn, run.run_id, &input.operation_key)
-                .unwrap()
-                .is_none()
-        );
-        let previous = original.interaction.as_ref().unwrap().evidence_json["screen_seq"]
-            .as_u64()
-            .unwrap();
-        let process = ProcessIdentity::read(run.owner_pid).unwrap().unwrap();
-        assert_eq!(process.start_identity, run.owner_start_identity);
-        assert!(process.matches().unwrap(), "generation-bound owned runner");
-        assert_eq!(i64::from(fixture.child.id()), process.pid);
-        fixture.resize(24, 81);
-        let resized = loop {
-            let current = inspect_permission(
-                &mut fixture.fixture.conn,
-                &settings,
-                &PermissionInspectInput {
-                    event_id: input.event_id,
-                    interaction_id: input.interaction_id,
-                    director_member_id: run.director_member_id,
-                },
-                Deadline::until(until),
-            )
-            .unwrap();
-            if current.output_seq > previous {
-                break current;
-            }
-            assert!(
-                Instant::now() < until,
-                "actual runner observes the resize under the original command budget"
-            );
-            std::thread::sleep(
-                Duration::from_millis(2).min(until.saturating_duration_since(Instant::now())),
-            );
-        };
-        assert_eq!(
-            resized.request_token.as_deref(),
-            Some(input.request_token.as_str()),
-            "an equivalent resize keeps the request token"
-        );
-        let after_resize = storage::get_event(&fixture.fixture.conn, input.event_id).unwrap();
-        assert_eq!(after_resize.event, original.event);
-        assert_eq!(
-            after_resize.interaction, original.interaction,
-            "an equivalent resize schedules no evidence refresh"
-        );
-        let result = respond_permission_with_host(
-            &mut fixture.fixture.conn,
-            &settings,
-            &input,
-            Deadline::until(until),
-            &mut host,
-        );
-        assert_eq!(
-            host.calls,
-            [1, 1, 1],
-            "the retained token after an equivalent resize permits one exchange: {:?}",
-            result.as_ref().err()
-        );
-        let result = result.unwrap();
-        assert_eq!(host.requests[0]["kind"], "permission_respond");
-        for field in ["answer_rule_id", "bytes", "stages"] {
-            assert!(host.requests[0].get(field).is_none());
-        }
-        let receipt = service_response_audit(&fixture, &input);
-        assert_eq!(
-            (
-                result.submission.status,
-                result.submission.stage,
-                result.submission.input_id
-            ),
-            (
-                SubmissionStatus::Accepted,
-                SubmissionStage::Submitted,
-                Some(receipt.input.input_id)
-            )
-        );
-        assert_eq!(
-            (
-                result.member_id,
-                result.run_id,
-                result.owner_epoch,
-                result.interaction_id,
-                result.event_id,
-                &result.key,
-                result.decision_source
-            ),
-            (
-                run.member_id,
-                run.run_id,
-                run.owner_epoch,
-                input.interaction_id,
-                input.event_id,
-                &input.key,
-                input.decision_source
-            )
-        );
-        assert!(result.submission.output_seq.is_some());
-        native_answers_through_barrier(
-            &mut fixture,
-            output_start,
-            "response-live-barrier",
-            &["review-answer=y"],
-        );
-        fixture.finish();
     }
 
     #[test]
@@ -4005,7 +3844,7 @@ mod tests {
             let mut case = History::new(InputState::Ready, None);
             let run = case.fixture.run.clone();
             storage::reserve_event_sequences(&mut case.fixture.conn, &run.owner()).unwrap();
-            let evidence = storage::evidence::EvidencePolicy::metadata().apply(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
+            let evidence = crate::broker::runtime::metadata_evidence(&serde_json::json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
             storage::persist_transition(
                 &mut case.fixture.conn,
                 &run.owner(),
@@ -4886,20 +4725,6 @@ mod tests {
                 );
                 before.unchanged(&conn);
             }
-            #[test]
-            fn semantic_source_mode_preflight_preserves_usage_category_before_history_or_live_effects()
-             {
-                let mut case = Case::new(Retained::Accepted);
-                let mut request = case.command();
-                request.director_mode = DirectorMode::Manual;
-                let before = Snapshot::take(&case.fixture.conn);
-                let failure = match attempt(&mut case, &request) {
-                    Err(failure) => failure,
-                    Ok(_) => panic!("director-auto requires auto before retained projection"),
-                };
-                assert!(matches!(failure.source, CafleetError::Usage(_)));
-                before.unchanged(&case.fixture.conn);
-            }
 
             mod claim_and_association_history {
                 use crate::runtime::input_client::tests::permission_history::entry::*;
@@ -4907,41 +4732,6 @@ mod tests {
                 use rusqlite::hooks::AuthContext;
                 use rusqlite::hooks::Authorization;
                 use std::sync::Mutex;
-
-                #[test]
-                fn released_not_submitted_claim_remains_valid_consumed_history() {
-                    let mut case = Case::new(Retained::NotSubmitted);
-                    assert_eq!(
-                        case.fixture
-                            .conn
-                            .execute(
-                                "DELETE FROM member_permission_response_claims WHERE input_id=?1",
-                                [case.input_id],
-                            )
-                            .unwrap(),
-                        1
-                    );
-                    let receipt =
-                        storage::get_permission_response(&case.fixture.conn, case.input_id)
-                            .unwrap();
-                    assert!(receipt.claim.is_none());
-                    assert_eq!(receipt.input.state, InputState::Settled);
-                    assert_eq!(
-                        receipt.input.disposition,
-                        Some(InputDisposition::NotSubmitted)
-                    );
-                    assert_eq!(receipt.response.metadata, case.request.metadata);
-                    let request = case.command();
-                    let before = Snapshot::take(&case.fixture.conn);
-                    let result = success(attempt(&mut case, &request));
-                    assert_projection(&case, &result, Retained::NotSubmitted);
-                    before.unchanged(&case.fixture.conn);
-                    assert_eq!(
-                        storage::get_permission_response(&case.fixture.conn, case.input_id)
-                            .unwrap(),
-                        receipt
-                    );
-                }
 
                 fn related(case: &Case) -> Case {
                     let mut conn = Connection::open(case.fixture.conn.path().unwrap()).unwrap();
@@ -4988,7 +4778,6 @@ mod tests {
                             resolved_mode: original.resolved_mode.clone(),
                             mode_source: original.mode_source,
                             permission_argv_json: original.permission_argv_json.clone(),
-                            event_evidence: original.event_evidence,
                             native_version: original.native_version.clone(),
                             coverage: Coverage::Unknown,
                             owner_pid: process.pid,

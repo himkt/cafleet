@@ -686,19 +686,7 @@ pub(crate) fn run_service(
         storage::reserve_event_sequences(conn, &owner)
     })?;
     run = storage::get_run(&conn, owner.run_id)?;
-    let evidence_policy = match descriptor.spawn.evidence_policy["mode"].as_str() {
-        Some("metadata") => storage::evidence::EvidencePolicy::metadata(),
-        Some("redacted") => {
-            let ids = catalog.rule_ids();
-            let refs = ids.iter().map(String::as_str).collect::<Vec<_>>();
-            storage::evidence::EvidencePolicy::redacted(
-                &descriptor.spawn.evidence_policy["config"],
-                &refs,
-            )?
-        }
-        _ => return Err(error("invalid launch evidence policy")),
-    };
-    let mut controller = ObservationController::new(&run, catalog, evidence_policy)?;
+    let mut controller = ObservationController::new(&run, catalog)?;
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -3986,7 +3974,6 @@ mod tests {
                 let observation = health.observation.as_ref().unwrap();
                 if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
                     && observation.pending_count == 0
-                    && !observation.pending_evidence
                 {
                     break;
                 }
@@ -4228,7 +4215,6 @@ mod tests {
                 let observation = health.observation.as_ref().unwrap();
                 if observation.eligibility == InputEligibility::Hold(GateReason::Interaction)
                     && observation.pending_count == 0
-                    && !observation.pending_evidence
                 {
                     return;
                 }
@@ -4757,7 +4743,7 @@ mod tests {
                     synthetic(fixture, spec);
                     let run = &fixture.run;
                     let evidence =
-                        storage::evidence::run_metadata(run, "runner-lifecycle", 1).unwrap();
+                        crate::broker::runtime::run_evidence(run, "runner-lifecycle", 1).unwrap();
                     if interaction {
                         seeded = Some(evidence.to_string());
                         fixture.conn.execute("INSERT INTO member_interactions(run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json) VALUES(?1,1,'permission_request',?2,'2026-10-26T17:00:00Z',?3)",rusqlite::params![run.run_id,evidence["evidence_digest"].as_str().unwrap(),evidence.to_string()]).unwrap();

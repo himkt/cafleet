@@ -79,7 +79,6 @@ CREATE TABLE member_runs (
     resolved_mode TEXT NOT NULL CHECK(length(trim(resolved_mode)) > 0),
     mode_source TEXT NOT NULL CHECK(mode_source IN ('default','explicit')),
     permission_argv_json TEXT NOT NULL CHECK(json_valid(permission_argv_json) AND json_type(permission_argv_json) = 'array'),
-    event_evidence TEXT NOT NULL CHECK(event_evidence IN ('metadata','redacted')),
     coverage TEXT NOT NULL CHECK(coverage IN ('tested','unknown')),
     status TEXT NOT NULL CHECK(status IN ('starting','prepared','running','degraded','recovering','exited','failed','lost')),
     native_version TEXT,

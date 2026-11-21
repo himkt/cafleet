@@ -246,7 +246,7 @@ pub(super) fn interaction_missing_evidence(
     evidence: &serde_json::Value,
 ) -> Result<Vec<MissingEvidence>> {
     if classification == storage::InteractionClass::Question {
-        storage::evidence::validate(evidence)?;
+        storage::validate_evidence(evidence)?;
         Ok(Vec::new())
     } else {
         inspection_missing_evidence(evidence)
@@ -256,24 +256,16 @@ pub(super) fn interaction_missing_evidence(
 pub(super) fn inspection_missing_evidence(
     evidence: &serde_json::Value,
 ) -> Result<Vec<MissingEvidence>> {
-    storage::evidence::validate(evidence)?;
-    let mut missing = Vec::new();
-    let known = evidence["truncated"] == false
-        && evidence["operation"]
-            .as_str()
-            .is_some_and(|text| !text.trim().is_empty() && text != "[redacted]");
-    if !known {
-        missing.push(MissingEvidence::Operation);
-    }
-    missing.extend([
+    storage::validate_evidence(evidence)?;
+    Ok(vec![
+        MissingEvidence::Operation,
         MissingEvidence::Arguments,
         MissingEvidence::Cwd,
         MissingEvidence::Environment,
         MissingEvidence::Targets,
         MissingEvidence::Effects,
         MissingEvidence::ChoiceScope,
-    ]);
-    Ok(missing)
+    ])
 }
 
 fn answered_classification(key: &AnswerKey) -> storage::InteractionClass {
@@ -1069,7 +1061,7 @@ impl InputCoordinator {
             Some(reason.clone())
         } else if let Some(code) = &status.diagnostic {
             Some(format!("observation degraded: {code}"))
-        } else if status.retained_draft || status.retained_evidence {
+        } else if status.retained_draft {
             Some("observation update pending".into())
         } else if status.visibility != Visibility::Visible {
             Some("permission request is not visible".into())
@@ -1954,7 +1946,6 @@ impl InputCoordinator {
         status.eligibility == InputEligibility::ComposerEmpty
             && status.visibility == Visibility::NotVisible
             && !status.retained_draft
-            && !status.retained_evidence
             && status.diagnostic.is_none()
     }
 
@@ -5060,7 +5051,6 @@ pub(super) fn receive_input_expiration(
 #[cfg(test)]
 mod tests {
     mod manual_progress {
-        use crate::broker::runtime as storage;
         use crate::coding_agent::ProfileCatalog;
         use crate::error::CafleetError;
         use crate::runtime::input::tests::ordinary_prompt::support::RunnerFixture;
@@ -5101,7 +5091,7 @@ mod tests {
                         )
                         .unwrap();
                     let health = self.controller.health(&self.writer);
-                    if !health.degraded && health.pending_count == 0 && !health.pending_evidence {
+                    if !health.degraded && health.pending_count == 0 {
                         break;
                     }
                     assert!(Instant::now() < self.until, "writer health: {health:?}");
@@ -5127,7 +5117,6 @@ mod tests {
         fn with_harness(body: impl FnOnce(&mut RunnerFixture)) {
             let mut harness = RunnerFixture::new(
                 ProfileCatalog::bundled(),
-                storage::evidence::EvidencePolicy::metadata(),
                 None,
                 TerminalSize { rows: 24, cols: 80 },
                 TransportLimits {
@@ -9356,8 +9345,6 @@ mod tests {
             }
 
             pub(in crate::runtime::input) struct HostProfile<'a> {
-                pub(crate) policy: storage::evidence::EvidencePolicy,
-                pub(crate) event_evidence: &'static str,
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'a str,
                 pub(crate) size: TerminalSize,
@@ -9367,23 +9354,14 @@ mod tests {
             pub(in crate::runtime::input) const TEST_STAGE_SETTLE: Duration =
                 Duration::from_millis(50);
             impl HostProfile<'_> {
-                pub(crate) fn synthetic(
-                    policy: storage::evidence::EvidencePolicy,
-                    event_evidence: &'static str,
-                ) -> Self {
+                pub(crate) fn metadata() -> Self {
                     Self {
-                        policy,
-                        event_evidence,
                         backend: crate::coding_agent::CodingAgent::Codex,
                         native_version: VERSION,
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
                         stage_settle: TEST_STAGE_SETTLE,
                     }
-                }
-
-                pub(crate) fn metadata() -> Self {
-                    Self::synthetic(storage::evidence::EvidencePolicy::metadata(), "metadata")
                 }
             }
 
@@ -9565,7 +9543,6 @@ mod tests {
             pub(in crate::runtime::input) struct RunSelection<'a> {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
                 pub(crate) native_version: &'a str,
-                pub(crate) event_evidence: &'static str,
             }
 
             /// Keeps exact input-event sequences independent of storage scheduling delays.
@@ -9601,7 +9578,6 @@ mod tests {
             impl RunnerFixture {
                 pub(in crate::runtime::input) fn new(
                     catalog: &ProfileCatalog,
-                    policy: storage::evidence::EvidencePolicy,
                     selection: Option<RunSelection>,
                     size: TerminalSize,
                     limits: TransportLimits,
@@ -9613,7 +9589,7 @@ mod tests {
                         let selected =
                             catalog.capabilities(selection.backend, Some(selection.native_version));
                         let coverage = selected.detection;
-                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3,event_evidence=?4 WHERE run_id=?5",rusqlite::params![selection.backend.name(),selection.native_version,coverage.as_str(),selection.event_evidence,fixture.run.run_id]).unwrap();
+                        fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3 WHERE run_id=?4",rusqlite::params![selection.backend.name(),selection.native_version,coverage.as_str(),fixture.run.run_id]).unwrap();
                         fixture
                             .conn
                             .execute(
@@ -9623,8 +9599,7 @@ mod tests {
                             .unwrap();
                     }
                     fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
-                    let mut controller =
-                        ObservationController::new(&fixture.run, catalog, policy).unwrap();
+                    let mut controller = ObservationController::new(&fixture.run, catalog).unwrap();
                     let mut writer = EventWriter::start_with_hooks(
                         format!("sqlite:///{}", writer_fixture.fixture.conn.path().unwrap()),
                         writer_fixture.fixture.run.clone(),
@@ -9775,8 +9750,6 @@ mod tests {
                         .unwrap()
                         .monotonic_ns();
                     let HostProfile {
-                        policy,
-                        event_evidence,
                         backend,
                         native_version,
                         size,
@@ -9798,11 +9771,9 @@ mod tests {
                         until,
                     } = RunnerFixture::new(
                         &catalog,
-                        policy,
                         Some(RunSelection {
                             backend,
                             native_version,
-                            event_evidence,
                         }),
                         size,
                         TransportLimits {
@@ -10782,15 +10753,12 @@ mod tests {
         use crate::broker::runtime::DecisionSource;
         use crate::broker::runtime::DirectorMode;
         use crate::broker::runtime::PermissionDecision;
-        use crate::coding_agent::CodingAgent;
         use crate::coding_agent::catalog::AnswerKey;
         use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
         use crate::runtime::ByteInput;
         use crate::runtime::PermissionInspection;
         use crate::runtime::PermissionRespondInput;
         use crate::runtime::PermissionResponseResult;
-        use crate::runtime::ReceiptAction;
-        use crate::runtime::ReceiptReply;
         use crate::runtime::TerminalSize;
         use crate::runtime::input::tests::ordinary_prompt::support::Host;
         use crate::runtime::input::tests::ordinary_prompt::support::Pty;
@@ -11305,119 +11273,6 @@ mod tests {
         }
 
         #[test]
-        fn permission_retained_key_replays_without_a_drain_or_typing_while_blocked() {
-            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                let ids = stable_form(h);
-                let inspected = inspect(h, ids);
-                let input = command(
-                    h,
-                    &inspected,
-                    "response:retained",
-                    PermissionDecision::Allow,
-                );
-                assert!(h.respond(&input).unwrap().is_none());
-                let id = arm_stage(h, 1);
-                h.drain();
-                assert!(h.advance().is_none());
-                arm_stage(h, 2);
-                h.drain();
-                let submitted = response(h.advance().expect("actual final response stage"));
-                assert_eq!(submitted.submission.input_id, Some(id));
-                let offers = h.pty.offers.clone();
-                h.coordinator.fence(h.until).unwrap();
-                h.child_output(b"\x1b[0m");
-                let lookup = |h: &mut Host, key: &str| {
-                    let mut retained = input.clone();
-                    retained.operation_key = key.into();
-                    let mut request = h.request("unused-response-key");
-                    request.operation = InputControlOperation::PermissionRespond(retained);
-                    h.coordinator.retained_permission_response(
-                        &mut h.fixture.conn,
-                        &request,
-                        h.until,
-                    )
-                };
-                let replay = response(
-                    lookup(h, "response:retained")
-                        .unwrap()
-                        .expect("a retained key returns its recorded result"),
-                );
-                assert_eq!(
-                    (
-                        replay.submission.status,
-                        replay.submission.stage,
-                        replay.submission.input_id
-                    ),
-                    (
-                        SubmissionStatus::Accepted,
-                        SubmissionStage::Submitted,
-                        Some(id)
-                    )
-                );
-                assert_eq!(h.pty.offers, offers, "the replay types nothing");
-                assert_eq!(
-                    h.pty.child.chunks.iter().map(Vec::len).sum::<usize>(),
-                    4,
-                    "the replay performs no admission drain"
-                );
-                assert!(
-                    lookup(h, "response:absent").unwrap().is_none(),
-                    "an absent key proceeds to the admission drain"
-                );
-                assert_eq!(counts(h), [1, 1, 1]);
-            });
-        }
-
-        #[test]
-        fn permission_rearm_reports_the_named_blocked_reason_before_live_validation() {
-            for (block, reason) in [
-                (
-                    (|h: &mut Host| {
-                        h.coordinator.fence(h.until).unwrap();
-                    }) as fn(&mut Host),
-                    "permission input is fenced",
-                ),
-                (
-                    |h: &mut Host| {
-                        h.coordinator.manual_generation = u64::MAX;
-                        assert!(h.coordinator.observe_manual(1).is_err());
-                        assert!(h.coordinator.manual_accounting_failed);
-                    },
-                    "manual input accounting failed",
-                ),
-            ] {
-                with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                    let (input, id) = terminal_zero(h, "response:rearm-blocked");
-                    let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                    assert!(
-                        h.respond(&input).unwrap().is_none(),
-                        "exact current Ready request enters live revalidation"
-                    );
-                    block(h);
-                    h.drain();
-                    let failure = h
-                        .try_advance()
-                        .err()
-                        .expect("a blocked rearm refuses its stage");
-                    assert!(
-                        failure
-                            .source
-                            .message()
-                            .contains(&format!("permission request is blocked: {reason}")),
-                        "{reason}: {:?}",
-                        failure.source.message()
-                    );
-                    assert_eq!(failure.context.input_id, Some(id));
-                    assert_eq!(
-                        storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                        original
-                    );
-                    assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-                });
-            }
-        }
-
-        #[test]
         fn pointer_reports_revoke_permission_tokens_without_keyboard_generation_changes() {
             for pointer in [b"\x1b[<0;10;20M".as_slice(), b"\x1b[M !!"] {
                 with_inspection(|host, _, _| {
@@ -11468,131 +11323,6 @@ mod tests {
             assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
         }
 
-        fn terminal_zero(h: &mut Host, key: &str) -> (PermissionRespondInput, i64) {
-            let (_, input, id) = admitted(h, key);
-            h.pty.short = Some(0);
-            h.drain();
-            let failure = h
-                .try_advance()
-                .err()
-                .expect("actual zero-length native write terminates its attempt");
-            assert!(
-                failure
-                    .source
-                    .message()
-                    .contains("native input write returned zero bytes")
-            );
-            assert_eq!(failure.context.input_id, Some(id));
-            let point = h.coordinator.retained_checkpoint(id).unwrap();
-            assert_eq!(
-                (point.stage, point.written_bytes),
-                (SubmissionStage::ZeroBytes, 0)
-            );
-            assert_eq!(
-                audit(h, id, &input, "inspection-allow-plan").input.state,
-                storage::InputState::Ready
-            );
-            h.coordinator.finish_pending_attempt();
-            h.pty.short = None;
-            assert!(h.coordinator.pending.is_none());
-            assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-            (input, id)
-        }
-
-        #[test]
-        fn permission_ready_actual_zero_rearms_exact_binding_and_revoked_authority_preserves_ready()
-        {
-            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                let (input, id) = terminal_zero(h, "response:ready-rearm");
-                let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert!(
-                    h.respond(&input).unwrap().is_none(),
-                    "exact current Ready request enters live revalidation"
-                );
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    original
-                );
-                assert_eq!(arm_stage(h, 2), id);
-                let rearmed = audit(h, id, &input, "inspection-allow-plan");
-                assert_eq!(rearmed.input.state, storage::InputState::InProgress);
-                assert_eq!(rearmed.response, original.response);
-                assert_eq!(rearmed.input.created_at, original.input.created_at);
-                assert_eq!(rearmed.input.payload_digest, original.input.payload_digest);
-                assert_eq!(counts(h), [1, 1, 1]);
-                h.drain();
-                assert!(h.advance().is_none());
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (SubmissionStage::Partial, 1)
-                );
-                assert_eq!(arm_stage(h, 3), id);
-                h.drain();
-                let completed = response(h.advance().expect("actual final rearmed stage"));
-                assert_eq!(
-                    (
-                        completed.submission.status,
-                        completed.submission.stage,
-                        completed.submission.input_id
-                    ),
-                    (
-                        SubmissionStatus::Accepted,
-                        SubmissionStage::Submitted,
-                        Some(id)
-                    )
-                );
-                let accepted = audit(h, id, &input, "inspection-allow-plan");
-                assert_eq!(accepted.input.state, storage::InputState::Accepted);
-                assert_eq!(accepted.response, original.response);
-                assert_eq!(
-                    h.pty.offers,
-                    vec![b"y".to_vec(), b"y".to_vec(), b"\r".to_vec()]
-                );
-            });
-            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                let (input, id) = terminal_zero(h, "response:ready-revoked");
-                let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                h.type_human(b"!");
-                h.drain();
-                let failure = h
-                    .respond(&input)
-                    .err()
-                    .expect("actual manual generation revokes Ready authority");
-                assert_eq!(
-                    (
-                        failure.context.run_id,
-                        failure.context.interaction_id,
-                        failure.context.input_id
-                    ),
-                    (
-                        Some(h.fixture.run.run_id),
-                        Some(input.interaction_id),
-                        Some(id)
-                    )
-                );
-                assert!(h.coordinator.pending.is_none());
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    original
-                );
-                assert_eq!(counts(h), [1, 1, 1]);
-                assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"!".to_vec()]);
-            });
-        }
-
-        fn receipt_reply(
-            h: &mut Host,
-            action: ReceiptAction,
-        ) -> std::result::Result<ReceiptReply, InputFailure> {
-            h.receipt(action).map(|reply| {
-                let InputControlReply::Receipt(reply) = reply else {
-                    panic!("actual permission receipt has its typed reply")
-                };
-                reply
-            })
-        }
-
         fn refuses_zero_proof(h: &mut Host, row: &storage::PermissionReceipt) {
             let tx = h
                 .fixture
@@ -11621,553 +11351,6 @@ mod tests {
             );
         }
 
-        fn release_ready_claim(
-            h: &mut Host,
-            row: &storage::PermissionReceipt,
-        ) -> storage::PermissionReceipt {
-            let tx = h
-                .fixture
-                .conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .unwrap();
-            let guard = h
-                .coordinator
-                .acquire_receipt_guard(&tx, row, h.until)
-                .unwrap();
-            let proof = guard
-                .zero_byte_retirement(
-                    &h.fixture.run.owner(),
-                    row.input.input_id,
-                    row.response.metadata.interaction_id,
-                )
-                .unwrap();
-            tx.rollback().unwrap();
-            storage::test_support::release_permission_claim(
-                &mut h.fixture.conn,
-                &h.fixture.run.owner(),
-                row.input.input_id,
-                &proof,
-                h.until,
-            )
-            .unwrap()
-        }
-
-        #[test]
-        fn permission_ready_rearm_restores_its_released_claim_and_refuses_a_competing_claim() {
-            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                let (input, id) = terminal_zero(h, "response:ready-claim-restore");
-                let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                let released = release_ready_claim(h, &original);
-                assert_eq!(released.input, original.input);
-                assert_eq!(released.response, original.response);
-                assert!(released.claim.is_none());
-                assert!(h.respond(&input).unwrap().is_none());
-                assert_eq!(arm_stage(h, 2), id);
-                let rearmed = audit(h, id, &input, "inspection-allow-plan");
-                assert_eq!(rearmed.input.state, storage::InputState::InProgress);
-                assert_eq!(rearmed.response, original.response);
-                assert_eq!(rearmed.claim, original.claim);
-                assert_eq!(counts(h), [1, 1, 1]);
-                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-                h.coordinator.finish_pending_attempt();
-            });
-            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                let (input, id) = terminal_zero(h, "response:ready-foreign-claim");
-                let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                release_ready_claim(h, &original);
-                let request = storage::NewPermissionResponse {
-                    operation_key: "response:competing-episode-owner".into(),
-                    metadata: original.response.metadata.clone(),
-                };
-                let cap = h
-                    .coordinator
-                    .current_request
-                    .as_ref()
-                    .unwrap()
-                    .0
-                    .observed
-                    .answer_matches
-                    .iter()
-                    .find(|matched| {
-                        matched.plan().capability().key()
-                            == &AnswerKey::Decision(PermissionDecision::Allow)
-                    })
-                    .unwrap()
-                    .plan()
-                    .capability();
-                let storage::PermissionReservation::Reserved(competing) =
-                    storage::reserve_permission_response(
-                        &mut h.fixture.conn,
-                        &h.fixture.run.owner(),
-                        &request,
-                        Some(cap),
-                        h.until,
-                    )
-                    .unwrap()
-                else {
-                    panic!(
-                        "separate deliberate key acquires the released claim through actual storage"
-                    )
-                };
-                assert_ne!(competing.input.input_id, id);
-                let outcome = h.respond(&input);
-                let refused = match outcome {
-                    Err(_) => true,
-                    Ok(None) => {
-                        let mut refused = false;
-                        for _ in 0..16 {
-                            h.drain();
-                            match h.try_advance() {
-                                Err(_) => {
-                                    refused = true;
-                                    break;
-                                }
-                                Ok(None) => {}
-                                Ok(Some(reply)) => {
-                                    let reply = response(reply);
-                                    assert!(matches!(
-                                        reply.submission.status,
-                                        SubmissionStatus::Held | SubmissionStatus::Rejected
-                                    ));
-                                    assert_eq!(
-                                        (reply.submission.input_id, reply.submission.stage),
-                                        (Some(id), SubmissionStage::ZeroBytes)
-                                    );
-                                    refused = true;
-                                    break;
-                                }
-                            }
-                        }
-                        refused
-                    }
-                    Ok(Some(reply)) => {
-                        let reply = response(reply);
-                        assert!(matches!(
-                            reply.submission.status,
-                            SubmissionStatus::Held | SubmissionStatus::Rejected
-                        ));
-                        assert_eq!(
-                            (reply.submission.input_id, reply.submission.stage),
-                            (Some(id), SubmissionStage::ZeroBytes)
-                        );
-                        true
-                    }
-                };
-                assert!(
-                    refused,
-                    "actual foreign-claim check refuses within finite turns"
-                );
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, competing.input.input_id)
-                        .unwrap(),
-                    competing
-                );
-                let unchanged = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert_eq!(unchanged.input, original.input);
-                assert_eq!(unchanged.response, original.response);
-                assert!(unchanged.claim.is_none());
-                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-                h.coordinator.finish_pending_attempt();
-            });
-        }
-
-        #[test]
-        fn permission_receipt_possible_initial_io_keeps_claim_through_attributed_settlement_and_retirement()
-         {
-            with_inspection(|h, _, _| {
-                let (_, input, id) = admitted(h, "response:possible-initial-io");
-                h.drain();
-                let mut guard = h
-                    .coordinator
-                    .acquire_write_guard(
-                        &mut h.fixture.conn,
-                        &mut h.transport,
-                        &h.controller,
-                        h.until,
-                    )
-                    .unwrap()
-                    .unwrap();
-                assert!(
-                    guard
-                        .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
-                        .is_err(),
-                    "an Armed writer lease is not a receipt-exclusion proof"
-                );
-                guard.begin_write(&h.transport, b"y", h.until).unwrap();
-                guard.mark_io_possible();
-                drop(guard);
-                h.coordinator.finish_pending_attempt();
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (SubmissionStage::Unknown, 0)
-                );
-                let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert_eq!(original.input.state, storage::InputState::InProgress);
-                refuses_zero_proof(h, &original);
-                assert!(matches!(receipt_reply(h, ReceiptAction::Reconcile {
-                input_id: id, expected: storage::InputState::InProgress,
-                disposition: storage::InputDisposition::NotSubmitted,
-                evidence_ref: "fixture:attributed-possible-io".into(),
-            }).unwrap(), ReceiptReply::Settled { input_id } if input_id == id));
-                let settled = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert_eq!(
-                    settled.input.disposition,
-                    Some(storage::InputDisposition::NotSubmitted)
-                );
-                assert_eq!(settled.response, original.response);
-                assert_eq!(settled.claim, original.claim);
-                refuses_zero_proof(h, &settled);
-                assert!(
-                    matches!(receipt_reply(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
-                );
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    settled
-                );
-                refuses_zero_proof(h, &settled);
-                let repeated = response(h.respond(&input).unwrap().unwrap());
-                assert_eq!(
-                    (repeated.submission.status, repeated.submission.stage),
-                    (SubmissionStatus::Rejected, SubmissionStage::ZeroBytes)
-                );
-                assert!(h.pty.offers.is_empty());
-            });
-        }
-
-        #[test]
-        fn permission_receipt_genuine_zero_exclusion_settlement_and_claim_release_are_atomic() {
-            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                let (input, id) = terminal_zero(h, "response:zero-settlement");
-                let original = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                let run = storage::get_run(&h.fixture.conn, h.fixture.run.run_id).unwrap();
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                let mut other = input.clone();
-                other.operation_key = "response:other-pending".into();
-                assert!(h.respond(&other).unwrap().is_none());
-                let pending = h.coordinator.pending.as_ref().unwrap();
-                let pending_before = (
-                    pending.request.operation_key.clone(),
-                    pending.phase,
-                    pending.deadline,
-                    pending.input_id(),
-                );
-                let ReceiptReply::Present {
-                    input_id,
-                    submission,
-                } = receipt_reply(
-                    h,
-                    ReceiptAction::Query {
-                        operation_key: input.operation_key.clone(),
-                    },
-                )
-                .unwrap()
-                else {
-                    panic!("durable Ready receipt remains present alongside another pending writer")
-                };
-                assert_eq!(input_id, id);
-                assert_eq!(
-                    (submission.status, submission.stage, submission.output_seq),
-                    (
-                        SubmissionStatus::Held,
-                        SubmissionStage::ZeroBytes,
-                        Some(point.output_seq)
-                    )
-                );
-                let reconcile = || ReceiptAction::Reconcile {
-                    input_id: id,
-                    expected: storage::InputState::Ready,
-                    disposition: storage::InputDisposition::NotSubmitted,
-                    evidence_ref: "fixture:live-zero-byte".into(),
-                };
-                assert!(receipt_reply(h, reconcile()).is_err());
-                let pending = h.coordinator.pending.as_ref().unwrap();
-                assert!(
-                    (
-                        pending.request.operation_key.clone(),
-                        pending.phase,
-                        pending.deadline,
-                        pending.input_id()
-                    ) == pending_before
-                );
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    original
-                );
-                h.coordinator.finish_pending_attempt();
-                let tx = h
-                    .fixture
-                    .conn
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .unwrap();
-                let mut guard = h
-                    .coordinator
-                    .acquire_receipt_guard(&tx, &original, h.until)
-                    .unwrap();
-                assert!(
-                    guard.begin_write(&h.transport, b"y", h.until).is_err(),
-                    "receipt exclusion grants no selected-stage write permit"
-                );
-                drop(guard);
-                tx.rollback().unwrap();
-                {
-                    let tx = h
-                        .fixture
-                        .conn
-                        .transaction_with_behavior(TransactionBehavior::Immediate)
-                        .unwrap();
-                    let guard = h
-                        .coordinator
-                        .acquire_receipt_guard(&tx, &original, h.until)
-                        .unwrap();
-                    let proof = guard
-                        .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
-                        .unwrap();
-                    tx.rollback().unwrap();
-                    let request = storage::NewPermissionResponse {
-                        operation_key: input.operation_key.clone(),
-                        metadata: original.response.metadata.clone(),
-                    };
-                    assert!(
-                        storage::rearm_permission_response(
-                            &mut h.fixture.conn,
-                            &h.fixture.run.owner(),
-                            &request,
-                            &proof,
-                            h.until
-                        )
-                        .is_err(),
-                        "exclusion-only proof cannot grant current-plan rearm authority"
-                    );
-                }
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    original
-                );
-                h.fixture
-                    .conn
-                    .execute_batch(&format!(
-                        "CREATE TRIGGER reject_live_claim_delete
-                 BEFORE DELETE ON member_permission_response_claims
-                 WHEN OLD.input_id={id}
-                 BEGIN
-                   SELECT CASE WHEN EXISTS(
-                     SELECT 1 FROM member_input_operations
-                     WHERE input_id=OLD.input_id AND state='settled'
-                       AND disposition='not_submitted'
-                       AND evidence_ref='fixture:live-zero-byte'
-                   ) THEN RAISE(ABORT,'owned live claim delete failure')
-                     ELSE RAISE(ABORT,'owned claim delete missing prior settlement') END;
-                 END"
-                    ))
-                    .unwrap();
-                let failed = receipt_reply(h, reconcile());
-                let removed = h
-                    .fixture
-                    .conn
-                    .execute_batch("DROP TRIGGER reject_live_claim_delete");
-                assert!(
-                    removed.is_ok(),
-                    "primary={:?}; trigger_cleanup={removed:?}",
-                    failed.as_ref().err()
-                );
-                let failed = failed
-                    .err()
-                    .expect("real claim deletion failure aborts settlement");
-                assert!(
-                    failed
-                        .source
-                        .message()
-                        .contains("owned live claim delete failure")
-                );
-                assert_eq!(failed.context.input_id, Some(id));
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    original
-                );
-                assert_eq!(storage::get_run(&h.fixture.conn, run.run_id).unwrap(), run);
-                let unchanged = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (
-                        unchanged.stage,
-                        unchanged.written_bytes,
-                        unchanged.output_seq
-                    ),
-                    (point.stage, point.written_bytes, point.output_seq)
-                );
-                assert!(
-                    matches!(receipt_reply(h, reconcile()).unwrap(), ReceiptReply::Settled { input_id } if input_id == id)
-                );
-                let settled = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert_eq!(settled.input.state, storage::InputState::Settled);
-                assert_eq!(
-                    settled.input.disposition,
-                    Some(storage::InputDisposition::NotSubmitted)
-                );
-                assert_eq!(
-                    settled.input.evidence_ref.as_deref(),
-                    Some("fixture:live-zero-byte")
-                );
-                assert_eq!(settled.response, original.response);
-                assert_eq!(settled.claim, None);
-                assert!(
-                    matches!(receipt_reply(h, ReceiptAction::Retire { input_id: id }).unwrap(), ReceiptReply::Retired { input_id } if input_id == id)
-                );
-                assert!(!h.coordinator.operations.contains_key(&id));
-                let ReceiptReply::Present {
-                    input_id,
-                    submission,
-                } = receipt_reply(
-                    h,
-                    ReceiptAction::Query {
-                        operation_key: input.operation_key.clone(),
-                    },
-                )
-                .unwrap()
-                else {
-                    panic!("retired cache retains its consumed durable operation")
-                };
-                assert_eq!(input_id, id);
-                assert_eq!(
-                    (submission.status, submission.stage, submission.output_seq),
-                    (SubmissionStatus::Rejected, SubmissionStage::Unknown, None)
-                );
-                let repeated = response(h.respond(&input).unwrap().unwrap());
-                assert_eq!(
-                    (
-                        repeated.submission.status,
-                        repeated.submission.input_id,
-                        repeated.submission.stage
-                    ),
-                    (
-                        SubmissionStatus::Rejected,
-                        Some(id),
-                        SubmissionStage::ZeroBytes
-                    )
-                );
-                let ids = stable_form(h);
-                let current = inspect(h, ids);
-                let fresh = command(
-                    h,
-                    &current,
-                    "response:deliberate-after-zero-settlement",
-                    PermissionDecision::Allow,
-                );
-                assert!(h.respond(&fresh).unwrap().is_none());
-                for _ in 0..16 {
-                    h.drain();
-                    assert!(h.try_advance().unwrap().is_none());
-                    if h.hooks.count("reserved") == 2 {
-                        break;
-                    }
-                }
-                assert_eq!(h.hooks.count("reserved"), 2);
-                let next = storage::find_input(
-                    &h.fixture.conn,
-                    h.fixture.run.run_id,
-                    &fresh.operation_key,
-                )
-                .unwrap()
-                .expect("new deliberate key reserves after proven release");
-                assert_ne!(next.input_id, id);
-                let next_receipt =
-                    storage::get_permission_response(&h.fixture.conn, next.input_id).unwrap();
-                assert_eq!(next_receipt.claim.as_ref().unwrap().input_id, next.input_id);
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    settled
-                );
-                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-                h.coordinator.finish_pending_attempt();
-            });
-        }
-
-        #[test]
-        fn permission_receipt_cacheless_ready_proof_is_borrowed_and_not_an_attributed_disposition()
-        {
-            assert_not_impl!(InputGuard<'static>: Send, Clone, serde::Serialize);
-            with_definition(inspection_fixture_definition(), b"y".to_vec(), |h, _, _| {
-                let (input, id) = terminal_zero(h, "response:cacheless-zero");
-                let ready = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                h.coordinator.fence(h.until).unwrap();
-                let mut empty = InputCoordinator::new(
-                    &mut h.fixture.conn,
-                    &h.fixture.run,
-                    h.coordinator.lock.clone(),
-                    crate::runtime::input::tests::ordinary_prompt::support::services(
-                        crate::coding_agent::catalog::test_support::load(
-                            &inspection_fixture_definition(),
-                        )
-                        .unwrap(),
-                        h.hooks.clone(),
-                        h.stage_settle,
-                        "receipt-only proof",
-                    ),
-                    h.until,
-                )
-                .unwrap();
-                assert!(empty.operations.is_empty());
-                {
-                    let tx = h
-                        .fixture
-                        .conn
-                        .transaction_with_behavior(TransactionBehavior::Immediate)
-                        .unwrap();
-                    let guard = empty.acquire_receipt_guard(&tx, &ready, h.until).unwrap();
-                    assert!(
-                        guard
-                            .zero_byte_retirement(
-                                &h.fixture.run.owner(),
-                                id + 1,
-                                input.interaction_id
-                            )
-                            .is_err()
-                    );
-                    let _proof = guard
-                        .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
-                        .unwrap();
-                    tx.rollback().unwrap();
-                }
-                storage::test_support::settle_input(
-                    &mut h.fixture.conn,
-                    &h.fixture.run.owner(),
-                    id,
-                    storage::InputState::Ready,
-                    storage::InputDisposition::NotSubmitted,
-                    "fixture:attributed-only",
-                )
-                .unwrap();
-                let attributed = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert!(attributed.claim.is_some());
-                let tx = h
-                    .fixture
-                    .conn
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .unwrap();
-                let guard = empty
-                    .acquire_receipt_guard(&tx, &attributed, h.until)
-                    .unwrap();
-                assert!(
-                    guard
-                        .zero_byte_retirement(&h.fixture.run.owner(), id, input.interaction_id)
-                        .is_err(),
-                    "cache-less NotSubmitted label supplies no byte proof"
-                );
-                drop(guard);
-                tx.rollback().unwrap();
-                let mut request = h.request("unused-cacheless-retire");
-                request.operation =
-                    InputControlOperation::Receipt(ReceiptAction::Retire { input_id: id });
-                assert!(
-                    matches!(empty.handle_received(&mut h.fixture.conn, request, &h.controller, h.until).unwrap(), Some(InputControlReply::Receipt(ReceiptReply::Retired { input_id })) if input_id == id)
-                );
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    attributed
-                );
-                assert_eq!(h.pty.offers, vec![b"y".to_vec()]);
-            });
-        }
         struct StageIo<'a> {
             inner: &'a mut Pty,
             fault: Option<io::ErrorKind>,
@@ -12211,205 +11394,6 @@ mod tests {
                 "real selected-stage PtyIo call consumes this fault"
             );
             assert!(result.unwrap().is_none());
-        }
-
-        #[test]
-        fn permission_response_raced_retained_reservation_and_claim_supply_no_write_authority() {
-            with_inspection(|h, _, _| {
-                let ids = stable_form(h);
-                let inspected = inspect(h, ids);
-                let input = command(
-                    h,
-                    &inspected,
-                    "response:reservation-race",
-                    PermissionDecision::Allow,
-                );
-                assert!(h.respond(&input).unwrap().is_none());
-                let plan = h
-                    .coordinator
-                    .services
-                    .catalog
-                    .answer_plan(
-                        CodingAgent::Codex,
-                        "0.0.1-synthetic",
-                        "synthetic-permission",
-                        &input.key,
-                    )
-                    .unwrap();
-                let cap = plan.capability();
-                let request = storage::NewPermissionResponse {
-                    operation_key: input.operation_key.clone(),
-                    metadata: storage::PermissionResponseMetadata {
-                        event_id: input.event_id,
-                        interaction_id: input.interaction_id,
-                        expected_owner_epoch: input.expected_owner_epoch,
-                        request_token: input.request_token.clone(),
-                        key: input.key.clone(),
-                        director_member_id: input.director_member_id,
-                        director_mode: input.director_mode,
-                        decision_source: input.decision_source,
-                        mode_evidence_ref: input.mode_evidence_ref.clone(),
-                        decision_evidence_ref: input.decision_evidence_ref.clone(),
-                        answer_rule_id: cap.answer_rule_id().into(),
-                    },
-                };
-                let storage::PermissionReservation::Reserved(original) =
-                    storage::reserve_permission_response(
-                        &mut h.fixture.conn,
-                        &h.fixture.run.owner(),
-                        &request,
-                        Some(cap),
-                        h.until,
-                    )
-                    .unwrap()
-                else {
-                    panic!("independent storage wins actual fresh reservation")
-                };
-                h.drain();
-                let result = response(h.advance().expect("race returns existing receipt"));
-                assert_eq!(
-                    (
-                        result.submission.input_id,
-                        result.submission.status,
-                        result.submission.stage
-                    ),
-                    (
-                        Some(original.input.input_id),
-                        SubmissionStatus::Uncertain,
-                        SubmissionStage::Unknown
-                    )
-                );
-                assert_eq!(h.hooks.count("reserved"), 0);
-                assert!(h.coordinator.operations.is_empty());
-                assert!(h.coordinator.pending.is_none());
-                assert!(h.pty.offers.is_empty());
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, original.input.input_id)
-                        .unwrap(),
-                    original
-                );
-                let other = command(
-                    h,
-                    &inspected,
-                    "response:different-claimed-key",
-                    PermissionDecision::Deny,
-                );
-                let mut outcome = h.respond(&other);
-                for _ in 0..16 {
-                    if !matches!(outcome, Ok(None)) {
-                        break;
-                    }
-                    h.drain();
-                    outcome = h.try_advance();
-                }
-                match outcome {
-                    Err(failure) => assert_eq!(
-                        failure.context.operation_key.as_deref(),
-                        Some(other.operation_key.as_str())
-                    ),
-                    Ok(Some(reply)) => assert_ne!(
-                        response(reply).submission.status,
-                        SubmissionStatus::Accepted
-                    ),
-                    Ok(None) => {
-                        panic!("real competing claim completes refusal within finite turns")
-                    }
-                }
-                assert_eq!(counts(h), [1, 1, 1]);
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, original.input.input_id)
-                        .unwrap(),
-                    original
-                );
-                assert!(h.pty.offers.is_empty());
-                h.coordinator.finish_pending_attempt();
-                let id = original.input.input_id;
-                storage::record_input_state(
-                    &mut h.fixture.conn,
-                    &h.fixture.run.owner(),
-                    id,
-                    storage::InputState::InProgress,
-                    storage::InputState::Ready,
-                )
-                .unwrap();
-                let ready = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert_eq!(ready.response, original.response);
-                assert_eq!(ready.claim, original.claim);
-                assert!(h.coordinator.operations.is_empty());
-                let expired = Instant::now() + Duration::from_millis(500);
-                assert!(expired < h.until);
-                let mut request = h.request("unused-cacheless-ready-expiry");
-                request.operation = InputControlOperation::PermissionRespond(input.clone());
-                assert!(
-                    h.coordinator
-                        .handle_received(&mut h.fixture.conn, request, &h.controller, expired,)
-                        .unwrap()
-                        .is_none()
-                );
-                let pending = h.coordinator.pending.as_ref().unwrap();
-                assert_eq!((pending.input_id(), pending.deadline), (Some(id), expired));
-                assert_eq!(pending.ready().unwrap(), &ready);
-                assert!(h.coordinator.operations.is_empty());
-                assert!(h.pty.offers.is_empty());
-                std::thread::sleep(expired.saturating_duration_since(Instant::now()));
-                assert!(Instant::now() >= expired);
-                let failure = h
-                    .try_advance()
-                    .err()
-                    .expect("original pending expiration returns its primary failure");
-                assert!(matches!(failure.source, CafleetError::DeadlineExceeded));
-                assert_eq!(
-                    (
-                        failure.context.run_id,
-                        failure.context.interaction_id,
-                        failure.context.input_id
-                    ),
-                    (
-                        Some(h.fixture.run.run_id),
-                        Some(input.interaction_id),
-                        Some(id)
-                    )
-                );
-                assert_eq!(
-                    failure.context.operation_key.as_deref(),
-                    Some(input.operation_key.as_str())
-                );
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    ready
-                );
-                assert!(h.coordinator.operations.is_empty());
-                assert!(h.pty.offers.is_empty());
-                h.coordinator.finish_pending_attempt();
-                assert!(h.coordinator.pending.is_none());
-                assert!(h.respond(&input).unwrap().is_none());
-                assert_eq!(h.coordinator.pending.as_ref().unwrap().input_id(), Some(id));
-                h.coordinator.finish_pending_attempt();
-                assert!(h.coordinator.pending.is_none());
-                assert!(h.coordinator.operations.is_empty());
-                assert_eq!(
-                    storage::get_permission_response(&h.fixture.conn, id).unwrap(),
-                    ready
-                );
-                assert!(h.pty.offers.is_empty());
-                assert_eq!(h.hooks.count("reserved"), 0);
-                assert!(h.respond(&input).unwrap().is_none());
-                assert_eq!(arm_stage(h, 1), id);
-                h.drain();
-                assert!(h.advance().is_none());
-                assert_eq!(arm_stage(h, 2), id);
-                h.drain();
-                let accepted = response(h.advance().expect("fresh explicit rearm remains usable"));
-                assert_eq!(
-                    (accepted.submission.input_id, accepted.submission.status),
-                    (Some(id), SubmissionStatus::Accepted)
-                );
-                let completed = storage::get_permission_response(&h.fixture.conn, id).unwrap();
-                assert_eq!(completed.response, ready.response);
-                assert_eq!(completed.claim, ready.claim);
-                assert_eq!(completed.input.state, storage::InputState::Accepted);
-                assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"\r".to_vec()]);
-            });
         }
 
         #[test]
@@ -12619,67 +11603,6 @@ mod tests {
             });
         }
 
-        #[test]
-        fn permission_response_accepted_bookkeeping_failure_keeps_known_context_claim_and_actual_counts()
-         {
-            with_inspection(|h, _, _| {
-                let (_, input, id) = admitted(h, "response:accepted-failure");
-                first_stage(h, id);
-                arm_stage(h, 2);
-                h.fixture.conn.execute_batch("CREATE TRIGGER owned_response_accept_failure BEFORE UPDATE OF state ON member_input_operations WHEN NEW.kind='permission_response' AND NEW.state='accepted' BEGIN SELECT RAISE(ABORT,'owned response accepted failure'); END;").unwrap();
-                h.drain();
-                let failure = match h.try_advance() {
-                    Err(failure) => failure,
-                    Ok(_) => panic!("real Accepted trigger failure remains an error"),
-                };
-                h.fixture
-                    .conn
-                    .execute_batch("DROP TRIGGER owned_response_accept_failure;")
-                    .unwrap();
-                assert!(
-                    failure
-                        .source
-                        .message()
-                        .contains("owned response accepted failure")
-                );
-                assert_eq!(
-                    (
-                        failure.context.run_id,
-                        failure.context.interaction_id,
-                        failure.context.input_id
-                    ),
-                    (
-                        Some(h.fixture.run.run_id),
-                        Some(input.interaction_id),
-                        Some(id)
-                    )
-                );
-                assert_eq!(
-                    failure.context.operation_key.as_deref(),
-                    Some(input.operation_key.as_str())
-                );
-                assert!(!failure.source.message().contains(&input.request_token));
-                let point = h.coordinator.retained_checkpoint(id).unwrap();
-                assert_eq!(
-                    (point.stage, point.written_bytes),
-                    (SubmissionStage::Submitted, 2)
-                );
-                assert_eq!(
-                    audit(h, id, &input, "inspection-allow-plan").input.state,
-                    storage::InputState::InProgress
-                );
-                h.coordinator.finish_pending_attempt();
-                assert_eq!(h.pty.offers, vec![b"y".to_vec(), b"\r".to_vec()]);
-                let repeated = response(
-                    h.respond(&input)
-                        .unwrap()
-                        .expect("failed commit is retained uncertainty"),
-                );
-                assert_eq!(repeated.submission.status, SubmissionStatus::Uncertain);
-                assert_eq!(h.pty.offers.len(), 2);
-            });
-        }
-
         mod question {
             use crate::coding_agent::catalog::test_support::QUESTION_DECLINE_PLAN;
             use crate::coding_agent::catalog::test_support::QUESTION_LATER_PLAN;
@@ -12859,6 +11782,49 @@ mod tests {
                     let receipt = audit(h, id, &input, QUESTION_LATER_PLAN);
                     assert_eq!(receipt.input.state, storage::InputState::Accepted);
                     assert_eq!(receipt.response.metadata.key, choice("later"));
+                });
+            }
+
+            #[test]
+            fn a_second_answer_for_the_same_episode_is_refused_with_zero_bytes() {
+                with_question(b"3", |h| {
+                    let ids = question(h, &["accept"]);
+                    let inspected = inspect(h, ids);
+                    let first =
+                        keyed_command(h, &inspected, "response:first-answer", choice("later"));
+                    assert!(h.respond(&first).unwrap().is_none());
+                    arm_stage(h, 1);
+                    h.drain();
+                    let answered = response(h.advance().expect("the first answer completes"));
+                    assert_eq!(answered.submission.status, SubmissionStatus::Accepted);
+                    let offers = h.pty.offers.clone();
+                    let second =
+                        keyed_command(h, &inspected, "response:second-answer", choice("later"));
+                    let mut replies = Vec::new();
+                    match h.respond(&second) {
+                        Err(_) => {}
+                        Ok(Some(reply)) => replies.push(response(reply)),
+                        Ok(None) => {
+                            for _ in 0..16 {
+                                h.drain();
+                                match h.try_advance() {
+                                    Err(_) => break,
+                                    Ok(Some(reply)) => {
+                                        replies.push(response(reply));
+                                        break;
+                                    }
+                                    Ok(None) => {}
+                                }
+                            }
+                        }
+                    }
+                    assert!(
+                        replies
+                            .iter()
+                            .all(|reply| reply.submission.status != SubmissionStatus::Accepted),
+                        "the episode accepts one answer"
+                    );
+                    assert_eq!(h.pty.offers, offers, "the second answer writes no byte");
                 });
             }
 

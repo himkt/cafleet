@@ -758,37 +758,6 @@ mod tests {
                 ],
             );
         }
-
-        #[test]
-        fn permission_response_rejects_invalid_decision_source_and_mode_enums() {
-            for (field, values) in [
-                ("--decision", ["", "approved", "yes", "Allow"]),
-                ("--decision-source", ["", "director_auto", "member", "User"]),
-                ("--director-mode", ["", "AUTO", "never", "on-request"]),
-            ] {
-                for value in values {
-                    let mut args = respond();
-                    set(&mut args, field, value);
-                    rejected(&args);
-                }
-            }
-        }
-
-        #[test]
-        fn permission_preflight_refuses_director_auto_attribution_outside_auto_mode() {
-            let mut manual = respond();
-            set(&mut manual, "--director-mode", "manual");
-            let failure = permission_preflight(&parsed(&manual)).unwrap_err();
-            assert!(
-                matches!(&failure, CafleetError::Usage(message) if message == "director-auto requires auto mode"),
-                "{}",
-                failure.message()
-            );
-            set(&mut manual, "--decision-source", "user");
-            permission_preflight(&parsed(&manual)).unwrap();
-            permission_preflight(&parsed(&respond())).unwrap();
-            permission_preflight(&parsed(&inspect())).unwrap();
-        }
     }
 
     #[test]

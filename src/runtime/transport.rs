@@ -451,7 +451,6 @@ impl Transport {
         ensure(
             !proof.health.degraded
                 && proof.health.pending_count == 0
-                && !proof.health.pending_evidence
                 && proof.health.diagnostic.is_none(),
             "observation drain is not healthy",
         )
@@ -560,8 +559,6 @@ fn unsettled_health(health: &ObservationHealth) -> Option<String> {
         })
     } else if health.pending_count != 0 {
         Some("observation transitions pending".into())
-    } else if health.pending_evidence {
-        Some("observation evidence pending".into())
     } else {
         None
     }
@@ -1388,7 +1385,6 @@ mod tests {
         );
     }
 
-    use crate::broker::runtime as storage;
     use crate::coding_agent::ProfileCatalog;
 
     use crate::runtime::observation::test_support::controller::Clock;
@@ -1672,12 +1668,9 @@ mod tests {
         fn new() -> Self {
             let until = Instant::now() + Duration::from_secs(4);
             let fixture = WriterFixture::new();
-            let controller = ObservationController::new(
-                &fixture.fixture.run,
-                ProfileCatalog::bundled(),
-                storage::evidence::EvidencePolicy::metadata(),
-            )
-            .unwrap();
+            let controller =
+                ObservationController::new(&fixture.fixture.run, ProfileCatalog::bundled())
+                    .unwrap();
             let hooks = Arc::new(Hooks::default());
             let release = Some(Release(hooks.clone()));
             let mut writer = start(&fixture, hooks.clone());
@@ -1870,7 +1863,6 @@ mod tests {
             let health = health.as_ref().expect("actual adapter supplied health");
             assert!(!health.degraded);
             assert_eq!(health.pending_count, 0);
-            assert!(!health.pending_evidence);
             assert_eq!(
                 health.eligibility,
                 InputEligibility::Hold(GateReason::Unknown)
@@ -2508,7 +2500,6 @@ mod tests {
         let actual = h.controller.health(&h.writer);
         assert!(!actual.degraded, "{actual:?}");
         assert_eq!(actual.pending_count, 0);
-        assert!(!actual.pending_evidence);
         assert_eq!(
             actual.eligibility,
             InputEligibility::Hold(GateReason::Unknown)

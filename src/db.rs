@@ -1226,12 +1226,12 @@ mod tests {
                 self.conn.execute(
             "INSERT INTO member_runs(member_id,fleet_id,director_member_id,backend,
              database_identity_json,launch_nonce,runtime_path,resolved_mode,mode_source,
-             permission_argv_json,event_evidence,coverage,status,
+             permission_argv_json,coverage,status,
              owner_epoch,owner_kind,owner_pid,owner_start_identity,
              cleanup_state,event_seq_reserved_through,native_session_json)
              VALUES(?1,?2,?3,?7,?4,?5,'/isolated/runtime','never','default',
              '[\"--ask-for-approval\",\"never\",\"--sandbox\",\"workspace-write\"]',
-             'metadata','unknown',?6,1,'creator',1234,'fixture-owner',
+             'unknown',?6,1,'creator',1234,'fixture-owner',
              'incomplete',0,?8)",
             params![self.member,self.fleet,self.director,
                 json!({"canonical_path": self.conn.path().unwrap(), "instance_id": "a".repeat(32), "device":1,"inode":2}).to_string(),
@@ -1364,7 +1364,6 @@ mod tests {
                 ("owner_kind", "member"),
                 ("cleanup_state", "unknown"),
                 ("coverage", "universal"),
-                ("event_evidence", "raw"),
                 ("backend", "bogus"),
                 ("database_identity_json", "[]"),
                 ("permission_argv_json", "{}"),

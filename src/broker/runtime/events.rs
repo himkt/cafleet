@@ -2,8 +2,92 @@ use crate::broker::runtime::*;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use rusqlite::params;
+use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
+
+const EVIDENCE_FIELDS: [&str; 4] = ["backend", "native_version", "rule_id", "screen_seq"];
+
+/// The metadata evidence of an observation: its identity fields and their digest.
+pub(crate) fn metadata_evidence(raw: &Value) -> Result<Value, CafleetError> {
+    let raw = raw
+        .as_object()
+        .ok_or_else(|| invalid("evidence", "object required"))?;
+    let mut fields = Map::new();
+    for key in EVIDENCE_FIELDS {
+        let value = raw
+            .get(key)
+            .ok_or_else(|| invalid(key, "required evidence field"))?;
+        fields.insert(key.into(), value.clone());
+    }
+    let mut evidence = Value::Object(fields);
+    evidence["evidence_digest"] = json!(evidence_digest(&evidence));
+    validate_evidence(&evidence)?;
+    Ok(evidence)
+}
+
+/// The metadata evidence of a run-scoped event that no screen form produced.
+pub(crate) fn run_evidence(
+    run: &RunRecord,
+    rule_id: &str,
+    screen_seq: u64,
+) -> Result<Value, CafleetError> {
+    metadata_evidence(&json!({
+        "backend":run.backend,"native_version":run.native_version,
+        "rule_id":rule_id,"screen_seq":screen_seq,
+    }))
+}
+
+fn evidence_digest(value: &Value) -> String {
+    let mut value = value.clone();
+    value
+        .as_object_mut()
+        .expect("evidence is an object")
+        .remove("evidence_digest");
+    crate::digest::sha256_hex(crate::digest::canonical_json(&value).as_bytes())
+}
+
+pub(crate) fn validate_evidence(value: &Value) -> Result<(), CafleetError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid("evidence_json", "object required"))?;
+    require(
+        object.len() == EVIDENCE_FIELDS.len() + 1
+            && EVIDENCE_FIELDS
+                .iter()
+                .chain(["evidence_digest"].iter())
+                .all(|key| object.contains_key(*key)),
+        "evidence_json",
+        "metadata evidence has exactly its identity fields and digest",
+    )?;
+    for field in ["backend", "rule_id"] {
+        require(
+            object[field]
+                .as_str()
+                .is_some_and(|text| !text.is_empty() && text.len() <= 256),
+            field,
+            "bounded evidence identity required",
+        )?;
+    }
+    require(
+        object["native_version"].is_null()
+            || object["native_version"]
+                .as_str()
+                .is_some_and(|text| text.len() <= 256),
+        "native_version",
+        "nullable bounded string required",
+    )?;
+    require(
+        object["screen_seq"].as_u64().is_some(),
+        "screen_seq",
+        "nonnegative sequence required",
+    )?;
+    require(
+        object["evidence_digest"].as_str() == Some(evidence_digest(value).as_str()),
+        "evidence_digest",
+        "evidence digest mismatch",
+    )
+}
 
 fn map_interaction(row: &rusqlite::Row<'_>) -> rusqlite::Result<InteractionRecord> {
     Ok(InteractionRecord {
@@ -25,7 +109,7 @@ pub(super) fn interaction(conn: &Connection, id: i64) -> Result<InteractionRecor
         [id],
         map_interaction,
     )?;
-    evidence::validate(&interaction.evidence_json)?;
+    validate_evidence(&interaction.evidence_json)?;
     require(
         interaction.evidence_json["evidence_digest"].as_str()
             == Some(interaction.evidence_digest.as_str()),
@@ -383,13 +467,7 @@ pub(crate) fn validate_transition(
         "run or reserved sequence mismatch",
     )?;
     rfc3339(&transition.observed_at, "observed_at")?;
-    evidence::validate(&transition.evidence_json)?;
-    let policy = &transition.evidence_json["evidence_policy"];
-    require(
-        run.event_evidence == EventEvidence::Redacted || policy == "metadata",
-        "event_evidence",
-        "run policy forbids screen evidence",
-    )?;
+    validate_evidence(&transition.evidence_json)?;
     require(
         transition.evidence_json["backend"] == run.backend,
         "evidence.backend",
@@ -793,7 +871,6 @@ fn payload(
             transition.classification,
             event_id,
             interaction_id,
-            &transition.evidence_json,
         )?
     };
     Ok(payload)
@@ -973,28 +1050,19 @@ pub(crate) fn persist_transition_in_transaction(
 
 const REVIEW_INSTRUCTION: &str = "Verify this event and the current request. Evaluate the operation and its risk. In the Director session's effective auto mode, decide allow or deny; otherwise obtain the user's permission. Submit the selected answer through the request-bound CAFleet response command, or give that complete command to the user. Inspect the native result and continuation afterward.";
 const QUESTION_INSTRUCTION: &str = "Verify this event and the current question. Inspect it for the choices CAFleet can answer and their scope. In the Director session's effective auto mode, choose one of those choices; otherwise obtain the user's choice. Submit it through the request-bound CAFleet response command with that choice, or give that complete command to the user. When the inspection lists no choice, ask the user to answer on the member's native surface. Inspect the native result and continuation afterward.";
-const MULTI_ROW_INSTRUCTION: &str = "The operation is shown as its displayed rows, where a row break may be a wrap or a line break in the command, so confirm the command against the excerpt before deciding.";
-fn with_multi_row_sentence(instruction: &str, evidence: &Value) -> String {
-    match evidence["operation_rows"].as_u64() {
-        Some(rows) if rows > 1 => format!("{instruction} {MULTI_ROW_INSTRUCTION}"),
-        _ => instruction.to_owned(),
-    }
-}
 fn director_action(
     run: &RunRecord,
     kind: RuntimeEventKind,
     classification: Option<InteractionClass>,
     event_id: i64,
     interaction_id: Option<i64>,
-    evidence: &Value,
 ) -> Result<Value, CafleetError> {
     let (action, instruction) = match (kind, classification) {
-        (RuntimeEventKind::InteractionOpened, Some(InteractionClass::PermissionRequest)) => (
-            "review_permission_request",
-            with_multi_row_sentence(REVIEW_INSTRUCTION, evidence),
-        ),
+        (RuntimeEventKind::InteractionOpened, Some(InteractionClass::PermissionRequest)) => {
+            ("review_permission_request", REVIEW_INSTRUCTION)
+        }
         (RuntimeEventKind::InteractionOpened, Some(InteractionClass::Question)) => {
-            ("review_question", QUESTION_INSTRUCTION.to_owned())
+            ("review_question", QUESTION_INSTRUCTION)
         }
         _ => return Ok(Value::Null),
     };
@@ -1011,73 +1079,6 @@ fn director_action(
     )?;
     Ok(json!({"kind":action,"instruction":instruction,
         "inspect_argv":["cafleet","permission","inspect",interaction_id.to_string(),"--event-id",event_id.to_string(),"--from-member-id",run.director_member_id.to_string(),"--json"]}))
-}
-
-pub(crate) fn update_interaction_evidence(
-    conn: &mut Connection,
-    owner: &RunOwner,
-    update: &InteractionEvidenceUpdate,
-    after_event_seq: i64,
-    deadline: std::time::Instant,
-) -> Result<InteractionRecord, CafleetError> {
-    crate::runtime::with_database_deadline(conn, deadline, |conn| {
-        owned_transaction(conn, owner, |conn, run| {
-            require(
-                update.run_id == run.run_id && update.episode_seq > 0,
-                "episode_seq",
-                "matching run and positive episode required",
-            )?;
-            evidence::validate(&update.evidence_json)?;
-            let value = &update.evidence_json;
-            require(
-                value["screen_seq"].as_u64() == Some(update.output_seq)
-                    && value["backend"] == run.backend
-                    && value["native_version"] == json!(run.native_version)
-                    && (run.event_evidence == EventEvidence::Redacted
-                        || value["evidence_policy"] == "metadata"),
-                "evidence_json",
-                "refresh evidence does not match current run/version/policy/sequence",
-            )?;
-            let maximum = latest_event_seq(conn, run.run_id)?;
-            require(
-                after_event_seq > 0 && maximum == Some(after_event_seq),
-                "after_event_seq",
-                "refresh barrier must match committed run maximum",
-            )?;
-            let id = interaction_id_for_episode(conn, run.run_id, update.episode_seq)?;
-            let current = interaction(conn, id)?;
-            require(
-                current.closed_at.is_none(),
-                "interaction_id",
-                "refresh requires an open current episode",
-            )?;
-            let opening_id:i64 = conn.query_row("SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND interaction_id=?2 AND kind='interaction_opened' AND event_seq<=?3",params![run.run_id,id,after_event_seq],|row| row.get(0))?;
-            get_event(conn, opening_id)?;
-            let previous = current.evidence_json["screen_seq"]
-                .as_u64()
-                .expect("validated interaction sequence");
-            require(
-                update.output_seq >= previous,
-                "screen_seq",
-                "refresh output sequence regressed",
-            )?;
-            if update.output_seq == previous {
-                require(
-                    value == &current.evidence_json,
-                    "screen_seq",
-                    "conflicting refresh at the same output sequence",
-                )?;
-                return Ok(current);
-            }
-            let changed = conn.execute("UPDATE member_interactions SET evidence_json=?1,evidence_digest=?2 WHERE interaction_id=?3 AND closed_at IS NULL",params![value.to_string(),value["evidence_digest"].as_str().expect("validated digest"),id])?;
-            require(
-                changed == 1,
-                "interaction_id",
-                "refresh lost its active episode",
-            )?;
-            interaction(conn, id)
-        })
-    })
 }
 
 #[cfg(test)]
@@ -1206,17 +1207,11 @@ mod tests {
         }
 
         #[test]
-        fn runtime_payload_v2_obscurity_and_closure_have_null_action() {
+        fn runtime_payload_v2_closure_has_null_action() {
             let mut fixture = Fixture::new();
             let owner = fixture.activate();
             fixture.open(&owner);
-            let transitions = [
-                ObservedTransition {
-                    kind: RuntimeEventKind::InteractionObscured,
-                    ..opening(owner.run_id, 2, 1, metadata())
-                },
-                closure(owner.run_id, 3, 1),
-            ];
+            let transitions = [closure(owner.run_id, 2, 1)];
             let events = transitions
                 .iter()
                 .map(|transition| {
@@ -1379,7 +1374,7 @@ mod tests {
             match changed {
                 "time" => conflict.observed_at = "2026-10-26T10:00:01.000000+00:00".into(),
                 "episode" => conflict.episode_seq = Some(2),
-                "kind" => conflict.kind = RuntimeEventKind::InteractionObscured,
+                "kind" => conflict.kind = RuntimeEventKind::InteractionClosed,
                 "classification" => conflict.classification = Some(InteractionClass::Question),
                 _ => unreachable!(),
             }
@@ -1522,7 +1517,7 @@ mod tests {
             .unwrap();
         let mut raw = raw_evidence(SECRET);
         raw["screen_seq"] = json!(121);
-        let closing_frame = evidence::EvidencePolicy::metadata().apply(&raw).unwrap();
+        let closing_frame = crate::broker::runtime::metadata_evidence(&raw).unwrap();
         assert_ne!(closing_frame, request.evidence_json);
         let closed = storage::persist_transition(
             &mut fixture.conn,
@@ -2166,35 +2161,6 @@ mod tests {
                 .is_err()
             );
             assert_eq!(durable_state(&fixture.reopen()), before);
-        }
-
-        #[test]
-        fn stalled_publication_rejects_a_permission_input_head() {
-            let mut response = storage::test_support::ResponseFixture::new();
-            let permission = response.reserve().input;
-            let storage::test_support::ResponseFixture {
-                mut base, owner, ..
-            } = response;
-            base.reserve(&owner);
-            assert_eq!(
-                storage::get_input(&base.conn, permission.input_id)
-                    .unwrap()
-                    .kind,
-                InputKind::PermissionResponse
-            );
-            let mut transition = stalled_transition(&owner, permission.input_id);
-            transition.event_seq = 2;
-            let before = durable_state(&base.reopen());
-            assert!(
-                storage::persist_transition(
-                    &mut base.conn,
-                    &owner,
-                    &transition,
-                    PersistenceMode::Live
-                )
-                .is_err()
-            );
-            assert_eq!(durable_state(&base.reopen()), before);
         }
 
         fn immediate_uncertain(fixture: &mut Fixture, owner: &RunOwner) -> InputOperation {

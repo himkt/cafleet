@@ -1,14 +1,12 @@
 use crate::broker::runtime as storage;
 use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::InteractionCloseReason;
-use crate::broker::runtime::InteractionEvidenceUpdate;
 use crate::broker::runtime::ObservedTransition;
 use crate::broker::runtime::OwnerKind;
 use crate::broker::runtime::RunRecord;
 use crate::broker::runtime::RunStatus;
 use crate::broker::runtime::RuntimeCauseKind;
 use crate::broker::runtime::RuntimeEventKind;
-use crate::broker::runtime::evidence::EvidencePolicy;
 use crate::broker::stored_enum;
 use crate::coding_agent::AnswerMatch;
 use crate::coding_agent::Detector;
@@ -80,7 +78,6 @@ pub(crate) struct ObservationStatus {
     pub(crate) next_deadline: Option<Instant>,
     pub(crate) retained_transition: bool,
     pub(crate) retained_draft: bool,
-    pub(crate) retained_evidence: bool,
     pub(crate) gap_count: u64,
     pub(crate) diagnostic: Option<String>,
 }
@@ -223,11 +220,7 @@ impl ScreenObserver for OrderedObservation<'_> {
     }
 }
 impl ObservationController {
-    pub(crate) fn new(
-        run: &RunRecord,
-        catalog: &ProfileCatalog,
-        policy: EvidencePolicy,
-    ) -> Result<Self> {
+    pub(crate) fn new(run: &RunRecord, catalog: &ProfileCatalog) -> Result<Self> {
         ensure(
             run.run_id > 0
                 && run.owner_epoch > 0
@@ -252,7 +245,7 @@ impl ObservationController {
         Ok(Self {
             run: run.clone(),
             detector: Detector::new(catalog, backend, run.native_version.as_deref()),
-            tracker: EpisodeTracker::new(run.run_id, policy)?,
+            tracker: EpisodeTracker::new(run.run_id)?,
             pool,
             pending: None,
             gap: None,
@@ -480,7 +473,7 @@ impl ObservationController {
         at: &str,
         screen_seq: u64,
     ) -> Result<TransitionDraft> {
-        let evidence = storage::evidence::run_metadata(&self.run, "runner-lifecycle", screen_seq)?;
+        let evidence = storage::run_evidence(&self.run, "runner-lifecycle", screen_seq)?;
         Ok(TransitionDraft {
             run_id: self.run.run_id,
             episode_seq: None,
@@ -500,7 +493,7 @@ impl ObservationController {
         self.visibility = update.visibility;
         self.eligibility = update.eligibility;
         self.next_deadline = update.next_deadline;
-        if !update.transitions.is_empty() || update.latest_evidence.is_some() {
+        if !update.transitions.is_empty() {
             self.pending = Some(PendingEpisodeUpdate {
                 update,
                 next_draft: 0,
@@ -583,16 +576,6 @@ impl ObservationController {
                     Ok(()) => pending.next_draft += 1,
                     Err(retained) => {
                         pending.materialized = Some(retained.transition);
-                        self.pending_error = Some(retained.cause);
-                        self.delivery_pressure(ObservationFailure::Sink, now)?;
-                        return Ok(());
-                    }
-                }
-            } else if let Some(value) = pending.update.latest_evidence.take() {
-                match writer.try_refresh(value, Instant::now() + Duration::from_millis(10)) {
-                    Ok(()) => {}
-                    Err(retained) => {
-                        pending.update.latest_evidence = Some(retained.update);
                         self.pending_error = Some(retained.cause);
                         self.delivery_pressure(ObservationFailure::Sink, now)?;
                         return Ok(());
@@ -948,10 +931,7 @@ impl ObservationController {
     }
     pub(crate) fn has_pending(&self) -> bool {
         let status = self.status();
-        status.retained_draft
-            || status.retained_evidence
-            || self.exit.is_some()
-            || self.gap.is_some()
+        status.retained_draft || self.exit.is_some() || self.gap.is_some()
     }
     pub(crate) fn status(&self) -> ObservationStatus {
         ObservationStatus {
@@ -966,10 +946,6 @@ impl ObservationController {
                 .pending
                 .as_ref()
                 .is_some_and(|p| p.next_draft < p.update.transitions.len()),
-            retained_evidence: self
-                .pending
-                .as_ref()
-                .is_some_and(|p| p.update.latest_evidence.is_some()),
             gap_count: self.gap_count,
             diagnostic: self.diagnostic.clone(),
         }
@@ -978,18 +954,16 @@ impl ObservationController {
         let observer = self.status();
         let state = writer.status();
         let pending = self.pending_transition_count();
-        let evidence = state.pending_evidence || observer.retained_evidence;
         let degraded =
             state.diagnostic.is_some() || self.gap.is_some() || observer.diagnostic.is_some();
         let mut eligibility = observer.eligibility;
-        if degraded || pending + state.pending_count > 0 || evidence {
+        if degraded || pending + state.pending_count > 0 {
             eligibility = InputEligibility::Hold(GateReason::Gap);
         }
         ObservationHealth {
             visibility: observer.visibility,
             eligibility,
             pending_count: pending + state.pending_count,
-            pending_evidence: evidence,
             gap_count: observer
                 .gap_count
                 .checked_add(state.gap_count)
@@ -1190,7 +1164,6 @@ pub(crate) mod native_capture {
         sensitive: Vec<String>,
         masks: Vec<CaptureMask>,
         catalog: ProfileCatalog,
-        definition: Value,
     }
     impl NativeCapturePolicy {
         fn apply_limits(&mut self, limits: &NativeCaptureLimits) -> Result<()> {
@@ -1213,72 +1186,18 @@ pub(crate) mod native_capture {
             }
             Ok(())
         }
-        pub(crate) fn from_launch(
-            spawn: &SpawnSpec,
-            masks: &[CaptureMask],
-            catalog: &ProfileCatalog,
-        ) -> Result<Self> {
-            Self::from_launch_with_compiler(spawn, masks, catalog, &BoundedCapturePatternCompiler)
+        pub(crate) fn from_launch(masks: &[CaptureMask], catalog: &ProfileCatalog) -> Result<Self> {
+            Self::from_launch_with_compiler(masks, catalog, &BoundedCapturePatternCompiler)
         }
         pub(crate) fn from_launch_with_compiler(
-            spawn: &SpawnSpec,
             masks: &[CaptureMask],
             catalog: &ProfileCatalog,
             compiler: &dyn NativeCapturePatternCompiler,
         ) -> Result<Self> {
             let defaults = NativeCaptureLimits::default();
-            let metadata = match spawn.evidence_policy["mode"].as_str() {
-                Some("metadata") => true,
-                Some("redacted") => false,
-                _ => return Err(error("invalid capture launch evidence policy")),
-            };
-            let mut raw_patterns = Vec::new();
-            let mut sensitive = Vec::new();
-            if !metadata {
-                let config = spawn.evidence_policy["config"]
-                    .as_object()
-                    .ok_or_else(|| error("capture redaction configuration required"))?;
-                ensure(
-                    config.get("schema_version") == Some(&json!(1)),
-                    "capture redaction schema mismatch",
-                )?;
-                let raw = config
-                    .get("patterns")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| error("capture patterns required"))?;
-                ensure(
-                    !raw.is_empty() && raw.len() <= defaults.max_patterns,
-                    "capture pattern count outside bounds",
-                )?;
-                let mut total = 0usize;
-                for pattern in raw {
-                    let pattern = pattern
-                        .as_str()
-                        .ok_or_else(|| error("capture pattern string required"))?;
-                    total = capture_size(&[total, pattern.len()])?;
-                    ensure(
-                        pattern.len() <= defaults.max_pattern_bytes
-                            && total <= defaults.max_total_pattern_bytes,
-                        "capture pattern budget exceeded",
-                    )?;
-                    raw_patterns.push(pattern);
-                }
-                let known = catalog.rule_ids();
-                let rules = config
-                    .get("sensitive_rules")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| error("capture sensitive rules required"))?;
-                for rule in rules {
-                    let rule = rule
-                        .as_str()
-                        .ok_or_else(|| error("capture sensitive rule string required"))?;
-                    ensure(
-                        known.iter().any(|known| known == rule),
-                        "unknown capture sensitive rule",
-                    )?;
-                    sensitive.push(rule.to_owned());
-                }
-            }
+            let metadata = false;
+            let raw_patterns: Vec<&str> = Vec::new();
+            let sensitive: Vec<String> = Vec::new();
             for mask in masks {
                 let r = mask.region;
                 ensure(
@@ -1301,7 +1220,6 @@ pub(crate) mod native_capture {
                 sensitive,
                 masks: masks.to_vec(),
                 catalog: catalog.clone(),
-                definition: spawn.evidence_policy.clone(),
             })
         }
     }
@@ -1446,7 +1364,6 @@ pub(crate) mod native_capture {
             && left.resolved_mode == right.resolved_mode
             && left.mode_source == right.mode_source
             && left.permission_argv_json == right.permission_argv_json
-            && left.event_evidence == right.event_evidence
     }
     pub(crate) fn native_capture_channel(
         run: &RunRecord,
@@ -1624,7 +1541,7 @@ pub(crate) mod native_capture {
                 "capture prepared owner mismatch",
             )?;
             ensure(
-                placement.mux_pane_id.is_some() && spawn.evidence_policy == self.policy.definition,
+                placement.mux_pane_id.is_some(),
                 "capture prepared placement/policy missing",
             )?;
             let native = &producer.value["native_executable"];
@@ -3870,8 +3787,7 @@ pub(crate) mod native_capture {
             )
             .map_err(io_error)?;
             ensure(policy.schema_version == 1, "capture policy schema mismatch")?;
-            let capture_policy =
-                NativeCapturePolicy::from_launch(&descriptor.spawn, &policy.masks, catalog)?;
+            let capture_policy = NativeCapturePolicy::from_launch(&policy.masks, catalog)?;
             let (mut port, receiver) =
                 native_capture_channel(&run, capture_policy, limits.clone())?;
             port.service_producer = Some(read_native_capture_producer(
@@ -5690,7 +5606,6 @@ pub(crate) mod native_capture {
             source_manifest: DriverReference,
             version_evidence: DriverReference,
             environment_evidence: DriverReference,
-            event_redaction: DriverReference,
             capture_policy: DriverReference,
             tmux: DriverTmux,
         }
@@ -5718,7 +5633,6 @@ pub(crate) mod native_capture {
             rows: u16,
             cols: u16,
             capture_policy_sha256: String,
-            event_redaction_sha256: String,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -5737,7 +5651,6 @@ pub(crate) mod native_capture {
             rows: u16,
             cols: u16,
             capture_policy_sha256: String,
-            event_redaction_sha256: String,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -5881,7 +5794,6 @@ pub(crate) mod native_capture {
             ownership: &DriverOwnership,
         ) -> Result<()> {
             case.capture_policy.verify()?;
-            case.event_redaction.verify()?;
             let privacy: DriverPrivacy = driver_read(&case.privacy_confirmation_path)?;
             ensure(
                 privacy.schema_version == 1
@@ -5892,8 +5804,7 @@ pub(crate) mod native_capture {
                         )?
                     && privacy.rows == approved.size.rows
                     && privacy.cols == approved.size.cols
-                    && privacy.capture_policy_sha256 == case.capture_policy.sha256
-                    && privacy.event_redaction_sha256 == case.event_redaction.sha256,
+                    && privacy.capture_policy_sha256 == case.capture_policy.sha256,
                 "privacy confirmation binding differs",
             )
         }
@@ -5904,31 +5815,18 @@ pub(crate) mod native_capture {
             until: Instant,
         ) -> Result<PathBuf> {
             const RETAINED_BYTES: usize = 48 * 1024;
-            let mut text = driver_tmux(
+            let text = driver_tmux(
                 case,
                 &["capture-pane", "-p", "-J", "-S", "-", "-t", pane],
                 until,
             )?;
-            let redaction: Value = driver_read(&case.event_redaction.path)?;
-            for pattern in redaction["patterns"]
-                .as_array()
-                .ok_or_else(|| error("case redaction patterns required"))?
-            {
-                let pattern = regex::Regex::new(
-                    pattern
-                        .as_str()
-                        .ok_or_else(|| error("case redaction pattern string required"))?,
-                )
-                .map_err(io_error)?;
-                text = pattern.replace_all(&text, "[REDACTED]").into_owned();
-            }
             let start = (text.len().saturating_sub(RETAINED_BYTES)..=text.len())
                 .find(|index| text.is_char_boundary(*index))
                 .expect("the string end is a character boundary");
             let path = case.cwd.join("runner-pane-capture.json");
             driver_publish(
                 &path,
-                &json!({"schema_version":1,"pane_id":pane,"redaction_sha256":case.event_redaction.sha256,
+                &json!({"schema_version":1,"pane_id":pane,
             "omitted_leading_bytes":start,"text":&text[start..]}),
                 until,
             )?;
@@ -6147,13 +6045,7 @@ pub(crate) mod native_capture {
                 &policy,
             )?;
             argv[0] = case.native_executable.path.to_string_lossy().into_owned();
-            let config: Value = driver_read(&case.event_redaction.path)?;
             let catalog = ProfileCatalog::bundled();
-            let rules = catalog.rule_ids();
-            crate::broker::runtime::evidence::EvidencePolicy::redacted(
-                &config,
-                &rules.iter().map(String::as_str).collect::<Vec<_>>(),
-            )?;
             let capture: CapturePolicyFile = driver_read(&case.capture_policy.path)?;
             ensure(
                 capture.schema_version == 1 && !capture.masks.is_empty(),
@@ -6170,15 +6062,14 @@ pub(crate) mod native_capture {
                 argv,
                 cwd: case.cwd.clone(),
                 environment: approved.child_environment(),
-                evidence_policy: json!({"mode":"redacted","config":config}),
                 size: approved.size,
             };
             spawn.validate()?;
-            NativeCapturePolicy::from_launch(&spawn, &capture.masks, catalog)?;
+            NativeCapturePolicy::from_launch(&capture.masks, catalog)?;
             driver_publish(
                 &case.launch_evidence_path,
                 &json!({"schema_version":1,"run_id":pending.run.run_id,
-        "launch_nonce":pending.run.launch_nonce,"argv":spawn.argv,"cwd":spawn.cwd,"policy":spawn.evidence_policy,
+        "launch_nonce":pending.run.launch_nonce,"argv":spawn.argv,"cwd":spawn.cwd,
         "native_executable":case.native_executable,"version_evidence":case.version_evidence}),
                 until,
             )?;
@@ -6870,7 +6761,6 @@ pub(crate) mod native_capture {
                 rows: approved.size.rows,
                 cols: approved.size.cols,
                 capture_policy_sha256: case.capture_policy.sha256.clone(),
-                event_redaction_sha256: case.event_redaction.sha256.clone(),
             };
             driver_publish(&case.started_record_path, &started, work_until)?;
             let mut armed_validated_at: Option<Instant> = None;
@@ -7036,7 +6926,6 @@ pub(crate) mod native_capture {
                 &case.source_manifest,
                 &case.version_evidence,
                 &case.environment_evidence,
-                &case.event_redaction,
                 &case.capture_policy,
             ]
             .into_iter()
@@ -7187,7 +7076,6 @@ pub(crate) mod native_capture {
                     resolved_mode: policy.resolved_mode().to_owned(),
                     mode_source: policy.mode_source(),
                     permission_argv_json: json!(policy.permission_argv()),
-                    event_evidence: storage::EventEvidence::Redacted,
                     native_version: Some(case.native_version.clone()),
                     coverage: detection,
                 };
@@ -7494,8 +7382,7 @@ pub(crate) mod native_capture {
                 assert_eq!(run.run_id, config.expected_run_id);
                 assert_eq!(run.launch_nonce, config.expected_launch_nonce);
                 let catalog = ProfileCatalog::bundled();
-                let policy =
-                    NativeCapturePolicy::from_launch(&descriptor.spawn, &[], catalog).unwrap();
+                let policy = NativeCapturePolicy::from_launch(&[], catalog).unwrap();
                 let (mut port, receiver) =
                     native_capture_channel(&run, policy, limits.clone()).unwrap();
                 let producer =
@@ -7608,16 +7495,6 @@ pub(crate) mod native_capture {
     }
 }
 
-fn same_evidence_apart_from_sequence(stored: &Value, current: &Value) -> bool {
-    let stored = stored.as_object().expect("policy evidence is an object");
-    let current = current.as_object().expect("policy evidence is an object");
-    // evidence_digest covers screen_seq, so it changes whenever screen_seq does.
-    stored.len() == current.len()
-        && stored.iter().all(|(key, value)| {
-            matches!(key.as_str(), "screen_seq" | "evidence_digest")
-                || current.get(key) == Some(value)
-        })
-}
 stored_enum!(Visibility, "observation.visibility", {
     Visible => "visible",
     Obscured => "obscured",
@@ -7660,7 +7537,6 @@ pub(crate) struct EpisodeUpdate {
     pub(crate) visibility: Visibility,
     pub(crate) eligibility: InputEligibility,
     pub(crate) transitions: Vec<TransitionDraft>,
-    pub(crate) latest_evidence: Option<InteractionEvidenceUpdate>,
     pub(crate) next_deadline: Option<Instant>,
 }
 impl EpisodeUpdate {
@@ -7669,7 +7545,6 @@ impl EpisodeUpdate {
             visibility,
             eligibility,
             transitions: Vec::new(),
-            latest_evidence: None,
             next_deadline: None,
         }
     }
@@ -7706,7 +7581,6 @@ struct Active {
 pub(crate) struct EpisodeTracker {
     run_id: i64,
     next_episode: Option<i64>,
-    policy: EvidencePolicy,
     active: Option<Active>,
     candidate: Option<Candidate>,
     boundary: Option<Instant>,
@@ -7743,12 +7617,11 @@ fn wall_time(value: &str) -> Result<()> {
     )
 }
 impl EpisodeTracker {
-    pub(crate) fn new(run_id: i64, policy: EvidencePolicy) -> Result<Self> {
+    pub(crate) fn new(run_id: i64) -> Result<Self> {
         ensure(run_id > 0, "positive run identity required")?;
         Ok(Self {
             run_id,
             next_episode: Some(1),
-            policy,
             active: None,
             candidate: None,
             boundary: None,
@@ -7861,7 +7734,7 @@ impl EpisodeTracker {
             value.raw_evidence["screen_seq"].as_u64() == Some(value.output_seq),
             "observation evidence sequence mismatch",
         )?;
-        let evidence = self.policy.apply(&value.raw_evidence)?;
+        let evidence = storage::metadata_evidence(&value.raw_evidence)?;
         self.current_evidence = Some(evidence.clone());
         if matches!(value.kind, ObservationKind::Interaction(_)) {
             ensure(
@@ -7888,16 +7761,6 @@ impl EpisodeTracker {
                 .is_some_and(|active| &active.fingerprint == fingerprint)
             {
                 self.candidate = None;
-                let active = self.active.as_mut().expect("matching active episode");
-                if !same_evidence_apart_from_sequence(&active.evidence, &evidence) {
-                    update.latest_evidence = Some(InteractionEvidenceUpdate {
-                        run_id: self.run_id,
-                        episode_seq: active.sequence,
-                        output_seq: value.output_seq,
-                        evidence_json: evidence.clone(),
-                    });
-                    active.evidence = evidence;
-                }
                 update.eligibility = InputEligibility::Hold(GateReason::Interaction);
             } else {
                 let since = Candidate::since(&mut self.candidate, fingerprint, now);
@@ -8033,7 +7896,7 @@ impl EventSequencePool {
                 && draft.episode_seq.is_none_or(|seq| seq > 0),
             "valid transition identity required",
         )?;
-        crate::broker::runtime::evidence::validate(&draft.evidence_json)?;
+        storage::validate_evidence(&draft.evidence_json)?;
         wall_time(&draft.observed_at)?;
         let sequence = self
             .range
@@ -8060,7 +7923,6 @@ pub(crate) struct ObservationHealth {
     pub(crate) visibility: Visibility,
     pub(crate) eligibility: InputEligibility,
     pub(crate) pending_count: u64,
-    pub(crate) pending_evidence: bool,
     pub(crate) gap_count: u64,
     pub(crate) degraded: bool,
     pub(crate) diagnostic: Option<String>,
@@ -8086,8 +7948,7 @@ impl ObservationHealth {
             ensure(
                 self.visibility == Visibility::NotVisible
                     && !self.degraded
-                    && self.pending_count == 0
-                    && !self.pending_evidence,
+                    && self.pending_count == 0,
                 "health composer proof conflicts with held state",
             )?;
         }
@@ -8102,7 +7963,7 @@ pub(crate) mod test_support {
     use serde_json::json;
     pub(crate) const NOW: &str = "2026-10-26T15:35:00.000000+00:00";
     pub(crate) fn tracker() -> EpisodeTracker {
-        EpisodeTracker::new(1, EvidencePolicy::metadata()).unwrap()
+        EpisodeTracker::new(1).unwrap()
     }
 
     pub(crate) fn open(
@@ -8137,9 +7998,9 @@ pub(crate) mod test_support {
     }
 
     impl Run {
-        pub(crate) fn new(policy: EvidencePolicy, observe: fn(&str) -> ScreenObservation) -> Self {
+        pub(crate) fn new(observe: fn(&str) -> ScreenObservation) -> Self {
             Self {
-                tracker: EpisodeTracker::new(1, policy).unwrap(),
+                tracker: EpisodeTracker::new(1).unwrap(),
                 origin: Instant::now(),
                 sequence: 0,
                 observe,
@@ -8216,19 +8077,6 @@ pub(crate) mod test_support {
             fixture.fixture.run =
                 storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
         }
-        pub(crate) fn configure_redacted(fixture: &mut WriterFixture) {
-            configure(fixture);
-            fixture
-                .fixture
-                .conn
-                .execute(
-                    "UPDATE member_runs SET event_evidence='redacted' WHERE run_id=?1",
-                    [fixture.fixture.run.run_id],
-                )
-                .unwrap();
-            fixture.fixture.run =
-                storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-        }
         pub(crate) struct Clock {
             pub(crate) origin: Instant,
             pub(crate) millis: AtomicU64,
@@ -8264,20 +8112,7 @@ pub(crate) mod test_support {
         pub(crate) fn form(operation: &str) -> Vec<u8> {
             format!("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ").into_bytes()
         }
-        pub(crate) fn detailed_form(operation: &str, detail: &str) -> Vec<u8> {
-            format!("\x1b[2J\x1b[18;1HSynthetic permission request\r\nOperation: {operation}\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nDetail: {detail}\r\nSelection: ").into_bytes()
-        }
         // Rewrites only the non-fingerprint detail row of `detailed_form` and returns the cursor to the end of `Selection: `.
-        pub(crate) fn detail_rewrite(detail: &str) -> Vec<u8> {
-            format!("\x1b[23;1H\x1b[2KDetail: {detail}\x1b[24;12H").into_bytes()
-        }
-        pub(crate) fn redacted_policy() -> storage::evidence::EvidencePolicy {
-            storage::evidence::EvidencePolicy::redacted(
-                    &serde_json::json!({"schema_version":1,"patterns":["synthetic-redaction-canary"],"sensitive_rules":[]}),
-                    &["synthetic-permission"],
-                )
-                .unwrap()
-        }
     }
 }
 
@@ -8347,10 +8182,6 @@ mod tests {
                     InputEligibility::Hold(GateReason::Interaction),
                     "{millis} ms"
                 );
-                assert!(
-                    update.latest_evidence.is_none(),
-                    "the stored request evidence is unchanged"
-                );
                 assert_eq!(tracker.active_episode(), episode);
             }
             let returned = tracker
@@ -8359,35 +8190,6 @@ mod tests {
             assert!(returned.transitions.is_empty());
             assert_eq!(returned.visibility, Visibility::Visible);
             assert_eq!(tracker.active_episode(), episode);
-        }
-
-        #[test]
-        fn continuation_starts_no_obscured_timer_that_a_later_uncertainty_inherits() {
-            let origin = Instant::now();
-            let mut tracker = tracker();
-            open(&mut tracker, &request(1), origin);
-            tracker
-                .observe(&dialog(2), origin + Duration::from_millis(200), NOW)
-                .unwrap();
-            tracker
-                .observe(&dialog(3), origin + Duration::from_millis(3000), NOW)
-                .unwrap();
-            let blank = gated(b"\x1b[0m\x1b[2J", 4);
-            let uncertain = tracker
-                .observe(&blank, origin + Duration::from_millis(3100), NOW)
-                .unwrap();
-            assert!(
-                uncertain.transitions.is_empty(),
-                "uncertainty after a continuation starts its own two-second interval"
-            );
-            let obscured = tracker
-                .observe(&blank, origin + Duration::from_millis(5100), NOW)
-                .unwrap();
-            assert_eq!(obscured.transitions.len(), 1);
-            assert_eq!(
-                obscured.transitions[0].kind,
-                RuntimeEventKind::InteractionObscured
-            );
         }
 
         #[test]
@@ -8606,7 +8408,6 @@ mod tests {
                 .unwrap();
             assert!(pending.transitions.is_empty(), "{change}");
             if change == "operation" {
-                assert!(pending.latest_evidence.is_none());
                 assert!(matches!(pending.eligibility, InputEligibility::Hold(_)));
                 assert!(
                     tracker
@@ -8749,7 +8550,6 @@ mod tests {
             closed.eligibility,
             InputEligibility::ComposerEmpty
         ));
-        assert!(closed.latest_evidence.is_none());
     }
 
     #[test]
@@ -8797,61 +8597,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_continuous_uncertainty_emits_one_obscured_event_at_two_seconds() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        open(
-            &mut tracker,
-            &sequenced(permission("write disposable.txt"), 1),
-            origin,
-        );
-        let obscured = unknown(2);
-        let first = tracker
-            .observe(&obscured, origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        assert!(first.transitions.is_empty());
-        assert!(matches!(first.visibility, Visibility::Obscured));
-        assert!(matches!(first.eligibility, InputEligibility::Hold(_)));
-        assert!(
-            tracker
-                .observe(&obscured, origin + Duration::from_millis(2199), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let stable = tracker
-            .observe(&obscured, origin + Duration::from_millis(2200), NOW)
-            .unwrap();
-        assert_eq!(stable.transitions.len(), 1);
-        assert_eq!(
-            stable.transitions[0].kind,
-            RuntimeEventKind::InteractionObscured
-        );
-        assert_eq!(stable.transitions[0].episode_seq, Some(1));
-        assert!(
-            tracker
-                .observe(&obscured, origin + Duration::from_secs(5), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let returned = tracker
-            .observe(
-                &sequenced(permission("write disposable.txt"), 3),
-                origin + Duration::from_secs(6),
-                NOW,
-            )
-            .unwrap();
-        assert!(returned.transitions.is_empty());
-        assert!(matches!(returned.visibility, Visibility::Visible));
-        assert!(matches!(
-            returned.eligibility,
-            InputEligibility::Hold(GateReason::Interaction)
-        ));
-        assert!(returned.latest_evidence.is_none());
-    }
-
-    #[test]
     fn runtime_episode_equivalent_redraw_schedules_no_refresh_and_no_opening() {
         let origin = Instant::now();
         let mut tracker = tracker();
@@ -8877,7 +8622,6 @@ mod tests {
                 .unwrap();
             assert!(update.transitions.is_empty());
             assert!(matches!(update.visibility, Visibility::Visible));
-            assert!(update.latest_evidence.is_none());
         }
     }
 
@@ -8985,44 +8729,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_episode_gap_reset_discards_the_unverified_obscurity_interval() {
-        let origin = Instant::now();
-        let mut tracker = tracker();
-        open(
-            &mut tracker,
-            &sequenced(permission("write disposable.txt"), 1),
-            origin,
-        );
-        tracker
-            .observe(&unknown(2), origin + Duration::from_millis(200), NOW)
-            .unwrap();
-        tracker.reset_observation().unwrap();
-        let unseen = unknown(3);
-        assert!(
-            tracker
-                .observe(&unseen, origin + Duration::from_millis(2200), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        assert!(
-            tracker
-                .observe(&unseen, origin + Duration::from_millis(4199), NOW)
-                .unwrap()
-                .transitions
-                .is_empty()
-        );
-        let result = tracker
-            .observe(&unseen, origin + Duration::from_millis(4200), NOW)
-            .unwrap();
-        assert_eq!(result.transitions.len(), 1);
-        assert_eq!(
-            result.transitions[0].kind,
-            RuntimeEventKind::InteractionObscured
-        );
-    }
-
-    #[test]
     fn runtime_episode_finish_closes_the_active_episode_once_with_process_exit() {
         let origin = Instant::now();
         let mut tracker = tracker();
@@ -9046,7 +8752,6 @@ mod tests {
             )
             .unwrap();
         assert!(result.transitions.is_empty());
-        assert!(result.latest_evidence.is_none());
         assert!(matches!(
             result.eligibility,
             InputEligibility::ComposerEmpty
@@ -9060,7 +8765,7 @@ mod tests {
 
     #[test]
     fn runtime_episode_rejects_regressing_output_sequences_and_invalid_identity() {
-        assert!(EpisodeTracker::new(0, EvidencePolicy::metadata()).is_err());
+        assert!(EpisodeTracker::new(0).is_err());
         let origin = Instant::now();
         let mut tracker = tracker();
         tracker
@@ -9112,7 +8817,6 @@ mod tests {
                 )
                 .unwrap();
             assert!(update.transitions.is_empty());
-            assert!(update.latest_evidence.is_none());
         }
     }
 
@@ -9351,8 +9055,7 @@ mod tests {
             let catalog =
                 crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
                     .unwrap();
-            ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata())
-                .map(|_| ())
+            ObservationController::new(&fixture.run, &catalog).map(|_| ())
         }
 
         #[test]
@@ -9398,9 +9101,7 @@ mod tests {
             let catalog =
                 crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
                     .unwrap();
-            let mut controller =
-                ObservationController::new(&fixture.run, &catalog, EvidencePolicy::metadata())
-                    .unwrap();
+            let mut controller = ObservationController::new(&fixture.run, &catalog).unwrap();
             let mut writer = writer_fixture.start().unwrap();
             writer.set_deadline(until);
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
@@ -9546,9 +9247,7 @@ mod tests {
             fixture.conn.execute("UPDATE member_runs SET backend='opencode',native_version='2.1.4',coverage='tested' WHERE run_id=?1",[fixture.run.run_id]).unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
             let catalog = ProfileCatalog::bundled();
-            let mut controller =
-                ObservationController::new(&fixture.run, catalog, EvidencePolicy::metadata())
-                    .unwrap();
+            let mut controller = ObservationController::new(&fixture.run, catalog).unwrap();
             let mut writer = writer_fixture.start().unwrap();
             writer.set_deadline(until);
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
@@ -9653,10 +9352,8 @@ mod tests {
             writer: &EventWriter,
             clock: &dyn ObservationClock,
             catalog: &ProfileCatalog,
-            policy: storage::evidence::EvidencePolicy,
         ) -> (ObservationController, TestChild, TerminalState) {
-            let mut controller =
-                ObservationController::new(&fixture.fixture.run, catalog, policy).unwrap();
+            let mut controller = ObservationController::new(&fixture.fixture.run, catalog).unwrap();
             let child = TestChild::spawn(std::path::Path::new("/bin/cat"), &[]);
             running(fixture, &child.identity());
             let terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
@@ -9871,22 +9568,12 @@ mod tests {
                     Self::build(
                         observation_hooks,
                         configure,
-                        storage::evidence::EvidencePolicy::metadata(),
                         form("write terminal-order.txt"),
-                    )
-                }
-                fn refreshable() -> Self {
-                    Self::build(
-                        None,
-                        configure_redacted,
-                        redacted_policy(),
-                        detailed_form("write terminal-order.txt", "opened"),
                     )
                 }
                 fn build(
                     observation_hooks: Option<Arc<dyn ObservationHooks>>,
                     configure_run: fn(&mut WriterFixture),
-                    policy: storage::evidence::EvidencePolicy,
                     opening: Vec<u8>,
                 ) -> Self {
                     let mut fixture = WriterFixture::new();
@@ -9894,8 +9581,7 @@ mod tests {
                     let hooks = Arc::new(Hooks::default());
                     let writer = start(&fixture, hooks.clone());
                     let mut controller =
-                        ObservationController::new(&fixture.fixture.run, &catalog(), policy)
-                            .unwrap();
+                        ObservationController::new(&fixture.fixture.run, &catalog()).unwrap();
                     if let Some(hooks) = observation_hooks {
                         controller.set_observation_hooks(hooks).unwrap();
                     }
@@ -9924,22 +9610,6 @@ mod tests {
                         clock,
                         fixture,
                     }
-                }
-                fn fail_refresh(&mut self) -> Release {
-                    self.hooks.pause(WriterBoundary::Persist);
-                    let release = Release(self.hooks.clone());
-                    self.clock.set(200);
-                    self.terminal
-                        .feed_observed(
-                            &detail_rewrite("refreshed"),
-                            &mut self.controller.observer(&self.writer, &self.clock),
-                        )
-                        .unwrap();
-                    self.hooks.wait(WriterBoundary::Persist, 2);
-                    wait_until(|| self.writer.status().diagnostic.is_some());
-                    assert!(self.writer.status().pending_evidence);
-                    assert_eq!(committed(&self.fixture), 1);
-                    release
                 }
                 fn exit(&mut self, millis: u64) -> u64 {
                     assert!(self.child.identity().matches().unwrap());
@@ -10012,94 +9682,6 @@ mod tests {
                         eprintln!("live case fixture retained writer work: {unfinished:?}");
                     }
                 }
-            }
-
-            #[test]
-            fn runner_degraded_exit_records_gap_before_original_closure_and_terminal_fence() {
-                let mut case = LiveCase::refreshable();
-                let release = case.fail_refresh();
-                let exit_sequence = case.exit(300);
-                assert!(case.controller.has_pending());
-                assert!(case.controller.unsaved_gap_count() > 0);
-                assert!(matches!(
-                    case.controller.status().eligibility,
-                    InputEligibility::Hold(_)
-                ));
-                case.clock.set(700);
-                drop(release);
-                let unfinished = case.drain(deadline());
-                let events = case.events();
-                let kinds: Vec<_> = events.iter().map(|view| view.event.kind).collect();
-                assert_eq!(
-                    kinds,
-                    [
-                        RuntimeEventKind::InteractionOpened,
-                        RuntimeEventKind::RunnerDegraded,
-                        RuntimeEventKind::RunnerDegraded,
-                        RuntimeEventKind::InteractionClosed,
-                        RuntimeEventKind::RunnerExited,
-                    ]
-                );
-                assert_eq!(unfinished, (0, 0));
-                assert!(!case.controller.has_pending());
-                assert_eq!(case.controller.unsaved_gap_count(), 0);
-                assert_eq!(
-                    events[1].event.payload_json["cause"]["kind"],
-                    "storage_pressure"
-                );
-                assert_eq!(events[1].event.observed_at, Timeline::timestamp(300));
-                assert_eq!(
-                    events[2].event.payload_json["cause"]["kind"],
-                    "storage_recovered"
-                );
-                assert_eq!(events[2].event.observed_at, Timeline::timestamp(700));
-                for view in &events[3..] {
-                    assert_eq!(view.event.observed_at, Timeline::timestamp(300));
-                    assert_eq!(
-                        view.event.payload_json["evidence"]["screen_seq"],
-                        exit_sequence
-                    );
-                }
-                assert_eq!(
-                    events[3].event.payload_json["close_reason"],
-                    "process_exited"
-                );
-                assert_eq!(events[4].event.payload_json["cause"]["exit_signal"], 15);
-                let run =
-                    storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
-                        .unwrap();
-                assert_eq!(run.status, RunStatus::Exited);
-                for _ in 0..3 {
-                    case.controller
-                        .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
-                        .unwrap();
-                }
-                assert_eq!(case.events().len(), 5);
-                assert!(!case.controller.has_pending());
-            }
-
-            #[test]
-            fn runner_expired_storage_budget_reports_unsaved_gap_and_pending_exit_work() {
-                let mut case = LiveCase::refreshable();
-                let _release = case.fail_refresh();
-                let until = Instant::now() + Duration::from_millis(120);
-                case.writer.set_deadline(until);
-                case.exit(300);
-                let begin = Instant::now();
-                let unfinished = case.drain(until);
-                assert!(begin.elapsed() < Duration::from_millis(500));
-                assert!(case.controller.has_pending() || unfinished.0 > 0);
-                assert!(case.controller.unsaved_gap_count() > 0 || unfinished.1 > 0);
-                assert_eq!(committed(&case.fixture), 1);
-                let run =
-                    storage::get_run(&case.fixture.fixture.conn, case.fixture.fixture.run.run_id)
-                        .unwrap();
-                assert_eq!(run.status, RunStatus::Running);
-                assert!(case.child.try_wait().unwrap().is_some());
-                assert_eq!(
-                    case.events()[0].event.kind,
-                    RuntimeEventKind::InteractionOpened
-                );
             }
 
             #[test]
@@ -10178,63 +9760,14 @@ mod tests {
         }
 
         #[test]
-        fn controller_accepts_only_the_exact_fresh_initial_committed_grant() {
-            let mut fixture = WriterFixture::new();
-            configure(&mut fixture);
-            let catalog = catalog();
-            assert!(
-                ObservationController::new(
-                    &fixture.fixture.run,
-                    &catalog,
-                    storage::evidence::EvidencePolicy::metadata()
-                )
-                .is_ok()
-            );
-            for field in [
-                "epoch",
-                "reservation",
-                "status",
-                "child",
-                "start",
-                "end",
-                "recovery",
-            ] {
-                let mut run = fixture.fixture.run.clone();
-                match field {
-                    "epoch" => run.owner_epoch = 0,
-                    "reservation" => run.event_seq_reserved_through = 512,
-                    "status" => run.status = RunStatus::Running,
-                    "child" => run.child_pid = Some(1),
-                    "start" => run.started_at = Some(NOW.into()),
-                    "end" => run.ended_at = Some(NOW.into()),
-                    _ => run.recovery_origin_status = Some(RunStatus::Running),
-                }
-                assert!(
-                    ObservationController::new(
-                        &run,
-                        &catalog,
-                        storage::evidence::EvidencePolicy::metadata()
-                    )
-                    .is_err(),
-                    "{field}"
-                );
-            }
-        }
-
-        #[test]
         fn controller_quiet_poll_opens_one_episode_with_the_unchanged_parser_sequence() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
             let clock = Clock::new();
-            let (mut controller, _child, mut terminal) = started_controller(
-                &mut fixture,
-                &writer,
-                &clock,
-                &catalog(),
-                storage::evidence::EvidencePolicy::metadata(),
-            );
+            let (mut controller, _child, mut terminal) =
+                started_controller(&mut fixture, &writer, &clock, &catalog());
             terminal
                 .feed_observed(
                     &form("write disposable.txt"),
@@ -10278,13 +9811,8 @@ mod tests {
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
             let clock = Clock::new();
-            let (mut controller, _child, mut terminal) = started_controller(
-                &mut fixture,
-                &writer,
-                &clock,
-                &catalog(),
-                storage::evidence::EvidencePolicy::metadata(),
-            );
+            let (mut controller, _child, mut terminal) =
+                started_controller(&mut fixture, &writer, &clock, &catalog());
             let mut bytes = form("write disposable.txt");
             bytes.extend_from_slice(b"\x1b[2J\x1b[Hworking");
             terminal
@@ -10311,12 +9839,8 @@ mod tests {
             ] {
                 let mut fixture = WriterFixture::new();
                 configure(&mut fixture);
-                let mut controller = ObservationController::new(
-                    &fixture.fixture.run,
-                    &catalog(),
-                    storage::evidence::EvidencePolicy::metadata(),
-                )
-                .unwrap();
+                let mut controller =
+                    ObservationController::new(&fixture.fixture.run, &catalog()).unwrap();
                 controller.observer_failed(reason, &Clock::new()).unwrap();
                 let status = controller.status();
                 assert!(matches!(status.eligibility, InputEligibility::Hold(_)));
@@ -10332,12 +9856,8 @@ mod tests {
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
             let clock = Clock::new();
-            let mut controller = ObservationController::new(
-                &fixture.fixture.run,
-                &catalog(),
-                storage::evidence::EvidencePolicy::metadata(),
-            )
-            .unwrap();
+            let mut controller =
+                ObservationController::new(&fixture.fixture.run, &catalog()).unwrap();
             let screen = TerminalState::new(TerminalSize { rows: 24, cols: 80 })
                 .unwrap()
                 .snapshot();
@@ -10373,13 +9893,8 @@ mod tests {
             let hooks = Arc::new(Hooks::default());
             let mut writer = start(&fixture, hooks);
             let clock = Clock::new();
-            let (mut controller, mut child, mut terminal) = started_controller(
-                &mut fixture,
-                &writer,
-                &clock,
-                &catalog(),
-                storage::evidence::EvidencePolicy::metadata(),
-            );
+            let (mut controller, mut child, mut terminal) =
+                started_controller(&mut fixture, &writer, &clock, &catalog());
             terminal
                 .feed_observed(
                     &form("write disposable.txt"),
@@ -10425,146 +9940,6 @@ mod tests {
         }
 
         #[test]
-        fn controller_refills_shared_lifecycle_sequences_only_from_committed_worker_grants() {
-            let until = Instant::now() + Duration::from_secs(15);
-            let mut fixture = WriterFixture::new();
-            configure(&mut fixture);
-            let mut writer = start(&fixture, Arc::new(Hooks::default()));
-            let clock = Clock::new();
-            let (mut controller, _child, mut terminal) = started_controller(
-                &mut fixture,
-                &writer,
-                &clock,
-                &catalog(),
-                storage::evidence::EvidencePolicy::metadata(),
-            );
-            let mut millis = 0u64;
-            let mut original_sequences = Vec::new();
-            for index in 0..130 {
-                assert!(Instant::now() < until, "bounded controller refill fixture");
-                clock.set(millis);
-                terminal
-                    .feed_observed(
-                        &form(&format!("write range-{index}.txt")),
-                        &mut controller.observer(&writer, &clock),
-                    )
-                    .unwrap();
-                original_sequences.push(terminal.snapshot().screen_seq);
-                millis = millis.checked_add(100).unwrap();
-                clock.set(millis);
-                let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
-                assert_retained_pressure(attempt, controller.status());
-                wait_until(|| {
-                    assert!(Instant::now() < until, "original refill fixture deadline");
-                    millis = millis.checked_add(1).unwrap();
-                    clock.set(millis);
-                    let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
-                    assert_retained_pressure(attempt, controller.status());
-                    let openings = crate::runtime::observation::test_support::opened(&fixture);
-                    openings == i64::from(index + 1)
-                        && !controller.status().retained_transition
-                        && !controller.status().retained_draft
-                });
-                millis = millis.checked_add(100).unwrap();
-            }
-            wait_until(|| {
-                millis = millis.checked_add(1).unwrap();
-                clock.set(millis);
-                let attempt = controller.poll(&terminal.snapshot(), &writer, &clock);
-                assert_retained_pressure(attempt, controller.status());
-                writer.status().pending_count == 0
-                    && !controller.status().retained_transition
-                    && !controller.status().retained_draft
-                    && controller.status().diagnostic.is_none()
-            });
-            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
-            assert!(run.event_seq_reserved_through >= 512);
-            assert_eq!(run.event_seq_reserved_through % 256, 0);
-            let ids: Vec<i64> = fixture
-                .fixture
-                .conn
-                .prepare(
-                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq",
-                )
-                .unwrap()
-                .query_map([run.run_id], |row| row.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
-            assert_eq!(
-                ids.iter()
-                    .copied()
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .len(),
-                ids.len()
-            );
-            let mut last = 0;
-            let mut interactions = Vec::new();
-            let mut gap = false;
-            for id in ids {
-                let view = storage::get_event(&fixture.fixture.conn, id).unwrap();
-                let event = &view.event;
-                assert!(
-                    event.event_seq > last && event.event_seq <= run.event_seq_reserved_through
-                );
-                last = event.event_seq;
-                match event.kind {
-                    RuntimeEventKind::InteractionOpened => {
-                        let sequence = view.interaction.as_ref().unwrap().episode_seq;
-                        assert_eq!(
-                            event.payload_json["evidence"]["screen_seq"],
-                            original_sequences[usize::try_from(sequence - 1).unwrap()]
-                        );
-                        interactions.push((event.kind, sequence));
-                    }
-                    RuntimeEventKind::InteractionClosed => {
-                        assert_eq!(event.payload_json["close_reason"], "superseded");
-                        interactions
-                            .push((event.kind, view.interaction.as_ref().unwrap().episode_seq));
-                    }
-                    RuntimeEventKind::RunnerDegraded => {
-                        let cause = &event.payload_json["cause"];
-                        assert!(cause["gap_count"].as_u64().is_some());
-                        assert!(cause["gap_started_at"].is_string());
-                        let kind = cause["kind"].as_str().unwrap();
-                        if kind == "storage_recovered" {
-                            assert!(gap);
-                            assert!(cause["gap_ended_at"].is_string());
-                            gap = false;
-                        } else {
-                            assert!(matches!(kind, "storage_pressure" | "observer_error"));
-                            assert!(!gap);
-                            gap = true;
-                        }
-                    }
-                    other => panic!("unexpected refill event: {other:?}"),
-                }
-            }
-            let mut expected = Vec::new();
-            for episode in 1..=130 {
-                if episode > 1 {
-                    expected.push((RuntimeEventKind::InteractionClosed, episode - 1));
-                }
-                expected.push((RuntimeEventKind::InteractionOpened, episode));
-            }
-            assert_eq!(interactions, expected);
-            assert!(!gap);
-            assert_eq!(
-                fixture
-                    .fixture
-                    .conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM member_interactions WHERE run_id=?1",
-                        [run.run_id],
-                        |row| row.get::<_, i64>(0)
-                    )
-                    .unwrap(),
-                130
-            );
-            writer.finish(deadline());
-        }
-
-        #[test]
         fn controller_retains_both_superseded_originals_when_the_first_submit_hits_pressure() {
             let mut fixture = WriterFixture::new();
             configure(&mut fixture);
@@ -10575,13 +9950,8 @@ mod tests {
             let release = Release(hooks.clone());
             hooks.wait(WriterBoundary::Receive, 1);
             let clock = Clock::new();
-            let (mut controller, _child, mut terminal) = started_controller(
-                &mut fixture,
-                &writer,
-                &clock,
-                &catalog,
-                storage::evidence::EvidencePolicy::metadata(),
-            );
+            let (mut controller, _child, mut terminal) =
+                started_controller(&mut fixture, &writer, &clock, &catalog);
             let mut last_opening_sequence = 0;
             for index in 0..32 {
                 clock.set(index * 200);
@@ -10598,7 +9968,6 @@ mod tests {
                     .poll(&terminal.snapshot(), &writer, &clock)
                     .unwrap();
                 assert_eq!(writer.status().pending_count, index * 2 + 1);
-                assert!(!writer.status().pending_evidence);
                 assert!(!controller.has_pending());
             }
             assert_eq!(writer.status().pending_count, 63);
@@ -10616,7 +9985,6 @@ mod tests {
                 .poll(&terminal.snapshot(), &writer, &clock)
                 .unwrap();
             assert_eq!(writer.status().pending_count, 64);
-            assert!(!writer.status().pending_evidence);
             assert!(!writer.status().diagnostic.is_some());
             assert!(!controller.has_pending());
             assert_eq!(committed(&fixture), 0);
@@ -10694,7 +10062,6 @@ mod tests {
     }
 
     mod bundled_claude_auto_tracker {
-        use crate::broker::runtime::evidence::EvidencePolicy;
         use crate::runtime::observation::tests::*;
         use serde_json::Value;
 
@@ -10723,14 +10090,14 @@ mod tests {
                 .unwrap()
         }
 
-        fn replay_run(policy: EvidencePolicy) -> Run {
-            Run::new(policy, observe)
+        fn replay_run() -> Run {
+            Run::new(observe)
         }
 
         #[test]
         fn tracker_opens_one_permission_episode_for_the_tip_form_and_closes_it_once_the_command_runs()
          {
-            let mut run = replay_run(EvidencePolicy::metadata());
+            let mut run = replay_run();
             let form = run.episode(TIP_FORM, 0, 300);
             assert_eq!(form.len(), 1, "{form:?}");
             assert_eq!(form[0].kind, RuntimeEventKind::InteractionOpened);
@@ -10752,7 +10119,6 @@ mod tests {
     }
 
     mod bundled_claude_2_1_312_tracker {
-        use crate::broker::runtime::evidence::EvidencePolicy;
         use crate::runtime::observation::tests::*;
         use serde_json::Value;
 
@@ -10783,7 +10149,7 @@ mod tests {
         }
 
         fn replay_run() -> Run {
-            Run::new(EvidencePolicy::metadata(), observe)
+            Run::new(observe)
         }
 
         #[test]

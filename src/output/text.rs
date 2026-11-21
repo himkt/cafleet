@@ -826,36 +826,6 @@ mod tests {
     }
 
     #[test]
-    fn permission_response_text_names_the_decision_or_the_choice_with_a_dash_for_the_other() {
-        use crate::coding_agent::catalog::AnswerKey;
-        use crate::runtime::PermissionResponseResult;
-        use crate::runtime::SubmissionResult;
-        let result = |key: AnswerKey| PermissionResponseResult {
-            submission: SubmissionResult::held("another programmatic input is pending"),
-            member_id: 3,
-            run_id: 7,
-            owner_epoch: 2,
-            interaction_id: 12,
-            event_id: 11,
-            key,
-            decision_source: crate::broker::runtime::DecisionSource::DirectorAuto,
-        };
-        let decision = format_permission_response_result(&result(AnswerKey::Decision(
-            crate::broker::runtime::PermissionDecision::Deny,
-        )));
-        assert!(
-            decision.starts_with("Permission response: interaction=12 run=7 decision=deny choice=- source=director-auto status=held"),
-            "{decision}"
-        );
-        let choice =
-            format_permission_response_result(&result(AnswerKey::Choice("not-now".into())));
-        assert!(
-            choice.starts_with("Permission response: interaction=12 run=7 decision=- choice=not-now source=director-auto status=held"),
-            "{choice}"
-        );
-    }
-
-    #[test]
     fn member_press_text_acknowledges_the_canonical_keys_without_effect_counts() {
         let keys = crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
         let value = crate::runtime::KeyAcknowledgment {

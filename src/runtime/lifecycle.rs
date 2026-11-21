@@ -250,7 +250,6 @@ pub(crate) struct RunSettings {
     pub(crate) resolved_mode: String,
     pub(crate) mode_source: ModeSource,
     pub(crate) permission_argv_json: Value,
-    pub(crate) event_evidence: EventEvidence,
     pub(crate) native_version: Option<String>,
     pub(crate) coverage: Coverage,
 }
@@ -310,7 +309,6 @@ pub(super) fn register_pending_run(
                 resolved_mode: settings.resolved_mode.clone(),
                 mode_source: settings.mode_source,
                 permission_argv_json: settings.permission_argv_json.clone(),
-                event_evidence: settings.event_evidence,
                 native_version: settings.native_version.clone(),
                 coverage: settings.coverage,
                 owner_pid: settings.creator.pid,
@@ -1313,7 +1311,7 @@ mod tests {
             if self.fast_exit {
                 let run = storage::get_run(&conn, run.run_id).unwrap();
                 storage::reserve_event_sequences(&mut conn, &run.owner()).unwrap();
-                let evidence=crate::broker::runtime::evidence::EvidencePolicy::metadata().apply(&json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
+                let evidence=crate::broker::runtime::metadata_evidence(&json!({"backend":"codex","native_version":"0.163.0","rule_id":"native-tool-permission","screen_seq":1,"operation":null,"choices":null,"excerpt":null,"truncated":false})).unwrap();
                 storage::persist_transition(
                     &mut conn,
                     &run.owner(),
@@ -1435,7 +1433,6 @@ mod tests {
                 resolved_mode: "approve-for-me".into(),
                 mode_source: ModeSource::Default,
                 permission_argv_json: fixture.run.permission_argv_json.clone(),
-                event_evidence: EventEvidence::Metadata,
                 native_version: None,
                 coverage: Coverage::Unknown,
             },

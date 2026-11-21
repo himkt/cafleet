@@ -36,7 +36,6 @@ use serde_json::Value;
 use serde_json::json;
 use std::io::Write;
 use std::path::Path;
-use std::path::PathBuf;
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -83,12 +82,6 @@ pub(crate) struct CreateArgs {
     pub(super) effort: Option<String>,
     #[arg(long, value_name = "MODE", help = CodingAgent::permission_mode_help())]
     pub(super) permission_mode: Option<String>,
-    /// Persist metadata or explicitly redacted screen evidence.
-    #[arg(long, default_value = "metadata", value_parser = ["metadata", "redacted"])]
-    pub(super) event_evidence: String,
-    /// Absolute UTF-8 JSON redaction configuration for redacted evidence.
-    #[arg(long, value_name = "PATH")]
-    pub(super) event_redaction_file: Option<PathBuf>,
     #[command(flatten)]
     pub(super) body: PromptArgs,
     /// Output in JSON format.
@@ -321,33 +314,6 @@ pub(crate) fn run(
     }
 }
 
-fn launch_evidence(
-    mode: &str,
-    file: Option<&Path>,
-    catalog: &ProfileCatalog,
-) -> Result<(broker::runtime::EventEvidence, Value), CafleetError> {
-    use broker::runtime::EventEvidence;
-    use broker::runtime::evidence::EvidencePolicy;
-    match (mode, file) {
-        ("metadata", None) => Ok((EventEvidence::Metadata, json!({"mode":"metadata"}))),
-        ("redacted", Some(path)) if path.is_absolute() => {
-            let config = std::fs::read_to_string(path).map_err(|cause| {
-                CafleetError::Usage(format!("cannot read --event-redaction-file: {cause}"))
-            })?;
-            let config: Value = serde_json::from_str(&config).map_err(|cause| {
-                CafleetError::Usage(format!("invalid --event-redaction-file JSON: {cause}"))
-            })?;
-            let rules = catalog.rule_ids();
-            let rule_refs = rules.iter().map(String::as_str).collect::<Vec<_>>();
-            EvidencePolicy::redacted(&config, &rule_refs)?;
-            Ok((EventEvidence::Redacted, json!({"mode":"redacted","config":config})))
-        }
-        _ => Err(CafleetError::Usage(
-            "--event-evidence metadata requires no redaction file; redacted requires an absolute --event-redaction-file".into(),
-        )),
-    }
-}
-
 fn create(conn: &mut Connection, args: &CreateArgs) -> Result<(), CafleetError> {
     create_with_layout_wait(conn, args, crate::pane_lock::LAYOUT_LOCK_WAIT)
 }
@@ -521,11 +487,6 @@ pub(crate) fn create_with_layout_wait(
     backend.validate_effort(effort)?;
     let policy = backend.resolve_policy(args.permission_mode.as_deref())?;
     let catalog = ProfileCatalog::bundled();
-    let (event_evidence, evidence_policy) = launch_evidence(
-        &args.event_evidence,
-        args.event_redaction_file.as_deref(),
-        catalog,
-    )?;
 
     let prompt_body = resolve_body(args.body.prompt.as_deref(), args.body.file.as_deref())?;
     backend.validate_prompt(&prompt_body)?;
@@ -637,7 +598,6 @@ pub(crate) fn create_with_layout_wait(
         mode_source: policy.mode_source(),
         permission_argv_json: serde_json::to_value(policy.permission_argv())
             .expect("string argv serializes"),
-        event_evidence,
         native_version: native.native_version,
         coverage: native.coverage,
     };
@@ -689,7 +649,6 @@ pub(crate) fn create_with_layout_wait(
                 argv,
                 cwd,
                 environment: forwarded_config.clone().into_iter().collect(),
-                evidence_policy,
                 size,
             };
             Ok((artifacts, spawn))
