@@ -1,7 +1,7 @@
 # Single bundled profile per backend and Claude AskUserQuestion detection
 
-**Status**: Approved
-**Progress**: 39/40 tasks complete
+**Status**: Complete
+**Progress**: 40/40 tasks complete
 **Last Updated**: 2026-11-22
 
 ## Overview
@@ -10,16 +10,16 @@ Every backend gets exactly one bundled runner profile with no native-version bou
 
 ## Success Criteria
 
-- [ ] `assets/profiles/bundled.json` holds exactly one profile per backend, with keys `backend`, `rules` and `capabilities`, and the catalog loader rejects a second profile for one backend.
-- [ ] `member create` launches every parsed native version with its backend's profile; `Error: unsupported native version …` no longer exists in code, SPEC, docs or skills.
-- [ ] A failed native version probe records `native_version` null, prints `Warning: native version unavailable for BACKEND: CAUSE.`, and records `coverage=tested` when the backend's profile declares detection.
-- [ ] Inspection and answers bind to the run's backend only: a run with a null `native_version` gets `answer_capability=tested` for a visible request whose tested plan exists.
-- [ ] Every AskUserQuestion capture (single question, multi-question tab bar, multi-select, "Review your answers" screen) on tmux and on herdr replays through the bundled Claude profile to its expected observation in the § Testing replay tests; this establishes the tmux half.
-- [ ] The § Live verification Question and Tabs phases on Herdr each produce one `question` `interaction_opened` with `review_question`, `permission inspect` returns `supported_choices` `[]`, `answer_capability` `unknown` and `capability_reason` `question has no tested answer`, and answering on the native surface produces `interaction_closed` with `not_visible`; with the herdr captures, this establishes the herdr half.
-- [ ] A quoted form above a live composer, the transcript viewer and every existing Claude form keep their current observation, except Claude Code's own `Model switch` question (`claude-2.1.302-auto-model-switch-question-1`), which renders with the AskUserQuestion component and becomes a `question` through `claude-ask-user-question`.
-- [ ] Outside `design-docs/`, no file mentions `min_version`, profile selection by version, a profile "from `<version>`", a profile boundary or a capture interval.
-- [ ] Design 0000239's Permanent and Transient phases each pass, or fail only for a recorded cause unrelated to detection with a follow-up issue opened. Their observed values replace 0000239's Step 9 "skipped" note; 0000239's live-verification Success Criterion is checked only when both pass, and otherwise stays open with a pointer to the follow-up issue.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] `assets/profiles/bundled.json` holds exactly one profile per backend, with keys `backend`, `rules` and `capabilities`, and the catalog loader rejects a second profile for one backend.
+- [x] `member create` launches every parsed native version with its backend's profile; `Error: unsupported native version …` no longer exists in code, SPEC, docs or skills.
+- [x] A failed native version probe records `native_version` null, prints `Warning: native version unavailable for BACKEND: CAUSE.`, and records `coverage=tested` when the backend's profile declares detection.
+- [x] Inspection and answers bind to the run's backend only: a run with a null `native_version` gets `answer_capability=tested` for a visible request whose tested plan exists.
+- [x] Every AskUserQuestion capture (single question, multi-question tab bar, multi-select, "Review your answers" screen) on tmux and on herdr replays through the bundled Claude profile to its expected observation in the § Testing replay tests; this establishes the tmux half.
+- [x] The § Live verification Question and Tabs phases on Herdr each produce one `question` `interaction_opened` with `review_question`, `permission inspect` returns `supported_choices` `[]`, `answer_capability` `unknown` and `capability_reason` `question has no tested answer`, and answering on the native surface produces `interaction_closed` with `not_visible`; with the herdr captures, this establishes the herdr half.
+- [x] A quoted form above a live composer, the transcript viewer and every existing Claude form keep their current observation, except Claude Code's own `Model switch` question (`claude-2.1.302-auto-model-switch-question-1`), which renders with the AskUserQuestion component and becomes a `question` through `claude-ask-user-question`.
+- [x] Outside `design-docs/`, no file mentions `min_version`, profile selection by version, a profile "from `<version>`", a profile boundary or a capture interval.
+- [x] Design 0000239's Permanent and Transient phases each pass, or fail only for a recorded cause unrelated to detection with a follow-up issue opened. Their observed values replace 0000239's Step 9 "skipped" note; 0000239's live-verification Success Criterion is checked only when both pass, and otherwise stays open with a pointer to the follow-up issue.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
 
@@ -297,7 +297,8 @@ Step 1 (captures and fixtures) deliberately precedes the documentation step requ
 - [x] Run `mise //docs:build` <!-- completed: 2026-11-22T02:31 -->
 - [x] Run `git grep` over tracked files outside `design-docs/` for `min_version`, `unsupported_minimum`, `minimum supported version`, `Profile selection by minimum version`, `profile-selection-by-minimum-version`, `profile from`, `profiles from`, `profile boundar`, `These boundaries`, `profile interval`, `within its interval`, `first boundary`, `first profile`, `greatest minimum`, `selected profile`, `profile selected`, `version-selected`, `Versioned profiles`, `SemVer precedence` and `coverage unknown.`, and confirm nothing is found <!-- completed: 2026-11-22T02:31 -->
 - [x] Recheck every § Documentation targets row against the shipped behavior <!-- completed: 2026-11-22T02:31 -->
-- [ ] Install the branch CLI through its mise task <!-- completed: -->
+- [x] Install the branch CLI through its mise task <!-- completed: 2026-11-22T03:09 -->
+  - Installed with `mise //:all-install` after the execution fleet was deleted, so the running fleet kept its installed binary; live verification used the built branch binary `target/release/cafleet`.
 
 ### Step 7: Live verification
 
