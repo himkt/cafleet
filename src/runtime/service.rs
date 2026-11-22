@@ -786,12 +786,19 @@ pub(crate) fn run_service(
     if let Some(cause) = writer.diagnostic() {
         outcome.fail(cause);
     }
-    let diagnostics = shutdown_diagnostics(&services.diagnostics, &outcome, &clock.wall_stamp());
+    let diagnostics_at = clock.wall_stamp();
+    let diagnostics = shutdown_diagnostics(&services.diagnostics, &outcome, &diagnostics_at);
     let persisted = with_database_deadline(&mut conn, deadlines.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
-        storage::write_runner_diagnostics(&tx, run.run_id, &diagnostics.0, diagnostics.1)?;
+        storage::write_runner_diagnostics(
+            &tx,
+            run.run_id,
+            &diagnostics.0,
+            diagnostics.1,
+            &diagnostics_at,
+        )?;
         tx.commit()?;
         Ok(())
     });

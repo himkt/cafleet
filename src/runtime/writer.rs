@@ -500,7 +500,8 @@ impl Worker {
         }
         let (entries, dropped) = self.diagnostics.drain();
         let bound = StepBound::within(DIAGNOSTIC_FLUSH_BOUND, &self.shutdown, &self.clock);
-        match self.write_diagnostics(&bound, &entries, dropped) {
+        let at = self.clock.wall_stamp();
+        match self.write_diagnostics(&bound, &entries, dropped, &at) {
             Ok(()) => self.flush_next = self.clock.now(),
             Err(cause) => {
                 if cause.transient_storage() {
@@ -517,13 +518,14 @@ impl Worker {
         bound: &StepBound,
         entries: &[storage::RunnerDiagnosticEntry],
         dropped: u64,
+        at: &str,
     ) -> Result<()> {
         #[cfg(test)]
         self.hooks.before(WriterBoundary::Flush, bound)?;
 
         with_shared_database_deadline(&mut self.conn, bound.until, &self.shutdown, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
-            storage::persist_runner_diagnostics(conn, &self.run.owner(), entries, dropped)
+            storage::persist_runner_diagnostics(conn, &self.run.owner(), entries, dropped, at)
         })
     }
 }

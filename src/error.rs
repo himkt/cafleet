@@ -10,6 +10,9 @@ pub enum CafleetError {
     DatabaseBusy(String),
     /// An SQLite I/O-class failure; it behaves like `App` except under `transient_storage`.
     DatabaseIo(String),
+    /// A statement that SQLite interrupted; it behaves like `App` until a deadline scope that has
+    /// passed turns it into `DeadlineExceeded`.
+    DatabaseInterrupted(String),
     DeadlineExceeded,
     WithDiagnostics {
         cause: Box<CafleetError>,
@@ -38,8 +41,17 @@ impl CafleetError {
             | Self::InvalidStoredValue { .. }
             | Self::DatabaseBusy(_)
             | Self::DatabaseIo(_)
+            | Self::DatabaseInterrupted(_)
             | Self::DeadlineExceeded
             | Self::WithDiagnostics { .. } => Self::App(message),
+        }
+    }
+
+    pub(crate) fn interrupted(&self) -> bool {
+        match self {
+            Self::WithDiagnostics { cause, .. } => cause.interrupted(),
+            Self::DatabaseInterrupted(_) => true,
+            _ => false,
         }
     }
 
@@ -48,7 +60,10 @@ impl CafleetError {
         match self {
             Self::WithDiagnostics { cause, .. } => cause.transient_storage(),
             Self::DatabaseBusy(_) | Self::DeadlineExceeded | Self::DatabaseIo(_) => true,
-            Self::Usage(_) | Self::App(_) | Self::InvalidStoredValue { .. } => false,
+            Self::Usage(_)
+            | Self::App(_)
+            | Self::DatabaseInterrupted(_)
+            | Self::InvalidStoredValue { .. } => false,
         }
     }
 
@@ -71,6 +86,7 @@ impl CafleetError {
             CafleetError::App(_)
             | CafleetError::DatabaseBusy(_)
             | CafleetError::DatabaseIo(_)
+            | CafleetError::DatabaseInterrupted(_)
             | CafleetError::DeadlineExceeded
             | CafleetError::InvalidStoredValue { .. } => 1,
         }
@@ -84,7 +100,8 @@ impl CafleetError {
             CafleetError::Usage(message)
             | CafleetError::App(message)
             | CafleetError::DatabaseBusy(message)
-            | CafleetError::DatabaseIo(message) => Cow::Borrowed(message),
+            | CafleetError::DatabaseIo(message)
+            | CafleetError::DatabaseInterrupted(message) => Cow::Borrowed(message),
             CafleetError::DeadlineExceeded => Cow::Borrowed("operation exceeded its deadline"),
             CafleetError::InvalidStoredValue { field, value } => {
                 Cow::Owned(format!("invalid stored value for {field}: {value}"))
@@ -113,6 +130,9 @@ impl From<rusqlite::Error> for CafleetError {
                 | rusqlite::ErrorCode::ReadOnly
                 | rusqlite::ErrorCode::FileLockingProtocolFailed,
             ) => return CafleetError::DatabaseIo(format!("database error: {e}")),
+            Some(rusqlite::ErrorCode::OperationInterrupted) => {
+                return CafleetError::DatabaseInterrupted(format!("database error: {e}"));
+            }
             _ => {}
         }
         if let rusqlite::Error::FromSqlConversionFailure(_, _, source) = &e

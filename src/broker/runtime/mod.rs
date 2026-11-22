@@ -481,26 +481,27 @@ fn upsert_runner_diagnostic(
     Ok(())
 }
 
-/// Stores `entries`, one overflow row for `dropped` entries, and prunes the run to its newest rows.
+/// Stores `entries`, one overflow row stamped `at` for `dropped` entries, and prunes the run to
+/// its newest rows.
 pub(crate) fn write_runner_diagnostics(
     tx: &Connection,
     run_id: i64,
     entries: &[RunnerDiagnosticEntry],
     dropped: u64,
+    at: &str,
 ) -> Result<(), CafleetError> {
     for entry in entries {
         upsert_runner_diagnostic(tx, run_id, entry)?;
     }
     if dropped > 0 {
-        let at = crate::time::now_stamp();
         upsert_runner_diagnostic(
             tx,
             run_id,
             &RunnerDiagnosticEntry {
                 source: RunnerDiagnosticSource::EventWriter,
                 message: format!("diagnostic buffer overflow: {dropped} entries dropped"),
-                first_at: at.clone(),
-                last_at: at,
+                first_at: at.to_owned(),
+                last_at: at.to_owned(),
                 count: 1,
             },
         )?;
@@ -520,9 +521,10 @@ pub(crate) fn persist_runner_diagnostics(
     owner: &RunOwner,
     entries: &[RunnerDiagnosticEntry],
     dropped: u64,
+    at: &str,
 ) -> Result<(), CafleetError> {
     owned_transaction(conn, owner, |tx, run| {
-        write_runner_diagnostics(tx, run.run_id, entries, dropped)
+        write_runner_diagnostics(tx, run.run_id, entries, dropped, at)
     })
 }
 

@@ -564,8 +564,9 @@ pub(crate) fn with_database_budget<T>(
     scoped_database_budget(conn, deadline, ScopeKind::Wait, None, operation)
 }
 
-/// Like [`with_database_budget`] until `until`, and statements also abort once it passes. An
-/// operation that returns after `until`, by value or error, fails with `DeadlineExceeded`.
+/// Like [`with_database_budget`] until `until`, and statements also abort once it passes. A
+/// value or an interrupted statement that returns after `until` fails with `DeadlineExceeded`;
+/// every other error returns unchanged.
 pub(crate) fn with_database_deadline<T>(
     conn: &mut Connection,
     until: Instant,
@@ -574,8 +575,7 @@ pub(crate) fn with_database_deadline<T>(
     let deadline = Deadline::until(until);
     deadline.remaining()?;
     let result = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, None, operation);
-    deadline.remaining()?;
-    result
+    past_deadline(result, || deadline)
 }
 
 /// Like [`with_database_deadline`], and the scope also ends once `shared`, which another thread
@@ -596,8 +596,20 @@ pub(crate) fn with_shared_database_deadline<T>(
         Some(shared),
         operation,
     );
-    effective().remaining()?;
-    result
+    past_deadline(result, effective)
+}
+
+fn past_deadline<T>(
+    result: Result<T, CafleetError>,
+    deadline: impl Fn() -> Deadline,
+) -> Result<T, CafleetError> {
+    match result {
+        Ok(value) => deadline().remaining().map(|_| value),
+        Err(error) if error.interrupted() && deadline().remaining().is_err() => {
+            Err(CafleetError::DeadlineExceeded)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 // Pane side effects are irreversible; mandatory storage finalization gets a
