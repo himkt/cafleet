@@ -1,6 +1,6 @@
 # Member deletion of a lost runner
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 17/17 tasks complete
 **Last Updated**: 2026-11-22
 
@@ -163,3 +163,4 @@ Deletion tests built on `Case::new` or `runtime::test_support::Fixture::new` rec
 | Date | Changes |
 |------|---------|
 | 2026-11-22 | Initial draft |
+| 2026-11-22 | Implemented; status Complete |
