@@ -2741,6 +2741,24 @@ mod tests {
         }
 
         #[test]
+        fn doctor_prints_an_ok_member_row_from_a_live_runner_probe() {
+            crate::runtime::service::test_support::input_service::with_input_service(
+                |fixture, _| {
+                    let mut scenario = Scenario::new();
+                    healthy_backends(&mut scenario);
+                    scenario.database = PathBuf::from(fixture.fixture.conn.path().unwrap());
+                    let run = &fixture.fixture.run;
+                    let views = scenario.views();
+                    let name = format!("member.{}.runtime", run.member_id);
+                    assert_eq!(
+                        named_row(&views.text, &name),
+                        format!("ok {name}: run={} observation=composer_empty", run.run_id)
+                    );
+                },
+            );
+        }
+
+        #[test]
         fn doctor_with_only_warnings_prints_ready_backends_and_exits_zero() {
             let mut scenario = Scenario::new();
             scenario.connect();

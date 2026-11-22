@@ -1419,6 +1419,8 @@ mod tests {
             }
         }
 
+        const WRITE_AT: u32 = 30;
+
         fn write(
             fixture: &mut Fixture,
             run_id: i64,
@@ -1426,7 +1428,7 @@ mod tests {
             dropped: u64,
         ) {
             let tx = fixture.conn.transaction().unwrap();
-            write_runner_diagnostics(&tx, run_id, entries, dropped).unwrap();
+            write_runner_diagnostics(&tx, run_id, entries, dropped, &at(WRITE_AT)).unwrap();
             tx.commit().unwrap();
         }
 
@@ -1563,6 +1565,11 @@ mod tests {
                     };
                     assert_eq!(row.0, "event_writer");
                     assert_eq!(row.1, "diagnostic buffer overflow: 3 entries dropped");
+                    assert_eq!(
+                        (row.2.as_str(), row.3.as_str()),
+                        (at(WRITE_AT).as_str(), at(WRITE_AT).as_str()),
+                        "the overflow row carries the caller's stamp"
+                    );
                 }
             }
         }

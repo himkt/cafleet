@@ -1022,6 +1022,42 @@ mod tests {
         }
 
         #[test]
+        fn writer_fences_after_one_replacement_attempt_once_run_ownership_is_lost() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            fixture
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
+                    [fixture.fixture.run.run_id],
+                )
+                .unwrap();
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            yield_until(|| {
+                writer
+                    .status()
+                    .diagnostic
+                    .is_some_and(|diagnostic| diagnostic.starts_with("event writer fenced: "))
+            });
+            assert_eq!(
+                hooks.state.lock().unwrap().calls[index(WriterBoundary::Persist)],
+                2,
+                "the original and one replacement are attempted before the fence"
+            );
+            let fenced = writer.status();
+            assert_eq!(fenced.pending_count, 0, "{fenced:?}");
+            assert_eq!(committed(&fixture), 0);
+            assert!(
+                writer.try_submit(transition(&fixture, 2)).is_err(),
+                "a fenced writer accepts no transition"
+            );
+            assert_eq!(writer.finish(until(&clock)), (0, 1));
+        }
+
+        #[test]
         fn writer_refuses_invalid_evidence_without_degrading() {
             let clock = clock();
             let fixture = WriterFixture::new();

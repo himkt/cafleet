@@ -2584,7 +2584,10 @@ mod tests {
         let result = with_database_deadline(
             &mut fixture.conn,
             start + Duration::from_millis(80),
-            |conn| sum(conn, SLOW_SUM),
+            |conn| {
+                conn.query_row(SLOW_SUM, [], |row| row.get::<_, i64>(0))
+                    .map_err(CafleetError::from)
+            },
         );
         let error = result.expect_err("the deadline cancels the long statement");
         assert!(

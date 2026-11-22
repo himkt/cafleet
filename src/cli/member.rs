@@ -2277,11 +2277,44 @@ mod tests {
                 let (status, stdout, stderr) =
                     external_member_invoke(fixture, "show", "", true, false, None, outer);
                 assert!(status.success(), "{status}; {stderr}");
+                let shown = external_member_json(&stdout);
                 assert!(
-                    external_member_json(&stdout)["runtime"]["unresolved_input_ids"]
+                    shown["runtime"]["unresolved_input_ids"]
                         .as_array()
                         .unwrap()
                         .contains(&json!(row.input_id))
+                );
+                assert_eq!(shown["runtime"]["observation_probe"], "answered", "{shown}");
+                assert_eq!(
+                    shown["runtime"]["observation"]
+                        .as_object()
+                        .unwrap_or_else(|| panic!("a live runner answers its observation: {shown}"))
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                    [
+                        "visibility",
+                        "eligibility",
+                        "degraded",
+                        "diagnostic",
+                        "writer_diagnostic",
+                        "pending_count",
+                        "gap_count",
+                        "gap_open_since"
+                    ]
+                );
+                assert_eq!(shown["runtime"]["observation_error"], Value::Null);
+                let (status, stdout, stderr) =
+                    external_member_invoke(fixture, "show", "", false, false, None, outer);
+                assert!(status.success(), "{status}; {stderr}");
+                let runtime_line = stdout
+                    .lines()
+                    .find(|line| line.contains(" observation="))
+                    .unwrap_or_else(|| panic!("the text runtime line carries the probe: {stdout}"));
+                let observed = runtime_line.rsplit_once(" observation=").unwrap().1;
+                assert!(
+                    !["-", "unavailable", "pending"].contains(&observed),
+                    "an answered probe renders its eligibility: {runtime_line}"
                 );
                 let (status, stdout, stderr) = external_member_invoke(
                     fixture,

@@ -2243,6 +2243,46 @@ mod tests {
         }
 
         #[test]
+        fn a_late_error_other_than_an_interrupt_keeps_its_cause() {
+            struct LateCause {
+                name: &'static str,
+                cause: fn() -> CafleetError,
+            }
+            const CAUSES: &[LateCause] = &[
+                LateCause {
+                    name: "permanent",
+                    cause: || CafleetError::App("permanent cause".into()),
+                },
+                LateCause {
+                    name: "busy",
+                    cause: || CafleetError::DatabaseBusy("busy cause".into()),
+                },
+            ];
+            for shared in [false, true] {
+                for case in CAUSES {
+                    let cause = case.cause;
+                    let name = format!("{}, shared={shared}", case.name);
+                    let mut conn = Connection::open_in_memory().unwrap();
+                    let until = Instant::now() + Duration::from_millis(50);
+                    let late = |_: &mut Connection| -> Result<(), CafleetError> {
+                        std::thread::sleep(Duration::from_millis(100));
+                        Err(cause())
+                    };
+                    let error = if shared {
+                        let deadline: SharedDeadline =
+                            std::sync::Arc::new(std::sync::Mutex::new(None));
+                        with_shared_database_deadline(&mut conn, until, &deadline, late)
+                    } else {
+                        with_database_deadline(&mut conn, until, late)
+                    }
+                    .err()
+                    .unwrap_or_else(|| panic!("{name}: the operation's error is returned"));
+                    assert_eq!(error.to_string(), cause().to_string(), "{name}");
+                }
+            }
+        }
+
+        #[test]
         fn shared_deadline_left_unset_bounds_the_scope_by_its_own_deadline_only() {
             let mut conn = Connection::open_in_memory().unwrap();
             let shared: SharedDeadline = std::sync::Arc::new(std::sync::Mutex::new(None));
