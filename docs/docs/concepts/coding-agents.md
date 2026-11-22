@@ -125,6 +125,8 @@ A claude member needs no broker allow rule: cafleet passes `Bash(cafleet message
 
 Claude Code can show two auto-mode dialogs in a member pane after a turn: `Make auto mode your default permission mode?` when your `~/.claude/settings.json` pins a non-`auto` `defaultMode`, and `Teach auto mode about your environment?` in auto mode. The runner holds input behind each and sends the Director a question event. The Director dismisses the first with `No, keep …` and the second with `Not now`, asking you before `Don't show again`; each answer changes only that dialog's flag in the member's Claude configuration. CAFleet never sends the `Yes` choices; answer them in the member pane if you want them.
 
+When a claude member asks a question with its AskUserQuestion tool, the runner holds input behind the form and sends the Director a question event that lists no choice. The Director relays the question to you, and you answer it in the member pane.
+
 ### Codex configuration
 
 #### Command rules and sandbox access
