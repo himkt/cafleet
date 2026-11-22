@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.himkt.dev/cafleet">himkt.dev/cafleet</a> · <a href="https://www.himkt.dev/cafleet/quickstart#install">install</a> · <a href="https://www.himkt.dev/cafleet/quickstart">quick start</a> · <a href="https://herdr.dev/docs/">docs</a>
+  <a href="https://www.himkt.dev/cafleet">himkt.dev/cafleet</a> · <a href="https://www.himkt.dev/cafleet/quickstart#install">install</a> · <a href="https://www.himkt.dev/cafleet/quickstart">quick start</a> · <a href="https://www.himkt.dev/cafleet/">docs</a>
 </p>
 
 <p align="center">
