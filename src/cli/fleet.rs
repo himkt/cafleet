@@ -1432,6 +1432,7 @@ mod tests {
             let mut new_run_id = None;
             let (result, host) = while_locks_are_acquired(&mut fixture, |fixture, _| {
                 fixture.conn.execute("UPDATE member_runs SET status='exited',cleanup_state='complete',exit_code=0 WHERE run_id=?1", [old_run.run_id]).unwrap();
+                let process = crate::runtime::ProcessIdentity::current().unwrap();
                 let spec = NewRun {
                     launch_nonce: "b".repeat(64),
                     runtime_path: fixture
@@ -1441,6 +1442,8 @@ mod tests {
                         .to_str()
                         .unwrap()
                         .into(),
+                    owner_pid: process.pid,
+                    owner_start_identity: process.start_identity,
                     ..crate::broker::runtime::test_support::Fixture::spec(
                         &fixture.conn,
                         old_run.fleet_id,
@@ -1785,6 +1788,114 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(status, "deregistered");
+        }
+
+        #[test]
+        fn runner_recovery_deletion_of_a_non_terminal_run_requests_shutdown_only_from_a_live_owner()
+        {
+            enum Outcome {
+                RecoveredAsLost,
+                ShutdownRefused,
+            }
+            struct OwnerCase {
+                name: &'static str,
+                owner: fn() -> crate::runtime::ProcessIdentity,
+                outcome: Outcome,
+            }
+            let cases = [
+                OwnerCase {
+                    name: "gone_runner",
+                    owner: || {
+                        let (mut child, identity) = crate::runtime::test_support::zombie();
+                        child.wait().unwrap();
+                        identity
+                    },
+                    outcome: Outcome::RecoveredAsLost,
+                },
+                OwnerCase {
+                    name: "live_owner_refuses",
+                    owner: || crate::runtime::ProcessIdentity::current().unwrap(),
+                    outcome: Outcome::ShutdownRefused,
+                },
+            ];
+            for owner_case in &cases {
+                let name = owner_case.name;
+                let mut case = Case::new();
+                let owner = (owner_case.owner)();
+                case.fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET owner_pid=?1, owner_start_identity=?2 WHERE run_id=?3",
+                        rusqlite::params![owner.pid, owner.start_identity, case.fixture.run.run_id],
+                    )
+                    .unwrap();
+                case.refresh();
+                let original = case.fixture.run.clone();
+                case.release();
+                let deadline = Deadline::until(Instant::now() + Duration::from_secs(2));
+                let mut host = DeletionTestHost::recovering(&case, deadline);
+                host.runner_gone = true;
+                let result = delete_fleet_with_host(
+                    &mut case.fixture.conn,
+                    &case.settings,
+                    original.fleet_id,
+                    deadline,
+                    &mut host,
+                );
+                match owner_case.outcome {
+                    Outcome::RecoveredAsLost => {
+                        if let Err(error) = result {
+                            panic!(
+                                "{name}: deletion of a dead owner's run failed after {:?}: {error:?}",
+                                host.calls
+                            );
+                        }
+                        assert_eq!(
+                            host.calls,
+                            vec!["recover", "close"],
+                            "{name}: a dead owner is recovered, never asked to shut down"
+                        );
+                        let recovered = host
+                            .recovered
+                            .as_ref()
+                            .unwrap_or_else(|| panic!("{name}: recovery ran"));
+                        assert_eq!(recovered.status, RunStatus::Lost, "{name}");
+                        let lost = events(&case)
+                            .iter()
+                            .filter(|row| row.event.kind == RuntimeEventKind::RunnerLost)
+                            .count();
+                        assert_eq!(lost, 1, "{name}: exactly one runner_lost event");
+                        let status: String = case
+                            .fixture
+                            .conn
+                            .query_row(
+                                "SELECT status FROM members WHERE member_id=?1 AND fleet_id=?2",
+                                rusqlite::params![original.member_id, original.fleet_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap();
+                        assert_eq!(status, "deregistered", "{name}");
+                    }
+                    Outcome::ShutdownRefused => {
+                        let Err(error) = result else {
+                            panic!("{name}: a live owner's refused shutdown keeps the member");
+                        };
+                        assert!(
+                            error.message().contains("ECONNREFUSED"),
+                            "{name}: {error:?}"
+                        );
+                        assert_eq!(
+                            host.calls,
+                            vec!["shutdown"],
+                            "{name}: a live owner is asked to shut down first"
+                        );
+                        assert_registry_active(&case.fixture);
+                        let current =
+                            storage::get_run(&case.fixture.conn, original.run_id).unwrap();
+                        assert_eq!(current.status, RunStatus::Running, "{name}");
+                    }
+                }
+            }
         }
 
         #[test]
