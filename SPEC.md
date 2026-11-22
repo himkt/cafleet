@@ -3358,18 +3358,18 @@ Durability begins at a successful SQLite commit, and notification is claimed onl
 
 **Diagnostic text.** Every runner diagnostic text that is stored or transmitted (the `event_rejected` cause's `error`, the health observation's `writer_diagnostic` and `member_runner_diagnostics.message`) has each control character U+0000–U+001F and U+007F replaced with a space, is trimmed and is truncated to at most 512 bytes at a UTF-8 boundary. Each text is a non-empty error message; it carries no input literal, message body or pane text.
 
-**Runner diagnostics.** The live runner stores its diagnostics in `member_runner_diagnostics` (§8), one row per run, source and message, and keeps printing each to its standard error:
+**Runner diagnostics.** The live runner stores its diagnostics in `member_runner_diagnostics` (§8), one row per run, source and message, and keeps printing each to its standard error as `member runtime: <message>`; the stored `message` is the text after that prefix:
 
-| `source` | Recorded diagnostic |
+| `source` | Stored `message` |
 |---|---|
-| `event_writer` | A writer failure text that differs from the current one, a rejection, a fence, a buffer overflow |
-| `observation` | An observation gap opening, as `observation gap opened: <code>` with the observation failure code |
-| `deferred_input` | `member runtime: deferred input: …` |
-| `queue_housekeeping` | `member runtime: queue housekeeping: …` |
-| `preview_sweep` | `member runtime: preview sweep: …` |
-| `input_result` | `member runtime: input … result is pending storage: …` and `member runtime: input … result is pending recovery: …` |
-| `permission_answer` | `member runtime: permission answer for interaction … is uncertain: …` |
-| `shutdown` | Each `member runtime: …` shutdown outcome diagnostic |
+| `event_writer` | `event writer: <text>` for a writer failure text that differs from the current one, `event writer rejected <kind> event <event_seq>: <text>`, `event writer fenced: <cause>` and `diagnostic buffer overflow: N entries dropped` |
+| `observation` | `observation gap opened: <code>` with the observation failure code |
+| `deferred_input` | `deferred input: …` |
+| `queue_housekeeping` | `queue housekeeping: …` |
+| `preview_sweep` | `preview sweep: …` |
+| `input_result` | `input <input_id> result is pending storage: …` and `input <input_id> result is pending recovery: …` |
+| `permission_answer` | `permission answer for interaction <interaction_id> is uncertain: …` |
+| `shutdown` | Each shutdown outcome diagnostic |
 
 The runner buffers at most 32 entries keyed by source and message, each with its count and first and last times; an overflow drops the oldest entry and adds its count to a dropped counter. The event worker flushes the buffer before each loop iteration, idle iterations included, when the buffer is non-empty or the dropped counter is positive and the next flush time has arrived. Each flush is one ownership-validated immediate transaction bounded by 500 ms of real time and by the shutdown deadline, and runs this write sequence:
 
