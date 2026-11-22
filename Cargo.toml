@@ -9,7 +9,7 @@ unsafe_code = "deny"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
 clap = { version = "4", features = ["derive"] }
-nix = { version = "0.31", features = ["signal", "fs", "poll", "term", "process", "user", "socket"] }
+nix = { version = "0.32", features = ["signal", "fs", "poll", "term", "process", "user", "socket"] }
 portable-pty = "0.9"
 filedescriptor = "0.8"
 vt100 = "0.18.1"
