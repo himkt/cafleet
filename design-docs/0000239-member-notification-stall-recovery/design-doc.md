@@ -1,8 +1,8 @@
 # Member notification stall recovery
 
-**Status**: Approved
-**Progress**: 0/57 tasks complete
-**Last Updated**: 2026-11-21
+**Status**: Complete
+**Progress**: 57/57 tasks complete
+**Last Updated**: 2026-11-22
 
 ## Overview
 
@@ -431,84 +431,86 @@ The Permanent phase queues its second prompt behind an open interaction, because
 
 ### Step 1: Documentation
 
-- [ ] Update `SPEC.md` §6.3 `member show`, Runtime presentation and `cafleet doctor` Check rows per § `member show` and § `doctor` member rows, replacing the no-live-health sentence <!-- completed: -->
-- [ ] Update `SPEC.md` §6.9 Persistence, Input delivery stalled event, Queue housekeeping and Runner pending-preview sweep per § Rejection event, § Stalled head no longer ready, § Duplicate delivery records and § Stall behind an uncertain input <!-- completed: -->
-- [ ] Rewrite `SPEC.md` §6.9 Storage pressure and durability boundary per § Skills and documentation (step bound, classification, fence, diagnostics; delete only the `degraded` clause) <!-- completed: -->
-- [ ] Update `SPEC.md` §8 with the table list row, the `member_runner_diagnostics` DDL before the ledger table and the `head_not_ready` and `duplicate_delivery` archive reasons <!-- completed: -->
-- [ ] Update `docs/docs/concepts/members.md` doctor, `member show` and stalled-event paragraphs <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md` Runtime presentation, Runtime events and doctor facts <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/roles/director.md` § Reconcile generated input with the `reconcile_uncertain_input` and `event_rejected` procedures <!-- completed: -->
-- [ ] Delete `design-docs/0000237-automatic-held-queue-flush/` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] Update `SPEC.md` §6.3 `member show`, Runtime presentation and `cafleet doctor` Check rows per § `member show` and § `doctor` member rows, replacing the no-live-health sentence <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `SPEC.md` §6.9 Persistence, Input delivery stalled event, Queue housekeeping and Runner pending-preview sweep per § Rejection event, § Stalled head no longer ready, § Duplicate delivery records and § Stall behind an uncertain input <!-- completed: 2026-11-21T14:01 -->
+- [x] Rewrite `SPEC.md` §6.9 Storage pressure and durability boundary per § Skills and documentation (step bound, classification, fence, diagnostics; delete only the `degraded` clause) <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `SPEC.md` §8 with the table list row, the `member_runner_diagnostics` DDL before the ledger table and the `head_not_ready` and `duplicate_delivery` archive reasons <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `docs/docs/concepts/members.md` doctor, `member show` and stalled-event paragraphs <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` Runtime presentation, Runtime events and doctor facts <!-- completed: 2026-11-21T14:01 -->
+- [x] Update `assets/skills/cafleet/roles/director.md` § Reconcile generated input with the `reconcile_uncertain_input` and `event_rejected` procedures <!-- completed: 2026-11-21T14:01 -->
+- [x] Delete `design-docs/0000237-automatic-held-queue-flush/` <!-- completed: 2026-11-21T14:01 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-21T14:01 -->
 
 ### Step 2: Deadline fix
 
-- [ ] Apply the `update()` change and add the controller test per § Deadline fix <!-- completed: -->
-- [ ] Change the `uncertain preview` scenario's expected events <!-- completed: -->
+- [x] Apply the `update()` change and add the controller test per § Deadline fix <!-- completed: 2026-11-21T14:06 -->
+- [x] Change the `uncertain preview` scenario's expected events <!-- completed: 2026-11-21T14:06 -->
 
 ### Step 3: Writer step bound
 
-- [ ] Add `SharedDeadline` and `with_shared_database_deadline` to `src/db.rs`, with `database_cancelled` and `remaining_database_wait` reading the shared value, plus their test <!-- completed: -->
-- [ ] Delete `WORK_SLICE`, `Worker::work_slice`, `Worker::work_deadline`, `Mailbox::work_deadline` and `WriterHooks::work_slice`, and move the mailbox deadline into a `SharedDeadline` <!-- completed: -->
-- [ ] Add `StepBound` (real-time `until`, shared shutdown deadline on the worker's clock, `check()`), run each receive and persist under it with `with_shared_database_deadline`, and make `finish` wait until `until + WRITER_JOIN_GRACE` before an unconditional join <!-- completed: -->
-- [ ] Change `WriterHooks::before` to take `&StepBound`, and end the `writer.rs` `Hooks` pause and the `service.rs` `block-persist` loop when `bound.check()` fails <!-- completed: -->
-- [ ] Remove `Hooks::on_virtual_time` and the `Hooks.work_slice` field in `writer.rs` and `InputFixtureWriterHooks::work_slice` in `input.rs`, pointing callers at `Hooks::default()` <!-- completed: -->
-- [ ] In `service.rs`, remove `synthetic_with_unhurried_writer`, `writer_work_slice_ms`, the `Hooks.work_slice` field and impl, the config parse and `ScenarioWriterHooks::work_slice`, and point callers at `synthetic` <!-- completed: -->
-- [ ] Add the virtual-jump, paused-hook join, held-lock persist and shutdown-interrupt tests, the last two on the real-clock `start` helper <!-- completed: -->
+- [x] Add `SharedDeadline` and `with_shared_database_deadline` to `src/db.rs`, with `database_cancelled` and `remaining_database_wait` reading the shared value, plus their test <!-- completed: 2026-11-21T14:20 -->
+- [x] Delete `WORK_SLICE`, `Worker::work_slice`, `Worker::work_deadline`, `Mailbox::work_deadline` and `WriterHooks::work_slice`, and move the mailbox deadline into a `SharedDeadline` <!-- completed: 2026-11-21T14:20 -->
+- [x] Add `StepBound` (real-time `until`, shared shutdown deadline on the worker's clock, `check()`), run each receive and persist under it with `with_shared_database_deadline`, and make `finish` wait until `until + WRITER_JOIN_GRACE` before an unconditional join <!-- completed: 2026-11-21T14:20 -->
+- [x] Change `WriterHooks::before` to take `&StepBound`, and end the `writer.rs` `Hooks` pause and the `service.rs` `block-persist` loop when `bound.check()` fails <!-- completed: 2026-11-21T14:20 -->
+- [x] Remove `Hooks::on_virtual_time` and the `Hooks.work_slice` field in `writer.rs` and `InputFixtureWriterHooks::work_slice` in `input.rs`, pointing callers at `Hooks::default()` <!-- completed: 2026-11-21T14:20 -->
+- [x] In `service.rs`, remove `synthetic_with_unhurried_writer`, `writer_work_slice_ms`, the `Hooks.work_slice` field and impl, the config parse and `ScenarioWriterHooks::work_slice`, and point callers at `synthetic` <!-- completed: 2026-11-21T14:20 -->
+- [x] Add the virtual-jump, paused-hook join, held-lock persist and shutdown-interrupt tests, the last two on the real-clock `start` helper <!-- completed: 2026-11-21T14:20 -->
 
 ### Step 4: Failure classification and rejection
 
-- [ ] Add `CafleetError::DatabaseIo`, its code mapping and `transient_storage`, with tests <!-- completed: -->
-- [ ] Add `diagnostic_text` with its tests <!-- completed: -->
-- [ ] Add `RuntimeCauseKind::EventRejected` and its cause validation in `src/broker/runtime/events.rs`, with tests <!-- completed: -->
-- [ ] Classify failures in the worker, and replace a permanently failing front transition with its rejection event within the same step, without `Mailbox::failure` <!-- completed: -->
-- [ ] Fence the writer when the replacement fails permanently <!-- completed: -->
-- [ ] Add `RetainReason` to `RetainedTransition`, skip `Mailbox::failure` for `EvidenceInvalid`, and replace an `EvidenceInvalid` refusal in `ObservationController::route` with no `delivery_pressure` call <!-- completed: -->
-- [ ] Add the replacement, transient-replacement, fence and sequence-slot writer tests, plus the controller rejection test <!-- completed: -->
-- [ ] Add `Step::FailPersist(bool)` and the `ScenarioWriterHooks` flag, move `an_event_storage_fault_holds_input_until_the_writer_persists_again` onto it and delete `EVENT_FAULT` <!-- completed: -->
-- [ ] Update the existing tests listed in § Testing <!-- completed: -->
+- [x] Add `CafleetError::DatabaseIo`, its code mapping and `transient_storage`, with tests <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `diagnostic_text` with its tests <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `RuntimeCauseKind::EventRejected` and its cause validation in `src/broker/runtime/events.rs`, with tests <!-- completed: 2026-11-21T14:35 -->
+- [x] Classify failures in the worker, and replace a permanently failing front transition with its rejection event within the same step, without `Mailbox::failure` <!-- completed: 2026-11-21T14:35 -->
+- [x] Fence the writer when the replacement fails permanently <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `RetainReason` to `RetainedTransition`, skip `Mailbox::failure` for `EvidenceInvalid`, and replace an `EvidenceInvalid` refusal in `ObservationController::route` with no `delivery_pressure` call <!-- completed: 2026-11-21T14:35 -->
+- [x] Add the replacement, transient-replacement, fence and sequence-slot writer tests, plus the controller rejection test <!-- completed: 2026-11-21T14:35 -->
+- [x] Add `Step::FailPersist(bool)` and the `ScenarioWriterHooks` flag, move `an_event_storage_fault_holds_input_until_the_writer_persists_again` onto it and delete `EVENT_FAULT` <!-- completed: 2026-11-21T14:35 -->
+- [x] Update the existing tests listed in § Testing <!-- completed: 2026-11-21T14:35 -->
 
 ### Step 5: Silent archival of stale and duplicate delivery records
 
-- [ ] Add `head_not_ready` and `duplicate_delivery` to the `archive_reason` CHECK in `assets/migrations/V1__baseline.sql` and to `ArchiveReason` <!-- completed: -->
-- [ ] Add `DeliveryFields.archive`, and set it to `Some(HeadNotReady)` in `stalled_delivery` with `published=false` per § Stalled head no longer ready <!-- completed: -->
-- [ ] Make `persist_transition_in_transaction` commit a delivery whose `archive` is set as a silent archived row at `transition.event_seq` (`notification_state='archived'`, NULL `message_id`, no inbox message) <!-- completed: -->
-- [ ] Make the delivery dedup branch build the delivery fields and commit a `duplicate_delivery` archived row returned as inserted, with `duplicate_delivery` taking precedence over `head_not_ready` and both applying only when `historical_ownership` supplies no archive reason, per § Duplicate delivery records <!-- completed: -->
-- [ ] Add the `events.rs` tests for `head_not_ready` archival and, for the head and preview dedup queries, a duplicate committing a `duplicate_delivery` row at its `event_seq`, its idempotent retry comparing equal and the next transition persisting <!-- completed: -->
-- [ ] Add the `service.rs` scenario where an interaction restarts a head's stall watch, the head stalls again, the second record commits as `duplicate_delivery` and later events still persist <!-- completed: -->
+- [x] Add `head_not_ready` and `duplicate_delivery` to the `archive_reason` CHECK in `assets/migrations/V1__baseline.sql` and to `ArchiveReason` <!-- completed: 2026-11-21T14:41 -->
+- [x] Add `DeliveryFields.archive`, and set it to `Some(HeadNotReady)` in `stalled_delivery` with `published=false` per § Stalled head no longer ready <!-- completed: 2026-11-21T14:41 -->
+- [x] Make `persist_transition_in_transaction` commit a delivery whose `archive` is set as a silent archived row at `transition.event_seq` (`notification_state='archived'`, NULL `message_id`, no inbox message) <!-- completed: 2026-11-21T14:41 -->
+- [x] Make the delivery dedup branch build the delivery fields and commit a `duplicate_delivery` archived row returned as inserted, with `duplicate_delivery` taking precedence over `head_not_ready` and both applying only when `historical_ownership` supplies no archive reason, per § Duplicate delivery records <!-- completed: 2026-11-21T14:41 -->
+- [x] Add the `events.rs` tests for `head_not_ready` archival and, for the head and preview dedup queries, a duplicate committing a `duplicate_delivery` row at its `event_seq`, its idempotent retry comparing equal and the next transition persisting <!-- completed: 2026-11-21T14:41 -->
+- [x] Add the `service.rs` scenario where an interaction restarts a head's stall watch, the head stalls again, the second record commits as `duplicate_delivery` and later events still persist <!-- completed: 2026-11-21T14:56 -->
 
 ### Step 6: Runner diagnostics
 
-- [ ] Add `member_runner_diagnostics` and its index to `assets/migrations/V1__baseline.sql` before `refinery_schema_history` <!-- completed: -->
-- [ ] Add the storage upsert/prune and latest-5 read functions under `src/broker/runtime/` <!-- completed: -->
-- [ ] Add the shared `RunnerDiagnostics` buffer with 32-entry overflow accounting <!-- completed: -->
-- [ ] Record every source site in § Runner diagnostics through it, keeping the `eprintln!` copy <!-- completed: -->
-- [ ] Flush from the event worker per § Runner diagnostics, including its bound, `flush_next` and outcome rules <!-- completed: -->
-- [ ] Write the `shutdown` rows in the cleanup UPDATE transaction <!-- completed: -->
-- [ ] Add the buffer, flush, dedup, prune and shutdown tests <!-- completed: -->
+- [x] Add `member_runner_diagnostics` and its index to `assets/migrations/V1__baseline.sql` before `refinery_schema_history` <!-- completed: 2026-11-21T14:56 -->
+- [x] Add the storage upsert/prune and latest-5 read functions under `src/broker/runtime/` <!-- completed: 2026-11-21T14:56 -->
+- [x] Add the shared `RunnerDiagnostics` buffer with 32-entry overflow accounting <!-- completed: 2026-11-21T14:56 -->
+- [x] Record every source site in § Runner diagnostics through it, keeping the `eprintln!` copy <!-- completed: 2026-11-21T14:56 -->
+- [x] Flush from the event worker per § Runner diagnostics, including its bound, `flush_next` and outcome rules <!-- completed: 2026-11-21T14:56 -->
+- [x] Write the `shutdown` rows in the cleanup UPDATE transaction <!-- completed: 2026-11-21T14:56 -->
+- [x] Add the buffer, flush, dedup, prune and shutdown tests <!-- completed: 2026-11-21T14:56 -->
 
 ### Step 7: Observation health and surfaces
 
-- [ ] Add `writer_diagnostic` and `gap_open_since` to `ObservationHealth`, apply the decode rules and raise the encoded limit to 2,048 bytes, with tests <!-- completed: -->
-- [ ] Add the member-show probe, its four `runtime` keys and the text suffix <!-- completed: -->
-- [ ] Add the doctor `member.<id>.runtime` rows with concurrent 1 s probes and `DOCTOR_GAP_ERROR_AGE` <!-- completed: -->
-- [ ] Add the `member show` and doctor tests for each situation <!-- completed: -->
+- [x] Add `writer_diagnostic` and `gap_open_since` to `ObservationHealth`, apply the decode rules and raise the encoded limit to 2,048 bytes, with tests <!-- completed: 2026-11-21T20:50 -->
+- [x] Add the member-show probe, its four `runtime` keys and the text suffix <!-- completed: 2026-11-21T20:50 -->
+- [x] Add the doctor `member.<id>.runtime` rows with concurrent 1 s probes and `DOCTOR_GAP_ERROR_AGE` <!-- completed: 2026-11-21T20:50 -->
+- [x] Add the `member show` and doctor tests for each situation <!-- completed: 2026-11-21T20:50 -->
 
 ### Step 8: Stall behind an uncertain input
 
-- [ ] Add `storage::first_uncertain_ordinary_input` <!-- completed: -->
-- [ ] Add `BlockedWait` and `watch_blocked`, called first in `queue_housekeeping` <!-- completed: -->
-- [ ] Suppress `watch_head` while a blocker exists <!-- completed: -->
-- [ ] Move every stalled record to the 5-key form and add `blocked_record` <!-- completed: -->
-- [ ] Update `validate_stalled_record`, `original`, `stalled_delivery`, the dedup queries and `payload` per § Stall behind an uncertain input, routing a blocked dedup hit through the Step 5 `duplicate_delivery` archival <!-- completed: -->
-- [ ] Make `publish_delivery_result` compare `blocked_by_input_id` per § Duplicate delivery records <!-- completed: -->
-- [ ] Add the blocked-wait and suppression tests, the blocked record validation and `original` round-trip tests, the blocked dedup query's `duplicate_delivery` test and the `publish_delivery_result` test for two blocked records naming different blockers <!-- completed: -->
+- [x] Add `storage::first_uncertain_ordinary_input` <!-- completed: 2026-11-21T20:57 -->
+- [x] Add `BlockedWait` and `watch_blocked`, called first in `queue_housekeeping` <!-- completed: 2026-11-21T20:57 -->
+- [x] Suppress `watch_head` while a blocker exists <!-- completed: 2026-11-21T20:57 -->
+- [x] Move every stalled record to the 5-key form and add `blocked_record` <!-- completed: 2026-11-21T20:57 -->
+- [x] Update `validate_stalled_record`, `original`, `stalled_delivery`, the dedup queries and `payload` per § Stall behind an uncertain input, routing a blocked dedup hit through the Step 5 `duplicate_delivery` archival <!-- completed: 2026-11-21T20:57 -->
+- [x] Make `publish_delivery_result` compare `blocked_by_input_id` per § Duplicate delivery records <!-- completed: 2026-11-21T20:57 -->
+- [x] Add the blocked-wait and suppression tests, the blocked record validation and `original` round-trip tests, the blocked dedup query's `duplicate_delivery` test and the `publish_delivery_result` test for two blocked records naming different blockers <!-- completed: 2026-11-21T20:57 -->
 
 ### Step 9: Validation
 
-- [ ] Run `mise //:test` <!-- completed: -->
-- [ ] Run `mise //:lint` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
-- [ ] Run the § Live verification phases and record each observed value <!-- completed: -->
-- [ ] Search outside `design-docs/` for `WORK_SLICE`, `work_slice`, `unhurried_writer`, `writer_work_slice_ms` and `automatic-held-queue-flush`, and confirm nothing is found <!-- completed: -->
-- [ ] Recheck every § Skills and documentation target against the shipped behavior <!-- completed: -->
+- [x] Run `mise //:test` <!-- completed: 2026-11-21T20:59 -->
+- [x] Run `mise //:lint` <!-- completed: 2026-11-21T20:59 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-21T20:59 -->
+- [x] Run the § Live verification phases and record each observed value <!-- completed: 2026-11-21T23:45 -->
+  - Healthy: passed on the branch binary (9f302033). `member show --json` reported `observation_probe` `answered`, eligibility `composer_empty`, `degraded` false, empty `diagnostics`; doctor reported `ok member.3.runtime: run=2 observation=composer_empty` right after the `database` row.
+  - Permanent and Transient: skipped. The bundled Claude profile opens no interaction for an AskUserQuestion form, so the procedure's `interaction_opened` never arrives (himkt/cafleet#639). Re-run both phases once #639 is fixed.
+- [x] Search outside `design-docs/` for `WORK_SLICE`, `work_slice`, `unhurried_writer`, `writer_work_slice_ms` and `automatic-held-queue-flush`, and confirm nothing is found <!-- completed: 2026-11-21T20:59 -->
+- [x] Recheck every § Skills and documentation target against the shipped behavior <!-- completed: 2026-11-21T20:59 -->

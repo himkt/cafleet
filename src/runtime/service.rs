@@ -513,6 +513,7 @@ pub(crate) struct RunnerDependencies {
     #[cfg(test)]
     pub(crate) catalog: &'static crate::coding_agent::ProfileCatalog,
     pub(crate) clock: Arc<dyn crate::time::Clock>,
+    pub(crate) diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
     #[cfg(test)]
     pub(crate) writer_hooks: Arc<dyn WriterHooks>,
 
@@ -533,6 +534,7 @@ pub(crate) fn run(settings: &Settings, descriptor_path: &Path) -> Result<i32> {
             #[cfg(test)]
             catalog: crate::coding_agent::ProfileCatalog::bundled(),
             clock: Arc::new(crate::time::SystemClock),
+            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
             #[cfg(test)]
             writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
 
@@ -629,6 +631,7 @@ pub(crate) fn run_service(
     .map_err(io_error)?;
     listener.set_nonblocking(true).map_err(io_error)?;
     let mut controller = ObservationController::new(&run, catalog)?;
+    controller.share_diagnostics(services.diagnostics.clone());
     #[cfg(test)]
     if let Some(hooks) = services.observation_hooks.take() {
         controller.set_observation_hooks(hooks.clone())?;
@@ -647,6 +650,7 @@ pub(crate) fn run_service(
         clock.clone(),
         #[cfg(test)]
         services.writer_hooks.clone(),
+        services.diagnostics.clone(),
     )?;
     let terminate = Arc::new(AtomicBool::new(false));
     let resize = Arc::new(AtomicBool::new(false));
@@ -782,9 +786,20 @@ pub(crate) fn run_service(
     if let Some(cause) = writer.diagnostic() {
         outcome.fail(cause);
     }
+    let diagnostics_at = clock.wall_stamp();
+    let diagnostics = shutdown_diagnostics(&services.diagnostics, &outcome, &diagnostics_at);
     let persisted = with_database_deadline(&mut conn, deadlines.storage_deadline(), |conn| {
         lock.validate(conn, &owner)?;
-        conn.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("UPDATE member_runs SET cleanup_state=?1,cleanup_diagnostics_json=?2,last_health_at=?3,status=CASE WHEN child_pid IS NULL THEN 'failed' ELSE status END,ended_at=CASE WHEN child_pid IS NULL THEN ?3 ELSE ended_at END WHERE run_id=?4 AND owner_epoch=?5",params![outcome.cleanup_state.as_str(),serde_json::to_string(&outcome.diagnostics).map_err(io_error)?,clock.wall_stamp(),run.run_id,owner.owner_epoch])?;
+        storage::write_runner_diagnostics(
+            &tx,
+            run.run_id,
+            &diagnostics.0,
+            diagnostics.1,
+            &diagnostics_at,
+        )?;
+        tx.commit()?;
         Ok(())
     });
     if let Err(cause) = persisted {
@@ -1119,7 +1134,7 @@ impl RunnerLoop<'_> {
             self.native.writer,
             self.native.clock,
         )?;
-        self.coordinator = Some(InputCoordinator::new(
+        let mut coordinator = InputCoordinator::new(
             self.conn,
             &self.run,
             self.lock.clone(),
@@ -1133,7 +1148,9 @@ impl RunnerLoop<'_> {
                 hooks: crate::runtime::input::test_support::default_input_hooks(),
             },
             self.handshake_deadline,
-        )?);
+        )?;
+        coordinator.share_diagnostics(self.native.writer.diagnostics().clone());
+        self.coordinator = Some(coordinator);
         serde_json::to_value(Started {
             identity: ControlIdentity::from_run(&self.run),
             runner: self.process.clone(),
@@ -1236,6 +1253,36 @@ impl RunnerLoop<'_> {
                 publish_stopped_results(coordinator, conn, run_id, controller, clock)
             })
     }
+}
+
+/// Every runner diagnostic still buffered once the event writer finished, followed by one
+/// `shutdown` entry per outcome diagnostic, with the buffer's dropped count.
+fn shutdown_diagnostics(
+    diagnostics: &crate::runtime::diagnostics::RunnerDiagnostics,
+    outcome: &ShutdownOutcome,
+    at: &str,
+) -> (Vec<RunnerDiagnosticEntry>, u64) {
+    let (mut entries, dropped) = diagnostics.drain();
+    entries.extend(
+        outcome
+            .diagnostics
+            .iter()
+            .map(|diagnostic| RunnerDiagnosticEntry {
+                source: RunnerDiagnosticSource::Shutdown,
+                message: diagnostic_text(diagnostic),
+                first_at: at.to_owned(),
+                last_at: at.to_owned(),
+                count: 1,
+            }),
+    );
+    (entries, dropped)
+}
+
+fn record_sweep_failure(coordinator: &InputCoordinator, cause: &CafleetError) {
+    coordinator.record_diagnostic(
+        RunnerDiagnosticSource::PreviewSweep,
+        &format!("preview sweep: {}", cause.message()),
+    );
 }
 
 /// The sweep's read snapshot: the run's member is an active ordinary member whose recorded run
@@ -1396,6 +1443,7 @@ impl InputTurns {
         match self.pending.take().expect("an attempt is in flight") {
             PendingAttempt::Sweep { .. } => {
                 self.finish_sweep(
+                    coordinator,
                     result.map(|reply| reply.expect("a completed sweep attempt has a reply")),
                     io.clock().now(),
                 );
@@ -1433,7 +1481,10 @@ impl InputTurns {
             if coordinator.deferred_failed() {
                 return Err(failure);
             }
-            eprintln!("member runtime: deferred input: {}", failure.message());
+            coordinator.record_diagnostic(
+                RunnerDiagnosticSource::DeferredInput,
+                &format!("deferred input: {}", failure.message()),
+            );
         }
         Ok(())
     }
@@ -1453,7 +1504,10 @@ impl InputTurns {
             if coordinator.deferred_failed() {
                 return Err(failure);
             }
-            eprintln!("member runtime: queue housekeeping: {}", failure.message());
+            coordinator.record_diagnostic(
+                RunnerDiagnosticSource::QueueHousekeeping,
+                &format!("queue housekeeping: {}", failure.message()),
+            );
         }
         Ok(())
     }
@@ -1481,13 +1535,15 @@ impl InputTurns {
                     .map_err(CafleetError::from);
                 match reply {
                     Ok(None) => self.pending = Some(PendingAttempt::Sweep { deadline }),
-                    Ok(Some(reply)) => self.finish_sweep(Ok(reply), io.clock().now()),
-                    Err(cause) => self.finish_sweep(Err(cause), io.clock().now()),
+                    Ok(Some(reply)) => {
+                        self.finish_sweep(coordinator, Ok(reply), io.clock().now());
+                    }
+                    Err(cause) => self.finish_sweep(coordinator, Err(cause), io.clock().now()),
                 }
             }
             Ok(None) => {}
             Err(cause) => {
-                eprintln!("member runtime: preview sweep: {}", cause.message());
+                record_sweep_failure(coordinator, &cause);
                 self.preview_sweep.back_off(io.clock().now());
             }
         }
@@ -1496,12 +1552,17 @@ impl InputTurns {
 
     /// Feeds a completed sweep attempt's outcome to the run-wide backoff: a submitted preview
     /// resets it, and a transient obstacle arms it.
-    fn finish_sweep(&mut self, reply: Result<InputControlReply>, now: Instant) {
+    fn finish_sweep(
+        &mut self,
+        coordinator: &InputCoordinator,
+        reply: Result<InputControlReply>,
+        now: Instant,
+    ) {
         let submission = match reply {
             Ok(InputControlReply::Submission(submission)) => submission,
             Ok(_) => unreachable!("a preview submission replies with a submission"),
             Err(cause) => {
-                eprintln!("member runtime: preview sweep: {}", cause.message());
+                record_sweep_failure(coordinator, &cause);
                 self.preview_sweep.back_off(now);
                 return;
             }
@@ -3101,36 +3162,28 @@ pub(crate) mod test_support {
             );
         }
 
-        /// `synthetic` with a writer slice no scheduler delay exhausts, for a test that asserts
-        /// the exact event sequence and so cannot tolerate a storage-pressure gap.
-        pub(crate) fn synthetic_with_unhurried_writer(
-            fixture: &mut crate::runtime::test_support::Fixture,
-            spec: &mut crate::runtime::SpawnSpec,
-        ) {
-            synthetic(fixture, spec);
-            let path = fixture._dir.path().join("observation-services.json");
-            let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-            config["writer_work_slice_ms"] = json!(30_000);
-            std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
-        }
-
         pub(crate) struct Hooks {
             pub(crate) directory: std::path::PathBuf,
-            pub(crate) work_slice: Duration,
         }
         impl WriterHooks for Hooks {
-            fn work_slice(&self) -> Duration {
-                self.work_slice
-            }
             fn before(
                 &self,
                 boundary: WriterBoundary,
-                deadline: Instant,
+                bound: &crate::runtime::writer::StepBound,
             ) -> Result<(), CafleetError> {
+                if matches!(boundary, WriterBoundary::Flush)
+                    && self.directory.join("fail-flush").exists()
+                {
+                    return Err(CafleetError::DatabaseBusy(
+                        "owned synthetic flush busy".into(),
+                    ));
+                }
                 if matches!(boundary, WriterBoundary::Persist)
                     && self.directory.join("fail-persist").exists()
                 {
-                    return Err(error("owned synthetic persist failure"));
+                    return Err(CafleetError::DatabaseBusy(
+                        "owned synthetic persist busy".into(),
+                    ));
                 }
                 if matches!(boundary, WriterBoundary::Persist) {
                     match std::fs::OpenOptions::new()
@@ -3144,7 +3197,7 @@ pub(crate) mod test_support {
                         Err(cause) => return Err(io_error(cause)),
                     }
                     while self.directory.join("block-persist").exists() {
-                        if Instant::now() >= deadline {
+                        if bound.check().is_err() {
                             return Err(CafleetError::DeadlineExceeded);
                         }
                         std::thread::sleep(Duration::from_millis(2));
@@ -3162,18 +3215,23 @@ pub(crate) mod test_support {
                 .map_err(io_error)?;
             let catalog = crate::coding_agent::catalog::test_support::load(&value["catalog"])?;
             private_write(&config.parent().unwrap().join("config-selected.json"),&serde_json::to_vec(&json!({"configuration":config,"sha256":sha256_hex(&std::fs::read(config).map_err(io_error)?)})).map_err(io_error)?);
+            let diagnostics = crate::runtime::diagnostics::RunnerDiagnostics::default();
+            if let Some(seeded) = value.get("seed_diagnostics") {
+                let stamp = crate::time::Clock::wall_stamp(&crate::time::SystemClock);
+                for index in 0..seeded.as_u64().expect("seed_diagnostics is an entry count") {
+                    diagnostics.record(
+                        crate::broker::runtime::RunnerDiagnosticSource::QueueHousekeeping,
+                        &format!("label: seeded {index:02}"),
+                        &stamp,
+                    );
+                }
+            }
             let services = crate::runtime::service::RunnerDependencies {
                 catalog: Box::leak(Box::new(catalog)),
                 clock: Arc::new(crate::time::SystemClock),
+                diagnostics,
                 writer_hooks: Arc::new(Hooks {
                     directory: config.parent().unwrap().to_path_buf(),
-                    work_slice: match value.get("writer_work_slice_ms") {
-                        None => crate::runtime::writer::WORK_SLICE,
-                        Some(ms) => Duration::from_millis(
-                            ms.as_u64()
-                                .expect("writer_work_slice_ms is a millisecond count"),
-                        ),
-                    },
                 }),
                 capture: None,
                 observation_hooks: crate::runtime::service::test_support::injected_failures::hooks(
@@ -3613,7 +3671,8 @@ pub(crate) mod test_support {
             HoldPane,
             ReleasePane,
             Arm(FaultPlan),
-            Clear(FaultPlan),
+            /// Every event writer persist fails with a transient busy cause while set.
+            FailPersist(bool),
         }
 
         /// A scenario as data: the native screen the child starts on, the screen it redraws after
@@ -3663,15 +3722,23 @@ pub(crate) mod test_support {
             }
         }
 
-        /// A writer work slice longer than any scenario, so event batches never split on time.
-        struct ScenarioWriterHooks;
+        #[derive(Default)]
+        struct ScenarioWriterHooks {
+            fail_persist: std::sync::atomic::AtomicBool,
+        }
 
         impl WriterHooks for ScenarioWriterHooks {
-            fn before(&self, _: WriterBoundary, _: Instant) -> Result<()> {
+            fn before(
+                &self,
+                boundary: WriterBoundary,
+                _: &crate::runtime::writer::StepBound,
+            ) -> Result<()> {
+                if matches!(boundary, WriterBoundary::Persist)
+                    && self.fail_persist.load(std::sync::atomic::Ordering::Acquire)
+                {
+                    return Err(CafleetError::DatabaseBusy("scenario persist busy".into()));
+                }
                 Ok(())
-            }
-            fn work_slice(&self) -> Duration {
-                Duration::from_secs(3600)
             }
         }
 
@@ -3830,6 +3897,7 @@ pub(crate) mod test_support {
             pub(crate) display: FakeDisplay,
             pub(crate) replies: Vec<std::result::Result<InputControlReply, CafleetError>>,
             pub(crate) held_pane: Option<crate::pane_lock::PaneLock>,
+            writer_hooks: Arc<ScenarioWriterHooks>,
             turns: InputTurns,
             finished: bool,
         }
@@ -3875,12 +3943,14 @@ pub(crate) mod test_support {
                     .unwrap();
                 fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
                 let mut controller = ObservationController::new(&fixture.run, catalog).unwrap();
+                let writer_hooks = Arc::new(ScenarioWriterHooks::default());
                 let writer = EventWriter::start_with_hooks(
                     format!("sqlite:///{}", fixture.conn.path().unwrap()),
                     fixture.run.clone(),
                     lock.clone(),
                     Arc::new(YieldingClock(clock.clone())),
-                    Arc::new(ScenarioWriterHooks),
+                    writer_hooks.clone(),
+                    crate::runtime::diagnostics::RunnerDiagnostics::default(),
                 )
                 .unwrap();
                 let child = ProcessIdentity::current().unwrap();
@@ -3956,6 +4026,7 @@ pub(crate) mod test_support {
                     display: FakeDisplay::default(),
                     replies: Vec::new(),
                     held_pane: None,
+                    writer_hooks,
                     turns: InputTurns::new(),
                     finished: false,
                 }
@@ -4029,7 +4100,10 @@ pub(crate) mod test_support {
                         self.held_pane.take().expect("a held pane lock");
                     }
                     Step::Arm(plan) => plan.arm(&mut self.fixture.conn),
-                    Step::Clear(plan) => plan.clear(&mut self.fixture.conn),
+                    Step::FailPersist(failing) => self
+                        .writer_hooks
+                        .fail_persist
+                        .store(failing, std::sync::atomic::Ordering::Release),
                 }
             }
 
@@ -4494,6 +4568,110 @@ mod tests {
                         .is_some()
                 );
             }
+        }
+
+        #[test]
+        fn control_shutdown_outcome_diagnostics_are_stored_as_shutdown_rows() {
+            let mut fixture = ServiceFixture::new(false);
+            fixture.prepare();
+            fixture.publish();
+            fixture.fixture.conn.execute_batch("CREATE TRIGGER reject_review_running BEFORE UPDATE OF status ON member_runs WHEN NEW.status='running' BEGIN SELECT RAISE(ABORT,'fixture running persistence blocked'); END").unwrap();
+            assert_rejected(&fixture.start());
+            assert_eq!(fixture.wait().code(), Some(1));
+            let run = storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+            let outcome: Vec<String> =
+                serde_json::from_value(run.cleanup_diagnostics_json.clone().unwrap()).unwrap();
+            assert!(!outcome.is_empty(), "the failed start reports its cause");
+            let rows: Vec<(String, String, i64)> = fixture
+                .fixture
+                .conn
+                .prepare("SELECT source,message,count FROM member_runner_diagnostics WHERE run_id=?1 AND source='shutdown' ORDER BY diagnostic_id")
+                .unwrap()
+                .query_map([run.run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            for diagnostic in &outcome {
+                let sanitized = crate::broker::runtime::diagnostic_text(diagnostic);
+                assert!(
+                    rows.iter()
+                        .any(|(_, message, count)| message.contains(&sanitized) && *count > 0),
+                    "{diagnostic:?} has a shutdown row: {rows:?}"
+                );
+            }
+        }
+
+        const SEEDED: u64 = 40;
+
+        fn seeded_unflushable(
+            fixture: &mut crate::runtime::test_support::Fixture,
+            spec: &mut crate::runtime::SpawnSpec,
+        ) {
+            crate::runtime::service::test_support::observation_services::synthetic(fixture, spec);
+            let path = fixture._dir.path().join("observation-services.json");
+            let mut config: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            config["seed_diagnostics"] = serde_json::json!(SEEDED);
+            std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
+            crate::runtime::service::test_support::observation_services::private_write(
+                &fixture._dir.path().join("fail-flush"),
+                b"owned test gate",
+            );
+        }
+
+        #[test]
+        fn control_shutdown_writes_still_buffered_diagnostics_and_the_overflow_row() {
+            let mut fixture = ServiceFixture::configured(false, seeded_unflushable);
+            fixture.prepare();
+            fixture.publish();
+            fixture.fixture.conn.execute_batch("CREATE TRIGGER reject_review_running BEFORE UPDATE OF status ON member_runs WHEN NEW.status='running' BEGIN SELECT RAISE(ABORT,'fixture running persistence blocked'); END").unwrap();
+            assert_rejected(&fixture.start());
+            assert_eq!(fixture.wait().code(), Some(1));
+            let run_id = fixture.fixture.run.run_id;
+            let rows: Vec<(String, String, i64)> = fixture
+                .fixture
+                .conn
+                .prepare("SELECT source,message,count FROM member_runner_diagnostics WHERE run_id=?1 ORDER BY diagnostic_id")
+                .unwrap()
+                .query_map([run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            let seeded = |index: u64| format!("label: seeded {index:02}");
+            assert!(
+                rows.iter()
+                    .any(|(source, message, _)| source == "queue_housekeeping"
+                        && *message == seeded(SEEDED - 1)),
+                "the newest buffered entry is written at shutdown: {rows:?}"
+            );
+            for evicted in 0..8 {
+                assert!(
+                    !rows
+                        .iter()
+                        .any(|(_, message, _)| *message == seeded(evicted)),
+                    "seeded entry {evicted} was evicted from the 32-entry buffer: {rows:?}"
+                );
+            }
+            let overflow: Vec<u64> = rows
+                .iter()
+                .filter(|(source, _, _)| source == "event_writer")
+                .filter_map(|(_, message, _)| {
+                    message
+                        .strip_prefix("diagnostic buffer overflow: ")?
+                        .strip_suffix(" entries dropped")?
+                        .parse()
+                        .ok()
+                })
+                .collect();
+            let [dropped] = overflow.as_slice() else {
+                panic!("one overflow row: {rows:?}");
+            };
+            assert!(*dropped >= 8, "{rows:?}");
+            assert!(
+                rows.iter().any(|(source, _, _)| source == "shutdown"),
+                "the outcome diagnostics are written alongside: {rows:?}"
+            );
+            assert!(rows.len() <= 256);
         }
     }
 
@@ -5534,10 +5712,10 @@ mod tests {
         const IDLE: &str = "codex-0.167.0-composer-idle-empty-tmux-120-1";
         const APPROVAL: &str = "codex-0.167.0-allow-pre-stage-tmux-120-1";
         const STATUS: &str = "codex-0.167.0-auto-status-tmux-120-1";
-        const EVENT_FAULT: FaultPlan = FaultPlan::Abort {
-            trigger: "scenario_event_fault",
-            on: "BEFORE INSERT ON member_runtime_events",
-            message: "scenario event fault",
+        const REJECT_OPENING: FaultPlan = FaultPlan::Abort {
+            trigger: "scenario_reject_opening",
+            on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='interaction_opened'",
+            message: "scenario opening rejection",
         };
 
         fn prompt_program(literal: &str) -> Vec<u8> {
@@ -5847,7 +6025,7 @@ mod tests {
                     Step::Message("retried preview FORM_MID_WRITE"),
                     Step::Run(Duration::from_secs(3)),
                 ],
-                events: &["input_delivery_result"],
+                events: &["input_delivery_result", "interaction_opened"],
             };
             let mut runner = UNCERTAIN.run();
             let body = "retried preview FORM_MID_WRITE";
@@ -5909,7 +6087,11 @@ mod tests {
                 stall["message_id"],
                 runner.message("stalled behind a human draft").message_id
             );
-            assert!(stall.get("blocking_input_id").is_none(), "{stall}");
+            assert_eq!(
+                stall["blocked_by_input_id"],
+                serde_json::Value::Null,
+                "{stall}"
+            );
             assert!(stall["waiting_since"].as_str().is_some(), "{stall}");
             assert!(
                 stall["director_action"]["instruction"]
@@ -5922,6 +6104,103 @@ mod tests {
             runner.step(Step::Run(Duration::from_secs(5)));
             assert!(runner.notified("stalled behind a human draft"));
             assert_eq!(runner.payloads("input_delivery_stalled").len(), 1);
+            runner.finish();
+        }
+
+        #[test]
+        fn a_head_that_stalls_again_after_an_interaction_archives_the_repeat_and_later_events_persist()
+         {
+            const BOUND: Duration = Duration::from_secs(2);
+            const RESTARTED: Scenario = Scenario {
+                name: "restarted head stall",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Prompt {
+                        key: "prompt:restarted-stall",
+                        literal: "head that stalls twice",
+                    },
+                    Step::HoldPane,
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Screen(DRAFT),
+                    Step::Run(Duration::from_millis(500)),
+                    Step::ReleasePane,
+                    Step::Run(Duration::from_secs(4)),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::HoldPane,
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Screen(DRAFT),
+                    Step::Run(Duration::from_millis(500)),
+                    Step::ReleasePane,
+                    Step::Run(Duration::from_secs(4)),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                ],
+                events: &[
+                    "interaction_opened",
+                    "interaction_closed",
+                    "input_delivery_stalled",
+                    "interaction_opened",
+                    "interaction_closed",
+                    "input_delivery_stalled",
+                    "interaction_opened",
+                ],
+            };
+            let mut runner = RESTARTED.run_with(|runner| runner.coordinator.set_stall_bound(BOUND));
+            assert_eq!(runner.typed("head that stalls twice"), 0);
+            let head = crate::broker::runtime::find_input(
+                &runner.fixture.conn,
+                runner.fixture.run.run_id,
+                "prompt:restarted-stall",
+            )
+            .unwrap()
+            .expect("the queued head has a receipt");
+            let rows: Vec<(String, Option<i64>, Option<String>, serde_json::Value)> = runner
+                .fixture
+                .conn
+                .prepare(
+                    "SELECT notification_state,message_id,archive_reason,payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' ORDER BY event_seq",
+                )
+                .unwrap()
+                .query_map([runner.fixture.run.run_id], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        serde_json::from_str(&row.get::<_, String>(3)?).unwrap(),
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            let [first, repeat] = rows.as_slice() else {
+                panic!("two stalled records, got {rows:?}");
+            };
+            assert_eq!(first.0, "inbox", "{first:?}");
+            assert!(first.1.is_some(), "{first:?}");
+            assert_eq!(first.2, None, "{first:?}");
+            assert_eq!(repeat.0, "archived", "{repeat:?}");
+            assert_eq!(repeat.1, None, "{repeat:?}");
+            assert_eq!(
+                repeat.2.as_deref(),
+                Some("duplicate_delivery"),
+                "{repeat:?}"
+            );
+            for (_, _, _, payload) in &rows {
+                assert_eq!(payload["input_id"], head.input_id, "{payload}");
+            }
+            assert!(
+                first.3["waiting_since"] != repeat.3["waiting_since"],
+                "the restarted watch carries its own wait start: {rows:?}"
+            );
+            let status = runner.writer.status();
+            assert_eq!(status.diagnostic, None, "{status:?}");
             runner.finish();
         }
 
@@ -5985,7 +6264,7 @@ mod tests {
                 redraw: None,
                 interrupt: None,
                 steps: &[
-                    Step::Arm(EVENT_FAULT),
+                    Step::FailPersist(true),
                     Step::Screen(APPROVAL),
                     Step::Run(Duration::from_secs(1)),
                 ],
@@ -5997,7 +6276,7 @@ mod tests {
                 runner.eligibility(),
                 InputEligibility::Hold(GateReason::Gap)
             );
-            runner.step(Step::Clear(EVENT_FAULT));
+            runner.step(Step::FailPersist(false));
             runner.step(Step::Run(Duration::from_secs(5)));
             assert!(
                 runner
@@ -6006,6 +6285,45 @@ mod tests {
                 "{:?}",
                 runner.event_kinds()
             );
+            runner.finish();
+        }
+
+        #[test]
+        fn a_rejected_event_degrades_without_a_gap_and_the_held_preview_is_delivered() {
+            const REJECTED: Scenario = Scenario {
+                name: "rejected opening",
+                screen: IDLE,
+                redraw: Some(IDLE),
+                interrupt: None,
+                steps: &[
+                    Step::Arm(REJECT_OPENING),
+                    Step::Screen(APPROVAL),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Message("preview held by the rejected form"),
+                    Step::Run(Duration::from_secs(1)),
+                    Step::Screen(IDLE),
+                    Step::Run(Duration::from_secs(5)),
+                ],
+                events: &["runner_degraded", "runner_degraded"],
+            };
+            let mut runner = REJECTED.run();
+            let body = "preview held by the rejected form";
+            let line = runner.preview_line(body);
+            let rejected: Vec<_> = runner
+                .payloads("runner_degraded")
+                .into_iter()
+                .map(|payload| {
+                    assert_eq!(payload["cause"]["kind"], "event_rejected", "{payload}");
+                    payload["cause"]["rejected_kind"].clone()
+                })
+                .collect();
+            assert_eq!(rejected, ["interaction_opened", "interaction_closed"]);
+            let status = runner.writer.status();
+            assert_eq!(status.diagnostic, None, "{status:?}");
+            assert_eq!(status.gap_count, 0, "{status:?}");
+            assert_eq!(runner.controller.status().gap_count, 0);
+            assert_eq!(runner.typed(&line), 1, "the held preview is typed once");
+            assert!(runner.notified(body));
             runner.finish();
         }
     }

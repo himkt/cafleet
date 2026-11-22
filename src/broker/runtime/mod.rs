@@ -382,6 +382,28 @@ pub(crate) fn member_runtime(
     id.map(|id| runtime_snapshot(conn, id)).transpose()
 }
 
+/// The latest run of every active ordinary member whose run is not terminal, in member-ID order.
+pub(crate) fn live_member_runs(conn: &Connection) -> Result<Vec<RunRecord>, CafleetError> {
+    let run_ids: Vec<i64> = conn
+        .prepare(
+            "SELECT (SELECT MAX(r.run_id) FROM member_runs r WHERE r.member_id=m.member_id)
+             FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
+             WHERE m.status='active' AND f.director_member_id IS NOT m.member_id
+               AND EXISTS(SELECT 1 FROM member_runs r WHERE r.member_id=m.member_id)
+             ORDER BY m.member_id",
+        )?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut runs = Vec::with_capacity(run_ids.len());
+    for run_id in run_ids {
+        let run = get_run(conn, run_id)?;
+        if !run.status.terminal() {
+            runs.push(run);
+        }
+    }
+    Ok(runs)
+}
+
 stored_enum!(RunStatus, "member_runs.status", {
     Starting => "starting", Prepared => "prepared", Running => "running",
     Degraded => "degraded", Recovering => "recovering",
@@ -410,12 +432,123 @@ stored_enum!(RuntimeCauseKind, "cause.kind", {
     CoverageUnknown => "coverage_unknown", NativeExit => "native_exit",
     StoragePressure => "storage_pressure", StorageRecovered => "storage_recovered",
     ObserverError => "observer_error", MonitorLost => "monitor_lost",
-    RuntimePathMissing => "runtime_path_missing"
+    RuntimePathMissing => "runtime_path_missing", EventRejected => "event_rejected"
 });
 stored_enum!(NotificationState, "member_runtime_events.notification_state", { Inbox => "inbox", Archived => "archived" });
 stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", {
-    MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive"
+    MemberInactive => "member_inactive", FleetDeleted => "fleet_deleted", DirectorInactive => "director_inactive",
+    HeadNotReady => "head_not_ready", DuplicateDelivery => "duplicate_delivery"
 });
+stored_enum!(RunnerDiagnosticSource, "member_runner_diagnostics.source", {
+    EventWriter => "event_writer", Observation => "observation",
+    DeferredInput => "deferred_input", QueueHousekeeping => "queue_housekeeping",
+    PreviewSweep => "preview_sweep", InputResult => "input_result",
+    PermissionAnswer => "permission_answer", Shutdown => "shutdown"
+});
+
+/// One deduplicated runner diagnostic: its source, sanitized message, first and last times and
+/// repeat count.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RunnerDiagnosticEntry {
+    pub(crate) source: RunnerDiagnosticSource,
+    pub(crate) message: String,
+    pub(crate) first_at: String,
+    pub(crate) last_at: String,
+    pub(crate) count: i64,
+}
+
+const RUNNER_DIAGNOSTIC_ROWS_PER_RUN: i64 = 256;
+const LATEST_RUNNER_DIAGNOSTICS: i64 = 5;
+
+fn upsert_runner_diagnostic(
+    tx: &Connection,
+    run_id: i64,
+    entry: &RunnerDiagnosticEntry,
+) -> Result<(), CafleetError> {
+    tx.execute(
+        "INSERT INTO member_runner_diagnostics(run_id,source,message,first_at,last_at,count)
+         VALUES(?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(run_id,source,message) DO UPDATE SET last_at=excluded.last_at,count=count+excluded.count",
+        params![
+            run_id,
+            entry.source.as_str(),
+            entry.message,
+            entry.first_at,
+            entry.last_at,
+            entry.count
+        ],
+    )?;
+    Ok(())
+}
+
+/// Stores `entries`, one overflow row stamped `at` for `dropped` entries, and prunes the run to
+/// its newest rows.
+pub(crate) fn write_runner_diagnostics(
+    tx: &Connection,
+    run_id: i64,
+    entries: &[RunnerDiagnosticEntry],
+    dropped: u64,
+    at: &str,
+) -> Result<(), CafleetError> {
+    for entry in entries {
+        upsert_runner_diagnostic(tx, run_id, entry)?;
+    }
+    if dropped > 0 {
+        upsert_runner_diagnostic(
+            tx,
+            run_id,
+            &RunnerDiagnosticEntry {
+                source: RunnerDiagnosticSource::EventWriter,
+                message: format!("diagnostic buffer overflow: {dropped} entries dropped"),
+                first_at: at.to_owned(),
+                last_at: at.to_owned(),
+                count: 1,
+            },
+        )?;
+    }
+    tx.execute(
+        "DELETE FROM member_runner_diagnostics WHERE run_id=?1 AND diagnostic_id NOT IN (
+             SELECT diagnostic_id FROM member_runner_diagnostics WHERE run_id=?1
+             ORDER BY last_at DESC, diagnostic_id DESC LIMIT ?2)",
+        params![run_id, RUNNER_DIAGNOSTIC_ROWS_PER_RUN],
+    )?;
+    Ok(())
+}
+
+/// Writes runner diagnostics in one ownership-validated immediate transaction of the live owner.
+pub(crate) fn persist_runner_diagnostics(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    entries: &[RunnerDiagnosticEntry],
+    dropped: u64,
+    at: &str,
+) -> Result<(), CafleetError> {
+    owned_transaction(conn, owner, |tx, run| {
+        write_runner_diagnostics(tx, run.run_id, entries, dropped, at)
+    })
+}
+
+/// The run's newest runner diagnostics, newest `last_at` then `diagnostic_id` first.
+pub(crate) fn latest_runner_diagnostics(
+    conn: &Connection,
+    run_id: i64,
+) -> Result<Vec<RunnerDiagnosticEntry>, CafleetError> {
+    conn.prepare(
+        "SELECT source,message,first_at,last_at,count FROM member_runner_diagnostics
+         WHERE run_id=?1 ORDER BY last_at DESC, diagnostic_id DESC LIMIT ?2",
+    )?
+    .query_map(params![run_id, LATEST_RUNNER_DIAGNOSTICS], |row| {
+        Ok(RunnerDiagnosticEntry {
+            source: row.get(0)?,
+            message: row.get(1)?,
+            first_at: row.get(2)?,
+            last_at: row.get(3)?,
+            count: row.get(4)?,
+        })
+    })?
+    .collect::<rusqlite::Result<_>>()
+    .map_err(CafleetError::from)
+}
 stored_enum!(InputKind, "member_input_operations.kind", { Prompt => "prompt", Exec => "exec" });
 stored_enum!(InputState, "member_input_operations.state", {
     Ready => "ready", InProgress => "in_progress", Accepted => "accepted",
@@ -1253,6 +1386,316 @@ mod tests {
             assert_eq!(
                 historical_ownership(&fixture.conn, &run).unwrap(),
                 Some(reason.1)
+            );
+        }
+    }
+
+    mod runner_diagnostics {
+        use crate::broker::runtime::tests::*;
+
+        type Row = (String, String, String, String, i64);
+
+        fn at(second: u32) -> String {
+            format!(
+                "2026-11-21T12:{:02}:{:02}.000000+00:00",
+                second / 60,
+                second % 60
+            )
+        }
+
+        fn entry(
+            source: RunnerDiagnosticSource,
+            message: &str,
+            first: u32,
+            last: u32,
+            count: i64,
+        ) -> RunnerDiagnosticEntry {
+            RunnerDiagnosticEntry {
+                source,
+                message: message.into(),
+                first_at: at(first),
+                last_at: at(last),
+                count,
+            }
+        }
+
+        const WRITE_AT: u32 = 30;
+
+        fn write(
+            fixture: &mut Fixture,
+            run_id: i64,
+            entries: &[RunnerDiagnosticEntry],
+            dropped: u64,
+        ) {
+            let tx = fixture.conn.transaction().unwrap();
+            write_runner_diagnostics(&tx, run_id, entries, dropped, &at(WRITE_AT)).unwrap();
+            tx.commit().unwrap();
+        }
+
+        fn rows(fixture: &Fixture, run_id: i64) -> Vec<Row> {
+            fixture
+                .conn
+                .prepare("SELECT source,message,first_at,last_at,count FROM member_runner_diagnostics WHERE run_id=?1 ORDER BY diagnostic_id")
+                .unwrap()
+                .query_map([run_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        }
+
+        fn second_run(fixture: &mut Fixture) -> i64 {
+            let member = register(
+                &mut fixture.conn,
+                fixture.fleet,
+                "second-worker",
+                Some("%3"),
+            );
+            let mut spec = Fixture::spec(&fixture.conn, fixture.fleet, fixture.director, member);
+            spec.launch_nonce = "b".repeat(64);
+            spec.runtime_path = spec.runtime_path.replace("/fixture/", "/second/");
+            create_run(&mut fixture.conn, &spec).unwrap().run_id
+        }
+
+        const SOURCES: &[(RunnerDiagnosticSource, &str)] = &[
+            (RunnerDiagnosticSource::EventWriter, "event_writer"),
+            (RunnerDiagnosticSource::Observation, "observation"),
+            (RunnerDiagnosticSource::DeferredInput, "deferred_input"),
+            (
+                RunnerDiagnosticSource::QueueHousekeeping,
+                "queue_housekeeping",
+            ),
+            (RunnerDiagnosticSource::PreviewSweep, "preview_sweep"),
+            (RunnerDiagnosticSource::InputResult, "input_result"),
+            (
+                RunnerDiagnosticSource::PermissionAnswer,
+                "permission_answer",
+            ),
+            (RunnerDiagnosticSource::Shutdown, "shutdown"),
+        ];
+
+        #[test]
+        fn every_runner_diagnostic_source_is_stored_under_its_name() {
+            for &(source, name) in SOURCES {
+                let mut fixture = Fixture::new();
+                let run_id = fixture.run.run_id;
+                write(
+                    &mut fixture,
+                    run_id,
+                    &[entry(source, "label: fixture diagnostic", 1, 1, 1)],
+                    0,
+                );
+                assert_eq!(source.as_str(), name);
+                assert_eq!(rows(&fixture, run_id)[0].0, name, "{name}");
+                assert_eq!(
+                    latest_runner_diagnostics(&fixture.conn, run_id).unwrap()[0].source,
+                    source,
+                    "{name}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_repeated_source_and_message_adds_its_count_and_moves_last_at() {
+            let mut fixture = Fixture::new();
+            let run_id = fixture.run.run_id;
+            write(
+                &mut fixture,
+                run_id,
+                &[
+                    entry(RunnerDiagnosticSource::EventWriter, "label: busy", 1, 2, 1),
+                    entry(RunnerDiagnosticSource::Observation, "label: busy", 1, 3, 2),
+                ],
+                0,
+            );
+            write(
+                &mut fixture,
+                run_id,
+                &[entry(
+                    RunnerDiagnosticSource::EventWriter,
+                    "label: busy",
+                    10,
+                    12,
+                    3,
+                )],
+                0,
+            );
+            assert_eq!(
+                rows(&fixture, run_id),
+                [
+                    (
+                        "event_writer".into(),
+                        "label: busy".into(),
+                        at(1),
+                        at(12),
+                        4
+                    ),
+                    ("observation".into(), "label: busy".into(), at(1), at(3), 2),
+                ]
+            );
+        }
+
+        #[test]
+        fn dropped_entries_add_one_overflow_row_naming_the_count() {
+            for dropped in [0_u64, 3] {
+                let mut fixture = Fixture::new();
+                let run_id = fixture.run.run_id;
+                write(
+                    &mut fixture,
+                    run_id,
+                    &[entry(
+                        RunnerDiagnosticSource::Shutdown,
+                        "label: exit",
+                        1,
+                        1,
+                        1,
+                    )],
+                    dropped,
+                );
+                let overflow: Vec<Row> = rows(&fixture, run_id)
+                    .into_iter()
+                    .filter(|row| row.1.starts_with("diagnostic buffer overflow"))
+                    .collect();
+                if dropped == 0 {
+                    assert!(overflow.is_empty(), "{overflow:?}");
+                } else {
+                    let [row] = overflow.as_slice() else {
+                        panic!("one overflow row, got {overflow:?}");
+                    };
+                    assert_eq!(row.0, "event_writer");
+                    assert_eq!(row.1, "diagnostic buffer overflow: 3 entries dropped");
+                    assert_eq!(
+                        (row.2.as_str(), row.3.as_str()),
+                        (at(WRITE_AT).as_str(), at(WRITE_AT).as_str()),
+                        "the overflow row carries the caller's stamp"
+                    );
+                }
+            }
+        }
+
+        struct PruneCase {
+            name: &'static str,
+            total: u32,
+            distinct_last_at: bool,
+        }
+
+        const PRUNE_CASES: &[PruneCase] = &[
+            PruneCase {
+                name: "older last_at rows are deleted first",
+                total: 260,
+                distinct_last_at: true,
+            },
+            PruneCase {
+                name: "a last_at tie deletes the lower diagnostic_id first",
+                total: 258,
+                distinct_last_at: false,
+            },
+        ];
+
+        #[test]
+        fn each_run_keeps_only_its_newest_256_rows() {
+            for case in PRUNE_CASES {
+                let name = case.name;
+                let mut fixture = Fixture::new();
+                let run_id = fixture.run.run_id;
+                let other = second_run(&mut fixture);
+                write(
+                    &mut fixture,
+                    other,
+                    &[entry(
+                        RunnerDiagnosticSource::Shutdown,
+                        "label: other run",
+                        0,
+                        0,
+                        1,
+                    )],
+                    0,
+                );
+                let entries: Vec<_> = (0..case.total)
+                    .map(|index| {
+                        let last = if case.distinct_last_at { index + 1 } else { 1 };
+                        entry(
+                            RunnerDiagnosticSource::EventWriter,
+                            &format!("label: entry {index:03}"),
+                            0,
+                            last,
+                            1,
+                        )
+                    })
+                    .collect();
+                write(&mut fixture, run_id, &entries, 0);
+                let kept = rows(&fixture, run_id);
+                assert_eq!(kept.len(), 256, "{name}");
+                let removed = case.total - 256;
+                assert_eq!(
+                    kept.first().unwrap().1,
+                    format!("label: entry {removed:03}"),
+                    "{name}: the oldest rows are pruned"
+                );
+                assert_eq!(
+                    kept.last().unwrap().1,
+                    format!("label: entry {:03}", case.total - 1),
+                    "{name}"
+                );
+                assert_eq!(
+                    rows(&fixture, other).len(),
+                    1,
+                    "{name}: other runs keep theirs"
+                );
+            }
+        }
+
+        #[test]
+        fn latest_runner_diagnostics_returns_the_runs_newest_five_by_last_at_then_id() {
+            let mut fixture = Fixture::new();
+            let run_id = fixture.run.run_id;
+            let other = second_run(&mut fixture);
+            write(
+                &mut fixture,
+                other,
+                &[entry(
+                    RunnerDiagnosticSource::Shutdown,
+                    "label: other run",
+                    99,
+                    99,
+                    1,
+                )],
+                0,
+            );
+            write(
+                &mut fixture,
+                run_id,
+                &[
+                    entry(RunnerDiagnosticSource::EventWriter, "label: a", 1, 1, 1),
+                    entry(RunnerDiagnosticSource::Observation, "label: b", 1, 7, 2),
+                    entry(RunnerDiagnosticSource::DeferredInput, "label: c", 2, 3, 1),
+                    entry(RunnerDiagnosticSource::PreviewSweep, "label: d", 4, 5, 1),
+                    entry(RunnerDiagnosticSource::InputResult, "label: e", 5, 5, 3),
+                    entry(RunnerDiagnosticSource::Shutdown, "label: f", 6, 6, 1),
+                    entry(RunnerDiagnosticSource::EventWriter, "label: g", 2, 2, 1),
+                ],
+                0,
+            );
+            assert_eq!(
+                latest_runner_diagnostics(&fixture.conn, run_id).unwrap(),
+                [
+                    entry(RunnerDiagnosticSource::Observation, "label: b", 1, 7, 2),
+                    entry(RunnerDiagnosticSource::Shutdown, "label: f", 6, 6, 1),
+                    entry(RunnerDiagnosticSource::InputResult, "label: e", 5, 5, 3),
+                    entry(RunnerDiagnosticSource::PreviewSweep, "label: d", 4, 5, 1),
+                    entry(RunnerDiagnosticSource::DeferredInput, "label: c", 2, 3, 1),
+                ]
+            );
+            assert_eq!(
+                latest_runner_diagnostics(&fixture.conn, other).unwrap(),
+                [entry(
+                    RunnerDiagnosticSource::Shutdown,
+                    "label: other run",
+                    99,
+                    99,
+                    1
+                )]
             );
         }
     }

@@ -2,6 +2,10 @@ use crate::broker::runtime as storage;
 use crate::broker::runtime::ObservedTransition;
 use crate::broker::runtime::PersistenceMode;
 use crate::broker::runtime::RunRecord;
+use crate::broker::runtime::RunnerDiagnosticSource;
+use crate::db::SharedDeadline;
+use crate::db::with_shared_database_deadline;
+use crate::runtime::diagnostics::RunnerDiagnostics;
 use crate::runtime::*;
 use rusqlite::Connection;
 use std::collections::VecDeque;
@@ -16,15 +20,49 @@ use std::time::Instant;
 pub(crate) enum WriterBoundary {
     Receive,
     Persist,
+    Flush,
 }
 
-pub(in crate::runtime) const WORK_SLICE: Duration = Duration::from_millis(100);
+/// Equal to the connection's busy timeout, so one worker step waits at most as long as one
+/// contended statement may.
+const WRITER_STEP_BOUND: Duration = Duration::from_secs(5);
+const WRITER_JOIN_GRACE: Duration = Duration::from_millis(50);
+const DIAGNOSTIC_FLUSH_BOUND: Duration = Duration::from_millis(500);
+const DIAGNOSTIC_FLUSH_RETRY: Duration = Duration::from_secs(1);
 
 #[cfg(test)]
 pub(crate) trait WriterHooks: Send + Sync {
-    fn before(&self, boundary: WriterBoundary, deadline: Instant) -> Result<()>;
-    fn work_slice(&self) -> Duration {
-        WORK_SLICE
+    fn before(&self, boundary: WriterBoundary, bound: &StepBound) -> Result<()>;
+}
+
+/// One worker step's limits: real time for the step itself, so a virtual-time jump never
+/// expires it, and the shutdown deadline on the worker's clock.
+pub(crate) struct StepBound {
+    until: Instant,
+    shutdown: SharedDeadline,
+    clock: Arc<dyn crate::time::Clock>,
+}
+impl StepBound {
+    fn new(shutdown: &SharedDeadline, clock: &Arc<dyn crate::time::Clock>) -> Self {
+        Self::within(WRITER_STEP_BOUND, shutdown, clock)
+    }
+    fn within(
+        limit: Duration,
+        shutdown: &SharedDeadline,
+        clock: &Arc<dyn crate::time::Clock>,
+    ) -> Self {
+        Self {
+            until: Instant::now() + limit,
+            shutdown: shutdown.clone(),
+            clock: clock.clone(),
+        }
+    }
+    pub(crate) fn check(&self) -> Result<()> {
+        let shutdown = *self.shutdown.lock().expect("writer shutdown deadline");
+        if Instant::now() >= self.until || shutdown.is_some_and(|end| self.clock.now() >= end) {
+            return Err(CafleetError::DeadlineExceeded);
+        }
+        Ok(())
     }
 }
 
@@ -34,10 +72,20 @@ pub(crate) struct WriterStatus {
     pub(crate) gap_count: u64,
     pub(crate) diagnostic: Option<String>,
 }
+/// Why `try_submit` refused a transition, which decides how the controller routes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetainReason {
+    EvidenceInvalid,
+    ChannelFull,
+    Stopped,
+    SequenceRegressed,
+    Fenced,
+}
 #[derive(Debug)]
 pub(crate) struct RetainedTransition {
     pub(crate) transition: ObservedTransition,
     pub(crate) cause: CafleetError,
+    pub(crate) reason: RetainReason,
 }
 #[derive(Default)]
 struct Mailbox {
@@ -46,16 +94,40 @@ struct Mailbox {
     diagnostic: Option<String>,
     last_sequence: i64,
     stop: bool,
-    deadline: Option<Instant>,
+    fenced: bool,
+    deadline: SharedDeadline,
+    diagnostics: RunnerDiagnostics,
 }
 impl Mailbox {
-    fn failure(&mut self, cause: &CafleetError) {
+    fn failure(&mut self, cause: &CafleetError, at: &str) {
         self.gaps = self.gaps.checked_add(1).expect("writer gap count overflow");
-        self.diagnostic = Some(cause.message().into_owned());
+        let message = cause.message().into_owned();
+        if self.diagnostic.as_deref() != Some(message.as_str()) {
+            self.diagnostics.record(
+                RunnerDiagnosticSource::EventWriter,
+                &format!("event writer: {message}"),
+                at,
+            );
+        }
+        self.diagnostic = Some(message);
     }
-    fn work_deadline(&self, now: Instant, slice: Duration) -> Instant {
-        let local = now + slice;
-        self.deadline.map_or(local, |until| until.min(local))
+    fn fence(&mut self, cause: &CafleetError, discarded: u64, at: &str) {
+        self.pending = self
+            .pending
+            .checked_sub(discarded)
+            .expect("discarded transitions were accepted");
+        self.gaps = self
+            .gaps
+            .checked_add(discarded)
+            .expect("writer gap count overflow");
+        let diagnostic = format!("event writer fenced: {}", cause.message());
+        self.diagnostics
+            .record(RunnerDiagnosticSource::EventWriter, &diagnostic, at);
+        self.diagnostic = Some(diagnostic);
+        self.fenced = true;
+    }
+    fn deadline(&self) -> Option<Instant> {
+        *self.deadline.lock().expect("writer shutdown deadline")
     }
     fn success(&mut self) {
         self.diagnostic = None;
@@ -66,6 +138,7 @@ pub(crate) struct EventWriter {
     mailbox: Arc<Mutex<Mailbox>>,
     thread: Option<std::thread::JoinHandle<()>>,
     clock: Arc<dyn crate::time::Clock>,
+    diagnostics: RunnerDiagnostics,
 }
 impl EventWriter {
     pub(crate) fn start(
@@ -73,12 +146,14 @@ impl EventWriter {
         run: RunRecord,
         lock: Arc<RunLock>,
         clock: Arc<dyn crate::time::Clock>,
+        diagnostics: RunnerDiagnostics,
     ) -> Result<Self> {
         Self::start_worker(
             database_url,
             run,
             lock,
             clock,
+            diagnostics,
             #[cfg(test)]
             crate::runtime::writer::test_support::default_writer_hooks(),
         )
@@ -91,8 +166,9 @@ impl EventWriter {
         lock: Arc<RunLock>,
         clock: Arc<dyn crate::time::Clock>,
         hooks: Arc<dyn WriterHooks>,
+        diagnostics: RunnerDiagnostics,
     ) -> Result<Self> {
-        Self::start_worker(database_url, run, lock, clock, hooks)
+        Self::start_worker(database_url, run, lock, clock, diagnostics, hooks)
     }
 
     fn start_worker(
@@ -100,6 +176,7 @@ impl EventWriter {
         run: RunRecord,
         lock: Arc<RunLock>,
         clock: Arc<dyn crate::time::Clock>,
+        diagnostics: RunnerDiagnostics,
         #[cfg(test)] hooks: Arc<dyn WriterHooks>,
     ) -> Result<Self> {
         let mut conn = crate::db::connect(&database_url)?;
@@ -107,11 +184,11 @@ impl EventWriter {
             lock.validate(conn, &run.owner())
         })?;
         let (sender, receiver) = mpsc::sync_channel(64);
-        let mailbox = Arc::new(Mutex::new(Mailbox::default()));
-        #[cfg(not(test))]
-        let work_slice = WORK_SLICE;
-        #[cfg(test)]
-        let work_slice = hooks.work_slice();
+        let mailbox = Arc::new(Mutex::new(Mailbox {
+            diagnostics: diagnostics.clone(),
+            ..Mailbox::default()
+        }));
+        let shutdown = mailbox.lock().expect("writer mailbox").deadline.clone();
         let worker = Worker {
             conn,
             run,
@@ -119,7 +196,9 @@ impl EventWriter {
             mailbox: mailbox.clone(),
             receiver,
             queue: VecDeque::new(),
-            work_slice,
+            shutdown,
+            flush_next: clock.now(),
+            diagnostics: diagnostics.clone(),
             clock: clock.clone(),
             #[cfg(test)]
             hooks,
@@ -133,7 +212,12 @@ impl EventWriter {
             mailbox,
             thread: Some(thread),
             clock,
+            diagnostics,
         })
+    }
+    /// The runner diagnostics buffer this writer flushes.
+    pub(crate) fn diagnostics(&self) -> &RunnerDiagnostics {
+        &self.diagnostics
     }
     fn send(&self, transition: Box<ObservedTransition>) -> Result<()> {
         self.sender
@@ -145,30 +229,39 @@ impl EventWriter {
         transition: ObservedTransition,
     ) -> std::result::Result<(), Box<RetainedTransition>> {
         let mut state = self.mailbox.lock().expect("writer mailbox");
-        let result = (|| -> Result<()> {
-            ensure(!state.stop, "event writer is stopped")?;
-            ensure(
-                transition.event_seq > state.last_sequence,
-                "accepted event sequence regressed",
-            )?;
-            storage::validate_evidence(&transition.evidence_json)?;
-            self.send(Box::new(transition.clone()))
-        })();
-        match result {
-            Ok(()) => {
-                state.pending = state
-                    .pending
-                    .checked_add(1)
-                    .expect("writer pending overflow");
-                assert!(state.pending <= 128, "bounded accepted writer capacity");
-                state.last_sequence = transition.event_seq;
-                Ok(())
-            }
-            Err(cause) => {
-                state.failure(&cause);
-                Err(Box::new(RetainedTransition { transition, cause }))
-            }
+        let refusal = if state.fenced {
+            Some((RetainReason::Fenced, error("event writer is fenced")))
+        } else if state.stop {
+            Some((RetainReason::Stopped, error("event writer is stopped")))
+        } else if transition.event_seq <= state.last_sequence {
+            Some((
+                RetainReason::SequenceRegressed,
+                error("accepted event sequence regressed"),
+            ))
+        } else if let Err(cause) = storage::validate_evidence(&transition.evidence_json) {
+            Some((RetainReason::EvidenceInvalid, cause))
+        } else if let Err(cause) = self.send(Box::new(transition.clone())) {
+            Some((RetainReason::ChannelFull, cause))
+        } else {
+            None
+        };
+        let Some((reason, cause)) = refusal else {
+            state.pending = state
+                .pending
+                .checked_add(1)
+                .expect("writer pending overflow");
+            assert!(state.pending <= 128, "bounded accepted writer capacity");
+            state.last_sequence = transition.event_seq;
+            return Ok(());
+        };
+        if !matches!(reason, RetainReason::EvidenceInvalid | RetainReason::Fenced) {
+            state.failure(&cause, &self.clock.wall_stamp());
         }
+        Err(Box::new(RetainedTransition {
+            transition,
+            cause,
+            reason,
+        }))
     }
     #[cfg(test)]
     pub(crate) fn submit(&self, transition: ObservedTransition) -> Result<()> {
@@ -191,41 +284,32 @@ impl EventWriter {
         self.status().diagnostic
     }
     pub(crate) fn set_deadline(&mut self, until: Instant) {
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        state.deadline = Some(state.deadline.map_or(until, |old| old.min(until)));
+        let state = self.mailbox.lock().expect("writer mailbox");
+        let mut deadline = state.deadline.lock().expect("writer shutdown deadline");
+        *deadline = Some(deadline.map_or(until, |old| old.min(until)));
     }
     pub(crate) fn begin_shutdown(&mut self, until: Instant) {
         self.set_deadline(until);
         self.mailbox.lock().expect("writer mailbox").stop = true;
     }
+    /// Joins the worker once it finishes or the shutdown deadline plus a short grace passes; an
+    /// in-flight step aborts at the shutdown deadline, so the join returns.
     pub(crate) fn finish(&mut self, until: Instant) -> (u64, u64) {
         self.begin_shutdown(until);
         let until = self
             .mailbox
             .lock()
             .expect("writer mailbox")
-            .deadline
+            .deadline()
             .expect("shutdown deadline");
-        if let Some(thread) = self.thread.as_ref() {
-            while !thread.is_finished() && self.clock.now() < until {
-                nap_until(self.clock.as_ref(), until);
+        if let Some(thread) = self.thread.take() {
+            let join_by = until + WRITER_JOIN_GRACE;
+            while !thread.is_finished() && self.clock.now() < join_by {
+                nap_until(self.clock.as_ref(), join_by);
             }
+            thread.join().expect("writer processing is panic-free");
         }
-        if self
-            .thread
-            .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished)
-        {
-            self.thread
-                .take()
-                .expect("writer thread")
-                .join()
-                .expect("writer processing is panic-free");
-        }
-        let mut state = self.mailbox.lock().expect("writer mailbox");
-        if self.thread.is_some() && state.diagnostic.is_none() {
-            state.failure(&CafleetError::DeadlineExceeded);
-        }
+        let state = self.mailbox.lock().expect("writer mailbox");
         let unsaved = if state.diagnostic.is_some() {
             state.gaps
         } else {
@@ -240,7 +324,7 @@ impl Drop for EventWriter {
             .mailbox
             .lock()
             .expect("writer mailbox")
-            .deadline
+            .deadline()
             .unwrap_or_else(|| self.clock.now() + Duration::from_secs(4));
         self.finish(until);
     }
@@ -253,7 +337,9 @@ struct Worker {
     mailbox: Arc<Mutex<Mailbox>>,
     receiver: mpsc::Receiver<Box<ObservedTransition>>,
     queue: VecDeque<Box<ObservedTransition>>,
-    work_slice: Duration,
+    shutdown: SharedDeadline,
+    flush_next: Instant,
+    diagnostics: RunnerDiagnostics,
     clock: Arc<dyn crate::time::Clock>,
     #[cfg(test)]
     hooks: Arc<dyn WriterHooks>,
@@ -265,13 +351,14 @@ impl Worker {
         loop {
             {
                 let state = self.mailbox.lock().expect("writer mailbox");
-                if state.deadline.is_some_and(|end| self.clock.now() >= end) {
+                if state.deadline().is_some_and(|end| self.clock.now() >= end) {
                     break;
                 }
                 if state.stop && state.pending == 0 {
                     break;
                 }
             }
+            self.flush_diagnostics();
             if self.clock.now() < next {
                 nap_until(self.clock.as_ref(), next);
                 continue;
@@ -282,7 +369,10 @@ impl Worker {
                     next = self.clock.now();
                 }
                 Err(cause) => {
-                    self.mailbox.lock().expect("writer mailbox").failure(&cause);
+                    self.mailbox
+                        .lock()
+                        .expect("writer mailbox")
+                        .failure(&cause, &self.clock.wall_stamp());
                     next = self.clock.now() + retry;
                     retry = (retry * 2).min(Duration::from_secs(2));
                 }
@@ -293,29 +383,26 @@ impl Worker {
         }
     }
     fn step(&mut self) -> Result<()> {
-        if !self.receive()? {
+        if self.mailbox.lock().expect("writer mailbox").fenced {
             return Ok(());
         }
-        self.persist_front()
-    }
-    fn work_deadline(&self) -> Instant {
-        self.mailbox
-            .lock()
-            .expect("writer mailbox")
-            .work_deadline(self.clock.now(), self.work_slice)
+        let bound = StepBound::new(&self.shutdown, &self.clock);
+        if !self.receive(&bound)? {
+            return Ok(());
+        }
+        self.persist_front(&bound)
     }
     /// Returns `false` when a test hook ends this pass before any persistence.
-    fn receive(&mut self) -> Result<bool> {
+    fn receive(&mut self, bound: &StepBound) -> Result<bool> {
         while self.queue.len() < 64 {
-            let until = self.work_deadline();
             #[cfg(test)]
-            match self.hooks.before(WriterBoundary::Receive, until) {
+            match self.hooks.before(WriterBoundary::Receive, bound) {
                 Ok(()) => {}
                 Err(CafleetError::DeadlineExceeded) => return Ok(false),
                 Err(cause) => return Err(cause),
             }
 
-            check_deadline(self.clock.now(), until)?;
+            bound.check()?;
             match self.receiver.try_recv() {
                 Ok(transition) => self.queue.push_back(transition),
                 Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
@@ -323,15 +410,64 @@ impl Worker {
         }
         Ok(true)
     }
-    fn persist_front(&mut self) -> Result<()> {
-        let Some(transition) = self.queue.front() else {
+    /// Persists the queue front. A permanent failure is replaced within this step by its rejection
+    /// event under a fresh bound, so it opens no gap; a rejection that fails permanently fences the
+    /// writer. A transient failure returns for the ordinary retry backoff.
+    fn persist_front(&mut self, bound: &StepBound) -> Result<()> {
+        if self.queue.is_empty() {
             return Ok(());
+        }
+        let cause = match self.persist(bound) {
+            Ok(()) => return Ok(()),
+            Err(cause) if cause.transient_storage() => return Err(cause),
+            Err(cause) => cause,
         };
-        let until = self.work_deadline();
+        let front = self.queue.front().expect("a failed persist has a front");
+        if storage::is_event_rejection(front) {
+            self.fence(&cause);
+            return Ok(());
+        }
+        let screen_seq = front.evidence_json["screen_seq"]
+            .as_u64()
+            .expect("try_submit validated the front's evidence");
+        let at = self.clock.wall_stamp();
+        self.diagnostics.record(
+            RunnerDiagnosticSource::EventWriter,
+            &format!(
+                "event writer rejected {} event {}: {}",
+                front.kind.as_str(),
+                front.event_seq,
+                cause.message()
+            ),
+            &at,
+        );
+        let replacement =
+            match storage::event_rejected_transition(&self.run, front, screen_seq, &cause, &at) {
+                Ok(replacement) => replacement,
+                Err(failure) => {
+                    self.fence(&failure);
+                    return Ok(());
+                }
+            };
+        **self
+            .queue
+            .front_mut()
+            .expect("a failed persist has a front") = replacement;
+        match self.persist(&StepBound::new(&self.shutdown, &self.clock)) {
+            Ok(()) => Ok(()),
+            Err(cause) if cause.transient_storage() => Err(cause),
+            Err(cause) => {
+                self.fence(&cause);
+                Ok(())
+            }
+        }
+    }
+    fn persist(&mut self, bound: &StepBound) -> Result<()> {
+        let transition = self.queue.front().expect("persist requires a front");
         #[cfg(test)]
-        self.hooks.before(WriterBoundary::Persist, until)?;
+        self.hooks.before(WriterBoundary::Persist, bound)?;
 
-        with_database_deadline(&mut self.conn, until, |conn| {
+        with_shared_database_deadline(&mut self.conn, bound.until, &self.shutdown, |conn| {
             self.lock.validate(conn, &self.run.owner())?;
             storage::persist_transition(conn, &self.run.owner(), transition, PersistenceMode::Live)
                 .map(|_| ())
@@ -341,6 +477,56 @@ impl Worker {
         state.pending = state.pending.checked_sub(1).expect("accepted writer count");
         state.success();
         Ok(())
+    }
+    /// Discards every accepted transition, the channel's included, and accepts no more.
+    fn fence(&mut self, cause: &CafleetError) {
+        let mut state = self.mailbox.lock().expect("writer mailbox");
+        let mut discarded = self.queue.len();
+        self.queue.clear();
+        while self.receiver.try_recv().is_ok() {
+            discarded += 1;
+        }
+        state.fence(
+            cause,
+            u64::try_from(discarded).expect("bounded writer capacity"),
+            &self.clock.wall_stamp(),
+        );
+    }
+    /// Writes buffered runner diagnostics once the retry time arrives. A flush never records a
+    /// writer failure, so it cannot open an observation gap.
+    fn flush_diagnostics(&mut self) {
+        if self.clock.now() < self.flush_next || !self.diagnostics.pending() {
+            return;
+        }
+        let (entries, dropped) = self.diagnostics.drain();
+        let bound = StepBound::within(DIAGNOSTIC_FLUSH_BOUND, &self.shutdown, &self.clock);
+        let at = self.clock.wall_stamp();
+        match self.write_diagnostics(&bound, &entries, dropped, &at) {
+            Ok(()) => self.flush_next = self.clock.now(),
+            Err(cause) => {
+                if cause.transient_storage() {
+                    self.diagnostics.restore(entries, dropped);
+                } else {
+                    self.diagnostics.discard(&entries, dropped);
+                }
+                self.flush_next = self.clock.now() + DIAGNOSTIC_FLUSH_RETRY;
+            }
+        }
+    }
+    fn write_diagnostics(
+        &mut self,
+        bound: &StepBound,
+        entries: &[storage::RunnerDiagnosticEntry],
+        dropped: u64,
+        at: &str,
+    ) -> Result<()> {
+        #[cfg(test)]
+        self.hooks.before(WriterBoundary::Flush, bound)?;
+
+        with_shared_database_deadline(&mut self.conn, bound.until, &self.shutdown, |conn| {
+            self.lock.validate(conn, &self.run.owner())?;
+            storage::persist_runner_diagnostics(conn, &self.run.owner(), entries, dropped, at)
+        })
     }
 }
 
@@ -366,7 +552,7 @@ mod tests {
         fn writer_worker_receive_stall_pins_64_channel_slots_and_returns_the_failed_original() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::on_virtual_time());
+            let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Receive);
             let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
@@ -379,6 +565,11 @@ mod tests {
                 .try_submit(original.clone())
                 .expect_err("channel pressure returns the original");
             assert_eq!(rejected.transition, original);
+            assert!(
+                matches!(rejected.reason, RetainReason::ChannelFull),
+                "{:?}",
+                rejected.reason
+            );
             let status = writer.status();
             assert_eq!(status.pending_count, 64);
             assert!(status.diagnostic.is_some());
@@ -394,7 +585,7 @@ mod tests {
         fn writer_worker_database_failure_retains_the_same_transition_for_retry() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::on_virtual_time());
+            let hooks = Arc::new(Hooks::default());
             hooks.fail_once(WriterBoundary::Persist);
             let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let _release = Release(hooks.clone());
@@ -402,16 +593,17 @@ mod tests {
             assert!(writer.try_submit(original.clone()).is_ok());
             yield_until(|| writer.status().diagnostic.is_some());
             assert_eq!(committed(&fixture), 0, "the retry waits for its backoff");
+            assert_eq!(writer.status().pending_count, 1);
             clock.advance(Duration::from_millis(100));
             yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let persisted = storage::get_event(&fixture.fixture.conn, 1).unwrap().event;
             assert_eq!(
-                storage::get_event(&fixture.fixture.conn, 1)
-                    .unwrap()
-                    .event
-                    .payload_json["evidence"],
-                original.evidence_json
+                persisted.kind, original.kind,
+                "a transient failure retries the original"
             );
+            assert_eq!(persisted.payload_json["evidence"], original.evidence_json);
             assert_eq!(committed(&fixture), 1);
+            assert_eq!(writer.status().diagnostic, None);
             assert_eq!(writer.finish(until(&clock)).0, 0);
         }
 
@@ -419,7 +611,7 @@ mod tests {
         fn writer_commits_each_submitted_transition_directly_with_its_event_sequence() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
             for sequence in 1..=3 {
                 assert!(writer.try_submit(transition(&fixture, sequence)).is_ok());
             }
@@ -441,7 +633,7 @@ mod tests {
         }
 
         #[test]
-        fn writer_retry_exhaustion_reports_a_degraded_status_and_keeps_the_transition() {
+        fn writer_fences_when_the_rejection_event_also_fails_permanently() {
             let clock = clock();
             let mut fixture = WriterFixture::new();
             crate::db::test_support::FaultPlan::Abort {
@@ -450,27 +642,61 @@ mod tests {
                 message: "injected event failure",
             }
             .arm(&mut fixture.fixture.conn);
-            let mut writer = start_on(&fixture, Arc::new(Hooks::on_virtual_time()), &clock);
+            let hooks = Arc::new(Hooks::default());
+            hooks.pause(WriterBoundary::Receive);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let release = Release(hooks.clone());
+            hooks.wait(WriterBoundary::Receive, 1);
             assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
-            yield_until(|| writer.status().diagnostic.is_some());
-            let status = writer.status();
-            assert_eq!(status.pending_count, 1, "{status:?}");
-            assert_eq!(committed(&fixture), 0);
-            let until = until(&clock);
-            writer.begin_shutdown(until);
-            clock.advance(Duration::from_secs(2));
+            assert!(writer.try_submit(transition(&fixture, 2)).is_ok());
+            drop(release);
+            yield_until(|| {
+                writer
+                    .status()
+                    .diagnostic
+                    .is_some_and(|diagnostic| diagnostic.starts_with("event writer fenced: "))
+            });
+            let fenced = writer.status();
             assert_eq!(
-                writer.finish(until).0,
-                1,
-                "the unsaved transition stays counted"
+                fenced.pending_count, 0,
+                "the queue is discarded: {fenced:?}"
             );
+            assert!(
+                fenced
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains("injected event failure")),
+                "{fenced:?}"
+            );
+            assert_eq!(committed(&fixture), 0);
+            let refused = writer
+                .try_submit(transition(&fixture, 3))
+                .expect_err("a fenced writer accepts no transition");
+            assert!(
+                matches!(refused.reason, RetainReason::Fenced),
+                "{:?}",
+                refused.reason
+            );
+            assert_eq!(refused.cause.message(), "event writer is fenced");
+            let after = writer.status();
+            assert_eq!(
+                after.diagnostic, fenced.diagnostic,
+                "a refusal after the fence keeps the fence diagnostic"
+            );
+            assert_eq!(after.gap_count, fenced.gap_count);
+            assert_eq!(
+                writer.finish(until(&clock)),
+                (0, 2),
+                "the discarded transitions are counted unsaved"
+            );
+            assert_eq!(committed(&fixture), 0);
         }
 
         #[test]
         fn writer_worker_pending_capacity_counts_channel_and_worker_queue_without_growth() {
             let clock = clock();
             let fixture = WriterFixture::new();
-            let hooks = Arc::new(Hooks::on_virtual_time());
+            let hooks = Arc::new(Hooks::default());
             hooks.pause(WriterBoundary::Persist);
             let mut writer = start_on(&fixture, hooks.clone(), &clock);
             let release = Release(hooks.clone());
@@ -496,6 +722,610 @@ mod tests {
         }
     }
 
+    mod step_bound {
+        use crate::runtime::writer::tests::*;
+
+        fn lock_holder(fixture: &WriterFixture) -> rusqlite::Connection {
+            let holder = crate::db::connect(&format!(
+                "sqlite:///{}",
+                fixture.fixture.conn.path().unwrap()
+            ))
+            .unwrap();
+            holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+            holder
+        }
+
+        #[test]
+        fn writer_virtual_clock_jump_while_the_worker_idles_never_expires_a_step() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(Hooks::default());
+            hooks.pause(WriterBoundary::Receive);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let release = Release(hooks.clone());
+            hooks.wait(WriterBoundary::Receive, 1);
+            clock.advance(Duration::from_secs(10));
+            drop(release);
+            let calls = hooks.state.lock().unwrap().calls[index(WriterBoundary::Receive)];
+            hooks.wait(WriterBoundary::Receive, calls + 2);
+            let idle = writer.status();
+            assert_eq!(idle.diagnostic, None, "{idle:?}");
+            assert_eq!(idle.gap_count, 0, "{idle:?}");
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_eq!(writer.status().diagnostic, None);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
+        }
+
+        #[test]
+        fn writer_persist_waits_beyond_100_ms_under_a_held_lock_without_failing() {
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start(&fixture, hooks.clone());
+            let holder = lock_holder(&fixture);
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            hooks.wait(WriterBoundary::Persist, 1);
+            std::thread::sleep(Duration::from_millis(300));
+            let held = writer.status();
+            assert_eq!(held.diagnostic, None, "{held:?}");
+            assert_eq!(held.gap_count, 0, "{held:?}");
+            assert_eq!(held.pending_count, 1, "{held:?}");
+            holder.execute_batch("ROLLBACK").unwrap();
+            wait_until_within(Duration::from_secs(5), || {
+                committed(&fixture) == 1 && writer.status().pending_count == 0
+            });
+            let persisted = writer.status();
+            assert_eq!(persisted.diagnostic, None, "{persisted:?}");
+            assert_eq!(persisted.gap_count, 0, "{persisted:?}");
+            assert_eq!(writer.finish(deadline()), (0, 0));
+        }
+
+        enum InFlight {
+            PausedPersistHook,
+            HeldDatabaseLock,
+        }
+
+        struct FinishCase {
+            name: &'static str,
+            in_flight: InFlight,
+        }
+
+        const FINISH_CASES: &[FinishCase] = &[
+            FinishCase {
+                name: "paused persist hook",
+                in_flight: InFlight::PausedPersistHook,
+            },
+            FinishCase {
+                name: "held database lock",
+                in_flight: InFlight::HeldDatabaseLock,
+            },
+        ];
+
+        #[test]
+        fn writer_finish_joins_an_in_flight_step_at_the_shutdown_deadline() {
+            const SHUTDOWN_AFTER: Duration = Duration::from_millis(200);
+            for case in FINISH_CASES {
+                let name = case.name;
+                let fixture = WriterFixture::new();
+                let hooks = Arc::new(Hooks::default());
+                let holder = match case.in_flight {
+                    InFlight::PausedPersistHook => {
+                        hooks.pause(WriterBoundary::Persist);
+                        None
+                    }
+                    InFlight::HeldDatabaseLock => Some(lock_holder(&fixture)),
+                };
+                let release = Release(hooks.clone());
+                let mut writer = start(&fixture, hooks.clone());
+                assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+                hooks.wait(WriterBoundary::Persist, 1);
+                std::thread::sleep(Duration::from_millis(50));
+                let started = Instant::now();
+                let (pending, _) = writer.finish(started + SHUTDOWN_AFTER);
+                let elapsed = started.elapsed();
+                assert!(
+                    writer.joined(),
+                    "{name}: finish joins the worker once its step aborts"
+                );
+                assert!(
+                    elapsed < Duration::from_secs(1),
+                    "{name}: the in-flight step ends at the shutdown deadline, not the 5 s step bound: {elapsed:?}"
+                );
+                assert_eq!(pending, 1, "{name}: the unsaved transition stays counted");
+                drop(release);
+                if let Some(holder) = holder {
+                    holder.execute_batch("ROLLBACK").unwrap();
+                }
+                std::thread::sleep(Duration::from_millis(50));
+                assert_eq!(
+                    committed(&fixture),
+                    0,
+                    "{name}: nothing commits after finish returns"
+                );
+            }
+        }
+
+        #[test]
+        fn writer_keeps_a_statement_cut_off_by_the_shutdown_deadline_at_the_front_unrejected() {
+            let fixture = WriterFixture::new();
+            fixture
+                .fixture
+                .conn
+                .execute_batch(
+                    "CREATE TABLE slow_rows(value INTEGER);
+                     INSERT INTO slow_rows WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<2000) SELECT x FROM counter;
+                     CREATE TRIGGER slow_event_insert BEFORE INSERT ON member_runtime_events BEGIN SELECT count(*) FROM slow_rows a, slow_rows b, slow_rows c; END",
+                )
+                .unwrap();
+            let diagnostics = RunnerDiagnostics::default();
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start_with(&fixture, hooks.clone(), diagnostics.clone());
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            hooks.wait(WriterBoundary::Persist, 1);
+            std::thread::sleep(Duration::from_millis(100));
+            let started = Instant::now();
+            let (pending, _) = writer.finish(started + Duration::from_millis(200));
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < Duration::from_secs(1),
+                "the shutdown deadline interrupts the statement: {elapsed:?}"
+            );
+            assert_eq!(pending, 1, "the original stays accepted and unsaved");
+            assert_eq!(
+                hooks.state.lock().unwrap().calls[index(WriterBoundary::Persist)],
+                1,
+                "no replacement persist follows the interrupted original"
+            );
+            let (entries, _) = diagnostics.snapshot();
+            assert!(
+                entries
+                    .iter()
+                    .all(|entry| !entry.message.starts_with("event writer rejected")),
+                "an interrupted statement records no rejection: {entries:?}"
+            );
+            assert_eq!(committed(&fixture), 0, "no rejection event is persisted");
+        }
+    }
+
+    mod rejection {
+        use crate::broker::runtime::RuntimeEventKind;
+        use crate::broker::runtime::RuntimeEventRecord;
+        use crate::runtime::writer::tests::*;
+
+        const REJECT_COVERAGE_UNKNOWN: crate::db::test_support::FaultPlan =
+            crate::db::test_support::FaultPlan::Abort {
+                trigger: "reject_coverage_unknown",
+                on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='coverage_unknown'",
+                message: "injected kind rejection",
+            };
+
+        fn event_at(fixture: &WriterFixture, sequence: i64) -> RuntimeEventRecord {
+            let id: i64 = fixture
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2",
+                    rusqlite::params![fixture.fixture.run.run_id, sequence],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            storage::get_event(&fixture.fixture.conn, id).unwrap().event
+        }
+
+        fn assert_rejection(event: &RuntimeEventRecord, rejected: &ObservedTransition) {
+            assert_eq!(event.kind, RuntimeEventKind::RunnerDegraded);
+            assert_eq!(event.event_seq, rejected.event_seq);
+            let cause = &event.payload_json["cause"];
+            assert_eq!(
+                cause
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["kind", "rejected_kind", "rejected_observed_at", "error"]
+            );
+            assert_eq!(cause["kind"], "event_rejected");
+            assert_eq!(cause["rejected_kind"], rejected.kind.as_str());
+            assert_eq!(cause["rejected_observed_at"], rejected.observed_at.as_str());
+            assert!(
+                cause["error"]
+                    .as_str()
+                    .is_some_and(|error| error.contains("injected kind rejection")),
+                "{cause}"
+            );
+            assert_eq!(
+                event.payload_json["director_action"],
+                serde_json::Value::Null
+            );
+            assert_eq!(
+                event.payload_json["evidence"]["screen_seq"],
+                rejected.evidence_json["screen_seq"]
+            );
+        }
+
+        #[test]
+        fn writer_replaces_a_permanent_failure_with_its_rejection_and_continues_without_a_gap() {
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            REJECT_COVERAGE_UNKNOWN.arm(&mut fixture.fixture.conn);
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let rejected = transition(&fixture, 1);
+            assert!(writer.try_submit(rejected.clone()).is_ok());
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            let replaced = writer.status();
+            assert_eq!(replaced.diagnostic, None, "{replaced:?}");
+            assert_eq!(replaced.gap_count, 0, "{replaced:?}");
+            assert_rejection(&event_at(&fixture, 1), &rejected);
+            REJECT_COVERAGE_UNKNOWN.clear(&mut fixture.fixture.conn);
+            let next = transition(&fixture, 2);
+            assert!(writer.try_submit(next.clone()).is_ok());
+            yield_until(|| committed(&fixture) == 2 && writer.status().pending_count == 0);
+            assert_eq!(event_at(&fixture, 2).kind, next.kind);
+            let continued = writer.status();
+            assert_eq!(continued.diagnostic, None, "{continued:?}");
+            assert_eq!(continued.gap_count, 0, "{continued:?}");
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        #[test]
+        fn writer_keeps_a_transiently_failing_replacement_at_the_front_until_the_backoff_retry() {
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            REJECT_COVERAGE_UNKNOWN.arm(&mut fixture.fixture.conn);
+            let hooks = Arc::new(Hooks::default());
+            hooks.busy_on_call(WriterBoundary::Persist, 2);
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            let rejected = transition(&fixture, 1);
+            assert!(writer.try_submit(rejected.clone()).is_ok());
+            yield_until(|| writer.status().diagnostic.is_some());
+            let held = writer.status();
+            assert_eq!(held.pending_count, 1, "{held:?}");
+            assert!(
+                held.diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains("fixture writer boundary busy")),
+                "the transient cause takes the ordinary path: {held:?}"
+            );
+            assert_eq!(committed(&fixture), 0, "the retry waits for its backoff");
+            clock.advance(Duration::from_millis(100));
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_rejection(&event_at(&fixture, 1), &rejected);
+            assert_eq!(writer.status().diagnostic, None);
+            assert_eq!(writer.finish(until(&clock)).0, 0);
+        }
+
+        #[test]
+        fn writer_fences_on_a_sequence_slot_failure() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
+            assert!(writer.try_submit(transition(&fixture, 2)).is_ok());
+            yield_until(|| {
+                writer
+                    .status()
+                    .diagnostic
+                    .is_some_and(|diagnostic| diagnostic.starts_with("event writer fenced: "))
+            });
+            let fenced = writer.status();
+            assert!(
+                fenced
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(|diagnostic| diagnostic.contains("event sequence")),
+                "{fenced:?}"
+            );
+            assert_eq!(fenced.pending_count, 0, "{fenced:?}");
+            assert_eq!(committed(&fixture), 0);
+            assert_eq!(writer.finish(until(&clock)), (0, 1));
+        }
+
+        #[test]
+        fn writer_fences_after_one_replacement_attempt_once_run_ownership_is_lost() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start_on(&fixture, hooks.clone(), &clock);
+            fixture
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET owner_epoch=owner_epoch+1 WHERE run_id=?1",
+                    [fixture.fixture.run.run_id],
+                )
+                .unwrap();
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            yield_until(|| {
+                writer
+                    .status()
+                    .diagnostic
+                    .is_some_and(|diagnostic| diagnostic.starts_with("event writer fenced: "))
+            });
+            assert_eq!(
+                hooks.state.lock().unwrap().calls[index(WriterBoundary::Persist)],
+                2,
+                "the original and one replacement are attempted before the fence"
+            );
+            let fenced = writer.status();
+            assert_eq!(fenced.pending_count, 0, "{fenced:?}");
+            assert_eq!(committed(&fixture), 0);
+            assert!(
+                writer.try_submit(transition(&fixture, 2)).is_err(),
+                "a fenced writer accepts no transition"
+            );
+            assert_eq!(writer.finish(until(&clock)), (0, 1));
+        }
+
+        #[test]
+        fn writer_refuses_invalid_evidence_without_degrading() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
+            let mut forged = transition(&fixture, 1);
+            forged.evidence_json = serde_json::json!({"forged": true});
+            let refused = writer
+                .try_submit(forged.clone())
+                .expect_err("invalid evidence is refused before hand-off");
+            assert!(
+                matches!(refused.reason, RetainReason::EvidenceInvalid),
+                "{:?}",
+                refused.reason
+            );
+            assert_eq!(refused.transition, forged);
+            let status = writer.status();
+            assert_eq!(status.diagnostic, None, "{status:?}");
+            assert_eq!(status.gap_count, 0, "{status:?}");
+            assert_eq!(status.pending_count, 0, "{status:?}");
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            yield_until(|| committed(&fixture) == 1 && writer.status().pending_count == 0);
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        #[test]
+        fn writer_refuses_submissions_after_stop_and_sequence_regression_as_pressure() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let mut writer = start_on(&fixture, Arc::new(Hooks::default()), &clock);
+            assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+            let regressed = writer
+                .try_submit(transition(&fixture, 1))
+                .expect_err("a regressed sequence is refused");
+            assert!(
+                matches!(regressed.reason, RetainReason::SequenceRegressed),
+                "{:?}",
+                regressed.reason
+            );
+            writer.begin_shutdown(until(&clock));
+            let stopped = writer
+                .try_submit(transition(&fixture, 3))
+                .expect_err("a stopped writer refuses new work");
+            assert!(
+                matches!(stopped.reason, RetainReason::Stopped),
+                "{:?}",
+                stopped.reason
+            );
+            writer.finish(until(&clock));
+        }
+    }
+
+    mod diagnostics_flush {
+        use crate::broker::runtime::RunnerDiagnosticSource;
+        use crate::runtime::writer::tests::*;
+
+        const REJECT_DIAGNOSTICS: crate::db::test_support::FaultPlan =
+            crate::db::test_support::FaultPlan::Abort {
+                trigger: "reject_runner_diagnostics",
+                on: "BEFORE INSERT ON member_runner_diagnostics",
+                message: "injected diagnostics rejection",
+            };
+
+        const STAMP: &str = "2026-11-21T12:00:00.000000+00:00";
+
+        fn stored(fixture: &WriterFixture) -> Vec<(String, String, i64)> {
+            fixture
+                .fixture
+                .conn
+                .prepare("SELECT source,message,count FROM member_runner_diagnostics WHERE run_id=?1 ORDER BY diagnostic_id")
+                .unwrap()
+                .query_map([fixture.fixture.run.run_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        }
+
+        fn assert_writer_healthy(writer: &EventWriter) {
+            let status = writer.status();
+            assert_eq!(
+                status.diagnostic, None,
+                "a flush never sets the writer diagnostic: {status:?}"
+            );
+            assert_eq!(status.gap_count, 0, "{status:?}");
+        }
+
+        #[test]
+        fn writer_flushes_buffered_diagnostics_and_merges_a_repeat_into_its_row() {
+            let clock = clock();
+            let fixture = WriterFixture::new();
+            let diagnostics = RunnerDiagnostics::default();
+            let mut writer = start_on_with(
+                &fixture,
+                Arc::new(Hooks::default()),
+                &clock,
+                diagnostics.clone(),
+            );
+            diagnostics.record(
+                RunnerDiagnosticSource::Observation,
+                "observation gap opened: sink_unavailable",
+                STAMP,
+            );
+            yield_until(|| stored(&fixture).len() == 1 && diagnostics.snapshot().0.is_empty());
+            diagnostics.record(
+                RunnerDiagnosticSource::Observation,
+                "observation gap opened: sink_unavailable",
+                STAMP,
+            );
+            yield_until(|| stored(&fixture).first().is_some_and(|row| row.2 == 2));
+            assert_eq!(
+                stored(&fixture),
+                [(
+                    "observation".into(),
+                    "observation gap opened: sink_unavailable".into(),
+                    2
+                )]
+            );
+            assert_writer_healthy(&writer);
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        #[test]
+        fn writer_keeps_the_buffer_through_a_transient_flush_failure() {
+            let fixture = WriterFixture::new();
+            let diagnostics = RunnerDiagnostics::default();
+            let mut writer = start_with(&fixture, Arc::new(Hooks::default()), diagnostics.clone());
+            let holder = crate::db::connect(&format!(
+                "sqlite:///{}",
+                fixture.fixture.conn.path().unwrap()
+            ))
+            .unwrap();
+            holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+            diagnostics.record(RunnerDiagnosticSource::DeferredInput, "label: held", STAMP);
+            std::thread::sleep(Duration::from_millis(800));
+            let (held, dropped) = diagnostics.snapshot();
+            assert_eq!(held.len(), 1, "a busy flush keeps its entries: {held:?}");
+            assert_eq!(dropped, 0);
+            assert!(stored(&fixture).is_empty());
+            assert_writer_healthy(&writer);
+            holder.execute_batch("ROLLBACK").unwrap();
+            wait_until_within(Duration::from_secs(5), || {
+                stored(&fixture).len() == 1 && diagnostics.snapshot().0.is_empty()
+            });
+            assert_eq!(
+                stored(&fixture),
+                [("deferred_input".into(), "label: held".into(), 1)]
+            );
+            assert_writer_healthy(&writer);
+            assert_eq!(writer.finish(deadline()), (0, 0));
+        }
+
+        #[test]
+        fn writer_drops_a_permanently_failing_flush_and_retries_one_second_later() {
+            let clock = clock();
+            let mut fixture = WriterFixture::new();
+            REJECT_DIAGNOSTICS.arm(&mut fixture.fixture.conn);
+            let diagnostics = RunnerDiagnostics::default();
+            let mut writer = start_on_with(
+                &fixture,
+                Arc::new(Hooks::default()),
+                &clock,
+                diagnostics.clone(),
+            );
+            diagnostics.record(RunnerDiagnosticSource::PreviewSweep, "label: lost", STAMP);
+            yield_until(|| diagnostics.snapshot() == (Vec::new(), 1));
+            REJECT_DIAGNOSTICS.clear(&mut fixture.fixture.conn);
+            clock.advance(Duration::from_millis(999));
+            std::thread::sleep(Duration::from_millis(200));
+            assert!(
+                stored(&fixture).is_empty(),
+                "the next flush waits one second after the failure"
+            );
+            assert_eq!(diagnostics.snapshot(), (Vec::new(), 1));
+            clock.advance(Duration::from_millis(1));
+            yield_until(|| !stored(&fixture).is_empty());
+            assert_eq!(
+                stored(&fixture),
+                [(
+                    "event_writer".into(),
+                    "diagnostic buffer overflow: 1 entries dropped".into(),
+                    1
+                )]
+            );
+            assert_eq!(diagnostics.snapshot(), (Vec::new(), 0));
+            assert_writer_healthy(&writer);
+            assert_eq!(writer.finish(until(&clock)), (0, 0));
+        }
+
+        enum WriterFailure {
+            Transient,
+            Rejection,
+            Fence,
+        }
+
+        struct RecordedCase {
+            name: &'static str,
+            failure: WriterFailure,
+            names: &'static str,
+        }
+
+        const RECORDED_CASES: &[RecordedCase] = &[
+            RecordedCase {
+                name: "a new transient writer diagnostic",
+                failure: WriterFailure::Transient,
+                names: "fixture writer boundary busy",
+            },
+            RecordedCase {
+                name: "a rejection",
+                failure: WriterFailure::Rejection,
+                names: "injected kind rejection",
+            },
+            RecordedCase {
+                name: "a fence",
+                failure: WriterFailure::Fence,
+                names: "event writer fenced",
+            },
+        ];
+
+        #[test]
+        fn writer_failures_are_recorded_and_flushed_under_event_writer() {
+            for case in RECORDED_CASES {
+                let name = case.name;
+                let clock = clock();
+                let mut fixture = WriterFixture::new();
+                let hooks = Arc::new(Hooks::default());
+                match case.failure {
+                    WriterFailure::Transient => hooks.fail_once(WriterBoundary::Persist),
+                    WriterFailure::Rejection => crate::db::test_support::FaultPlan::Abort {
+                        trigger: "reject_coverage_unknown",
+                        on: "BEFORE INSERT ON member_runtime_events WHEN NEW.kind='coverage_unknown'",
+                        message: "injected kind rejection",
+                    }
+                    .arm(&mut fixture.fixture.conn),
+                    WriterFailure::Fence => crate::db::test_support::FaultPlan::Abort {
+                        trigger: "reject_every_event",
+                        on: "BEFORE INSERT ON member_runtime_events",
+                        message: "injected event failure",
+                    }
+                    .arm(&mut fixture.fixture.conn),
+                }
+                let diagnostics = RunnerDiagnostics::default();
+                let mut writer =
+                    start_on_with(&fixture, hooks.clone(), &clock, diagnostics.clone());
+                assert!(writer.try_submit(transition(&fixture, 1)).is_ok());
+                if matches!(case.failure, WriterFailure::Transient) {
+                    yield_until(|| writer.status().diagnostic.is_some());
+                    clock.advance(Duration::from_millis(100));
+                }
+                yield_until(|| {
+                    stored(&fixture).iter().any(|(source, message, _)| {
+                        source == "event_writer" && message.contains(case.names)
+                    })
+                });
+                assert!(
+                    stored(&fixture)
+                        .iter()
+                        .all(|(source, message, count)| source == "event_writer"
+                            && !message.trim().is_empty()
+                            && *count > 0),
+                    "{name}: {:?}",
+                    stored(&fixture)
+                );
+                writer.finish(until(&clock));
+            }
+        }
+    }
+
     #[test]
     fn writer_stale_owner_is_rejected_before_worker_start() {
         let mut fixture = WriterFixture::new();
@@ -515,12 +1345,12 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::error::Result;
-    use crate::runtime::writer::{WriterBoundary, WriterHooks};
+    use crate::runtime::writer::{StepBound, WriterBoundary, WriterHooks};
     use std::sync::Arc;
     use std::time::Instant;
     struct DefaultWriterHooks;
     impl WriterHooks for DefaultWriterHooks {
-        fn before(&self, _: WriterBoundary, _: Instant) -> Result<()> {
+        fn before(&self, _: WriterBoundary, _: &StepBound) -> Result<()> {
             Ok(())
         }
     }
@@ -529,6 +1359,7 @@ pub(crate) mod test_support {
     }
 
     use crate::broker::runtime::*;
+    pub(crate) use crate::runtime::diagnostics::RunnerDiagnostics;
     use crate::runtime::test_support::Fixture;
     use crate::runtime::writer::*;
     use crate::time::Clock;
@@ -540,31 +1371,25 @@ pub(crate) mod test_support {
         match boundary {
             WriterBoundary::Receive => 0,
             WriterBoundary::Persist => 1,
+            WriterBoundary::Flush => 2,
         }
     }
     #[derive(Debug, Default)]
     pub(crate) struct HookState {
-        pub(crate) paused: [bool; 2],
-        pub(crate) failures: [u64; 2],
-        pub(crate) calls: [u64; 2],
-        pub(crate) first: [Option<u64>; 2],
+        pub(crate) paused: [bool; 3],
+        pub(crate) failures: [u64; 3],
+        pub(crate) calls: [u64; 3],
+        pub(crate) first: [Option<u64>; 3],
         pub(crate) ordinal: u64,
+        pub(crate) busy_call: [Option<u64>; 3],
+        pub(crate) busy: [bool; 3],
     }
     #[derive(Default)]
     pub(crate) struct Hooks {
         pub(crate) state: Mutex<HookState>,
         pub(crate) changed: Condvar,
-        work_slice: Option<Duration>,
     }
     impl Hooks {
-        /// Hooks for a worker on a virtual clock: a work slice longer than any test, so a pause
-        /// measured in real time never outlives the worker's virtual work deadline.
-        pub(crate) fn on_virtual_time() -> Self {
-            Self {
-                work_slice: Some(Duration::from_secs(3600)),
-                ..Self::default()
-            }
-        }
         pub(crate) fn pause(&self, boundary: WriterBoundary) {
             self.state.lock().unwrap().paused[index(boundary)] = true;
         }
@@ -573,12 +1398,21 @@ pub(crate) mod test_support {
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.paused = [false; 2];
+            state.paused = [false; 3];
+            state.busy = [false; 3];
             drop(state);
             self.changed.notify_all();
         }
         pub(crate) fn fail_once(&self, boundary: WriterBoundary) {
             self.state.lock().unwrap().failures[index(boundary)] += 1;
+        }
+        /// Fails only the `call`-th entry to `boundary`, counting from 1, as a transient busy cause.
+        pub(crate) fn busy_on_call(&self, boundary: WriterBoundary, call: u64) {
+            self.state.lock().unwrap().busy_call[index(boundary)] = Some(call);
+        }
+        /// Fails every entry to `boundary` as a transient busy cause until released.
+        pub(crate) fn busy(&self, boundary: WriterBoundary) {
+            self.state.lock().unwrap().busy[index(boundary)] = true;
         }
         pub(crate) fn wait(&self, boundary: WriterBoundary, count: u64) {
             let slot = index(boundary);
@@ -595,11 +1429,9 @@ pub(crate) mod test_support {
             }
         }
     }
+    const PAUSE_SLICE: Duration = Duration::from_millis(10);
     impl WriterHooks for Hooks {
-        fn work_slice(&self) -> Duration {
-            self.work_slice.unwrap_or(WORK_SLICE)
-        }
-        fn before(&self, boundary: WriterBoundary, until: Instant) -> Result<()> {
+        fn before(&self, boundary: WriterBoundary, bound: &StepBound) -> Result<()> {
             let slot = index(boundary);
             let mut state = self.state.lock().unwrap();
             state.ordinal = state.ordinal.checked_add(1).unwrap();
@@ -608,15 +1440,21 @@ pub(crate) mod test_support {
             state.first[slot].get_or_insert(ordinal);
             self.changed.notify_all();
             while state.paused[slot] {
-                let remaining = until.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
+                if bound.check().is_err() {
                     return Err(CafleetError::DeadlineExceeded);
                 }
-                state = self.changed.wait_timeout(state, remaining).unwrap().0;
+                state = self.changed.wait_timeout(state, PAUSE_SLICE).unwrap().0;
             }
             if state.failures[slot] > 0 {
                 state.failures[slot] -= 1;
-                return Err(error("fixture writer boundary failure"));
+                return Err(CafleetError::DatabaseBusy(
+                    "fixture writer boundary busy".into(),
+                ));
+            }
+            if state.busy[slot] || state.busy_call[slot] == Some(state.calls[slot]) {
+                return Err(CafleetError::DatabaseBusy(
+                    "fixture writer boundary busy".into(),
+                ));
             }
             Ok(())
         }
@@ -664,12 +1502,23 @@ pub(crate) mod test_support {
         hooks: Arc<Hooks>,
         clock: &Arc<TestClock>,
     ) -> EventWriter {
+        start_on_with(fixture, hooks, clock, RunnerDiagnostics::default())
+    }
+
+    /// Like [`start_on`], recording and flushing through `diagnostics`.
+    pub(crate) fn start_on_with(
+        fixture: &WriterFixture,
+        hooks: Arc<Hooks>,
+        clock: &Arc<TestClock>,
+        diagnostics: RunnerDiagnostics,
+    ) -> EventWriter {
         EventWriter::start_with_hooks(
             format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
             fixture.fixture.run.clone(),
             fixture.lock.clone(),
             Arc::new(YieldingClock(clock.clone())),
             hooks,
+            diagnostics,
         )
         .unwrap()
     }
@@ -692,12 +1541,22 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn start(fixture: &WriterFixture, hooks: Arc<Hooks>) -> EventWriter {
+        start_with(fixture, hooks, RunnerDiagnostics::default())
+    }
+
+    /// Like [`start`], recording and flushing through `diagnostics`.
+    pub(crate) fn start_with(
+        fixture: &WriterFixture,
+        hooks: Arc<Hooks>,
+        diagnostics: RunnerDiagnostics,
+    ) -> EventWriter {
         EventWriter::start_with_hooks(
             format!("sqlite:///{}", fixture.fixture.conn.path().unwrap()),
             fixture.fixture.run.clone(),
             fixture.lock.clone(),
             std::sync::Arc::new(crate::time::SystemClock),
             hooks,
+            diagnostics,
         )
         .unwrap()
     }
@@ -759,6 +1618,7 @@ pub(crate) mod test_support {
                 self.fixture.run.clone(),
                 self.lock.clone(),
                 std::sync::Arc::new(crate::time::SystemClock),
+                RunnerDiagnostics::default(),
             )
         }
     }

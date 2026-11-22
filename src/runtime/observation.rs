@@ -108,6 +108,7 @@ pub(crate) struct ObservationController {
     unplanned_question_episode: Option<i64>,
     pending_error: Option<CafleetError>,
     delivery_results: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
+    diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
     #[cfg(test)]
     capture: Option<native_capture::NativeCapturePort>,
     #[cfg(test)]
@@ -251,11 +252,20 @@ impl ObservationController {
             unplanned_question_episode: None,
             pending_error: None,
             delivery_results: std::sync::Mutex::default(),
+            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
             #[cfg(test)]
             capture: None,
             #[cfg(test)]
             observation_hooks: None,
         })
+    }
+    /// Records gap openings into the runner's shared diagnostics buffer, which the event writer
+    /// flushes; until called, they go to a buffer of this controller alone.
+    pub(crate) fn share_diagnostics(
+        &mut self,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    ) {
+        self.diagnostics = diagnostics;
     }
     /// Queues a deferred input's first result for publication on the next poll, once per input.
     pub(crate) fn publish_delivery_result(&self, record: serde_json::Value) {
@@ -266,6 +276,7 @@ impl ObservationController {
         if queue.iter().all(|queued| {
             queued["input_id"] != record["input_id"]
                 || queued["message_id"] != record["message_id"]
+                || queued["blocked_by_input_id"] != record["blocked_by_input_id"]
                 || queued["kind"] != record["kind"]
         }) {
             queue.push_back(record);
@@ -484,6 +495,7 @@ impl ObservationController {
     fn update(&self, transitions: Vec<TransitionDraft>) -> EpisodeUpdate {
         EpisodeUpdate {
             transitions,
+            next_deadline: self.next_deadline,
             ..EpisodeUpdate::new(self.visibility, self.eligibility)
         }
     }
@@ -505,6 +517,13 @@ impl ObservationController {
                 .checked_add(1)
                 .ok_or_else(|| error("terminal observation loss overflow"))?;
             return Ok(());
+        }
+        if self.gap.is_none() {
+            self.diagnostics.record(
+                storage::RunnerDiagnosticSource::Observation,
+                &format!("observation gap opened: {}", reason.as_str()),
+                &now.observed_at,
+            );
         }
         let gap = self.gap.get_or_insert_with(|| PendingGap {
             started_at: now.observed_at.clone(),
@@ -545,6 +564,36 @@ impl ObservationController {
                     Ok(()) => {
                         pending.next_draft += 1;
                         self.next_event_seq += 1;
+                    }
+                    Err(retained) if retained.reason == RetainReason::EvidenceInvalid => {
+                        assert!(
+                            !storage::is_event_rejection(&retained.transition),
+                            "a rejection event always carries valid run evidence"
+                        );
+                        let screen_seq = self
+                            .last_output
+                            .expect("an evidence refusal follows a validated screen");
+                        self.diagnostics.record(
+                            storage::RunnerDiagnosticSource::EventWriter,
+                            &format!(
+                                "event writer rejected {} event {}: {}",
+                                retained.transition.kind.as_str(),
+                                retained.transition.event_seq,
+                                retained.cause.message()
+                            ),
+                            &now.observed_at,
+                        );
+                        let replacement = storage::event_rejected_transition(
+                            &self.run,
+                            &retained.transition,
+                            screen_seq,
+                            &retained.cause,
+                            &now.observed_at,
+                        )?;
+                        self.pending
+                            .as_mut()
+                            .expect("the routed update is pending")
+                            .materialized = Some(replacement);
                     }
                     Err(retained) => {
                         pending.materialized = Some(retained.transition);
@@ -946,6 +995,8 @@ impl ObservationController {
             } else {
                 observer.diagnostic
             },
+            writer_diagnostic: state.diagnostic.as_deref().map(storage::diagnostic_text),
+            gap_open_since: self.gap.as_ref().map(|gap| gap.started_at.clone()),
         }
     }
     #[cfg(test)]
@@ -3795,6 +3846,7 @@ pub(crate) mod native_capture {
                 crate::runtime::service::RunnerDependencies {
                     catalog,
                     clock: Arc::new(SystemClockWithUnit(shutdown_unit)),
+                    diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
                     writer_hooks: crate::runtime::writer::test_support::default_writer_hooks(),
                     capture: Some(port),
                     observation_hooks: None,
@@ -7414,6 +7466,7 @@ pub(crate) mod native_capture {
                         crate::runtime::service::RunnerDependencies {
                             catalog,
                             clock: Arc::new(crate::time::SystemClock),
+                            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
                             writer_hooks:
                                 crate::runtime::writer::test_support::default_writer_hooks(),
                             capture: Some(port),
@@ -7516,6 +7569,25 @@ pub(crate) enum GateReason {
 pub(crate) enum InputEligibility {
     ComposerEmpty,
     Hold(GateReason),
+}
+impl GateReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Candidate => "candidate",
+            Self::Interaction => "interaction",
+            Self::Unknown => "unknown",
+            Self::ObserverUnavailable => "observer_unavailable",
+            Self::Gap => "gap",
+        }
+    }
+}
+impl InputEligibility {
+    pub(crate) fn rendering(self) -> String {
+        match self {
+            Self::ComposerEmpty => "composer_empty".to_owned(),
+            Self::Hold(reason) => format!("hold:{}", reason.as_str()),
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TransitionDraft {
@@ -7847,7 +7919,6 @@ pub(crate) fn materialize(draft: &TransitionDraft, sequence: i64) -> Result<Obse
             && draft.episode_seq.is_none_or(|seq| seq > 0),
         "valid transition identity required",
     )?;
-    storage::validate_evidence(&draft.evidence_json)?;
     wall_time(&draft.observed_at)?;
     Ok(ObservedTransition {
         run_id: draft.run_id,
@@ -7871,6 +7942,8 @@ pub(crate) struct ObservationHealth {
     pub(crate) gap_count: u64,
     pub(crate) degraded: bool,
     pub(crate) diagnostic: Option<String>,
+    pub(crate) writer_diagnostic: Option<String>,
+    pub(crate) gap_open_since: Option<String>,
 }
 
 impl ObservationHealth {
@@ -7880,15 +7953,32 @@ impl ObservationHealth {
             "health pending count exceeds capacity",
         )?;
         ensure(
-            serde_json::to_vec(self).map_err(io_error)?.len() <= 1024,
+            serde_json::to_vec(self).map_err(io_error)?.len() <= 2048,
             "health observation exceeds encoded limit",
         )?;
+        if let Some(text) = &self.writer_diagnostic {
+            ensure(
+                self.degraded && storage::is_diagnostic_text(text),
+                "invalid health writer diagnostic",
+            )?;
+        }
+        if let Some(started) = &self.gap_open_since {
+            ensure(
+                self.degraded && self.eligibility == InputEligibility::Hold(GateReason::Gap),
+                "health gap start outside a degraded gap hold",
+            )?;
+            wall_time(started)?;
+        }
         if let Some(code) = &self.diagnostic {
             ensure(
                 ObservationFailure::try_from(code.as_str()).is_ok(),
                 "invalid health diagnostic",
             )?;
         }
+        ensure(
+            !self.degraded || self.diagnostic.is_some(),
+            "degraded health omits its diagnostic",
+        )?;
         if self.eligibility == InputEligibility::ComposerEmpty {
             ensure(
                 self.visibility == Visibility::NotVisible
@@ -8758,6 +8848,29 @@ mod tests {
         });
     }
 
+    #[test]
+    fn input_eligibility_renders_composer_empty_or_hold_with_its_reason() {
+        for (eligibility, expected) in [
+            (InputEligibility::ComposerEmpty, "composer_empty"),
+            (
+                InputEligibility::Hold(GateReason::Candidate),
+                "hold:candidate",
+            ),
+            (
+                InputEligibility::Hold(GateReason::Interaction),
+                "hold:interaction",
+            ),
+            (InputEligibility::Hold(GateReason::Unknown), "hold:unknown"),
+            (
+                InputEligibility::Hold(GateReason::ObserverUnavailable),
+                "hold:observer_unavailable",
+            ),
+            (InputEligibility::Hold(GateReason::Gap), "hold:gap"),
+        ] {
+            assert_eq!(eligibility.rendering(), expected, "{eligibility:?}");
+        }
+    }
+
     mod observation_contract {
         use crate::runtime::observation::tests::*;
         use crate::runtime::service::test_support::observation_services::count;
@@ -8785,7 +8898,7 @@ mod tests {
         fn service_shutdown_uses_the_active_controller_to_close_before_truthful_exit() {
             let mut fixture = ServiceFixture::configured(
                 false,
-                crate::runtime::service::test_support::observation_services::synthetic_with_unhurried_writer,
+                crate::runtime::service::test_support::observation_services::synthetic,
             );
             fixture.start_running();
             quiet(&mut fixture, "form-shutdown");
@@ -9525,9 +9638,84 @@ mod tests {
             }
 
             #[test]
+            fn health_reports_no_writer_diagnostic_or_gap_start_while_healthy() {
+                let case = LiveCase::new();
+                let health = case.controller.health(&case.writer);
+                assert!(!health.degraded, "{health:?}");
+                assert_eq!(health.writer_diagnostic, None);
+                assert_eq!(health.gap_open_since, None);
+                health.validate().unwrap();
+            }
+
+            #[test]
+            fn health_reports_the_sanitized_writer_diagnostic_and_the_pending_gap_start() {
+                let mut case = LiveCase::new();
+                case.hooks.busy(WriterBoundary::Persist);
+                let release = Release(case.hooks.clone());
+                case.clock.set_elapsed(Duration::from_millis(200));
+                case.terminal.feed(&form("write second.txt")).unwrap();
+                case.controller
+                    .observer(&case.writer, &case.clock)
+                    .observe(&case.terminal.snapshot())
+                    .unwrap();
+                case.clock.set_elapsed(Duration::from_millis(300));
+                case.controller
+                    .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                    .unwrap();
+                wait_until_within(Duration::from_secs(10), || {
+                    case.writer.status().diagnostic.is_some()
+                });
+                case.clock.set_elapsed(Duration::from_millis(400));
+                let opened_at = crate::time::Clock::wall_stamp(&case.clock);
+                case.controller
+                    .poll(&case.terminal.snapshot(), &case.writer, &case.clock)
+                    .unwrap();
+                let health = case.controller.health(&case.writer);
+                assert_eq!(
+                    health.eligibility,
+                    InputEligibility::Hold(GateReason::Gap),
+                    "{health:?}"
+                );
+                assert!(health.degraded, "{health:?}");
+                assert_eq!(health.diagnostic.as_deref(), Some("sink_unavailable"));
+                let writer = case.writer.status().diagnostic.unwrap();
+                assert_eq!(
+                    health.writer_diagnostic,
+                    Some(crate::broker::runtime::diagnostic_text(&writer)),
+                    "{health:?}"
+                );
+                assert_eq!(health.gap_open_since, Some(opened_at), "{health:?}");
+                health.validate().unwrap();
+                drop(release);
+            }
+
+            #[test]
+            fn health_reports_a_terminal_fenced_gap_without_a_gap_start() {
+                let mut case = LiveCase::new();
+                case.exit(300);
+                wait_until_within(Duration::from_secs(10), || {
+                    committed(&case.fixture) == 3 && case.writer.status().pending_count == 0
+                });
+                case.clock.set_elapsed(Duration::from_millis(400));
+                case.controller
+                    .observer_failed(ObservationFailure::Parser, &case.clock)
+                    .unwrap();
+                let health = case.controller.health(&case.writer);
+                assert_eq!(
+                    health.eligibility,
+                    InputEligibility::Hold(GateReason::Gap),
+                    "{health:?}"
+                );
+                assert!(health.degraded, "{health:?}");
+                assert_eq!(health.writer_diagnostic, None, "{health:?}");
+                assert_eq!(health.gap_open_since, None, "{health:?}");
+                health.validate().unwrap();
+            }
+
+            #[test]
             fn runner_failure_after_terminal_enqueue_never_appends_a_live_post_terminal_gap() {
                 let mut case = LiveCase::new();
-                case.hooks.pause(WriterBoundary::Persist);
+                case.hooks.busy(WriterBoundary::Persist);
                 let release = Release(case.hooks.clone());
                 case.exit(300);
                 case.hooks.wait(WriterBoundary::Persist, 2);
@@ -9895,6 +10083,178 @@ mod tests {
             );
             assert_eq!(event_at(&fixture, 65).event, closed.event);
             assert_eq!(event_at(&fixture, 66).event, opened.event);
+        }
+
+        struct GapRecoveryCase {
+            name: &'static str,
+            queues_delivery: bool,
+        }
+
+        const GAP_RECOVERY_CASES: &[GapRecoveryCase] = &[
+            GapRecoveryCase {
+                name: "no queued delivery",
+                queues_delivery: false,
+            },
+            GapRecoveryCase {
+                name: "delivery queued during the gap",
+                queues_delivery: true,
+            },
+        ];
+
+        const IDLE_COMPOSER: &[u8] = b"\x1b[0m\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
+
+        #[test]
+        fn controller_gap_recovery_reobserves_the_unchanged_screen_after_publishing_a_delivery() {
+            for case in GAP_RECOVERY_CASES {
+                let name = case.name;
+                let mut fixture = WriterFixture::new();
+                configure(&mut fixture);
+                fixture
+                    .fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET coverage='unknown' WHERE run_id=?1",
+                        [fixture.fixture.run.run_id],
+                    )
+                    .unwrap();
+                fixture.fixture.run =
+                    storage::get_run(&fixture.fixture.conn, fixture.fixture.run.run_id).unwrap();
+                let catalog =
+                    crate::coding_agent::catalog::test_support::composer_catalog(None, None);
+                let hooks = Arc::new(Hooks::default());
+                hooks.pause(WriterBoundary::Persist);
+                let mut writer = start(&fixture, hooks.clone());
+                let release = Release(hooks.clone());
+                let clock = fixture_clock();
+                let (mut controller, _child, mut terminal) =
+                    started_controller(&mut fixture, &writer, &clock, &catalog);
+                wait_until_within(Duration::from_secs(20), || {
+                    writer.status().diagnostic.is_some()
+                });
+                terminal
+                    .feed_observed(IDLE_COMPOSER, &mut controller.observer(&writer, &clock))
+                    .unwrap();
+                clock.set_elapsed(Duration::from_millis(100));
+                let status = controller
+                    .poll(&terminal.snapshot(), &writer, &clock)
+                    .unwrap();
+                assert!(
+                    matches!(status.eligibility, InputEligibility::Hold(GateReason::Gap)),
+                    "{name}: a degraded writer holds input behind a gap: {:?}",
+                    status.eligibility
+                );
+                if case.queues_delivery {
+                    let preview = crate::broker::messaging::insert_message_validated(
+                        &fixture.fixture.conn,
+                        fixture.fixture.run.director_member_id,
+                        fixture.fixture.run.member_id,
+                        "preview",
+                    )
+                    .unwrap();
+                    controller.publish_delivery_result(storage::preview_delivery_result_cause(
+                        preview.message_id,
+                        storage::DeliveryMethod::Profile,
+                        "partial",
+                        storage::StopCause::ShortWrite,
+                    ));
+                }
+                drop(release);
+                wait_until_within(Duration::from_secs(20), || {
+                    let state = writer.status();
+                    state.diagnostic.is_none() && state.pending_count == 0
+                });
+                let mut status = controller.status();
+                for millis in [200, 300, 400] {
+                    clock.set_elapsed(Duration::from_millis(millis));
+                    status = controller
+                        .poll(&terminal.snapshot(), &writer, &clock)
+                        .unwrap();
+                }
+                assert!(
+                    matches!(status.eligibility, InputEligibility::ComposerEmpty),
+                    "{name}: the unchanged idle screen is re-observed after the gap closes: {:?}",
+                    status.eligibility
+                );
+                writer.finish(deadline());
+            }
+        }
+
+        #[test]
+        fn publish_delivery_result_queues_blocked_records_per_blocker_and_drops_a_queued_repeat() {
+            let mut fixture = WriterFixture::new();
+            configure(&mut fixture);
+            let controller = ObservationController::new(&fixture.fixture.run, &catalog()).unwrap();
+            let blocked = |blocker: i64| serde_json::json!({"kind":"input_delivery_stalled","input_id":null,"message_id":null,"blocked_by_input_id":blocker,"waiting_since":NOW});
+            controller.publish_delivery_stalled(blocked(11));
+            controller.publish_delivery_stalled(blocked(12));
+            controller.publish_delivery_stalled(blocked(11));
+            let queued: Vec<serde_json::Value> = controller
+                .delivery_results
+                .lock()
+                .unwrap()
+                .iter()
+                .cloned()
+                .collect();
+            assert_eq!(queued, [blocked(11), blocked(12)]);
+        }
+
+        #[test]
+        fn controller_replaces_an_evidence_invalid_refusal_with_its_rejection_and_opens_no_gap() {
+            let mut fixture = WriterFixture::new();
+            configure(&mut fixture);
+            let hooks = Arc::new(Hooks::default());
+            let mut writer = start(&fixture, hooks);
+            let clock = fixture_clock();
+            let (mut controller, _child, terminal) =
+                started_controller(&mut fixture, &writer, &clock, &catalog());
+            let forged = TransitionDraft {
+                run_id: fixture.fixture.run.run_id,
+                episode_seq: None,
+                classification: None,
+                kind: RuntimeEventKind::CoverageUnknown,
+                observed_at: NOW.into(),
+                evidence_json: serde_json::json!({"forged": true}),
+                close_reason: None,
+                cause_json: Some(serde_json::json!({"kind":"coverage_unknown"})),
+            };
+            let update = controller.update(vec![forged]);
+            controller.retain(update).unwrap();
+            clock.set_elapsed(Duration::from_millis(100));
+            let status = controller
+                .poll(&terminal.snapshot(), &writer, &clock)
+                .unwrap();
+            assert_eq!(status.gap_count, 0, "{status:?}");
+            assert_eq!(status.diagnostic, None, "{status:?}");
+            assert!(!status.retained_transition, "{status:?}");
+            assert!(!controller.has_pending());
+            wait_until_within(Duration::from_secs(20), || {
+                committed(&fixture) == 1 && writer.status().pending_count == 0
+            });
+            let state = writer.status();
+            assert_eq!(state.diagnostic, None, "{state:?}");
+            assert_eq!(state.gap_count, 0, "{state:?}");
+            let event = event_at(&fixture, 1).event;
+            assert_eq!(event.kind, RuntimeEventKind::RunnerDegraded);
+            let cause = &event.payload_json["cause"];
+            assert_eq!(cause["kind"], "event_rejected");
+            assert_eq!(cause["rejected_kind"], "coverage_unknown");
+            assert_eq!(cause["rejected_observed_at"], NOW);
+            assert!(
+                cause["error"]
+                    .as_str()
+                    .is_some_and(|error| !error.is_empty()),
+                "{cause}"
+            );
+            assert_eq!(
+                event.payload_json["evidence"]["rule_id"],
+                "runner-lifecycle"
+            );
+            assert_eq!(
+                event.payload_json["evidence"]["screen_seq"],
+                terminal.snapshot().screen_seq
+            );
+            assert_eq!(controller.status().gap_count, 0);
+            writer.finish(deadline());
         }
     }
 

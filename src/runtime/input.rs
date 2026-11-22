@@ -178,11 +178,21 @@ pub(crate) struct InputCoordinator {
     bracketed_paste: bool,
     stall_bound: Duration,
     preview_wait: Option<PreviewWait>,
+    blocked_wait: Option<BlockedWait>,
+    diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
 }
 
 /// The sweep's selected preview while the composer holds it; the stall watchdog runs from `since`.
 struct PreviewWait {
     message_id: i64,
+    since: Instant,
+    stalled: bool,
+}
+
+/// Queued input or a pending preview waiting behind the run's lowest uncertain ordinary input;
+/// the stall watchdog runs from `since`.
+struct BlockedWait {
+    blocker_input_id: i64,
     since: Instant,
     stalled: bool,
 }
@@ -564,12 +574,30 @@ fn stalled_record(
     now: Instant,
     clock: &dyn crate::time::Clock,
 ) -> serde_json::Value {
-    let waiting_since = clock.wall_now()
-        - chrono::Duration::from_std(now.duration_since(since)).expect("bounded stall wait");
     serde_json::json!({
         "kind":"input_delivery_stalled", "input_id":input_id, "message_id":message_id,
-        "waiting_since":crate::time::format_utc(waiting_since),
+        "blocked_by_input_id":null, "waiting_since":waiting_since(since, now, clock),
     })
+}
+
+/// An `input_delivery_stalled` record for queued input or a pending preview held behind the
+/// uncertain `blocker` since `since`.
+fn blocked_record(
+    blocker: i64,
+    since: Instant,
+    now: Instant,
+    clock: &dyn crate::time::Clock,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind":"input_delivery_stalled", "input_id":null, "message_id":null,
+        "blocked_by_input_id":blocker, "waiting_since":waiting_since(since, now, clock),
+    })
+}
+
+fn waiting_since(since: Instant, now: Instant, clock: &dyn crate::time::Clock) -> String {
+    let waiting_since = clock.wall_now()
+        - chrono::Duration::from_std(now.duration_since(since)).expect("bounded stall wait");
+    crate::time::format_utc(waiting_since)
 }
 
 /// The in-progress in-memory record of a receipt-free attempt with its selected delivery.
@@ -2555,9 +2583,12 @@ impl InputCoordinator {
         }) {
             Ok(operation) => operation,
             Err(cause) if storage_failure(&cause) => {
-                eprintln!(
-                    "member runtime: input {input_id} result is pending storage: {}",
-                    cause.message()
+                self.record_diagnostic(
+                    storage::RunnerDiagnosticSource::InputResult,
+                    &format!(
+                        "input {input_id} result is pending storage: {}",
+                        cause.message()
+                    ),
                 );
                 self.finalization = Some(PendingFinalization {
                     input_id,
@@ -2619,7 +2650,11 @@ impl InputCoordinator {
         conn: &mut Connection,
         observation: &ObservationController,
     ) -> Result<()> {
-        if self.input_fenced || self.queue.is_empty() {
+        if self.input_fenced {
+            return Ok(());
+        }
+        self.watch_blocked(conn, observation)?;
+        if self.queue.is_empty() {
             return Ok(());
         }
         if let Some(pending) = self.finalization.take() {
@@ -2685,19 +2720,81 @@ impl InputCoordinator {
         Ok(())
     }
 
+    /// Tracks queued input or a pending preview waiting behind the run's lowest uncertain ordinary
+    /// input, and publishes one blocked `input_delivery_stalled` once that wait lasts the stall
+    /// bound. A transient storage failure skips the pass and keeps the wait.
+    fn watch_blocked(
+        &mut self,
+        conn: &mut Connection,
+        observation: &ObservationController,
+    ) -> Result<()> {
+        let (run_id, member_id) = (self.run.run_id, self.run.member_id);
+        let queued = !self.queue.is_empty();
+        let read = with_database_deadline(
+            conn,
+            self.services.clock.now() + DEFERRED_FINALIZATION,
+            |conn| {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                let blocker = storage::first_uncertain_ordinary_input(&tx, run_id)?;
+                let waiter = blocker.is_some()
+                    && (queued || crate::broker::oldest_pending_preview(&tx, member_id)?.is_some());
+                tx.commit()?;
+                Ok((blocker, waiter))
+            },
+        );
+        let (blocker, waiter) = match read {
+            Ok(read) => read,
+            Err(cause) if storage_failure(&cause) => return Ok(()),
+            Err(cause) => return Err(cause),
+        };
+        let Some(blocker) = blocker.filter(|_| waiter) else {
+            self.blocked_wait = None;
+            return Ok(());
+        };
+        let now = self.services.clock.now();
+        if self
+            .blocked_wait
+            .as_ref()
+            .is_none_or(|wait| wait.blocker_input_id != blocker)
+        {
+            self.blocked_wait = Some(BlockedWait {
+                blocker_input_id: blocker,
+                since: now,
+                stalled: false,
+            });
+        }
+        let wait = self
+            .blocked_wait
+            .as_mut()
+            .expect("the blocked wait is recorded");
+        if wait.stalled || now.duration_since(wait.since) < self.stall_bound {
+            return Ok(());
+        }
+        wait.stalled = true;
+        observation.publish_delivery_stalled(blocked_record(
+            blocker,
+            wait.since,
+            now,
+            self.services.clock.as_ref(),
+        ));
+        Ok(())
+    }
+
     /// Publishes one `input_delivery_stalled` for a head that has started no attempt within the
-    /// stall bound of becoming the head; time an interaction blocks it does not count.
+    /// stall bound of becoming the head; time an interaction or an uncertain blocker holds it
+    /// does not count.
     fn watch_head(&mut self, observation: &ObservationController) {
         let now = self.services.clock.now();
         let interaction = matches!(
             ordinary_blocker(&observation.status()),
             Some(OrdinaryBlocker::Interaction)
         );
+        let blocked = self.blocked_wait.is_some();
         let stall_bound = self.stall_bound;
         let Some(head) = self.queue.front_mut() else {
             return;
         };
-        if interaction {
+        if interaction || blocked {
             head.head_since = None;
             head.stalled = false;
             return;
@@ -4418,10 +4515,13 @@ impl InputCoordinator {
     }
 
     fn log_answer_failure(&self, selection: &PermissionSelection, cause: &CafleetError) {
-        eprintln!(
-            "member runtime: permission answer for interaction {} is uncertain: {}",
-            selection.request.interaction_id,
-            cause.message()
+        self.record_diagnostic(
+            storage::RunnerDiagnosticSource::PermissionAnswer,
+            &format!(
+                "permission answer for interaction {} is uncertain: {}",
+                selection.request.interaction_id,
+                cause.message()
+            ),
         );
     }
 
@@ -4534,16 +4634,10 @@ impl InputCoordinator {
             }
             Ok(operation) => {
                 if let Err(cause) = self.finish_deferred(observation, &operation) {
-                    eprintln!(
-                        "member runtime: input {id} result is pending recovery: {}",
-                        cause.message()
-                    );
+                    self.record_pending_recovery(id, &cause);
                 }
             }
-            Err(cause) => eprintln!(
-                "member runtime: input {id} result is pending recovery: {}",
-                cause.message()
-            ),
+            Err(cause) => self.record_pending_recovery(id, &cause),
         }
     }
 
@@ -4912,7 +5006,29 @@ impl InputCoordinator {
             bracketed_paste: false,
             stall_bound: STALL_BOUND,
             preview_wait: None,
+            blocked_wait: None,
+            diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
         })
+    }
+    /// Records input diagnostics into the runner's shared buffer, which the event writer flushes.
+    pub(crate) fn share_diagnostics(
+        &mut self,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    ) {
+        self.diagnostics = diagnostics;
+    }
+    pub(crate) fn record_diagnostic(&self, source: storage::RunnerDiagnosticSource, message: &str) {
+        self.diagnostics
+            .record(source, message, &self.services.clock.wall_stamp());
+    }
+    fn record_pending_recovery(&self, input_id: i64, cause: &CafleetError) {
+        self.record_diagnostic(
+            storage::RunnerDiagnosticSource::InputResult,
+            &format!(
+                "input {input_id} result is pending recovery: {}",
+                cause.message()
+            ),
+        );
     }
 
     pub(super) fn progress_with_manual<T>(
@@ -8160,7 +8276,7 @@ mod tests {
                     housekeep(host);
                     let payload = await_stalled(host, head);
                     assert_eq!(payload["input_id"], head, "{payload}");
-                    assert!(payload.get("blocking_input_id").is_none(), "{payload}");
+                    assert_eq!(payload["blocked_by_input_id"], Value::Null, "{payload}");
                     assert!(
                         payload["director_action"]["instruction"]
                             .as_str()
@@ -8257,6 +8373,267 @@ mod tests {
                         assert_unpublished(host, second);
                         assert_stalled_once(host, second);
                         assert_eq!(stalled_payloads(host, first).len(), 1);
+                    });
+                }
+
+                const RECONCILE_INSTRUCTION: &str = "Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.";
+
+                /// An uncertain prompt of the host's run, reserved and stopped outside the queue.
+                fn uncertain_blocker(host: &mut Host, key: &str) -> i64 {
+                    let owner = host.fixture.run.owner();
+                    let input = crate::broker::runtime::test_support::reserve_input(
+                        &mut host.fixture.conn,
+                        &owner,
+                        &storage::NewInput {
+                            operation_key: key.into(),
+                            kind: storage::InputKind::Prompt,
+                            payload_digest: "d".repeat(64),
+                        },
+                    )
+                    .unwrap();
+                    storage::record_input_uncertain(
+                        &mut host.fixture.conn,
+                        &owner,
+                        input.input_id,
+                        storage::StopCause::WriteFailed,
+                    )
+                    .unwrap()
+                    .input_id
+                }
+
+                fn settle_blocker(host: &mut Host, blocker: i64) {
+                    crate::broker::runtime::test_support::settle_input(
+                        &mut host.fixture.conn,
+                        &host.fixture.run.owner(),
+                        blocker,
+                        storage::InputState::Uncertain,
+                        storage::InputDisposition::Submitted,
+                        "audit:pane-shows-the-input",
+                    )
+                    .unwrap();
+                }
+
+                fn pending_preview(host: &mut Host, body: &str) -> i64 {
+                    crate::broker::messaging::insert_message_validated(
+                        &host.fixture.conn,
+                        host.fixture.run.director_member_id,
+                        host.fixture.run.member_id,
+                        body,
+                    )
+                    .unwrap()
+                    .message_id
+                }
+
+                fn blocked_rows(host: &Host, blocker: i64) -> Vec<(Value, String, Option<String>)> {
+                    host.fixture
+                        .conn
+                        .prepare(
+                            "SELECT payload_json,notification_state,archive_reason FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.blocked_by_input_id')=?2 ORDER BY event_seq",
+                        )
+                        .unwrap()
+                        .query_map(rusqlite::params![host.fixture.run.run_id, blocker], |row| {
+                            Ok((
+                                serde_json::from_str(&row.get::<_, String>(0)?).unwrap(),
+                                row.get(1)?,
+                                row.get(2)?,
+                            ))
+                        })
+                        .unwrap()
+                        .collect::<rusqlite::Result<_>>()
+                        .unwrap()
+                }
+
+                /// Moves the blocked wait's start past the three-minute stall bound.
+                fn backdate_blocked_since(host: &mut Host, blocker: i64) -> Instant {
+                    let since = host
+                        .clock
+                        .now()
+                        .checked_sub(Duration::from_secs(181))
+                        .expect("the host has run past the stall bound");
+                    let wait = host
+                        .coordinator
+                        .blocked_wait
+                        .as_mut()
+                        .expect("a blocked wait is recorded");
+                    assert_eq!(wait.blocker_input_id, blocker);
+                    wait.since = since;
+                    since
+                }
+
+                fn await_blocked(host: &mut Host, blocker: i64, count: usize) {
+                    loop {
+                        host.drain();
+                        if blocked_rows(host, blocker).len() >= count {
+                            return;
+                        }
+                        assert!(
+                            host.clock.now() < host.until,
+                            "the blocked wait publishes its record"
+                        );
+                        host.clock.advance(Duration::from_millis(5));
+                    }
+                }
+
+                /// Backdates the blocked wait, runs housekeeping and checks the record that names
+                /// the blocker, its wait start and the reconcile action, published once.
+                fn assert_blocked_once(host: &mut Host, blocker: i64, published: usize) {
+                    let since = backdate_blocked_since(host, blocker);
+                    housekeep(host);
+                    await_blocked(host, blocker, published);
+                    let rows = blocked_rows(host, blocker);
+                    let (payload, _, _) = rows.last().unwrap();
+                    assert_eq!(payload["input_id"], Value::Null, "{payload}");
+                    assert_eq!(payload["message_id"], Value::Null, "{payload}");
+                    assert_eq!(payload["blocked_by_input_id"], blocker, "{payload}");
+                    let waited = chrono::Duration::from_std(host.clock.now().duration_since(since))
+                        .expect("bounded stall wait");
+                    assert_eq!(
+                        payload["waiting_since"],
+                        crate::time::format_utc(host.clock.wall_now() - waited),
+                        "{payload}"
+                    );
+                    assert_eq!(
+                        payload["director_action"]["kind"], "reconcile_uncertain_input",
+                        "{payload}"
+                    );
+                    assert_eq!(
+                        payload["director_action"]["instruction"], RECONCILE_INSTRUCTION,
+                        "{payload}"
+                    );
+                    let argv = payload["director_action"]["inspect_argv"]
+                        .as_array()
+                        .expect("the reconcile action names its inspect command");
+                    assert_eq!(
+                        argv[..5],
+                        [
+                            serde_json::json!("cafleet"),
+                            serde_json::json!("input"),
+                            serde_json::json!("show"),
+                            serde_json::json!(blocker.to_string()),
+                            serde_json::json!("--json"),
+                        ],
+                        "{payload}"
+                    );
+                    assert!(host.coordinator.blocked_wait.as_ref().unwrap().stalled);
+                    housekeep(host);
+                    housekeep(host);
+                    settle_publications(host);
+                    assert_eq!(
+                        blocked_rows(host, blocker).len(),
+                        published,
+                        "the blocked wait publishes once per wait"
+                    );
+                }
+
+                #[test]
+                fn a_head_behind_an_uncertain_input_publishes_one_blocked_record_and_no_head_stall()
+                {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-uncertain");
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        housekeep(host);
+                        let wait = host
+                            .coordinator
+                            .blocked_wait
+                            .as_ref()
+                            .expect("a waiting head starts the blocked wait");
+                        assert_eq!(wait.blocker_input_id, blocker);
+                        assert!(!wait.stalled);
+                        assert_eq!(
+                            host.coordinator.queue.front().unwrap().head_since,
+                            None,
+                            "a blocker suspends the head's own watch"
+                        );
+                        assert!(blocked_rows(host, blocker).is_empty());
+                        assert_blocked_once(host, blocker, 1);
+                        let rows = blocked_rows(host, blocker);
+                        assert_eq!(rows[0].1, "inbox");
+                        assert_eq!(rows[0].2, None);
+                        assert!(
+                            stalled_payloads(host, head).is_empty(),
+                            "a blocked head publishes no review_stalled_delivery"
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_pending_preview_behind_an_uncertain_input_publishes_one_blocked_record() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        pending_preview(host, "preview behind the uncertain prompt");
+                        housekeep(host);
+                        assert_eq!(
+                            host.coordinator
+                                .blocked_wait
+                                .as_ref()
+                                .expect("a pending preview starts the blocked wait")
+                                .blocker_input_id,
+                            blocker
+                        );
+                        assert_blocked_once(host, blocker, 1);
+                    });
+                }
+
+                #[test]
+                fn a_blocked_wait_clears_without_a_waiter_and_restarts_for_the_same_blocker() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        housekeep(host);
+                        assert!(
+                            host.coordinator.blocked_wait.is_none(),
+                            "a blocker without a waiter starts no wait"
+                        );
+                        let head = waiting_head(host, "prompt:first-waiter");
+                        housekeep(host);
+                        assert_blocked_once(host, blocker, 1);
+                        cancel_queued(host, head);
+                        housekeep(host);
+                        assert!(
+                            host.coordinator.blocked_wait.is_none(),
+                            "the wait clears once no waiter remains"
+                        );
+                        waiting_head(host, "prompt:second-waiter");
+                        housekeep(host);
+                        let restarted = host
+                            .coordinator
+                            .blocked_wait
+                            .as_ref()
+                            .expect("a new waiter restarts the wait for the same blocker");
+                        assert_eq!(restarted.blocker_input_id, blocker);
+                        assert!(!restarted.stalled);
+                        assert!(
+                            host.clock.now().duration_since(restarted.since)
+                                < Duration::from_secs(10)
+                        );
+                        assert_blocked_once(host, blocker, 2);
+                        let rows = blocked_rows(host, blocker);
+                        assert_eq!((rows[0].1.as_str(), rows[0].2.as_deref()), ("inbox", None));
+                        assert_eq!(
+                            (rows[1].1.as_str(), rows[1].2.as_deref()),
+                            ("archived", Some("duplicate_delivery")),
+                            "the restarted wait's record is a silent duplicate"
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_settled_blocker_clears_the_wait_and_restarts_the_heads_own_watch() {
+                    with_permission_host(Duration::from_secs(20), |host| {
+                        let head = waiting_head(host, "prompt:behind-uncertain");
+                        let blocker = uncertain_blocker(host, "prompt:uncertain-blocker");
+                        housekeep(host);
+                        assert!(host.coordinator.blocked_wait.is_some());
+                        assert_eq!(host.coordinator.queue.front().unwrap().head_since, None);
+                        settle_blocker(host, blocker);
+                        housekeep(host);
+                        assert!(host.coordinator.blocked_wait.is_none());
+                        assert!(
+                            host.coordinator.queue.front().unwrap().head_since.is_some(),
+                            "the head's ordinary watch starts afresh"
+                        );
+                        assert_unpublished(host, head);
+                        assert_stalled_once(host, head);
+                        assert!(blocked_rows(host, blocker).is_empty());
                     });
                 }
             }
@@ -9700,20 +10077,15 @@ mod tests {
                 pub(crate) native_version: &'a str,
             }
 
-            /// Keeps exact input-event sequences independent of storage scheduling delays.
             struct InputFixtureWriterHooks;
 
             impl crate::runtime::writer::WriterHooks for InputFixtureWriterHooks {
                 fn before(
                     &self,
                     _: crate::runtime::writer::WriterBoundary,
-                    _: Instant,
+                    _: &crate::runtime::writer::StepBound,
                 ) -> Result<()> {
                     Ok(())
-                }
-
-                fn work_slice(&self) -> Duration {
-                    Duration::from_secs(30)
                 }
             }
 
@@ -9766,6 +10138,7 @@ mod tests {
                         writer_fixture.lock.clone(),
                         Arc::new(YieldingClock(clock.clone())),
                         Arc::new(InputFixtureWriterHooks),
+                        crate::runtime::diagnostics::RunnerDiagnostics::default(),
                     )
                     .unwrap();
                     writer.set_deadline(until);

@@ -2504,7 +2504,112 @@ mod tests {
         use crate::runtime::control::tests::*;
 
         fn wire(run: &RunRecord) -> serde_json::Value {
-            json!({"identity":ControlIdentity::from_run(run),"runner":{"pid":run.runner_pid.unwrap(),"start_identity":run.runner_start_identity.as_ref().unwrap()},"child":{"pid":run.child_pid.unwrap(),"start_identity":run.child_start_identity.as_ref().unwrap()},"output_seq":17,"observation":{"visibility":"unknown","eligibility":{"state":"hold","reason":"unknown"},"pending_count":0,"gap_count":0,"degraded":false,"diagnostic":null}})
+            json!({"identity":ControlIdentity::from_run(run),"runner":{"pid":run.runner_pid.unwrap(),"start_identity":run.runner_start_identity.as_ref().unwrap()},"child":{"pid":run.child_pid.unwrap(),"start_identity":run.child_start_identity.as_ref().unwrap()},"output_seq":17,"observation":{"visibility":"unknown","eligibility":{"state":"hold","reason":"unknown"},"pending_count":0,"gap_count":0,"degraded":false,"diagnostic":null,"writer_diagnostic":null,"gap_open_since":null}})
+        }
+
+        fn degraded_gap(run: &RunRecord) -> serde_json::Value {
+            let mut value = wire(run);
+            let status = &mut value["observation"];
+            status["eligibility"] = json!({"state":"hold","reason":"gap"});
+            status["degraded"] = json!(true);
+            status["gap_count"] = json!(1);
+            status["diagnostic"] = json!("sink_unavailable");
+            status["writer_diagnostic"] = json!("database error: database is locked");
+            status["gap_open_since"] = json!("2026-11-21T12:04:08.000000+00:00");
+            value
+        }
+
+        #[test]
+        fn health_decode_accepts_writer_diagnostic_and_gap_open_since_for_a_degraded_gap() {
+            let mut fixture = Fixture::new();
+            let (_artifacts, _lock) = activate(&mut fixture);
+            type Shape = fn(&mut serde_json::Value);
+            let cases: &[(&str, Shape)] = &[
+                ("a degraded gap with both fields", |_| {}),
+                ("a terminal-fenced gap without a pending gap", |status| {
+                    status["gap_open_since"] = json!(null)
+                }),
+                ("a degraded gap whose writer recovered", |status| {
+                    status["writer_diagnostic"] = json!(null)
+                }),
+                ("a 512-byte writer diagnostic", |status| {
+                    status["writer_diagnostic"] = json!(format!("label: {}", "x".repeat(505)))
+                }),
+                (
+                    "a 512-byte writer diagnostic whose escaping doubles it past 1024 bytes",
+                    |status| {
+                        status["writer_diagnostic"] = json!(format!("q: {}", "\"".repeat(509)))
+                    },
+                ),
+            ];
+            for &(name, shape) in cases {
+                let mut value = degraded_gap(&fixture.run);
+                shape(&mut value["observation"]);
+                let expected = value["observation"].clone();
+                let decoded = HealthSnapshot::decode(value, &fixture.run)
+                    .unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+                let observation = decoded.observation.unwrap();
+                observation
+                    .validate()
+                    .unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+                assert_eq!(
+                    observation.writer_diagnostic.as_deref(),
+                    expected["writer_diagnostic"].as_str(),
+                    "{name}"
+                );
+                assert_eq!(
+                    observation.gap_open_since.as_deref(),
+                    expected["gap_open_since"].as_str(),
+                    "{name}"
+                );
+            }
+        }
+
+        #[test]
+        fn health_decode_refuses_writer_diagnostic_and_gap_open_since_outside_their_rules() {
+            let mut fixture = Fixture::new();
+            let (_artifacts, _lock) = activate(&mut fixture);
+            type Shape = fn(&mut serde_json::Value);
+            let cases: &[(&str, Shape)] = &[
+                ("a writer diagnostic without degradation", |status| {
+                    status["eligibility"] = json!({"state":"hold","reason":"unknown"});
+                    status["degraded"] = json!(false);
+                    status["diagnostic"] = json!(null);
+                    status["gap_open_since"] = json!(null);
+                }),
+                ("an empty writer diagnostic", |status| {
+                    status["writer_diagnostic"] = json!("")
+                }),
+                ("a writer diagnostic longer than 512 bytes", |status| {
+                    status["writer_diagnostic"] = json!(format!("label: {}", "x".repeat(506)))
+                }),
+                ("a writer diagnostic with a control character", |status| {
+                    status["writer_diagnostic"] = json!("database error:\nlocked")
+                }),
+                ("a non-string writer diagnostic", |status| {
+                    status["writer_diagnostic"] = json!(7)
+                }),
+                ("gap_open_since without degradation", |status| {
+                    status["eligibility"] = json!({"state":"hold","reason":"gap"});
+                    status["degraded"] = json!(false);
+                    status["diagnostic"] = json!(null);
+                    status["writer_diagnostic"] = json!(null);
+                }),
+                ("gap_open_since outside a gap hold", |status| {
+                    status["eligibility"] = json!({"state":"hold","reason":"unknown"})
+                }),
+                ("gap_open_since that is not RFC 3339", |status| {
+                    status["gap_open_since"] = json!("yesterday")
+                }),
+            ];
+            for &(name, shape) in cases {
+                let mut value = degraded_gap(&fixture.run);
+                shape(&mut value["observation"]);
+                assert!(
+                    HealthSnapshot::decode(value, &fixture.run).is_err(),
+                    "{name}"
+                );
+            }
         }
 
         #[test]

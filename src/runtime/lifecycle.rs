@@ -2584,9 +2584,16 @@ mod tests {
         let result = with_database_deadline(
             &mut fixture.conn,
             start + Duration::from_millis(80),
-            |conn| sum(conn, SLOW_SUM),
+            |conn| {
+                conn.query_row(SLOW_SUM, [], |row| row.get::<_, i64>(0))
+                    .map_err(CafleetError::from)
+            },
         );
-        assert!(result.is_err());
+        let error = result.expect_err("the deadline cancels the long statement");
+        assert!(
+            error.transient_storage(),
+            "a statement cut off by its deadline is transient: {error:?}"
+        );
         assert!(start.elapsed() < Duration::from_millis(750));
         assert_eq!(sum(&fixture.conn, FAST_SUM).unwrap(), 50005000);
         assert_eq!(

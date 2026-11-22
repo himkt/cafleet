@@ -1,5 +1,6 @@
 mod artifacts;
 pub(crate) mod control;
+pub(crate) mod diagnostics;
 mod input;
 pub(crate) mod input_client;
 mod lifecycle;

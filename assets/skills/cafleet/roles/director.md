@@ -260,6 +260,21 @@ On `input_delivery_stalled` with `director_action.kind=review_stalled_delivery`:
 3. When the capture shows the composer holds text, submit or clear it with authorized `member press` keys the capture establishes, or ask the user through {decision_surface} to clear or submit the composer on the member's native surface.
 4. When the composer is empty and the input still waits, inspect a waiting head with `input show INPUT_ID --json`; cancel it with `input reconcile INPUT_ID --disposition not-submitted` and resend it deliberately when it cannot proceed.
 
+On `input_delivery_stalled` with `director_action.kind=reconcile_uncertain_input`:
+
+1. Verify the event and record its `blocked_by_input_id`.
+2. Inspect that input with its `inspect_argv` (`input show BLOCKER_ID --json`), reading its `state` and `stop_cause`. When it is no longer `uncertain`, the queue has already resumed; record that and stop. Another `uncertain` prompt or exec of the run then becomes the next blocker and gets its own event.
+3. Capture the member's pane and establish from the capture and routed member evidence whether the input was submitted.
+4. Settle it with `input reconcile BLOCKER_ID --disposition submitted`, `not-submitted` or `abandoned-uncertain` and an `--evidence-ref` naming that evidence; with incomplete evidence, `abandoned-uncertain` records the uncertainty. Queued input and pending previews then resume with no further send.
+
+On `runner_degraded` with `cause.kind=event_rejected`, the runner replaced an event it could never store and kept working:
+
+1. Verify the event and record its `rejected_kind`, `rejected_observed_at` and `error`.
+2. Run `member show MEMBER_ID --json` and read `runtime.observation` and `runtime.diagnostics`; `degraded` false confirms the runner still observes and delivers.
+3. For `rejected_kind` `interaction_opened` or `interaction_closed`, capture the pane: a visible permission request or question has no interaction to inspect or answer through CAFleet, so ask the user through {decision_surface} to handle it on the member's native surface. For a rejected delivery event, the cause names no input: read the `event_writer` row of `runtime.diagnostics` that names the rejected kind and `event_seq`, then inspect each input in `runtime.unresolved_input_ids` with `input show INPUT_ID --json` as for `input_delivery_result`.
+
+When `member show` keeps reporting `degraded` with an open `gap_open_since`, or doctor reports `error` for the member's `member.<id>.runtime` row, the runner holds all generated input until it can store events again; follow that row's hint, deleting the member and creating a replacement when it does not recover.
+
 ## Supervision
 
 The host owns continuation, native tools and user gates; CAFleet persists messages and previews ordinary members, while the Director retains its native stdout receiver and collects broker/artifact/pane evidence. [Director wake](#director-wake) steps 3–4 own polling and recording deliveries; unfinished assignments and pending user decisions stay tracked in host-owned state, and stream/native delivery changes no consumption state.

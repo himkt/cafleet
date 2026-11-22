@@ -337,11 +337,28 @@ enum ScopeKind {
     Cancellable,
 }
 
+/// A deadline another thread may lower while a database scope that reads it is running.
+pub(crate) type SharedDeadline = std::sync::Arc<std::sync::Mutex<Option<Instant>>>;
+
+fn shared_instant(shared: &SharedDeadline) -> Option<Instant> {
+    *shared.lock().expect("shared database deadline")
+}
+
 struct DatabaseWait {
     deadline: Deadline,
     completion: bool,
     /// Statements abort through the progress handler once this passes.
     cancellation: Option<Instant>,
+    shared: Option<SharedDeadline>,
+}
+
+impl DatabaseWait {
+    fn lowered(&self, until: Instant) -> Instant {
+        self.shared
+            .as_ref()
+            .and_then(shared_instant)
+            .map_or(until, |shared| until.min(shared))
+    }
 }
 
 #[derive(Default)]
@@ -414,7 +431,9 @@ fn remaining_database_wait() -> Option<Duration> {
         waits.frames[start..]
             .iter()
             .try_fold(Duration::MAX, |remaining, wait| {
-                wait.deadline.remaining().map(|left| remaining.min(left))
+                Deadline::until(wait.lowered(wait.deadline.instant()))
+                    .remaining()
+                    .map(|left| remaining.min(left))
             })
             .ok()
     })
@@ -426,7 +445,7 @@ fn database_cancelled() -> bool {
         let until = waits
             .frames
             .iter()
-            .filter_map(|frame| frame.cancellation)
+            .filter_map(|frame| frame.cancellation.map(|until| frame.lowered(until)))
             .min();
         Instant::now() >= until.expect("a progress handler has an owning cancellable scope")
     })
@@ -452,6 +471,7 @@ impl<'a> DatabaseBudget<'a> {
         conn: &'a mut Connection,
         deadline: Deadline,
         kind: ScopeKind,
+        shared: Option<&SharedDeadline>,
     ) -> Result<Self, CafleetError> {
         let identity = std::ptr::from_ref(conn).addr();
         DATABASE_WAITS.with(|waits| {
@@ -476,6 +496,7 @@ impl<'a> DatabaseBudget<'a> {
                 cancellation: (kind == ScopeKind::Cancellable).then(|| {
                     inherited.map_or(deadline.instant(), |until| until.min(deadline.instant()))
                 }),
+                shared: shared.cloned(),
             });
         });
         if kind == ScopeKind::Cancellable {
@@ -540,10 +561,12 @@ pub(crate) fn with_database_budget<T>(
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
     deadline.remaining()?;
-    scoped_database_budget(conn, deadline, ScopeKind::Wait, operation)
+    scoped_database_budget(conn, deadline, ScopeKind::Wait, None, operation)
 }
 
-/// Like [`with_database_budget`] until `until`, and statements also abort once it passes.
+/// Like [`with_database_budget`] until `until`, and statements also abort once it passes. A
+/// value or an interrupted statement that returns after `until` fails with `DeadlineExceeded`;
+/// every other error returns unchanged.
 pub(crate) fn with_database_deadline<T>(
     conn: &mut Connection,
     until: Instant,
@@ -551,9 +574,42 @@ pub(crate) fn with_database_deadline<T>(
 ) -> Result<T, CafleetError> {
     let deadline = Deadline::until(until);
     deadline.remaining()?;
-    let value = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, operation)?;
-    deadline.remaining()?;
-    Ok(value)
+    let result = scoped_database_budget(conn, deadline, ScopeKind::Cancellable, None, operation);
+    past_deadline(result, || deadline)
+}
+
+/// Like [`with_database_deadline`], and the scope also ends once `shared`, which another thread
+/// may lower mid-statement, passes.
+pub(crate) fn with_shared_database_deadline<T>(
+    conn: &mut Connection,
+    until: Instant,
+    shared: &SharedDeadline,
+    operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
+) -> Result<T, CafleetError> {
+    let effective =
+        || Deadline::until(shared_instant(shared).map_or(until, |lowered| until.min(lowered)));
+    effective().remaining()?;
+    let result = scoped_database_budget(
+        conn,
+        Deadline::until(until),
+        ScopeKind::Cancellable,
+        Some(shared),
+        operation,
+    );
+    past_deadline(result, effective)
+}
+
+fn past_deadline<T>(
+    result: Result<T, CafleetError>,
+    deadline: impl Fn() -> Deadline,
+) -> Result<T, CafleetError> {
+    match result {
+        Ok(value) => deadline().remaining().map(|_| value),
+        Err(error) if error.interrupted() && deadline().remaining().is_err() => {
+            Err(CafleetError::DeadlineExceeded)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 // Pane side effects are irreversible; mandatory storage finalization gets a
@@ -569,6 +625,7 @@ pub(crate) fn complete_database_budget<T>(
         conn,
         Deadline::until(deadline.instant().max(Instant::now() + COMPLETION_GRACE)),
         ScopeKind::Completion,
+        None,
         operation,
     )
 }
@@ -577,9 +634,10 @@ fn scoped_database_budget<T>(
     conn: &mut Connection,
     deadline: Deadline,
     kind: ScopeKind,
+    shared: Option<&SharedDeadline>,
     operation: impl FnOnce(&mut Connection) -> Result<T, CafleetError>,
 ) -> Result<T, CafleetError> {
-    let mut budget = DatabaseBudget::new(conn, deadline, kind)?;
+    let mut budget = DatabaseBudget::new(conn, deadline, kind, shared)?;
     let result = operation(budget.conn);
     let restored = budget.restore().map_err(|error| {
         CafleetError::App(format!(
@@ -2097,6 +2155,152 @@ mod tests {
             assert!(matches!(error, CafleetError::DatabaseBusy(_)));
             assert!(started.elapsed() >= Duration::from_millis(180));
             assert!(started.elapsed() < Duration::from_millis(700));
+        }
+
+        enum SharedDeadlineWait {
+            LongStatement,
+            BusyWait,
+        }
+
+        struct SharedDeadlineCase {
+            name: &'static str,
+            wait: SharedDeadlineWait,
+        }
+
+        const SHARED_DEADLINE_CASES: &[SharedDeadlineCase] = &[
+            SharedDeadlineCase {
+                name: "long statement",
+                wait: SharedDeadlineWait::LongStatement,
+            },
+            SharedDeadlineCase {
+                name: "busy wait",
+                wait: SharedDeadlineWait::BusyWait,
+            },
+        ];
+
+        #[test]
+        fn shared_deadline_lowered_mid_scope_aborts_the_running_wait() {
+            const SLOW_SUM: &str = "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter";
+            const LOWER_AFTER: Duration = Duration::from_millis(100);
+            for case in SHARED_DEADLINE_CASES {
+                let name = case.name;
+                let directory = tempfile::tempdir().unwrap();
+                let url = format!("sqlite:///{}", directory.path().join("shared.db").display());
+                let mut conn = connect(&url).unwrap();
+                conn.execute_batch("CREATE TABLE probe(value INTEGER)")
+                    .unwrap();
+                let holder = connect(&url).unwrap();
+                if matches!(case.wait, SharedDeadlineWait::BusyWait) {
+                    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+                }
+                let shared: SharedDeadline = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let lowering = {
+                    let shared = shared.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(LOWER_AFTER);
+                        *shared.lock().unwrap() = Some(Instant::now());
+                    })
+                };
+                let started = Instant::now();
+                let result = with_shared_database_deadline(
+                    &mut conn,
+                    started + Duration::from_secs(30),
+                    &shared,
+                    |conn| match case.wait {
+                        SharedDeadlineWait::LongStatement => conn
+                            .query_row(SLOW_SUM, [], |row| row.get::<_, i64>(0))
+                            .map(|_| ())
+                            .map_err(CafleetError::from),
+                        SharedDeadlineWait::BusyWait => conn
+                            .execute("INSERT INTO probe VALUES(1)", [])
+                            .map(|_| ())
+                            .map_err(CafleetError::from),
+                    },
+                );
+                let elapsed = started.elapsed();
+                lowering.join().unwrap();
+                let error = result.err().unwrap_or_else(|| {
+                    panic!("{name}: the lowered shared deadline aborts the wait")
+                });
+                assert!(
+                    error.transient_storage(),
+                    "{name}: a wait cut off by the shared deadline is transient: {error:?}"
+                );
+                assert!(
+                    elapsed >= LOWER_AFTER - Duration::from_millis(10),
+                    "{name}: the wait runs until the shared deadline is lowered: {elapsed:?}"
+                );
+                assert!(
+                    elapsed < Duration::from_secs(2),
+                    "{name}: the abort follows the lowered shared deadline, not the 30 s frame: {elapsed:?}"
+                );
+                if matches!(case.wait, SharedDeadlineWait::BusyWait) {
+                    holder.execute_batch("ROLLBACK").unwrap();
+                }
+                conn.execute("INSERT INTO probe VALUES(2)", [])
+                    .unwrap_or_else(|cause| panic!("{name}: the connection is reusable: {cause}"));
+            }
+        }
+
+        #[test]
+        fn a_late_error_other_than_an_interrupt_keeps_its_cause() {
+            struct LateCause {
+                name: &'static str,
+                cause: fn() -> CafleetError,
+            }
+            const CAUSES: &[LateCause] = &[
+                LateCause {
+                    name: "permanent",
+                    cause: || CafleetError::App("permanent cause".into()),
+                },
+                LateCause {
+                    name: "busy",
+                    cause: || CafleetError::DatabaseBusy("busy cause".into()),
+                },
+            ];
+            for shared in [false, true] {
+                for case in CAUSES {
+                    let cause = case.cause;
+                    let name = format!("{}, shared={shared}", case.name);
+                    let mut conn = Connection::open_in_memory().unwrap();
+                    let until = Instant::now() + Duration::from_millis(50);
+                    let late = |_: &mut Connection| -> Result<(), CafleetError> {
+                        std::thread::sleep(Duration::from_millis(100));
+                        Err(cause())
+                    };
+                    let error = if shared {
+                        let deadline: SharedDeadline =
+                            std::sync::Arc::new(std::sync::Mutex::new(None));
+                        with_shared_database_deadline(&mut conn, until, &deadline, late)
+                    } else {
+                        with_database_deadline(&mut conn, until, late)
+                    }
+                    .err()
+                    .unwrap_or_else(|| panic!("{name}: the operation's error is returned"));
+                    assert_eq!(error.to_string(), cause().to_string(), "{name}");
+                }
+            }
+        }
+
+        #[test]
+        fn shared_deadline_left_unset_bounds_the_scope_by_its_own_deadline_only() {
+            let mut conn = Connection::open_in_memory().unwrap();
+            let shared: SharedDeadline = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let value = with_shared_database_deadline(
+                &mut conn,
+                Instant::now() + Duration::from_secs(5),
+                &shared,
+                |conn| {
+                    conn.query_row(
+                        "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(CafleetError::from)
+                },
+            )
+            .unwrap();
+            assert_eq!(value, 50005000);
         }
     }
 }
