@@ -10733,7 +10733,6 @@ mod tests {
                 HostProfile {
                     backend: crate::coding_agent::CodingAgent::Opencode,
                     native_version: Some("2.1.4"),
-
                     size: crate::runtime::TerminalSize {
                         rows: 36,
                         cols: 120,

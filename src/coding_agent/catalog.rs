@@ -2556,7 +2556,6 @@ pub(crate) mod test_support {
         operations: (Coverage, Coverage),
     ) {
         let actual = catalog.capabilities(backend);
-
         assert_eq!(actual.composer, observation);
         assert_eq!(actual.prompt_submission, operations.0);
         assert_eq!(actual.native_exec_submission, operations.1);
@@ -4588,7 +4587,6 @@ mod tests {
             let copy = value["profiles"][0].clone();
             value["profiles"].as_array_mut().unwrap().push(copy);
         });
-
         for array in [
             "/profiles/0/rules",
             "/profiles/0/rules/0/matchers",

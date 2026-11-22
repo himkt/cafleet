@@ -2313,10 +2313,8 @@ mod tests {
             version: "0.167.0",
             idle: "codex-0.167.0-composer-idle-empty-tmux-120-1",
             idle_rule: "codex-suggestion-composer",
-
             composer_top: 35,
             prompt_row: 35,
-
             draft: "› hello",
             form: "codex-0.163.0-on-request-permission-1",
             form_rule: "codex-exec-approval",
