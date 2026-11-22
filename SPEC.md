@@ -2685,12 +2685,12 @@ The native captures showed this decision evidence:
 | Allow | The hint area briefly shows `Waiting for permission event…`, then the form disappears without transcript text, the command runs and the member prints its report, a `<agent> · <model> · <duration>` line and the idle composer | The member continues on its own |
 | Deny | After the final Enter the hint area briefly shows `Waiting for permission event…`, then the dialog disappears and the transcript shows `Step interrupted`, a `<agent> · <model> · <duration>` line and the idle composer; nothing runs | OpenCode does not continue after a rejection; the Director's next message reaches the idle composer through the prompt submission plan and continues the member |
 
-Because an answered form or dialog leaves no transcript text, the false-positive guard rests on the live-region anchors. The fixtures are native 36-row captures, each with one reviewed masked row; the visible public model name and context-usage counter are neither account, plan nor path text:
+Because an answered form or dialog leaves no transcript text, the false-positive guard rests on the live-region anchors. The fixtures are native 36-row captures, each with one reviewed masked row; the visible public model name and context-usage counter are neither account, plan nor path text. The composer observation and both submission plans rest on the 2.2.7 captures named in the measured-plan table above:
 
 | Fixtures | Geometry | Masked row | Supports |
 |---|---|---|---|
-| `opencode-2.1.4-ask-permission-1`, `-allow-pre-stage-1`, `-deny-pre-stage-1`, `-deny-pre-stage-2`, `-deny-pre-stage-3`, `-focus-always-1`, `-idle-composer-1` and the submission fixtures | 36x120 | 35 | The wide layout and its dialog, the composer and the submission plans |
-| `opencode-2.1.4-narrow-permission-057-1`, `-narrow-deny-pre-stage-2-057-1`, `-narrow-deny-pre-stage-3-057-1`, `-narrow-long-command-057-1`, `-narrow-idle-composer-057-1` | 36x57 | 35 | The split layout with a wrapped command, its dialog, the clipped long command and the idle composer |
+| `opencode-2.1.4-ask-permission-1`, `-allow-pre-stage-1`, `-deny-pre-stage-1`, `-deny-pre-stage-2`, `-deny-pre-stage-3`, `-focus-always-1` | 36x120 | 35 | The wide layout, its dialog and their answers |
+| `opencode-2.1.4-narrow-permission-057-1`, `-narrow-deny-pre-stage-2-057-1`, `-narrow-deny-pre-stage-3-057-1`, `-narrow-long-command-057-1` | 36x57 | 35 | The split layout with a wrapped command, its dialog and the clipped long command |
 | `opencode-2.1.4-compact-permission-055-1`, `-compact-deny-pre-stage-2-055-1`, `-compact-deny-pre-stage-3-055-1` | 36x55 | 35, or 0 for the dialog | The compact layout with its control text sharing the choice row, and the compact dialog |
 | `opencode-2.1.4-narrow-permission-min-1`, `-narrow-deny-pre-stage-2-min-1`, `-narrow-deny-pre-stage-3-min-1` | 36x36 | 0 for the form and the dialog, 35 for the stage-2 form | The compact layout at `W_min` with a control-only row, and the compact dialog |
 
