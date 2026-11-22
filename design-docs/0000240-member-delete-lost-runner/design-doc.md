@@ -1,7 +1,7 @@
 # Member deletion of a lost runner
 
 **Status**: Approved
-**Progress**: 0/17 tasks complete
+**Progress**: 8/17 tasks complete
 **Last Updated**: 2026-11-22
 
 ## Overview
@@ -126,17 +126,17 @@ Deletion tests built on `Case::new` or `runtime::test_support::Fixture::new` rec
 
 ### Step 1: Update SPEC.md
 
-- [ ] Edit §6.3 `member delete` first paragraph per § Contract changes, including the check-then-exit race and rerun <!-- completed: -->
-- [ ] Edit §6.3 `fleet delete` step 2 wording <!-- completed: -->
-- [ ] Edit the §6.9 deletion-recovery paragraph to cover recovery without shutdown for a dead owner, including a `recovering` run <!-- completed: -->
-- [ ] Add deletion's shutdown gate to the §6.9 liveness paragraph <!-- completed: -->
-- [ ] Edit the "Member/fleet deletion" row of the §6.9 Terminal transport and lifecycle table <!-- completed: -->
+- [x] Edit §6.3 `member delete` first paragraph per § Contract changes, including the check-then-exit race and rerun <!-- completed: 2026-11-22T00:36 -->
+- [x] Edit §6.3 `fleet delete` step 2 wording <!-- completed: 2026-11-22T00:36 -->
+- [x] Edit the §6.9 deletion-recovery paragraph to cover recovery without shutdown for a dead owner, including a `recovering` run <!-- completed: 2026-11-22T00:36 -->
+- [x] Add deletion's shutdown gate to the §6.9 liveness paragraph <!-- completed: 2026-11-22T00:36 -->
+- [x] Edit the "Member/fleet deletion" row of the §6.9 Terminal transport and lifecycle table <!-- completed: 2026-11-22T00:36 -->
 
 ### Step 2: Update user docs and skills
 
-- [ ] Add the lost-runner deletion sentence to the "Runner-managed deletion coordinates shutdown…" paragraph of `docs/docs/concepts/members.md` § Teardown <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md` § `member delete` per § Contract changes <!-- completed: -->
-- [ ] Run `mise //docs:build` and confirm it passes <!-- completed: -->
+- [x] Add the lost-runner deletion sentence to the "Runner-managed deletion coordinates shutdown…" paragraph of `docs/docs/concepts/members.md` § Teardown <!-- completed: 2026-11-22T00:37 -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` § `member delete` per § Contract changes <!-- completed: 2026-11-22T00:37 -->
+- [x] Run `mise //docs:build` and confirm it passes <!-- completed: 2026-11-22T00:37 -->
 
 ### Step 3: Add the failing test
 

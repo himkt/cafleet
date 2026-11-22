@@ -276,7 +276,7 @@ Failure compensation shuts down owned runner/child, closes pane, removes descrip
 
 ### `member delete`
 
-`cafleet member delete MEMBER_ID [--json]` shuts down the member's runner, closes the locked pane and deregisters. Post-close database errors retain the cause and closed-pane evidence; layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages.
+`cafleet member delete MEMBER_ID [--json]` shuts down the member's live runner (a runner already gone is settled as lost without a shutdown request), closes the locked pane and deregisters. `member runtime: ECONNREFUSED` from a runner that exited during deletion is resolved by rerunning the delete. Post-close database errors retain the cause and closed-pane evidence; layout-restoration diagnostics preserve successful deregistration. Director protection uses § Error messages.
 
 Before runner shutdown, a `hermes` run's session work is stopped through native pane input (`Ctrl+C` when busy, then `/stop` and `/exit`) and its registered background processes are verified as stopped, within a 20-second settlement budget per Hermes member (also in `fleet delete`) that extends the 5-second deletion deadline.
 
