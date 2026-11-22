@@ -17,7 +17,7 @@ A role verdict is `yes` only when evidence establishes every Eligible-tier requi
 
 A subscribe listen starts a turn on an idle session, delivers no later than the end of a busy turn without interrupting it, and keeps emission order. Eligible Directors without verified reception follow [receiver recovery](../roles/director.md#receiver-recovery), preserving goal/decision authority.
 
-Members need a runner-compatible PTY, an explicit detection-coverage declaration and a classified default launch mode (`auto` — native automatic review or a fixed allow/deny policy — or `manual`, native interactive approval) whose bundled profile detects every approval form the mode renders and declares request-bound allow and deny answers, outside the profile's recorded layout limits. An approval form is a native permission request that blocks the member until answered; question, trust, update and startup dialogs are outside it. A recorded layout limit is a profile-documented rendering no request rule matches (narrower than `W_min`, wrapped or clipped operation, uncaptured geometry), answered manually on the native surface. A default mode with no approval form meets the bar without request rules. Approval-prompt coverage counts toward the Member verdict; other bundled support leaves verdicts unchanged, and a failed probe or unselected profile still launches with `coverage=unknown`.
+Members need a runner-compatible PTY, an explicit detection-coverage declaration and a classified default launch mode (`auto` — native automatic review or a fixed allow/deny policy — or `manual`, native interactive approval) whose bundled profile detects every approval form the mode renders and declares request-bound allow and deny answers, outside the profile's recorded layout limits. An approval form is a native permission request that blocks the member until answered; question, trust, update and startup dialogs are outside it. A recorded layout limit is a profile-documented rendering no request rule matches (narrower than `W_min`, wrapped or clipped operation, uncaptured geometry), answered manually on the native surface. A default mode with no approval form meets the bar without request rules. Approval-prompt coverage counts toward the Member verdict; other bundled support leaves verdicts unchanged, and a backend without a bundled profile still launches with `coverage=unknown`.
 
 ## claude
 
@@ -76,6 +76,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | In `auto`, Claude Code can show `Teach auto mode about your environment?` after a turn; inspection lists `not-now` (7-day snooze) and `dont-show-again`, and `1. Yes` has no answer; ask the user to answer its wizard, a separate no-choice `question`, natively. In Director auto mode answer `--choice not-now` and ask the user before `dont-show-again`; otherwise relay both choices. | `{permission_flags}`; [Member launch policy](../roles/director.md#member-launch-policy); [observed interactions](../roles/director.md#consume-observed-interactions) |
 | Several tool calls in one turn show one permission form at a time, each heading ending in `N of M`, and each form is its own permission request. An allow answers only the current form, and the next form arrives as a new request; a deny on any form interrupts the turn and refuses every call that has not completed. | [Runtime handling](../roles/director.md#runtime-events) |
 | `Claude has a question for you — it shows once you send or clear what you're typing.` is a no-choice `question`: a draft hides the auto-default dialog. Ask the user to clear the draft on the member's surface, so the dialog appears as its own event for `--choice decline`, or to send it with Enter (again while the notice stays), after which the dialog returns at the member's next launch. | [Observed interactions](../roles/director.md#consume-observed-interactions) |
+| An AskUserQuestion form (a `☐`/`✔` heading or tab row, numbered options, `Chat about this` and the `Enter to select · … · Esc to cancel` footer, or its `Review your answers` screen) arrives as a `question` `interaction_opened` with `review_question`; inspection lists no choice. Relay the question to the user, who answers in the member pane. | [Observed interactions](../roles/director.md#consume-observed-interactions) |
 | A delivery-dismissed prompt can show `The user doesn't want to proceed with this tool use.`; only an Escape-dismissal preview establishes that the delivery caused it. | [Command execution](../roles/member.md#command-execution) |
 
 #### Claude native Director reception
@@ -99,7 +100,7 @@ Reception ends with the fleet: after `closed` `fleet_deleted`, verify task/sourc
 | Role | Eligible | Basis |
 |---|---|---|
 | Director | `yes` | `goal` `native` (2.1.296); `listen` `native` `subscribe` through one Monitor task running `cafleet message listen` (2.1.319, checked 2026-11-17) |
-| Member | `yes` | Omitted `auto` automatic review; the Claude profile from `2.1.302` |
+| Member | `yes` | Omitted `auto` automatic review; the bundled Claude profile |
 
 ## codex
 
@@ -168,7 +169,7 @@ The forwarder's stdout, record forwarding and exit with its pinned Codex session
 | Role | Eligible | Basis |
 |---|---|---|
 | Director | `yes` | `goal` `native` (0.162.1); `listen` `native` `subscribe` through `codex queue` on the escalated path (0.167.0, checked 2026-11-17); the sandboxed path is unverified |
-| Member | `yes` | Omitted `--approve-for-me` automatic review; the Codex profile from `0.163.0` |
+| Member | `yes` | Omitted `--approve-for-me` automatic review; the bundled Codex profile |
 
 ## opencode
 
@@ -368,7 +369,7 @@ After a restart on the same session, re-arm with `cafleet_listen` on the first t
 | Role | Eligible | Basis |
 |---|---|---|
 | Director | `yes` | `goal` `extension` through the `cafleet` plugin and `listen` `extension` `subscribe` through `cafleet_listen`, both under `opencode mini --standalone` (2.2.0 minimum; `listen` 2.2.6, checked 2026-11-17) |
-| Member | `yes` | The omitted `cafleet-ask` preset, whose shell permission form the OpenCode profile from `2.1.4` detects and answers; runner acceptance on herdr only |
+| Member | `yes` | The omitted `cafleet-ask` preset, whose shell permission form the bundled OpenCode profile detects and answers; runner acceptance on herdr only |
 
 ## hermes
 
@@ -434,7 +435,7 @@ Reception makes no pane input and leaves `/goal` authority with the host.
 | Role | Eligible | Basis |
 |---|---|---|
 | Director | `yes` | `goal` `native` `/goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both on the TUI client (2026.9.24; `listen` checked 2026-11-17) |
-| Member | `yes` | Default `smart` approval-prompt coverage (ESCALATE and override); the Hermes profile from `2026.9.24` |
+| Member | `yes` | Default `smart` approval-prompt coverage (ESCALATE and override); the bundled Hermes profile |
 
 ## pi
 
@@ -493,4 +494,4 @@ After a restart on the same session (`pi --continue`), re-arm with `cafleet_list
 | Role | Eligible | Basis |
 |---|---|---|
 | Director | `yes` | `goal` `extension` `/cafleet-goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both from the CAFleet pi extension under plain `pi` (1.5.0; `listen` checked 2026-11-17); re-arm reception after `/reload`, `/new`, `/resume`, `/fork` or `pi --continue` |
-| Member | `yes` | The omitted `cafleet-ask` gate mode, whose approval form the pi profile from `1.5.0` detects and answers |
+| Member | `yes` | The omitted `cafleet-ask` gate mode, whose approval form the bundled pi profile detects and answers |

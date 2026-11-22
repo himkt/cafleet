@@ -1060,8 +1060,7 @@ fn inspect_permission_with_host(
         )?;
         match reply.answer_capability {
             Coverage::Tested => ensure(
-                run.native_version.is_some()
-                    && reply.request_token.is_some()
+                reply.request_token.is_some()
                     && match interaction.classification {
                         InteractionClass::Question => {
                             reply.supported_decisions.is_empty()
@@ -1583,6 +1582,57 @@ mod tests {
         .unwrap();
         assert_eq!(bounded.answer_rule_id.map(|rule| rule.len()), Some(256));
         inspection_barrier(&mut fixture, output_start, "reply-binding-barrier");
+        fixture.finish();
+    }
+
+    #[test]
+    fn permission_inspection_client_accepts_a_tested_reply_for_a_run_without_a_native_version() {
+        use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
+        use crate::runtime::service::test_support::observation_services::synthetic;
+
+        let mut fixture = ServiceFixture::configured(false, |fixture, spec| {
+            synthetic(fixture, spec);
+            overwrite_observation_catalog(fixture, inspection_fixture_definition());
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_runs SET native_version=NULL WHERE run_id=?1",
+                    [fixture.run.run_id],
+                )
+                .unwrap();
+            fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+        });
+        fixture.start_running();
+        let outer = Instant::now() + Duration::from_secs(5);
+        fixture.master.write_all(b"form-unprobed\r").unwrap();
+        fixture.read_until("Operation: write form-unprobed.txt");
+        let output_start = fixture.output.len();
+        let (event_id, interaction_id, _) = opened_interaction(&mut fixture, outer);
+        let (settings, run, placement) = service_target(&fixture);
+        assert_eq!(run.native_version, None);
+        let mut host = SocketHost::new(&settings, &placement, outer);
+        let inspected = inspect_permission_with_host(
+            &mut fixture.fixture.conn,
+            &settings,
+            &PermissionInspectInput {
+                event_id,
+                interaction_id,
+                director_member_id: run.director_member_id,
+            },
+            Deadline::until(outer),
+            &mut host,
+        )
+        .unwrap();
+        assert_eq!(inspected.answer_capability, Coverage::Tested);
+        assert_eq!(inspected.native_version, None);
+        assert_eq!(
+            inspected.evidence["native_version"],
+            serde_json::Value::Null
+        );
+        assert!(inspected.request_token.is_some());
+        assert!(!inspected.supported_decisions.is_empty());
+        assert!(inspected.capability_reason.is_none());
+        inspection_barrier(&mut fixture, output_start, "unprobed-barrier");
         fixture.finish();
     }
 

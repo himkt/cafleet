@@ -226,7 +226,7 @@ Backend acknowledgment establishes neither PTY input nor native outcome. Manual 
 
 The Director owns `permission inspect`/`respond` and `input reconcile`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond` and `input reconcile`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
 
-New members use CAFleet-owned PTYs with separate launch-policy, detection, empty-composer, prompt/native-exec and request-bound answer capabilities. `member create` selects the bundled profile that supplies every capability from the native version and refuses a version below the first boundary ([member create](../reference/cli.md#member-create)); failed probes/unknown coverage preserve manual work and generated-input fallback. [Runtime command facts](../reference/cli.md#member-runtime) owns commands and fields.
+New members use CAFleet-owned PTYs with separate launch-policy, detection, empty-composer, prompt/native-exec and request-bound answer capabilities. `member create` launches with its backend's bundled profile, which supplies every capability ([member create](../reference/cli.md#member-create)); unknown coverage preserves manual work and generated-input fallback. [Runtime command facts](../reference/cli.md#member-runtime) owns commands and fields.
 
 ### Consume observed interactions
 
@@ -245,7 +245,7 @@ A response selects a tested single-request allow/deny choice, or a tested dismis
 
 ### Reconcile generated input
 
-Permission responses require the selected profile's independently tested answer plan and never use fallback. Keyboard or pointer input (terminal replies excluded), or a request/ownership/visibility change, invalidates the token. CLI decisions are semantic, separate from arbitrary keys.
+Permission responses require the bundled profile's independently tested answer plan and never use fallback. Keyboard or pointer input (terminal replies excluded), or a request/ownership/visibility change, invalidates the token. CLI decisions are semantic, separate from arbitrary keys.
 
 Retain every known `input_id` from stdout, queued results and uncertainty errors, then inspect `cafleet input show INPUT_ID --json`. Read its [`stop_cause`](../reference/cli.md#input-show-and-input-reconcile) together with pane/native evidence. Queued input keeps its ID across method changes; after a client timeout, inspect it before selecting another key. Explicit prompt/exec requires a separate deliberate retry after pane inspection. An uncertain prompt or exec stops the member's queue: no queued input and no preview reaches it until you reconcile that input. An uncertain preview's `input_delivery_result` carries no input ID and needs no reconciliation: its runner types it again once the composer is verified empty, and a repeated preview carries the same message ID.
 

@@ -306,7 +306,7 @@ pub(crate) mod test_support {
                 mode_source: ModeSource::Default,
                 permission_argv_json: json!(["--approve-for-me"]),
                 native_version: None,
-                coverage: Coverage::Unknown,
+                coverage: Coverage::Tested,
                 owner_pid: process.pid,
                 owner_start_identity: process.start_identity,
             };

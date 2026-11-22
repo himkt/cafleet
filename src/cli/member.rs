@@ -490,7 +490,7 @@ pub(crate) fn create_with_layout_wait(
         (home.map(crate::coding_agent::hermes::joined), probe)
     });
     let hermes_home = hermes_home.transpose()?;
-    let native = crate::coding_agent::native_launch_identity(backend, probe, catalog)?;
+    let native = crate::coding_agent::native_launch_identity(backend, probe, catalog);
     if let Some(warning) = &native.warning {
         eprintln!("{warning}");
     }

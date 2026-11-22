@@ -1,7 +1,7 @@
 # Single bundled profile per backend and Claude AskUserQuestion detection
 
-**Status**: Approved
-**Progress**: 0/40 tasks complete
+**Status**: Complete
+**Progress**: 40/40 tasks complete
 **Last Updated**: 2026-11-22
 
 ## Overview
@@ -10,16 +10,16 @@ Every backend gets exactly one bundled runner profile with no native-version bou
 
 ## Success Criteria
 
-- [ ] `assets/profiles/bundled.json` holds exactly one profile per backend, with keys `backend`, `rules` and `capabilities`, and the catalog loader rejects a second profile for one backend.
-- [ ] `member create` launches every parsed native version with its backend's profile; `Error: unsupported native version …` no longer exists in code, SPEC, docs or skills.
-- [ ] A failed native version probe records `native_version` null, prints `Warning: native version unavailable for BACKEND: CAUSE.`, and records `coverage=tested` when the backend's profile declares detection.
-- [ ] Inspection and answers bind to the run's backend only: a run with a null `native_version` gets `answer_capability=tested` for a visible request whose tested plan exists.
-- [ ] Every AskUserQuestion capture (single question, multi-question tab bar, multi-select, "Review your answers" screen) on tmux and on herdr replays through the bundled Claude profile to its expected observation in the § Testing replay tests; this establishes the tmux half.
-- [ ] The § Live verification Question and Tabs phases on Herdr each produce one `question` `interaction_opened` with `review_question`, `permission inspect` returns `supported_choices` `[]`, `answer_capability` `unknown` and `capability_reason` `question has no tested answer`, and answering on the native surface produces `interaction_closed` with `not_visible`; with the herdr captures, this establishes the herdr half.
-- [ ] A quoted form above a live composer, the transcript viewer and every existing Claude form keep their current observation.
-- [ ] Outside `design-docs/`, no file mentions `min_version`, profile selection by version, a profile "from `<version>`", a profile boundary or a capture interval.
-- [ ] Design 0000239's Permanent and Transient phases each pass, or fail only for a recorded cause unrelated to detection with a follow-up issue opened. Their observed values replace 0000239's Step 9 "skipped" note; 0000239's live-verification Success Criterion is checked only when both pass, and otherwise stays open with a pointer to the follow-up issue.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] `assets/profiles/bundled.json` holds exactly one profile per backend, with keys `backend`, `rules` and `capabilities`, and the catalog loader rejects a second profile for one backend.
+- [x] `member create` launches every parsed native version with its backend's profile; `Error: unsupported native version …` no longer exists in code, SPEC, docs or skills.
+- [x] A failed native version probe records `native_version` null, prints `Warning: native version unavailable for BACKEND: CAUSE.`, and records `coverage=tested` when the backend's profile declares detection.
+- [x] Inspection and answers bind to the run's backend only: a run with a null `native_version` gets `answer_capability=tested` for a visible request whose tested plan exists.
+- [x] Every AskUserQuestion capture (single question, multi-question tab bar, multi-select, "Review your answers" screen) on tmux and on herdr replays through the bundled Claude profile to its expected observation in the § Testing replay tests; this establishes the tmux half.
+- [x] The § Live verification Question and Tabs phases on Herdr each produce one `question` `interaction_opened` with `review_question`, `permission inspect` returns `supported_choices` `[]`, `answer_capability` `unknown` and `capability_reason` `question has no tested answer`, and answering on the native surface produces `interaction_closed` with `not_visible`; with the herdr captures, this establishes the herdr half.
+- [x] A quoted form above a live composer, the transcript viewer and every existing Claude form keep their current observation, except Claude Code's own `Model switch` question (`claude-2.1.302-auto-model-switch-question-1`), which renders with the AskUserQuestion component and becomes a `question` through `claude-ask-user-question`.
+- [x] Outside `design-docs/`, no file mentions `min_version`, profile selection by version, a profile "from `<version>`", a profile boundary or a capture interval.
+- [x] Design 0000239's Permanent and Transient phases each pass, or fail only for a recorded cause unrelated to detection with a follow-up issue opened. Their observed values replace 0000239's Step 9 "skipped" note; 0000239's live-verification Success Criterion is checked only when both pass, and otherwise stays open with a pointer to the follow-up issue.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
 
@@ -122,10 +122,10 @@ In the patterns below, `WS` stands for the catalog's whitespace class `[\t-\r \x
 
 | Rule | Region start | Region end | Required matchers |
 |---|---|---|---|
-| `claude-ask-user-question` | `heading` `^ (?:←WS+)?[☐✔]WSNWS` | `footer` `^Enter to select · [^·]+ · Esc to cancelWS*$` | `heading`, `chat` `^(?:❯ \|  )[1-9]\. Chat about thisWS*$`, `footer` |
-| `claude-ask-user-question-review` | The same `heading` | The same `footer` | `heading`, `review` `^Review your answersWS*$`, `footer` |
+| `claude-ask-user-question` | `heading` `^(?: \|←WS+)[☐☒✔]WSNWS` | `footer` `^Enter to select · (?:[^·]+ · )+Esc to cancelWS*$` | `heading`, `chat` `^(?:❯ \|  )[1-9]\. Chat about thisWS*$`, `footer` |
+| `claude-ask-user-question-review` | The same `heading` | `cancel` `^(?:❯ \|  )[1-9]\. CancelWS*$` | `heading`, `review` `^Review your answersWS*$`, `submit` `^(?:❯ \|  )[1-9]\. Submit answersWS*$`, `cancel` |
 
-The `heading` pattern matches the single-question checkbox heading (` ☐ Color`) and the multi-question tab bar (`←  ☐ Color  ☐ Size  ✔ Submit  →`). The `[^·]+` footer segment admits both `↑/↓ to navigate` and the multi-question navigation hint. Multi-select options render inside the same anchors, so they need no rule of their own.
+The `heading` pattern matches the single-select one-question heading (` ☐ Color`, one leading space) and the tab bar that every multi-question and every `multiSelect` form starts at column 0 (`←  ☐ Color  ☐ Size  ✔ Submit  →`); an answered or toggled question renders `☒`. The repeated `[^·]+ · ` footer segment admits `↑/↓ to navigate`, the multi-question `Tab/Arrow keys to navigate` and the extra `ctrl+g to edit in VS Code` segment shown while `Type something.` is focused. Multi-select options render inside the same anchors, so they need no rule of their own. The `Review your answers` screen shows neither the footer nor a `Chat about this` row; it ends with `Ready to submit your answers?`, `❯ 1. Submit answers` and `  2. Cancel`, so its rule ends at the `Cancel` row.
 
 A captured variant that lacks one of these anchored rows, or that shows the live composer prefix while the form is open, is reported to the Director before any rule is written; the Director decides between an added rule and a recorded layout limit.
 
@@ -136,8 +136,7 @@ The semantic fingerprint is `(kind, operation, choice labels)` without the rule 
 | Native transition | Episode outcome |
 |---|---|
 | Moving focus, switching tabs, toggling a multi-select option, typing into `Type something.`, reaching the review screen | One episode; no new event |
-| `Claude has a question for you — …` notice, then the form after the user clears the draft | One episode, because `claude-question-pending-notice` has the same fingerprint |
-| `Claude has a question for you — …` notice, then the user sends the draft | The outcome the `pending-sent` capture establishes: the form follows in the same episode, or no form follows and the episode closes `not_visible` once the idle composer is stable; SPEC records the observed outcome |
+| A draft typed into the composer when the form mounts | On Claude Code 2.1.322 the form mounts over the draft with no `Claude has a question for you — …` notice, so the form opens the episode directly; SPEC records this outcome |
 | Form answered or cancelled, then the idle composer stable for 250 ms | `interaction_closed` with `not_visible` |
 | Two forms with no verified noninteraction boundary between them | One episode, the existing identity limitation of SPEC §6.9 Classification and episode identity |
 | Both rules matching one frame | No conflict: their parts deduplicate |
@@ -150,17 +149,17 @@ The semantic fingerprint is `(kind, operation, choice labels)` without the rule 
 | A form taller than the pane, clipping the heading or footer | Unmatched |
 | An older or newer Claude Code that renders different anchors | Unmatched (`unknown`), the accepted fail-safe of the single profile |
 
-Step 1 records a `W_min` per rule: the narrowest captured width at which that rule still matches, from the `narrow` case for `claude-ask-user-question` and the `review-narrow` case for `claude-ask-user-question-review`. SPEC states both values.
+Step 1 records a `W_min` per rule: the narrowest captured width at which that rule still matches, from the `narrow` case for `claude-ask-user-question` and the `review-narrow` case for `claude-ask-user-question-review`. The captures give 60 columns for the form rule (both footers fit one row at 60 and wrap at 40) and 40 columns for the review rule. SPEC states both values.
 
 ### Native capture procedure
 
-Captures use the test-only native-capture driver (inline `native_capture` module of `src/runtime/observation.rs`, ignored test `native_capture_prepare_start_driver`, registry `APPROVED_CASES`) with the installed Claude Code, whose version the driver verifies from the pane's own `--version` output. herdr captures run in a member pane on a real herdr server, like the existing `claude-2.1.322-composer-*-herdr-092-1` fixtures, whose `092` is the pane's column count (those screens are 36x92). A herdr capture keeps the pane geometry the herdr server gives the member pane, recorded in the fixture's `rows` and `cols`.
+Captures record the installed Claude Code with `script -q -f -O <case>.raw -T <case>.timing -m advanced -c '<claude argv>'` at the case geometry, after verifying the version from `claude --version` in the same pane, as every Claude 2.1.322 fixture was captured (design 0000236 § Fixture capture method). The advanced timing log records the start geometry and every resize. A scratch converter outside the repository replays each recorded byte prefix up to a target state through `vt100` and emits `lines`, cursor, `alternate_screen`, `cell_backgrounds`, `cell_styles` and the canonical digest; the bundled-catalog guard and the replay tests then validate every fixture. tmux cases run on a private tmux server. herdr cases run in a dedicated herdr pane outside the fleet's panes, keeping the pane geometry the herdr server gives it, recorded in the fixture's `rows` and `cols`, like the existing `claude-2.1.322-composer-*-herdr-092-1` fixtures, whose `092` is the pane's column count (those screens are 36x92).
 
 Fixture ids follow `claude-<captured version>-ask-<case>-<mux>-<cols>-<n>`: `<mux>` is `tmux` or `herdr`, `<cols>` the captured column count zero-padded to three digits, and `<n>` numbers the captures of one case from 1. For example, `claude-2.1.322-ask-tabs-herdr-092-2` is the second capture of `tabs` in a 92-column herdr pane.
 
-A new driver mode `AskQuestion` prompts the member to call AskUserQuestion with the case's arguments, waits for the footer row, captures, then sends the case's navigation bytes and captures again. The driver sends only arrow keys, Tab, Space, digits, typed draft text, the Ctrl+U (`0x15`) that `pending` uses to clear its draft, and the Enter that `single-closed` and `pending-sent` name. It never sends Escape to an open form.
+Each case prompts Claude Code to call AskUserQuestion with the case's arguments, waits for the footer row, marks the recorded byte offset of each target state, and sends the case's navigation bytes. The capture script sends only arrow keys, Tab, Space, digits, typed draft text, the Ctrl+U (`0x15`) that `pending` uses to clear its draft, and the Enter that `single-closed` names. It never sends Escape to an open form.
 
-| Case | AskUserQuestion arguments and driver actions | Mux and size | Expected observation |
+| Case | AskUserQuestion arguments and capture actions | Mux and size | Expected observation |
 |---|---|---|---|
 | `single` | One question, two options (issue layout) | tmux 36x120, herdr | `claude-ask-user-question` |
 | `single-closed` | `single`, then `1` and Enter; capture after the idle composer returns | tmux 36x120, herdr | Idle composer; closes the episode |
@@ -171,10 +170,9 @@ A new driver mode `AskQuestion` prompts the member to call AskUserQuestion with 
 | `typing` | `single`, focus `Type something.`, type `abc` | tmux 36x120 | `claude-ask-user-question` |
 | `narrow` | `single` at 36x60 and 36x40 | tmux | Positive where anchors hold; otherwise the form rule's `W_min` limit |
 | `quoted` | The member prints the issue's form text as a code block in its reply | tmux 36x120 | Not a question |
-| `pending` | A draft typed into the composer before the form mounts, then cleared with Ctrl+U | tmux 36x120 | Notice, then the form in one episode |
-| `pending-sent` | As `pending`, but the draft is sent with Enter instead of cleared; capture after the notice disappears | tmux 36x120 | The send outcome of § Episode identity, recorded as observed |
+| `pending` | A draft typed into the composer before the form mounts | tmux 36x120 | The form, mounted over the draft with no notice (§ Episode identity) |
 
-Every case other than `single-closed` and `pending-sent` leaves its form open, like the existing `NoAnswer` cases such as `cells-002`: after the last capture the driver sends no closing byte, and the case's dedicated tmux server and private database are discarded with the member process. A herdr case ends with `cafleet member delete`, which stops the native process with the form still open. Masking follows the existing review (banner, account, model, plan and home paths masked; every rule region unmasked).
+Every case other than `single-closed` leaves its form open: after the last target state the script sends no closing byte, and the case's private tmux server, or its dedicated herdr pane, is discarded with the native process. Masking follows the existing review (banner, account, model, plan and home paths masked; every rule region unmasked).
 
 ### Documentation targets
 
@@ -192,7 +190,7 @@ Edits follow the project order: SPEC, `docs/`, README (no change: it states no p
 | `SPEC.md` §6.9 Launch policy and capability registry | In "An omitted selection is not validated against the version catalog, so a member whose probed version is newer than every profile boundary still launches with the default; a native version that rejects …", delete the clause up to the semicolon and keep "A native version that rejects `auto` or `--approve-for-me` exits immediately with `runner_exited` (below)". "(§ Profile selection by minimum version)" becomes "(§ Bundled profiles and native screen fixtures)"; "A failed probe or a backend without bundled profiles yields `coverage=unknown`" becomes "A backend without a bundled profile yields `coverage=unknown`"; "selected profile" becomes "the backend's bundled profile" |
 | `SPEC.md` §6.9 Native version probe | The probe is diagnostic metadata; the new warning; delete "The probed version then selects the run's bundled profile" |
 | `SPEC.md` §6.9 Profile selection by minimum version | Delete the section, including its SemVer precedence paragraph; move its fail-safe paragraph ("The rules match screen patterns, so a changed native UI fails safe …") and the runner-pins-its-profile paragraph, rewritten for one profile per backend, into Bundled profiles and native screen fixtures |
-| `SPEC.md` §6.9 Bundled profiles and native screen fixtures | One profile per backend with keys `backend`, `rules`, `capabilities`; profiles named "the bundled Claude profile"; provenance rules without intervals; the per-profile plan table keyed by backend with its evidence versions; delete the predecessor-profile paragraph; every "profile from `V`" in the per-backend subsections becomes "the bundled X profile"; add the AskUserQuestion rules, their captures, both `W_min` values, the `pending-sent` outcome and the limits to the Claude subsection and the Detection row |
+| `SPEC.md` §6.9 Bundled profiles and native screen fixtures | One profile per backend with keys `backend`, `rules`, `capabilities`; profiles named "the bundled Claude profile"; provenance rules without intervals; the per-profile plan table keyed by backend with its evidence versions; delete the predecessor-profile paragraph; every "profile from `V`" in the per-backend subsections becomes "the bundled X profile"; add the AskUserQuestion rules, their captures, both `W_min` values, the draft-mount outcome and the limits to the Claude subsection and the Detection row |
 | `SPEC.md` §6.9 Executable native plans, Measured submission plans, Persistence (coverage), Coverage and latency | Replace selection by version and every "selected profile" / "profile selected" with the backend's bundled profile; "on a native version within its interval" becomes "on an installed native version"; "A run without a selected profile" becomes "A run whose backend has no bundled profile"; "the version-selected profile" becomes "the backend's bundled profile" |
 | `SPEC.md` §6.9 Classification and episode identity | "known backend version" becomes "backend"; "Versioned profiles are bundled locally in CAFleet" becomes "Profiles are bundled locally in CAFleet"; "A run with no selected profile" becomes "A run whose backend has no bundled profile" |
 | `SPEC.md` §6.9 Request-bound permission responses | The token's binding list drops "native version" ("bound in memory to the complete database/run/nonce/epoch, interaction/episode, live operation/choice/focus identity, …"); the answer binding becomes "its backend equals the run's"; "the run's selected profile" becomes "the run's bundled profile"; the "(§ Profile selection by minimum version)" pointer becomes "(§ Bundled profiles and native screen fixtures)" |
@@ -220,7 +218,7 @@ Every test is an in-file unit test of the file that owns the asserted behavior.
 | File | Tests |
 |---|---|
 | `src/coding_agent/catalog.rs` | The bundled catalog has one profile per backend and passes provenance validation; a catalog with two profiles for one backend fails with `more than one profile for one backend`; a citation of another backend's fixture fails; each AskUserQuestion fixture replays to its expected observation through the bundled Claude profile; the quoted and transcript-viewer frames yield no question; every existing Claude fixture keeps its current observation with the two new rules present |
-| `src/coding_agent/detector.rs` | The `tabs`, `multi` and `typing` captures and the `single` capture yield equal fingerprints; the `review` capture equals them; the `pending` notice and the form fingerprints are equal. Frame-guard mutation cases in the style of `a_dialog_a_quoted_above_a_live_composer_is_no_interaction`: the captured live `single` form with a `❯\u{a0}` composer row written into it yields no interaction, and the same form with the `  Showing detailed transcript · ctrl+o to toggle` row written into it yields none. The `quoted` capture alone does not exercise the guard, because its transcript margin already fails the `heading` anchor |
+| `src/coding_agent/detector.rs` | The `tabs`, `multi` and `typing` captures and the `single` capture yield equal fingerprints; the `review` capture equals them; the existing `claude-question-pending-notice` fixture and the form fingerprints are equal. Frame-guard mutation cases in the style of `a_dialog_a_quoted_above_a_live_composer_is_no_interaction`: the captured live `single` form with a `❯\u{a0}` composer row written into it yields no interaction, and the same form with the `  Showing detailed transcript · ctrl+o to toggle` row written into it yields none. The `quoted` capture alone does not exercise the guard, because its transcript margin already fails the `heading` anchor |
 | `src/coding_agent/mod.rs` | A probed version below every former boundary (e.g. `0.0.1`) launches with the backend's profile and `coverage=tested`; a failed probe records null `native_version`, `coverage=tested` for a backend with detection, and the new warning text |
 | `src/runtime/observation.rs` | The creation/observer coverage consistency table: `(None, tested)` is consistent for a backend whose profile declares detection, `(Some, unknown)` is inconsistent; a scenario that opens an AskUserQuestion episode, queues a prompt with `interaction_open`, and closes `not_visible` after the idle composer, then delivers the queued prompt |
 | `src/runtime/input.rs`, `src/runtime/input_client.rs` | `permission inspect` on an AskUserQuestion episode returns `[]`, `unknown` and `question has no tested answer`; a run with null `native_version` gets `tested` capability for a permission request with a tested plan |
@@ -247,68 +245,74 @@ A 0000239 phase that fails for a cause unrelated to detection is recorded with i
 > Task format: `- [x] Done task <!-- completed: 2026-02-13T14:30 -->`
 > When completing a task, check the box and record the timestamp in the same edit.
 
-Step 1 (test-only capture driver and fixtures) deliberately precedes the documentation step required first by `.claude/rules/documentation-maintenance.md` § Implementation Order, because SPEC must carry the margins, `W_min` values and `pending-sent` outcome that only the captures establish.
+Step 1 (captures and fixtures) deliberately precedes the documentation step required first by `.claude/rules/documentation-maintenance.md` § Implementation Order, because SPEC must carry the margins, `W_min` values and draft-mount outcome that only the captures establish.
 
 ### Step 1: Capture AskUserQuestion evidence
 
-- [ ] Add the `AskQuestion` driver mode and the § Native capture procedure cases to `APPROVED_CASES`, with driver unit tests for the never-Escape stage guard <!-- completed: -->
-- [ ] Run the cases on tmux with the installed Claude Code and capture the herdr cases on a herdr server, verifying the version from the pane's `--version` output <!-- completed: -->
-- [ ] Review masking and convert the captures into fixture entries and screens <!-- completed: -->
-- [ ] Report the captured margins, `W_min` and any variant that lacks an anchor or shows the live composer to the Director before Step 2 <!-- completed: -->
+- [x] Write the § Native capture procedure capture script and scratch converter outside the repository, sending only the listed byte set <!-- completed: 2026-11-22T01:53 -->
+- [x] Run the cases on tmux with the installed Claude Code and capture the herdr cases on a herdr server, verifying the version from the pane's `--version` output <!-- completed: 2026-11-22T01:53 -->
+- [x] Review masking and convert the captures into fixture entries and screens <!-- completed: 2026-11-22T01:53 -->
+- [x] Report the captured margins, `W_min` and any variant that lacks an anchor or shows the live composer to the Director before Step 2 <!-- completed: 2026-11-22T01:53 -->
 
 ### Step 2: Documentation
 
-- [ ] Update `SPEC.md` per § Documentation targets, including the AskUserQuestion rules with their captured literals <!-- completed: -->
-- [ ] Update `docs/docs/concepts/members.md`, `docs/docs/concepts/coding-agents.md` and `docs/docs/contributing.md` <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/reference/coding-agents.md` (Member Basis cells and the new claude Note row) and `assets/skills/cafleet/roles/director.md` <!-- completed: -->
-- [ ] Update `.claude/rules/documentation-maintenance.md` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
+- [x] Update `SPEC.md` per § Documentation targets, including the AskUserQuestion rules with their captured literals <!-- completed: 2026-11-22T01:50 -->
+- [x] Update `docs/docs/concepts/members.md`, `docs/docs/concepts/coding-agents.md` and `docs/docs/contributing.md` <!-- completed: 2026-11-22T01:28 -->
+- [x] Update `assets/skills/cafleet/reference/cli.md`, `assets/skills/cafleet/reference/coding-agents.md` (Member Basis cells and the new claude Note row) and `assets/skills/cafleet/roles/director.md` <!-- completed: 2026-11-22T01:28 -->
+- [x] Update `.claude/rules/documentation-maintenance.md` <!-- completed: 2026-11-22T01:28 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-22T01:28 -->
 
 ### Step 3: Merge the bundled profiles
 
-- [ ] Rebuild `assets/profiles/bundled.json` with one profile per backend per § Merge of existing profiles, removing every `min_version` <!-- completed: -->
-- [ ] Union the detection, answer and continuation citations as the merge table states <!-- completed: -->
-- [ ] Add `claude-ask-user-question` and `claude-ask-user-question-review` to the Claude rules and `detection.rule_ids`, citing the Step 1 fixtures <!-- completed: -->
+- [x] Rebuild `assets/profiles/bundled.json` with one profile per backend per § Merge of existing profiles, removing every `min_version` <!-- completed: 2026-11-22T01:32 -->
+- [x] Union the detection, answer and continuation citations as the merge table states <!-- completed: 2026-11-22T01:32 -->
+- [x] Add `claude-ask-user-question` and `claude-ask-user-question-review` to the Claude rules and `detection.rule_ids`, citing the Step 1 fixtures <!-- completed: 2026-11-22T01:57 -->
 
 ### Step 4: Catalog and runtime code
 
-- [ ] Remove `min_version` from the raw and compiled profile types and add the one-profile-per-backend check <!-- completed: -->
-- [ ] Replace `matching` with `profile(backend)`, delete `unsupported_minimum`, and drop the version parameter from `detection_coverage`, `answer_plans`, `answer_plan`, `verified_composer` and `composer_plan` and their callers <!-- completed: -->
-- [ ] Remove the interval from `validate_provenance` and the version from the pattern-syntax report line <!-- completed: -->
-- [ ] Delete the below-minimum refusal in `src/coding_agent/mod.rs` and change the probe warning and failed-probe coverage <!-- completed: -->
-- [ ] Update `src/coding_agent/detector.rs` `Detector::new` to take the backend's profile <!-- completed: -->
-- [ ] Change the creation/observer coverage consistency check and recovery's tested-coverage report in `src/runtime/` to the backend's profile <!-- completed: -->
-- [ ] Remove the native version from answer plans, the request-token binding, the `tested` capability requirement and input validation in `src/runtime/input.rs`, `src/runtime/input_client.rs` and `src/runtime/control.rs` <!-- completed: -->
-- [ ] In `src/runtime/observation.rs`, delete `ObservedRequest.native_version` and its comparison in the request equality, and the `let Some(version) = &self.run.native_version else { return Ok(None) }` guard before `answer_plans`, so a null-version run builds its `ObservedRequest` and sets `unplanned_question_episode` <!-- completed: -->
-- [ ] Delete `NativeVersion::precedence` and its unused `Ordering` import in `src/coding_agent/mod.rs` <!-- completed: -->
+- [x] Remove `min_version` from the raw and compiled profile types and add the one-profile-per-backend check <!-- completed: 2026-11-22T01:37 -->
+- [x] Replace `matching` with `profile(backend)`, delete `unsupported_minimum`, and drop the version parameter from `detection_coverage`, `answer_plans`, `answer_plan`, `verified_composer` and `composer_plan` and their callers <!-- completed: 2026-11-22T02:12 -->
+- [x] Remove the interval from `validate_provenance` and the version from the pattern-syntax report line <!-- completed: 2026-11-22T02:12 -->
+- [x] Delete the below-minimum refusal in `src/coding_agent/mod.rs` and change the probe warning and failed-probe coverage <!-- completed: 2026-11-22T01:37 -->
+- [x] Update `src/coding_agent/detector.rs` `Detector::new` to take the backend's profile <!-- completed: 2026-11-22T01:37 -->
+- [x] Change the creation/observer coverage consistency check and recovery's tested-coverage report in `src/runtime/` to the backend's profile <!-- completed: 2026-11-22T01:37 -->
+- [x] Remove the native version from answer plans, the request-token binding, the `tested` capability requirement and input validation in `src/runtime/input.rs`, `src/runtime/input_client.rs` and `src/runtime/control.rs` <!-- completed: 2026-11-22T01:37 -->
+- [x] In `src/runtime/observation.rs`, delete `ObservedRequest.native_version` and its comparison in the request equality, and the `let Some(version) = &self.run.native_version else { return Ok(None) }` guard before `answer_plans`, so a null-version run builds its `ObservedRequest` and sets `unplanned_question_episode` <!-- completed: 2026-11-22T01:37 -->
+- [x] Delete `NativeVersion::precedence` and its unused `Ordering` import in `src/coding_agent/mod.rs` <!-- completed: 2026-11-22T01:37 -->
 
 ### Step 5: Tests
 
-- [ ] Delete the tests listed under § Testing as removed behavior <!-- completed: -->
-- [ ] Add the `catalog.rs` tests from § Testing <!-- completed: -->
-- [ ] Add the `detector.rs` fingerprint tests <!-- completed: -->
-- [ ] Add the `coding_agent/mod.rs` probe and launch tests <!-- completed: -->
-- [ ] Add the `observation.rs` consistency table cases and the AskUserQuestion scenario <!-- completed: -->
-- [ ] Add the `input.rs` / `input_client.rs` inspection and null-version capability tests <!-- completed: -->
-- [ ] Delete fixtures (entry and screen) that no capability cites and no remaining test reads <!-- completed: -->
+- [x] Delete the tests listed under § Testing as removed behavior <!-- completed: 2026-11-22T02:12 -->
+- [x] Add the `catalog.rs` tests from § Testing <!-- completed: 2026-11-22T02:12 -->
+- [x] Add the `detector.rs` fingerprint tests <!-- completed: 2026-11-22T02:12 -->
+- [x] Add the `coding_agent/mod.rs` probe and launch tests <!-- completed: 2026-11-22T02:12 -->
+- [x] Add the `observation.rs` consistency table cases and the AskUserQuestion scenario <!-- completed: 2026-11-22T02:12 -->
+- [x] Add the `input.rs` / `input_client.rs` inspection and null-version capability tests <!-- completed: 2026-11-22T02:12 -->
+- [x] Delete fixtures (entry and screen) that no capability cites and no remaining test reads <!-- completed: 2026-11-22T02:29 -->
 
 ### Step 6: Validation
 
-- [ ] Run `mise //:test` <!-- completed: -->
-- [ ] Run `mise //:lint` <!-- completed: -->
-- [ ] Run `mise //docs:build` <!-- completed: -->
-- [ ] Run `git grep` over tracked files outside `design-docs/` for `min_version`, `unsupported_minimum`, `minimum supported version`, `Profile selection by minimum version`, `profile-selection-by-minimum-version`, `profile from`, `profiles from`, `profile boundar`, `These boundaries`, `profile interval`, `within its interval`, `first boundary`, `first profile`, `greatest minimum`, `selected profile`, `profile selected`, `version-selected`, `Versioned profiles`, `SemVer precedence` and `coverage unknown.`, and confirm nothing is found <!-- completed: -->
-- [ ] Recheck every § Documentation targets row against the shipped behavior <!-- completed: -->
-- [ ] Install the branch CLI through its mise task <!-- completed: -->
+- [x] Run `mise //:test` <!-- completed: 2026-11-22T02:31 -->
+- [x] Run `mise //:lint` <!-- completed: 2026-11-22T02:31 -->
+- [x] Run `mise //docs:build` <!-- completed: 2026-11-22T02:31 -->
+- [x] Run `git grep` over tracked files outside `design-docs/` for `min_version`, `unsupported_minimum`, `minimum supported version`, `Profile selection by minimum version`, `profile-selection-by-minimum-version`, `profile from`, `profiles from`, `profile boundar`, `These boundaries`, `profile interval`, `within its interval`, `first boundary`, `first profile`, `greatest minimum`, `selected profile`, `profile selected`, `version-selected`, `Versioned profiles`, `SemVer precedence` and `coverage unknown.`, and confirm nothing is found <!-- completed: 2026-11-22T02:31 -->
+- [x] Recheck every § Documentation targets row against the shipped behavior <!-- completed: 2026-11-22T02:31 -->
+- [x] Install the branch CLI through its mise task <!-- completed: 2026-11-22T03:09 -->
+  - Installed with `mise //:all-install` after the execution fleet was deleted, so the running fleet kept its installed binary; live verification used the built branch binary `target/release/cafleet`.
 
 ### Step 7: Live verification
 
-- [ ] Run the Question phase and record each observed value <!-- completed: -->
-- [ ] Run the Tabs phase and record each observed value <!-- completed: -->
-- [ ] Run 0000239's Permanent phase and record each observed value <!-- completed: -->
-- [ ] Run 0000239's Transient phase and record each observed value <!-- completed: -->
-- [ ] Replace 0000239's Step 9 "skipped" note with the observed Permanent and Transient values; check 0000239's live-verification Success Criterion when both pass, and otherwise leave it open with a pointer to the follow-up issue <!-- completed: -->
-- [ ] Open a follow-up issue for any 0000239 phase failure unrelated to detection and record it in both design docs <!-- completed: -->
+- [x] Run the Question phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed on the branch binary with Claude Code 2.1.323 on Herdr (dedicated database). The Director inbox received `interaction_opened` (interaction 1), `classification` `question`, `director_action.kind` `review_question`, rule `claude-ask-user-question`. `permission inspect`: `supported_choices` `[]`, `answer_capability` `unknown`, `capability_reason` `question has no tested answer`. After `1` on the native surface: `interaction_closed` with `not_visible` (rule `claude-idle-composer`), and `member show` reported `observation.eligibility` `composer_empty`.
+- [x] Run the Tabs phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed: the two-question form (`←  ☐ Color  ☐ Size  ✔ Submit  →`) through Tab, Left, both answers (`☒` headings) and `Submit answers` on the `Review your answers` screen produced exactly one `interaction_opened` (interaction 2) and one `interaction_closed` (`not_visible`).
+- [x] Run 0000239's Permanent phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed; values recorded in design 0000239 Step 9. A first attempt was discarded because the trigger could not be created before the second prompt queued; it still showed the queued prompt delivering after the form closed.
+- [x] Run 0000239's Transient phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed; values recorded in design 0000239 Step 9. M's Claude Code refused to run any `sleep`, so the hold started first and the request was typed into M's pane through the multiplexer (no database write); two earlier attempts were discarded because the form appeared before the hold.
+- [x] Replace 0000239's Step 9 "skipped" note with the observed Permanent and Transient values; check 0000239's live-verification Success Criterion when both pass, and otherwise leave it open with a pointer to the follow-up issue <!-- completed: 2026-11-22T02:57 -->
+- [x] Open a follow-up issue for any 0000239 phase failure unrelated to detection and record it in both design docs <!-- completed: 2026-11-22T02:57 -->
+  - No phase failed, so no follow-up issue was needed.
 
 ---
 
@@ -318,3 +322,6 @@ Step 1 (test-only capture driver and fixtures) deliberately precedes the documen
 |------|---------|
 | 2026-11-22 | Initial draft |
 | 2026-11-22 | Review round 1: per-half evidence for the tmux/herdr criterion and the 0000239 pass-or-recorded-failure criterion; `NativeVersion::precedence` deletion; `pending-sent` and `review-narrow` captures with a `W_min` per rule; herdr geometry, fixture id form and case endings; frame-guard mutation tests; the capture-first ordering exception; the `observation.rs` version guard; documentation rows for Native suggestions, Push notifications, Classification, the request token, the skill intro, cli.md fallback, director.md and the contributing guard paragraph; a wider removal search |
+| 2026-11-22 | Execution: captures use `script(1)` and a scratch converter instead of a native-capture driver mode, because one driver arm yields a single two-sample pair and needs an external orchestrator (user decision) |
+| 2026-11-22 | Execution (Director decisions on Step 1 captures): heading admits the column-0 tab bar and `☒`; footer admits several middle segments; the review rule ends at its `Cancel` row and requires `Submit answers`, since that screen has no footer or `Chat about this` row; `W_min` 60 (form) and 40 (review); `pending-sent` dropped because 2.1.322 mounts the form over a draft with no notice |
+| 2026-11-22 | Execution: Claude Code's `Model switch` question, drawn with the AskUserQuestion component, now opens a no-choice `question` (Success Criterion 7 amended) |

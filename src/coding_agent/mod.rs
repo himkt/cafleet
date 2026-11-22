@@ -18,7 +18,6 @@ pub(crate) use crate::coding_agent::detector::SemanticFingerprint;
 use crate::config::EnvLookup;
 use crate::error::CafleetError;
 use clap::ValueEnum;
-use std::cmp::Ordering;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -565,9 +564,6 @@ impl NativeVersion {
     pub(crate) fn parse(text: &str) -> Option<Self> {
         semver::Version::parse(text).ok().map(Self)
     }
-    pub(crate) fn precedence(&self, other: &Self) -> Ordering {
-        self.0.cmp_precedence(&other.0)
-    }
 }
 
 pub(crate) struct NativeLaunchIdentity {
@@ -580,31 +576,23 @@ pub(crate) fn native_launch_identity(
     backend: CodingAgent,
     probe: Result<String, CafleetError>,
     catalog: &ProfileCatalog,
-) -> Result<NativeLaunchIdentity, CafleetError> {
+) -> NativeLaunchIdentity {
+    let coverage = catalog.detection_coverage(backend);
     match probe {
-        Ok(version) => {
-            if let Some(minimum) = catalog.unsupported_minimum(backend, &version) {
-                return Err(CafleetError::App(format!(
-                    "unsupported native version for {}: {version}; minimum supported version is {minimum}",
-                    backend.name()
-                )));
-            }
-            let coverage = catalog.detection_coverage(backend, Some(&version));
-            Ok(NativeLaunchIdentity {
-                native_version: Some(version),
-                coverage,
-                warning: None,
-            })
-        }
-        Err(cause) => Ok(NativeLaunchIdentity {
+        Ok(version) => NativeLaunchIdentity {
+            native_version: Some(version),
+            coverage,
+            warning: None,
+        },
+        Err(cause) => NativeLaunchIdentity {
             native_version: None,
-            coverage: Coverage::Unknown,
+            coverage,
             warning: Some(format!(
-                "Warning: native version unavailable for {}: {}; coverage unknown.",
+                "Warning: native version unavailable for {}: {}.",
                 backend.name(),
                 cause.message()
             )),
-        }),
+        },
     }
 }
 
@@ -1417,7 +1405,7 @@ mod tests {
         }
 
         use crate::coding_agent::catalog::test_support::inspection_fixture_definition;
-        use crate::coding_agent::catalog::test_support::thresholds;
+        use crate::coding_agent::catalog::test_support::single_profiles;
 
         fn launched(
             backend: CodingAgent,
@@ -1425,67 +1413,94 @@ mod tests {
             catalog: &ProfileCatalog,
         ) -> NativeLaunchIdentity {
             native_launch_identity(backend, Ok(version.into()), catalog)
-                .unwrap_or_else(|error| panic!("{backend:?} {version}: {}", error.message()))
         }
 
         #[test]
-        fn native_launch_identity_selects_the_boundary_profile_from_its_minimum_onwards() {
-            let catalog = crate::coding_agent::catalog::test_support::load(&thresholds(&[
-                ("low", "1.0.0"),
-                ("high", "2.0.0"),
-            ]))
+        fn native_launch_identity_launches_every_parsed_version_with_the_backends_profile() {
+            let catalog = crate::coding_agent::catalog::test_support::load(&single_profiles(&[(
+                CodingAgent::Codex,
+                "only",
+            )]))
             .unwrap();
-            for version in ["1.0.0", "1.5.0", "2.0.0", "3.0.0-beta.1"] {
+            for version in ["0.0.1", "1.0.0", "1.5.0", "3.0.0-beta.1", "99.0.0+build.1"] {
                 let identity = launched(CodingAgent::Codex, version, &catalog);
-                assert_eq!(identity.native_version.as_deref(), Some(version));
                 assert_eq!(
-                    identity.coverage,
-                    catalog.detection_coverage(CodingAgent::Codex, Some(version)),
+                    identity.native_version.as_deref(),
+                    Some(version),
                     "{version}"
                 );
                 assert_eq!(identity.coverage, Coverage::Tested, "{version}");
                 assert_eq!(
                     identity.warning, None,
-                    "{version} launches without a version-mismatch warning"
+                    "{version} launches without a warning"
                 );
             }
         }
 
         #[test]
-        fn native_launch_identity_rejects_a_known_version_below_the_lowest_boundary() {
-            let several = crate::coding_agent::catalog::test_support::load(&thresholds(&[
-                ("high", "2.0.0"),
-                ("low", "1.0.0"),
-            ]))
-            .unwrap();
-            let error =
-                match native_launch_identity(CodingAgent::Codex, Ok("0.9.0".into()), &several) {
-                    Err(error) => error,
-                    Ok(_) => panic!("0.9.0 is below every boundary"),
-                };
-            assert_eq!(error.exit_code(), 1);
-            assert_eq!(
-                error.message(),
-                "unsupported native version for codex: 0.9.0; minimum supported version is 1.0.0"
-            );
+        fn native_launch_identity_launches_the_lowest_parsed_version_with_the_bundled_profile() {
+            let catalog = ProfileCatalog::bundled();
+            for &backend in CodingAgent::all() {
+                let identity = launched(backend, "0.0.1", catalog);
+                assert_eq!(
+                    identity.native_version.as_deref(),
+                    Some("0.0.1"),
+                    "{backend:?}"
+                );
+                assert_eq!(
+                    identity.coverage,
+                    catalog.detection_coverage(backend),
+                    "{backend:?}"
+                );
+                assert_eq!(identity.warning, None, "{backend:?}");
+            }
+            for backend in [
+                CodingAgent::Claude,
+                CodingAgent::Codex,
+                CodingAgent::Opencode,
+            ] {
+                assert_eq!(
+                    launched(backend, "0.0.1", catalog).coverage,
+                    Coverage::Tested,
+                    "{backend:?} declares detection"
+                );
+            }
         }
 
         #[test]
-        fn native_launch_identity_launches_a_failed_probe_with_unknown_coverage_and_its_warning() {
+        fn native_launch_identity_launches_a_failed_probe_with_the_profile_coverage_and_its_warning()
+         {
             let catalog = ProfileCatalog::bundled();
+            for backend in [CodingAgent::Claude, CodingAgent::Codex] {
+                let failed = native_launch_identity(
+                    backend,
+                    Err(CafleetError::App("probe exited with status 1".into())),
+                    catalog,
+                );
+                assert_eq!(failed.native_version, None, "{backend:?}");
+                assert_eq!(failed.coverage, Coverage::Tested, "{backend:?}");
+                assert_eq!(
+                    failed.warning,
+                    Some(format!(
+                        "Warning: native version unavailable for {}: probe exited with status 1.",
+                        backend.name()
+                    )),
+                    "{backend:?}"
+                );
+            }
+            let without_profile =
+                crate::coding_agent::catalog::test_support::load(&inspection_fixture_definition())
+                    .unwrap();
             let failed = native_launch_identity(
-                CodingAgent::Codex,
+                CodingAgent::Claude,
                 Err(CafleetError::App("probe exited with status 1".into())),
-                catalog,
-            )
-            .unwrap_or_else(|error| panic!("a failed probe still launches: {}", error.message()));
+                &without_profile,
+            );
             assert_eq!(failed.native_version, None);
             assert_eq!(failed.coverage, Coverage::Unknown);
             assert_eq!(
                 failed.warning.as_deref(),
-                Some(
-                    "Warning: native version unavailable for codex: probe exited with status 1; coverage unknown."
-                )
+                Some("Warning: native version unavailable for claude: probe exited with status 1.")
             );
         }
 

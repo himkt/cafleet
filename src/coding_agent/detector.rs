@@ -648,7 +648,6 @@ impl Detector {
             let capability = plan.capability();
             debug_assert!(
                 capability.backend() == self.backend
-                    && self.version.as_deref() == Some(capability.native_version())
                     && observed.rule_id == capability.request_rule_id(),
                 "answer plans come from the observed request rule of this detector's profile"
             );
@@ -683,7 +682,7 @@ impl Detector {
         Self {
             backend,
             version: version.map(str::to_owned),
-            profile: catalog.matching(backend, version).cloned(),
+            profile: catalog.profile(backend).cloned(),
         }
     }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
@@ -791,9 +790,8 @@ pub(crate) mod test_support {
     use crate::runtime::TerminalState;
 
     impl Detector {
-        /// Observes `screen` and matches the one `plan` against it; a plan of another backend,
-        /// version or request rule than the observation, which production never offers, matches
-        /// nothing.
+        /// Observes `screen` and matches the one `plan` against it; a plan of another backend
+        /// or request rule than the observation, which production never offers, matches nothing.
         pub(crate) fn match_answer(
             &self,
             screen: &ScreenSnapshot,
@@ -802,7 +800,6 @@ pub(crate) mod test_support {
             let observed = self.observe(screen)?;
             let capability = plan.capability();
             if capability.backend() != self.backend
-                || self.version.as_deref() != Some(capability.native_version())
                 || observed.rule_id != capability.request_rule_id()
             {
                 return Ok(None);
@@ -1254,7 +1251,6 @@ mod tests {
         let plan = catalog
             .answer_plan(
                 CodingAgent::Codex,
-                "0.0.1-synthetic",
                 "synthetic-permission",
                 &AnswerKey::Decision(PermissionDecision::Allow),
             )
@@ -2234,12 +2230,7 @@ mod tests {
             let focus = u16::try_from(forms.focus_row).unwrap();
             for (decision, id, choice) in forms.answers {
                 let plan = ProfileCatalog::bundled()
-                    .answer_plan(
-                        forms.backend,
-                        forms.version,
-                        forms.rule,
-                        &AnswerKey::Decision(decision),
-                    )
+                    .answer_plan(forms.backend, forms.rule, &AnswerKey::Decision(decision))
                     .expect("measured bundled answer plan");
                 let fixture = bundled_screen(id);
                 let screen = replay_native_fixture(&fixture, |_| {}, true, None);
@@ -2319,11 +2310,11 @@ mod tests {
         },
         IdleComposer {
             backend: CodingAgent::Codex,
-            version: CODEX_VERSION,
-            idle: "codex-0.163.0-idle-composer-1",
-            idle_rule: "codex-idle-composer",
-            composer_top: 32,
-            prompt_row: 32,
+            version: "0.167.0",
+            idle: "codex-0.167.0-composer-idle-empty-tmux-120-1",
+            idle_rule: "codex-suggestion-composer",
+            composer_top: 35,
+            prompt_row: 35,
             draft: "› hello",
             form: "codex-0.163.0-on-request-permission-1",
             form_rule: "codex-exec-approval",
@@ -2623,26 +2614,13 @@ mod tests {
             strict_idle: bool,
         }
 
-        /// The profile that serves `version`: the backend's profile with the highest
-        /// `min_version` at or below it.
-        fn applicable_profile<'a>(
-            definitions: &'a Value,
-            backend: &str,
-            version: &str,
-        ) -> &'a Value {
-            let version = crate::coding_agent::NativeVersion::parse(version).unwrap();
-            let minimum = |profile: &Value| {
-                crate::coding_agent::NativeVersion::parse(profile["min_version"].as_str().unwrap())
-                    .unwrap()
-            };
+        fn backend_profile<'a>(definitions: &'a Value, backend: &str) -> &'a Value {
             definitions["profiles"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .filter(|profile| profile["backend"] == backend)
-                .filter(|profile| minimum(profile).precedence(&version).is_le())
-                .max_by(|left, right| minimum(left).precedence(&minimum(right)))
-                .expect("a bundled fixture is served by a profile of its backend")
+                .find(|profile| profile["backend"] == backend)
+                .expect("a bundled fixture is served by its backend's profile")
         }
 
         fn line_patterns(rule: &Value) -> impl Iterator<Item = &str> {
@@ -2674,7 +2652,7 @@ mod tests {
             })
         }
 
-        /// Every bundled `-suggestion-` fixture with its serving profile's suggestion rule ids
+        /// Every bundled `-suggestion-` fixture with its backend profile's suggestion rule ids
         /// and whether that profile's idle rule is strict.
         fn suggestion_fixtures() -> Vec<SuggestionFixture> {
             let definitions = bundled_definitions();
@@ -2686,7 +2664,7 @@ mod tests {
                 .map(|fixture| {
                     let backend = fixture["backend"].as_str().unwrap();
                     let version = fixture["native_version"].as_str().unwrap();
-                    let profile = applicable_profile(&definitions, backend, version);
+                    let profile = backend_profile(&definitions, backend);
                     SuggestionFixture {
                         id: fixture["id"].as_str().unwrap().to_owned(),
                         backend: *CodingAgent::all()
@@ -2719,7 +2697,7 @@ mod tests {
                 .collect();
             assert!(
                 !strict.is_empty(),
-                "some suggestion fixture is served by a profile with a strict idle rule"
+                "some suggestion fixture belongs to a backend whose profile has a strict idle rule"
             );
             strict
         }
@@ -2838,6 +2816,114 @@ mod tests {
         comparable::<SemanticFingerprint>();
         assert_not_impl!(SemanticFingerprint: std::fmt::Debug, serde::Serialize);
     }
+    mod claude_ask_user_question {
+        use crate::coding_agent::detector::tests::*;
+
+        const ASK_VERSION: &str = "2.1.322";
+        const FORM_RULE: &str = "claude-ask-user-question";
+        const REVIEW_RULE: &str = "claude-ask-user-question-review";
+        const SINGLE: &str = "claude-2.1.322-ask-single-tmux-120-1";
+        const LIVE_COMPOSER_ROW: usize = 30;
+
+        fn observe_at(
+            version: &str,
+            id: &str,
+            change: impl FnOnce(&mut Vec<String>),
+        ) -> ScreenObservation {
+            observe_bundled(
+                CodingAgent::Claude,
+                version,
+                &replay_as_captured(id, change, None),
+            )
+        }
+
+        fn question(version: &str, id: &str, rule: &str) -> ScreenObservation {
+            let observed = observe_at(version, id, |_| {});
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::Question),
+                "{id}"
+            );
+            assert_eq!(observed.rule_id, rule, "{id}");
+            assert!(observed.fingerprint.is_some(), "{id}");
+            observed
+        }
+
+        #[test]
+        fn every_form_state_of_one_call_shares_the_single_form_fingerprint() {
+            const STATES: [(&str, &str); 9] = [
+                ("claude-2.1.322-ask-tabs-tmux-120-1", FORM_RULE),
+                ("claude-2.1.322-ask-tabs-tmux-120-2", FORM_RULE),
+                ("claude-2.1.322-ask-multi-tmux-120-1", FORM_RULE),
+                ("claude-2.1.322-ask-multi-tmux-120-2", FORM_RULE),
+                ("claude-2.1.322-ask-multi-tmux-120-3", FORM_RULE),
+                ("claude-2.1.322-ask-typing-tmux-120-1", FORM_RULE),
+                ("claude-2.1.322-ask-typing-tmux-120-2", FORM_RULE),
+                ("claude-2.1.322-ask-review-tmux-120-1", FORM_RULE),
+                ("claude-2.1.322-ask-review-tmux-120-2", REVIEW_RULE),
+            ];
+            let single = question(ASK_VERSION, SINGLE, FORM_RULE);
+            for (id, rule) in STATES {
+                let observed = question(ASK_VERSION, id, rule);
+                assert!(
+                    observed.fingerprint == single.fingerprint,
+                    "{id} shares the single form's episode identity"
+                );
+            }
+        }
+
+        #[test]
+        fn the_pending_notice_and_the_form_share_one_fingerprint() {
+            let notice = question(
+                "2.1.312",
+                "claude-2.1.312-question-pending-notice-1",
+                "claude-question-pending-notice",
+            );
+            for (id, rule) in [
+                (SINGLE, FORM_RULE),
+                ("claude-2.1.322-ask-pending-tmux-120-1", FORM_RULE),
+            ] {
+                let form = question(ASK_VERSION, id, rule);
+                assert!(form.fingerprint == notice.fingerprint, "{id}");
+            }
+        }
+
+        #[test]
+        fn the_live_form_with_a_live_composer_row_written_into_it_is_no_interaction() {
+            assert_eq!(observe_at(ASK_VERSION, SINGLE, |_| {}).rule_id, FORM_RULE);
+            for cursor in [None, Some((u16::try_from(LIVE_COMPOSER_ROW).unwrap(), 2))] {
+                let observed = observe_bundled(
+                    CodingAgent::Claude,
+                    ASK_VERSION,
+                    &replay_as_captured(
+                        SINGLE,
+                        |lines| lines[LIVE_COMPOSER_ROW] = "❯\u{a0}".into(),
+                        cursor,
+                    ),
+                );
+                assert_ne!(observed.rule_id, FORM_RULE, "{cursor:?}");
+                assert!(
+                    !matches!(observed.kind, ObservationKind::Interaction(_)),
+                    "{cursor:?}: {:?}",
+                    observed.kind
+                );
+            }
+        }
+
+        #[test]
+        fn the_live_form_with_the_transcript_viewer_footer_written_into_it_is_no_interaction() {
+            let observed = observe_at(ASK_VERSION, SINGLE, |lines| {
+                lines[LIVE_COMPOSER_ROW] = "  Showing detailed transcript · ctrl+o to toggle".into()
+            });
+            assert_ne!(observed.rule_id, FORM_RULE);
+            assert!(
+                !matches!(observed.kind, ObservationKind::Interaction(_)),
+                "{:?}",
+                observed.kind
+            );
+        }
+    }
+
     mod claude_2_1_312_guards {
         use crate::coding_agent::detector::tests::*;
 
@@ -3162,7 +3248,6 @@ mod tests {
             let plan = catalog
                 .answer_plan(
                     CodingAgent::Codex,
-                    VERSION,
                     RULE,
                     &AnswerKey::Decision(PermissionDecision::Allow),
                 )
@@ -3349,7 +3434,7 @@ mod tests {
         }
         fn plan(request: &str, key: AnswerKey) -> AnswerPlan {
             catalog()
-                .answer_plan(CodingAgent::Codex, VERSION, request, &key)
+                .answer_plan(CodingAgent::Codex, request, &key)
                 .expect("synthetic question profile plan")
         }
         fn choice_plan(id: &str) -> AnswerPlan {
@@ -3444,14 +3529,21 @@ mod tests {
         }
 
         #[test]
-        fn match_answer_refuses_a_choice_plan_from_another_profile_version() {
-            let other = Detector::new(&catalog(), CodingAgent::Codex, Some("0.0.2-synthetic"));
+        fn match_answer_binds_a_choice_plan_to_its_backend_whatever_the_run_version() {
+            let screen = screen_of(&question_fixture_form(&["accept"]));
+            for version in [Some("0.0.2-synthetic"), Some("99.0.0"), None] {
+                let run = Detector::new(&catalog(), CodingAgent::Codex, version);
+                assert!(
+                    run.match_answer(&screen, &choice_plan("decline"))
+                        .unwrap()
+                        .is_some(),
+                    "{version:?}"
+                );
+            }
+            let other = Detector::new(&catalog(), CodingAgent::Claude, Some(VERSION));
             assert!(
                 other
-                    .match_answer(
-                        &screen_of(&question_fixture_form(&["accept"])),
-                        &choice_plan("decline")
-                    )
+                    .match_answer(&screen, &choice_plan("decline"))
                     .unwrap()
                     .is_none()
             );
@@ -3494,7 +3586,6 @@ mod tests {
             let plan = catalog
                 .answer_plan(
                     CodingAgent::Codex,
-                    VERSION,
                     QUESTION_RULE,
                     &AnswerKey::Choice("decline".into()),
                 )
@@ -3571,7 +3662,6 @@ mod tests {
             let plan = catalog
                 .answer_plan(
                     CodingAgent::Codex,
-                    VERSION,
                     QUESTION_RULE,
                     &AnswerKey::Choice("decline".into()),
                 )
@@ -3620,7 +3710,6 @@ mod tests {
             gated_catalog()
                 .answer_plan(
                     CodingAgent::Codex,
-                    VERSION,
                     GATED_RULE,
                     &AnswerKey::Decision(decision),
                 )
@@ -4041,11 +4130,11 @@ mod tests {
     }
 
     #[test]
-    fn runtime_detector_fingerprints_carry_no_profile_element_across_profile_boundaries() {
-        let catalog = crate::coding_agent::catalog::test_support::load(&thresholds(&[
-            ("first", "1.0.0"),
-            ("second", "2.0.0"),
-        ]))
+    fn runtime_detector_fingerprints_carry_no_native_version() {
+        let catalog = crate::coding_agent::catalog::test_support::load(&single_profiles(&[(
+            CodingAgent::Codex,
+            "only",
+        )]))
         .unwrap();
         let mut rows = vec![
             "Live footer".to_owned(),
@@ -4054,12 +4143,12 @@ mod tests {
         ];
         rows.extend(lines("write disposable.txt"));
         let screen = terminal(&rows, 80, false).snapshot();
-        let [first, second] = ["1.4.2", "3.1.4"].map(|run| {
-            Detector::new(&catalog, CodingAgent::Codex, Some(run))
+        let [first, second, unprobed] = [Some("1.4.2"), Some("3.1.4"), None].map(|run| {
+            Detector::new(&catalog, CodingAgent::Codex, run)
                 .observe(&screen)
                 .unwrap()
         });
-        for observed in [&first, &second] {
+        for observed in [&first, &second, &unprobed] {
             assert_eq!(
                 observed.kind,
                 ObservationKind::Interaction(InteractionClass::PermissionRequest)
@@ -4067,8 +4156,8 @@ mod tests {
             assert!(observed.fingerprint.is_some());
         }
         assert!(
-            first.fingerprint == second.fingerprint,
-            "the permission request keeps its identity across profile boundaries"
+            first.fingerprint == second.fingerprint && first.fingerprint == unprobed.fingerprint,
+            "the permission request keeps its identity whatever the run's native version"
         );
     }
 
@@ -4573,7 +4662,6 @@ mod tests {
             let plan = ProfileCatalog::bundled()
                 .answer_plan(
                     CodingAgent::Opencode,
-                    VERSION,
                     PERMISSION_RULE,
                     &AnswerKey::Decision(PermissionDecision::Allow),
                 )
@@ -4990,12 +5078,7 @@ mod tests {
 
         fn plan(rule: &str, decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
-                .answer_plan(
-                    CodingAgent::Hermes,
-                    VERSION,
-                    rule,
-                    &AnswerKey::Decision(decision),
-                )
+                .answer_plan(CodingAgent::Hermes, rule, &AnswerKey::Decision(decision))
                 .expect("measured bundled Hermes answer plan")
         }
 
@@ -5336,22 +5419,6 @@ mod tests {
                 ObservationKind::ComposerEmpty
             );
         }
-
-        #[test]
-        fn claude_native_ghost_hint_and_an_actual_typed_character_have_distinct_eligibility() {
-            verify(
-                CodingAgent::Claude,
-                "2.1.319",
-                "claude-2.1.319-composer-prompt-key-probe-before-tapped-v2-tmux-120-1",
-                true,
-            );
-            verify(
-                CodingAgent::Claude,
-                "2.1.319",
-                "claude-2.1.319-composer-prompt-key-probe-after-tapped-v2-tmux-120-2",
-                false,
-            );
-        }
     }
 
     mod pi_profile {
@@ -5403,12 +5470,7 @@ mod tests {
 
         fn plan(decision: PermissionDecision) -> AnswerPlan {
             ProfileCatalog::bundled()
-                .answer_plan(
-                    CodingAgent::Pi,
-                    VERSION,
-                    REQUEST,
-                    &AnswerKey::Decision(decision),
-                )
+                .answer_plan(CodingAgent::Pi, REQUEST, &AnswerKey::Decision(decision))
                 .expect("measured bundled pi answer plan")
         }
 

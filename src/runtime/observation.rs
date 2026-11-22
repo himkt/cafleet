@@ -146,7 +146,6 @@ pub(crate) struct ObservedRequest {
     pub(super) answer_matches: Vec<AnswerMatch>,
     pub(super) episode_seq: i64,
     pub(super) classification: storage::InteractionClass,
-    pub(super) native_version: String,
     pub(super) request_rule_id: String,
     pub(super) semantic: SemanticFingerprint,
     pub(super) choices: Vec<String>,
@@ -157,7 +156,6 @@ impl ObservedRequest {
     pub(super) fn same_request(&self, other: &Self) -> bool {
         self.episode_seq == other.episode_seq
             && self.classification == other.classification
-            && self.native_version == other.native_version
             && self.request_rule_id == other.request_rule_id
             && self.semantic == other.semantic
             && self.choices == other.choices
@@ -219,7 +217,7 @@ impl ObservationController {
         let backend = crate::coding_agent::coding_agent(&run.backend)
             .ok_or_else(|| error("unknown observer backend"))?;
         ensure(
-            catalog.detection_coverage(backend, run.native_version.as_deref()) == run.coverage,
+            catalog.detection_coverage(backend) == run.coverage,
             "observer coverage mismatch",
         )?;
         Ok(Self {
@@ -355,14 +353,9 @@ impl ObservationController {
             let Some((episode_seq, classification)) = self.tracker.active_episode() else {
                 return Ok(None);
             };
-            let Some(version) = &self.run.native_version else {
-                return Ok(None);
-            };
             let backend = crate::coding_agent::coding_agent(&self.run.backend)
                 .expect("validated observer backend");
-            let plans = self
-                .catalog
-                .answer_plans(backend, version, &observed.rule_id);
+            let plans = self.catalog.answer_plans(backend, &observed.rule_id);
             if plans.is_empty() && classification == storage::InteractionClass::Question {
                 unplanned_question_episode = Some(episode_seq);
             }
@@ -374,7 +367,6 @@ impl ObservationController {
                 request_generation: self.request_generation,
                 episode_seq,
                 classification,
-                native_version: version.clone(),
                 request_rule_id: observed.rule_id.clone(),
                 semantic: first.semantic().clone(),
                 choices: first.choices().to_vec(),
@@ -7114,8 +7106,7 @@ pub(crate) mod native_capture {
                     ),
                 )?;
                 let policy = approved.backend.resolve_policy(approved.requested_mode())?;
-                let detection = ProfileCatalog::bundled()
-                    .detection_coverage(approved.backend, Some(&case.native_version));
+                let detection = ProfileCatalog::bundled().detection_coverage(approved.backend);
                 let settings = RunSettings {
                     database_identity_json: storage::database_identity(conn)?,
                     creator: ownership.driver.clone(),
@@ -8923,10 +8914,12 @@ mod tests {
             assert_eq!(reason, "process_exited");
         }
         #[test]
-        fn service_later_version_profile_emits_no_coverage_unknown_while_no_profile_still_does() {
+        fn service_run_of_a_backend_with_a_profile_emits_no_coverage_unknown_whatever_its_version()
+        {
             for (native, coverage, expected) in [
                 (Some("0.164.0"), storage::Coverage::Tested, 0),
-                (None, storage::Coverage::Unknown, 1),
+                (Some("0.0.1"), storage::Coverage::Tested, 0),
+                (None, storage::Coverage::Tested, 0),
             ] {
                 let mut fixture = ServiceFixture::configured(false, move |fixture, _| {
                     fixture
@@ -9020,13 +9013,22 @@ mod tests {
         use crate::runtime::observation::*;
         use crate::runtime::writer::test_support::WriterFixture;
 
-        fn initialize(native_version: Option<&str>, coverage: storage::Coverage) -> Result<()> {
+        fn initialize(
+            backend: &str,
+            native_version: Option<&str>,
+            coverage: storage::Coverage,
+        ) -> Result<()> {
             let WriterFixture { mut fixture, .. } = WriterFixture::new();
             fixture
                 .conn
                 .execute(
-                    "UPDATE member_runs SET native_version=?1,coverage=?2 WHERE run_id=?3",
-                    rusqlite::params![native_version, coverage.as_str(), fixture.run.run_id],
+                    "UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3 WHERE run_id=?4",
+                    rusqlite::params![
+                        backend,
+                        native_version,
+                        coverage.as_str(),
+                        fixture.run.run_id
+                    ],
                 )
                 .unwrap();
             fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
@@ -9037,21 +9039,54 @@ mod tests {
         }
 
         #[test]
-        fn observer_initialization_requires_the_selected_detection_coverage() {
-            for (native_version, coverage, accepted) in [
-                (Some("0.0.1-synthetic"), storage::Coverage::Tested, true),
-                (Some("0.0.2-synthetic"), storage::Coverage::Tested, true),
-                (Some("0.0.1-synthetic"), storage::Coverage::Unknown, false),
-                (Some("0.0.0-below"), storage::Coverage::Tested, false),
-                (Some("0.0.0-below"), storage::Coverage::Unknown, true),
-                (None, storage::Coverage::Tested, false),
-                (None, storage::Coverage::Unknown, true),
+        fn observer_initialization_requires_the_backends_profile_detection_coverage() {
+            for (backend, native_version, coverage, accepted) in [
+                (
+                    "codex",
+                    Some("0.0.1-synthetic"),
+                    storage::Coverage::Tested,
+                    true,
+                ),
+                (
+                    "codex",
+                    Some("0.0.2-synthetic"),
+                    storage::Coverage::Tested,
+                    true,
+                ),
+                (
+                    "codex",
+                    Some("0.0.0-below"),
+                    storage::Coverage::Tested,
+                    true,
+                ),
+                ("codex", None, storage::Coverage::Tested, true),
+                (
+                    "codex",
+                    Some("0.0.1-synthetic"),
+                    storage::Coverage::Unknown,
+                    false,
+                ),
+                ("codex", None, storage::Coverage::Unknown, false),
+                (
+                    "claude",
+                    Some("0.0.1-synthetic"),
+                    storage::Coverage::Unknown,
+                    true,
+                ),
+                ("claude", None, storage::Coverage::Unknown, true),
+                (
+                    "claude",
+                    Some("0.0.1-synthetic"),
+                    storage::Coverage::Tested,
+                    false,
+                ),
+                ("claude", None, storage::Coverage::Tested, false),
             ] {
-                let result = initialize(native_version, coverage);
+                let result = initialize(backend, native_version, coverage);
                 assert_eq!(
                     result.is_ok(),
                     accepted,
-                    "{native_version:?} {coverage:?}: {:?}",
+                    "{backend} {native_version:?} {coverage:?}: {:?}",
                     result.err().map(|error| error.message().to_string())
                 );
             }
@@ -10431,6 +10466,90 @@ mod tests {
             assert_eq!(second[1].kind, RuntimeEventKind::InteractionOpened);
             assert_eq!(second[1].evidence_json["rule_id"], READ);
             assert_ne!(second[1].episode_seq, first[0].episode_seq);
+        }
+    }
+
+    mod bundled_claude_ask_user_question_tracker {
+        use crate::runtime::observation::tests::*;
+        use serde_json::Value;
+
+        const FORM_RULE: &str = "claude-ask-user-question";
+        const REVIEW_RULE: &str = "claude-ask-user-question-review";
+
+        fn observe(id: &str) -> ScreenObservation {
+            let fixture = bundled_fixture(id);
+            let document: Value = serde_json::from_str(&fixture).unwrap();
+            let screen = replay_native_fixture(
+                &fixture,
+                |_| {},
+                document["alternate_screen"].as_bool().unwrap(),
+                None,
+            );
+            Detector::new(
+                ProfileCatalog::bundled(),
+                CodingAgent::Claude,
+                Some("2.1.322"),
+            )
+            .observe(&screen)
+            .unwrap()
+        }
+
+        fn replay_run() -> Run {
+            Run::new(observe)
+        }
+
+        #[test]
+        fn tracker_keeps_one_question_episode_across_the_form_and_closes_it_on_the_idle_composer() {
+            let mut run = replay_run();
+            let opened = run.episode("claude-2.1.322-ask-tabs-tmux-120-1", 0, 300);
+            assert_eq!(opened.len(), 1, "{opened:?}");
+            assert_eq!(opened[0].kind, RuntimeEventKind::InteractionOpened);
+            assert_eq!(opened[0].classification, Some(InteractionClass::Question));
+            assert_eq!(opened[0].evidence_json["rule_id"], FORM_RULE);
+            let mut at = 350;
+            for id in [
+                "claude-2.1.322-ask-tabs-tmux-120-2",
+                "claude-2.1.322-ask-review-tmux-120-1",
+                "claude-2.1.322-ask-review-tmux-120-2",
+            ] {
+                let moved = run.episode(id, at, at + 300);
+                assert!(moved.is_empty(), "{id} keeps the episode: {moved:?}");
+                at += 350;
+            }
+            let closed = run.episode("claude-2.1.322-ask-single-closed-tmux-120-1", at, at + 550);
+            assert_eq!(closed.len(), 1, "{closed:?}");
+            assert_eq!(closed[0].kind, RuntimeEventKind::InteractionClosed);
+            assert_eq!(closed[0].episode_seq, opened[0].episode_seq);
+            assert_eq!(
+                closed[0].close_reason,
+                Some(InteractionCloseReason::NotVisible)
+            );
+        }
+
+        #[test]
+        fn tracker_opens_the_review_screen_as_the_same_question_class() {
+            let mut run = replay_run();
+            let opened = run.episode("claude-2.1.322-ask-review-tmux-120-2", 0, 300);
+            assert_eq!(opened.len(), 1, "{opened:?}");
+            assert_eq!(opened[0].classification, Some(InteractionClass::Question));
+            assert_eq!(opened[0].evidence_json["rule_id"], REVIEW_RULE);
+        }
+
+        #[test]
+        fn tracker_continues_the_pending_notice_into_the_form_in_one_episode() {
+            let mut run = replay_run();
+            let notice = run.episode("claude-2.1.312-question-pending-notice-1", 0, 300);
+            assert_eq!(notice.len(), 1, "{notice:?}");
+            assert_eq!(notice[0].classification, Some(InteractionClass::Question));
+            assert_eq!(
+                notice[0].evidence_json["rule_id"],
+                "claude-question-pending-notice"
+            );
+            let form = run.episode("claude-2.1.322-ask-pending-tmux-120-1", 350, 900);
+            assert!(
+                form.is_empty(),
+                "the form continues the notice's episode: {form:?}"
+            );
         }
     }
 }
