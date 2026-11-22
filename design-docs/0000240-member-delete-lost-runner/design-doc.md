@@ -1,7 +1,7 @@
 # Member deletion of a lost runner
 
 **Status**: Approved
-**Progress**: 8/17 tasks complete
+**Progress**: 17/17 tasks complete
 **Last Updated**: 2026-11-22
 
 ## Overview
@@ -10,11 +10,11 @@
 
 ## Success Criteria
 
-- [ ] Deleting a member whose run is non-terminal and whose recorded owner process is not alive sends no shutdown request, records `runner_lost` through recovery, closes the pane and deregisters the member.
-- [ ] Deleting a member whose recorded owner process is alive still requests shutdown first; a refused control socket from a live owner keeps today's `Error: member runtime: ECONNREFUSED: Connection refused` and leaves the member registered.
-- [ ] `fleet delete` follows the same rule for every member it ends.
-- [ ] One table-driven unit test in `src/cli/fleet.rs` covers both cases through `delete_fleet_with_host`; `mise //:test` and `mise //:lint` pass.
-- [ ] `SPEC.md`, `docs/docs/concepts/members.md` and `assets/skills/cafleet/reference/cli.md` describe the conditional shutdown; `mise //docs:build` passes.
+- [x] Deleting a member whose run is non-terminal and whose recorded owner process is not alive sends no shutdown request, records `runner_lost` through recovery, closes the pane and deregisters the member.
+- [x] Deleting a member whose recorded owner process is alive still requests shutdown first; a refused control socket from a live owner keeps today's `Error: member runtime: ECONNREFUSED: Connection refused` and leaves the member registered.
+- [x] `fleet delete` follows the same rule for every member it ends.
+- [x] One table-driven unit test in `src/cli/fleet.rs` covers both cases through `delete_fleet_with_host`; `mise //:test` and `mise //:lint` pass.
+- [x] `SPEC.md`, `docs/docs/concepts/members.md` and `assets/skills/cafleet/reference/cli.md` describe the conditional shutdown; `mise //docs:build` passes.
 
 ---
 
@@ -140,21 +140,21 @@ Deletion tests built on `Case::new` or `runtime::test_support::Fixture::new` rec
 
 ### Step 3: Add the failing test
 
-- [ ] Add `runner_recovery_deletion_of_a_non_terminal_run_requests_shutdown_only_from_a_live_owner` with the `gone_runner` and `live_owner_refuses` cases to `src/cli/fleet.rs` `mod tests` > `mod recovery` <!-- completed: -->
-- [ ] Run `mise //:test runner_recovery_deletion_of_a_non_terminal_run` and confirm `gone_runner` fails with calls `["shutdown"]` and the ECONNREFUSED error <!-- completed: -->
+- [x] Add `runner_recovery_deletion_of_a_non_terminal_run_requests_shutdown_only_from_a_live_owner` with the `gone_runner` and `live_owner_refuses` cases to `src/cli/fleet.rs` `mod tests` > `mod recovery` <!-- completed: 2026-11-22T00:40 -->
+- [x] Run `mise //:test runner_recovery_deletion_of_a_non_terminal_run` and confirm `gone_runner` fails with calls `["shutdown"]` and the ECONNREFUSED error <!-- completed: 2026-11-22T00:40 -->
 
 ### Step 4: Gate the shutdown request
 
-- [ ] Add `&& runtime.run.owner_process().is_alive()?` to the shutdown condition in `end_member` <!-- completed: -->
-- [ ] Set the replacement run's `owner_pid`/`owner_start_identity` from `ProcessIdentity::current()` in `runner_review_fleet_changed_run_on_the_same_pane_preserves_the_new_run_identity` per § Existing test adjustment <!-- completed: -->
-- [ ] Run the new test and `runner_review_fleet_changed_run_on_the_same_pane_preserves_the_new_run_identity`, and confirm they pass <!-- completed: -->
+- [x] Add `&& runtime.run.owner_process().is_alive()?` to the shutdown condition in `end_member` <!-- completed: 2026-11-22T00:40 -->
+- [x] Set the replacement run's `owner_pid`/`owner_start_identity` from `ProcessIdentity::current()` in `runner_review_fleet_changed_run_on_the_same_pane_preserves_the_new_run_identity` per § Existing test adjustment <!-- completed: 2026-11-22T00:40 -->
+- [x] Run the new test and `runner_review_fleet_changed_run_on_the_same_pane_preserves_the_new_run_identity`, and confirm they pass <!-- completed: 2026-11-22T00:40 -->
 
 ### Step 5: Validate
 
-- [ ] Run `mise //:test` and confirm every test passes <!-- completed: -->
-- [ ] Run `mise //:lint` and confirm it passes <!-- completed: -->
-- [ ] Reinstall the CLI through its `mise tasks --all` install task <!-- completed: -->
-- [ ] Commit the design doc with the implementation per the project git-workflow rule <!-- completed: -->
+- [x] Run `mise //:test` and confirm every test passes <!-- completed: 2026-11-22T00:40 -->
+- [x] Run `mise //:lint` and confirm it passes <!-- completed: 2026-11-22T00:40 -->
+- [x] Reinstall the CLI through its `mise tasks --all` install task <!-- completed: 2026-11-22T00:40 -->
+- [x] Commit the design doc with the implementation per the project git-workflow rule <!-- completed: 2026-11-22T00:42 -->
 
 ---
 

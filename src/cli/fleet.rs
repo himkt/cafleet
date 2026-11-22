@@ -526,6 +526,7 @@ pub(crate) fn end_member(
         scope(conn)?;
         if let Some(runtime) = crate::broker::runtime::member_runtime(conn, member_id)?
             && !runtime.run.status.terminal()
+            && runtime.run.owner_process().is_alive()?
         {
             let outcome = host.shutdown(conn, &runtime.run, deadline)?;
             if outcome.cleanup_state != CleanupState::Complete {
