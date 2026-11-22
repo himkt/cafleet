@@ -1,7 +1,7 @@
 # Single bundled profile per backend and Claude AskUserQuestion detection
 
 **Status**: Approved
-**Progress**: 33/40 tasks complete
+**Progress**: 39/40 tasks complete
 **Last Updated**: 2026-11-22
 
 ## Overview
@@ -301,12 +301,17 @@ Step 1 (captures and fixtures) deliberately precedes the documentation step requ
 
 ### Step 7: Live verification
 
-- [ ] Run the Question phase and record each observed value <!-- completed: -->
-- [ ] Run the Tabs phase and record each observed value <!-- completed: -->
-- [ ] Run 0000239's Permanent phase and record each observed value <!-- completed: -->
-- [ ] Run 0000239's Transient phase and record each observed value <!-- completed: -->
-- [ ] Replace 0000239's Step 9 "skipped" note with the observed Permanent and Transient values; check 0000239's live-verification Success Criterion when both pass, and otherwise leave it open with a pointer to the follow-up issue <!-- completed: -->
-- [ ] Open a follow-up issue for any 0000239 phase failure unrelated to detection and record it in both design docs <!-- completed: -->
+- [x] Run the Question phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed on the branch binary with Claude Code 2.1.323 on Herdr (dedicated database). The Director inbox received `interaction_opened` (interaction 1), `classification` `question`, `director_action.kind` `review_question`, rule `claude-ask-user-question`. `permission inspect`: `supported_choices` `[]`, `answer_capability` `unknown`, `capability_reason` `question has no tested answer`. After `1` on the native surface: `interaction_closed` with `not_visible` (rule `claude-idle-composer`), and `member show` reported `observation.eligibility` `composer_empty`.
+- [x] Run the Tabs phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed: the two-question form (`←  ☐ Color  ☐ Size  ✔ Submit  →`) through Tab, Left, both answers (`☒` headings) and `Submit answers` on the `Review your answers` screen produced exactly one `interaction_opened` (interaction 2) and one `interaction_closed` (`not_visible`).
+- [x] Run 0000239's Permanent phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed; values recorded in design 0000239 Step 9. A first attempt was discarded because the trigger could not be created before the second prompt queued; it still showed the queued prompt delivering after the form closed.
+- [x] Run 0000239's Transient phase and record each observed value <!-- completed: 2026-11-22T02:57 -->
+  - Passed; values recorded in design 0000239 Step 9. M's Claude Code refused to run any `sleep`, so the hold started first and the request was typed into M's pane through the multiplexer (no database write); two earlier attempts were discarded because the form appeared before the hold.
+- [x] Replace 0000239's Step 9 "skipped" note with the observed Permanent and Transient values; check 0000239's live-verification Success Criterion when both pass, and otherwise leave it open with a pointer to the follow-up issue <!-- completed: 2026-11-22T02:57 -->
+- [x] Open a follow-up issue for any 0000239 phase failure unrelated to detection and record it in both design docs <!-- completed: 2026-11-22T02:57 -->
+  - No phase failed, so no follow-up issue was needed.
 
 ---
 
