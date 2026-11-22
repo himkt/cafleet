@@ -3293,10 +3293,8 @@ pub(crate) mod test_support {
                 0o700
             );
             synthetic(fixture, spec);
-            let bundled = crate::coding_agent::ProfileCatalog::bundled().capabilities(
-                crate::coding_agent::CodingAgent::Codex,
-                Some("0.0.1-synthetic"),
-            );
+            let bundled = crate::coding_agent::ProfileCatalog::bundled()
+                .capabilities(crate::coding_agent::CodingAgent::Codex);
             fixture
                 .conn
                 .execute(
@@ -3919,9 +3917,7 @@ pub(crate) mod test_support {
                     artifacts,
                     lock,
                 } = WriterFixture::new();
-                let coverage = catalog
-                    .capabilities(native.backend, Some(&native.version))
-                    .detection;
+                let coverage = catalog.capabilities(native.backend).detection;
                 fixture
                     .conn
                     .execute(
@@ -3996,7 +3992,7 @@ pub(crate) mod test_support {
                 .unwrap();
                 let redraw = redraw.map(|id| {
                     let plan = catalog
-                        .composer_plan(native.backend, &native.version, ComposerOperation::Prompt)
+                        .composer_plan(native.backend, ComposerOperation::Prompt)
                         .expect("a redraw after submit needs the profile's prompt plan");
                     let submit = plan
                         .stages("x", LiteralFraming::Plain)
@@ -5722,7 +5718,6 @@ mod tests {
             ProfileCatalog::bundled()
                 .composer_plan(
                     crate::coding_agent::CodingAgent::Codex,
-                    "0.167.0",
                     ComposerOperation::Prompt,
                 )
                 .unwrap()

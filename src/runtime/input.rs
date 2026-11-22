@@ -1413,7 +1413,6 @@ impl InputCoordinator {
         let capability = selection.plan.capability();
         ensure(
             capability.backend().name() == self.run.backend
-                && Some(capability.native_version()) == self.run.native_version.as_deref()
                 && view.event.payload_json["evidence"]["rule_id"].as_str()
                     == Some(capability.request_rule_id())
                 && capability.key() == &request.key,
@@ -1895,11 +1894,9 @@ impl InputCoordinator {
     }
 
     fn verified_composer(&self, operation: ComposerOperation) -> bool {
-        self.services.catalog.verified_composer(
-            self.backend,
-            self.run.native_version.as_deref(),
-            operation,
-        )
+        self.services
+            .catalog
+            .verified_composer(self.backend, operation)
     }
 
     fn attempt_requirement(&self, operation: ComposerOperation, stages: usize) -> Result<Duration> {
@@ -2335,16 +2332,9 @@ impl InputCoordinator {
             kind,
             literal,
         } = input;
-        let composer = match self.run.native_version.as_deref() {
-            Some(native) => {
-                let backend = coding_agent(&self.run.backend)
-                    .ok_or_else(|| error("unknown input backend"))?;
-                self.services
-                    .catalog
-                    .composer_plan(backend, native, operation)
-            }
-            None => None,
-        };
+        let backend =
+            coding_agent(&self.run.backend).ok_or_else(|| error("unknown input backend"))?;
+        let composer = self.services.catalog.composer_plan(backend, operation);
         let (method, reason) = match &composer {
             Some(_) if Self::composer_eligible(observation) => {
                 (storage::DeliveryMethod::Profile, None)
@@ -6041,9 +6031,7 @@ mod tests {
                 };
                 let literal = "printf native-verification";
                 let catalog = ProfileCatalog::bundled().clone();
-                let plan = catalog
-                    .composer_plan(backend, native_version, operation)
-                    .unwrap();
+                let plan = catalog.composer_plan(backend, operation).unwrap();
                 assert!(plan.plain_literal_allowed(literal));
                 let expected = plan
                     .stages(literal, LiteralFraming::Plain)
@@ -6054,7 +6042,7 @@ mod tests {
                     expected.clone(),
                     HostProfile {
                         backend,
-                        native_version,
+                        native_version: Some(native_version),
                         size: TerminalSize {
                             rows: u16::try_from(fixture["rows"].as_u64().unwrap()).unwrap(),
                             cols: u16::try_from(fixture["cols"].as_u64().unwrap()).unwrap(),
@@ -6158,7 +6146,7 @@ mod tests {
             }
 
             #[test]
-            fn measured_working_composers_and_claude_ghost_hint_confirm_written_submit_keys() {
+            fn measured_working_composers_confirm_written_submit_keys() {
                 use crate::coding_agent::detector::test_support::{
                     bundled_screen, native_fixture_bytes,
                 };
@@ -6167,7 +6155,6 @@ mod tests {
                     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61",
                     "hermes-2026.9.24-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7",
                     "hermes-2026.9.24-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7",
-                    "claude-2.1.319-composer-prompt-key-probe-before-tapped-v2-tmux-120-1",
                 ] {
                     after_native_submit(fixture_id, |host| {
                         host.show(native_fixture_bytes(&bundled_screen(fixture_id)));
@@ -9878,7 +9865,7 @@ mod tests {
 
             pub(in crate::runtime::input) struct HostProfile<'a> {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
-                pub(crate) native_version: &'a str,
+                pub(crate) native_version: Option<&'a str>,
                 pub(crate) size: TerminalSize,
                 pub(crate) screen: Vec<u8>,
                 pub(crate) stage_settle: Duration,
@@ -9892,7 +9879,7 @@ mod tests {
                 pub(crate) fn metadata() -> Self {
                     Self {
                         backend: crate::coding_agent::CodingAgent::Codex,
-                        native_version: VERSION,
+                        native_version: Some(VERSION),
                         size: TerminalSize { rows: 24, cols: 80 },
                         screen: SCREEN.to_vec(),
                         stage_settle: TEST_STAGE_SETTLE,
@@ -10074,7 +10061,7 @@ mod tests {
 
             pub(in crate::runtime::input) struct RunSelection<'a> {
                 pub(crate) backend: crate::coding_agent::CodingAgent,
-                pub(crate) native_version: &'a str,
+                pub(crate) native_version: Option<&'a str>,
             }
 
             struct InputFixtureWriterHooks;
@@ -10115,8 +10102,7 @@ mod tests {
                     let mut writer_fixture = WriterFixture::new();
                     let fixture = &mut writer_fixture.fixture;
                     if let Some(selection) = selection {
-                        let selected =
-                            catalog.capabilities(selection.backend, Some(selection.native_version));
+                        let selected = catalog.capabilities(selection.backend);
                         let coverage = selected.detection;
                         fixture.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3 WHERE run_id=?4",rusqlite::params![selection.backend.name(),selection.native_version,coverage.as_str(),fixture.run.run_id]).unwrap();
                         fixture
@@ -10269,8 +10255,7 @@ mod tests {
                     } = profile;
                     let catalog = catalog();
                     let composer_selected =
-                        catalog.capabilities(backend, Some(native_version)).composer
-                            == storage::Coverage::Tested;
+                        catalog.capabilities(backend).composer == storage::Coverage::Tested;
                     let RunnerFixture {
                         mut fixture,
                         artifacts,
@@ -10725,7 +10710,7 @@ mod tests {
                 b"unused-program~".to_vec(),
                 HostProfile {
                     backend: crate::coding_agent::CodingAgent::Claude,
-                    native_version,
+                    native_version: Some(native_version),
                     size: crate::runtime::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -10747,7 +10732,8 @@ mod tests {
                 b"\r".to_vec(),
                 HostProfile {
                     backend: crate::coding_agent::CodingAgent::Opencode,
-                    native_version: "2.1.4",
+                    native_version: Some("2.1.4"),
+
                     size: crate::runtime::TerminalSize {
                         rows: 36,
                         cols: 120,
@@ -10880,6 +10866,37 @@ mod tests {
         }
 
         #[test]
+        fn a_run_without_a_recorded_native_version_gets_a_tested_permission_answer() {
+            with_definition_profile(
+                inspection_fixture_definition(),
+                b"unused-program~".to_vec(),
+                HostProfile {
+                    native_version: None,
+                    ..HostProfile::metadata()
+                },
+                |h, calls, _| {
+                    assert_eq!(h.fixture.run.native_version, None);
+                    assert_eq!(h.fixture.run.coverage, Coverage::Tested);
+                    let ids = stable_form(h);
+                    let value = inspect(h, ids);
+                    assert_eq!(value.native_version, None);
+                    assert_eq!(value.answer_capability, Coverage::Tested);
+                    assert!(
+                        value.capability_reason.is_none(),
+                        "{:?}",
+                        value.capability_reason
+                    );
+                    assert_eq!(
+                        value.supported_decisions,
+                        [PermissionDecision::Allow, PermissionDecision::Deny]
+                    );
+                    assert_eq!(value.request_token.as_ref().map(String::len), Some(64));
+                    assert_eq!(calls.load(Ordering::SeqCst), 1);
+                },
+            );
+        }
+
+        #[test]
         fn events_and_permission_inspection_carry_metadata_only_evidence() {
             with_inspection(|h, _, _| {
                 let ids = stable_form(h);
@@ -10929,7 +10946,7 @@ mod tests {
                 moved.observed.output_seq += 1;
                 assert!(current.same_request(&moved), "output_seq stays unbound");
                 type Mutation<'a> = (&'a str, Box<dyn Fn(&mut CurrentRequest) + 'a>);
-                let mutations: [Mutation; 13] = [
+                let mutations: [Mutation; 12] = [
                     (
                         "request_generation",
                         Box::new(|r| r.observed.request_generation += 1),
@@ -10944,10 +10961,6 @@ mod tests {
                         Box::new(|r| {
                             r.observed.classification = storage::InteractionClass::Question
                         }),
-                    ),
-                    (
-                        "native_version",
-                        Box::new(|r| r.observed.native_version.push('x')),
                     ),
                     (
                         "request_rule_id",
@@ -11925,6 +11938,154 @@ mod tests {
                 assert!(h.try_advance().unwrap().is_none());
                 assert_eq!(h.pty.offers.len(), 2);
             });
+        }
+
+        mod ask_user_question {
+            use crate::runtime::input::tests::permission_response_contracts::*;
+
+            const IDLE: &str = "claude-2.1.302-auto-idle-composer-1";
+            const FORM: &str = "claude-2.1.322-ask-single-tmux-120-1";
+            const LITERAL: &str = "queued behind the AskUserQuestion form";
+
+            fn fixture(id: &str) -> Vec<u8> {
+                native_fixture_bytes(
+                    &crate::coding_agent::detector::test_support::bundled_screen(id),
+                )
+            }
+
+            fn opened_ids(h: &mut Host) -> (i64, i64, i64, i64) {
+                loop {
+                    h.drain();
+                    let ids =
+                        crate::runtime::input::tests::permission_inspection_contracts::current_ids(
+                            h,
+                        );
+                    if let Some(ids) = ids {
+                        return ids;
+                    }
+                    assert!(
+                        h.clock.now() < h.until,
+                        "the AskUserQuestion form opens within the fixture deadline"
+                    );
+                    h.clock.advance(Duration::from_millis(2));
+                }
+            }
+
+            fn interaction(h: &Host, interaction_id: i64) -> (String, Option<String>) {
+                h.fixture
+                    .conn
+                    .query_row(
+                        "SELECT classification,close_reason FROM member_interactions WHERE interaction_id=?1",
+                        [interaction_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap()
+            }
+
+            #[test]
+            fn ask_user_question_inspection_lists_no_choice_and_reports_no_tested_answer() {
+                with_claude_host("2.1.322", IDLE, |h, calls, _| {
+                    h.child_output(fixture(FORM));
+                    let ids = opened_ids(h);
+                    let value = inspect(h, ids);
+                    assert_eq!(
+                        value.classification,
+                        Some(storage::InteractionClass::Question)
+                    );
+                    assert_eq!(value.visibility, Visibility::Visible);
+                    assert_eq!(value.answer_capability, storage::Coverage::Unknown);
+                    assert_eq!(
+                        value.capability_reason.as_deref(),
+                        Some("question has no tested answer")
+                    );
+                    assert!(value.supported_choices.is_empty());
+                    assert!(value.supported_decisions.is_empty());
+                    assert!(value.request_token.is_none());
+                    assert!(value.answer_rule_id.is_none());
+                    assert_eq!(value.evidence["rule_id"], "claude-ask-user-question");
+                    assert_eq!(
+                        calls.load(Ordering::SeqCst),
+                        0,
+                        "no request token is minted"
+                    );
+                    assert_eq!(input_rows(h), 0);
+                    assert!(h.pty.offers.is_empty());
+                });
+            }
+
+            #[test]
+            fn a_prompt_during_the_form_queues_with_zero_bytes_and_drains_once_after_it_closes() {
+                with_claude_host("2.1.322", IDLE, |h, _, _| {
+                    h.child_output(fixture(FORM));
+                    let (_, interaction_id, _, _) = opened_ids(h);
+                    assert!(matches!(
+                        h.controller.health(&h.writer).eligibility,
+                        InputEligibility::Hold(_)
+                    ));
+                    let mut program = LITERAL.as_bytes().to_vec();
+                    program.push(b'\r');
+                    h.pty.expect_program(program.clone());
+                    h.confirm_after_programs([program.clone()]);
+                    let mut prompt = h.request("prompt:ask-user-question");
+                    prompt.operation = InputControlOperation::SubmitPrompt(SubmitInput {
+                        operation_key: "prompt:ask-user-question".into(),
+                        input_kind: storage::InputKind::Prompt,
+                        literal: LITERAL.into(),
+                    });
+                    let Some(InputControlReply::Submission(queued)) = h.handle(prompt).unwrap()
+                    else {
+                        panic!("a prompt during the form returns a Submission reply")
+                    };
+                    assert_eq!(
+                        (queued.status, queued.stage),
+                        (SubmissionStatus::Queued, SubmissionStage::ZeroBytes)
+                    );
+                    assert_eq!(
+                        queued
+                            .delivery
+                            .as_ref()
+                            .and_then(|delivery| delivery.reason.as_deref()),
+                        Some("interaction_open")
+                    );
+                    let id = queued.input_id.expect("queued work has a durable input ID");
+                    for _ in 0..20 {
+                        h.drain();
+                        h.advance();
+                    }
+                    assert!(
+                        h.pty.offers.is_empty(),
+                        "no byte, Escape or Enter included, reaches the form: {:?}",
+                        h.pty.offers
+                    );
+                    assert_eq!(
+                        interaction(h, interaction_id),
+                        ("question".to_owned(), None)
+                    );
+                    h.show(fixture(IDLE));
+                    while !matches!(
+                        storage::get_input(&h.fixture.conn, id).unwrap().state,
+                        storage::InputState::Accepted | storage::InputState::Settled
+                    ) {
+                        assert!(h.clock.now() < h.until, "the queued prompt drains in time");
+                        h.drain();
+                        h.advance();
+                        h.clock.advance(Duration::from_millis(5));
+                    }
+                    assert_eq!(
+                        interaction(h, interaction_id),
+                        ("question".to_owned(), Some("not_visible".to_owned()))
+                    );
+                    for _ in 0..20 {
+                        h.drain();
+                        h.advance();
+                    }
+                    assert_eq!(h.pty.program, vec![program], "the prompt is delivered once");
+                    assert!(h.pty.manual.is_empty(), "{:?}", h.pty.manual);
+                    let input = storage::get_input(&h.fixture.conn, id).unwrap();
+                    assert_eq!(input.state, storage::InputState::Accepted);
+                    assert_eq!(input.defer_reason.as_deref(), Some("interaction_open"));
+                });
+            }
         }
 
         mod question {

@@ -2,7 +2,6 @@ use crate::broker::runtime::Coverage;
 use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::PermissionDecision;
 use crate::coding_agent::CodingAgent;
-use crate::coding_agent::NativeVersion;
 use crate::coding_agent::detector::ObservationKind;
 use crate::error::CafleetError;
 use crate::error::Result;
@@ -54,7 +53,6 @@ pub(crate) fn valid_choice_id(value: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AnswerCapability {
     backend: CodingAgent,
-    native_version: String,
     request_rule_id: String,
     answer_rule_id: String,
     key: AnswerKey,
@@ -62,9 +60,6 @@ pub(crate) struct AnswerCapability {
 impl AnswerCapability {
     pub(crate) fn backend(&self) -> CodingAgent {
         self.backend
-    }
-    pub(crate) fn native_version(&self) -> &str {
-        &self.native_version
     }
     pub(crate) fn request_rule_id(&self) -> &str {
         &self.request_rule_id
@@ -183,7 +178,6 @@ struct RawCatalog {
 #[serde(deny_unknown_fields)]
 struct RawProfile {
     backend: CodingAgent,
-    min_version: NativeVersion,
     rules: Vec<RawRule>,
     capabilities: RawCapabilities,
 }
@@ -546,8 +540,6 @@ impl AnswerPlan {
 #[derive(Clone)]
 pub(super) struct Profile {
     pub(crate) backend: CodingAgent,
-    pub(crate) min_version: NativeVersion,
-    pub(crate) min_version_text: String,
     pub(crate) rules: Vec<Rule>,
     pub(crate) detection: Option<Capability>,
     pub(crate) composer: Option<Capability>,
@@ -555,12 +547,7 @@ pub(super) struct Profile {
     pub(crate) answers: Vec<Answer>,
 }
 impl Profile {
-    pub(super) fn answer_plan(
-        &self,
-        version: &str,
-        request: &str,
-        key: &AnswerKey,
-    ) -> Option<AnswerPlan> {
+    pub(super) fn answer_plan(&self, request: &str, key: &AnswerKey) -> Option<AnswerPlan> {
         let answer = self
             .answers
             .iter()
@@ -575,7 +562,6 @@ impl Profile {
         Some(AnswerPlan {
             capability: AnswerCapability {
                 backend: self.backend,
-                native_version: version.into(),
                 request_rule_id: request.into(),
                 answer_rule_id: answer.id.clone(),
                 key: key.clone(),
@@ -588,7 +574,7 @@ impl Profile {
     }
     /// Every plan of the request rule: decisions in `allow`, `deny` order, then choices in the
     /// rule's choice order.
-    pub(super) fn answer_plans(&self, version: &str, request: &str) -> Vec<AnswerPlan> {
+    pub(super) fn answer_plans(&self, request: &str) -> Vec<AnswerPlan> {
         let Some(rule) = self.rules.iter().find(|rule| rule.id == request) else {
             return Vec::new();
         };
@@ -600,7 +586,7 @@ impl Profile {
                     .iter()
                     .map(|choice| AnswerKey::Choice(choice.id.clone())),
             )
-            .filter_map(|key| self.answer_plan(version, request, &key))
+            .filter_map(|key| self.answer_plan(request, &key))
             .collect()
     }
 }
@@ -979,7 +965,7 @@ fn compile_answer(
 }
 
 fn compile_profile(raw: RawProfile) -> Result<Profile> {
-    let (backend, min) = (raw.backend, raw.min_version);
+    let backend = raw.backend;
     let rules = raw
         .rules
         .into_iter()
@@ -1024,8 +1010,6 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
         .collect::<Result<Vec<_>>>()?;
     Ok(Profile {
         backend,
-        min_version_text: min.0.to_string(),
-        min_version: min.clone(),
         rules,
         detection,
         composer,
@@ -1060,17 +1044,12 @@ impl ProfileCatalog {
     pub(crate) fn from_definitions(value: &Value) -> Result<Self> {
         let raw = RawCatalog::deserialize(value).map_err(|cause| invalid(cause.to_string()))?;
         require(raw.schema_version == 1, "unsupported profile schema")?;
-        let thresholds = raw
-            .profiles
-            .iter()
-            .map(|profile| (profile.backend, profile.min_version.clone()))
-            .collect::<Vec<_>>();
-        for (index, (backend, min)) in thresholds.iter().enumerate() {
+        for (index, profile) in raw.profiles.iter().enumerate() {
             require(
-                thresholds[..index]
+                raw.profiles[..index]
                     .iter()
-                    .all(|(other, earlier)| other != backend || earlier.precedence(min).is_ne()),
-                "equal-precedence profile thresholds for one backend",
+                    .all(|earlier| earlier.backend != profile.backend),
+                "more than one profile for one backend",
             )?;
         }
         let profiles = raw
@@ -1084,32 +1063,12 @@ impl ProfileCatalog {
             capture_origin: "synthetic",
         })
     }
-    pub(super) fn matching(&self, backend: CodingAgent, version: Option<&str>) -> Option<&Profile> {
-        let version = NativeVersion::parse(version?)?;
-        self.profiles
-            .iter()
-            .filter(|p| p.backend == backend && p.min_version.precedence(&version).is_le())
-            .max_by(|a, b| a.min_version.precedence(&b.min_version))
+    pub(super) fn profile(&self, backend: CodingAgent) -> Option<&Profile> {
+        self.profiles.iter().find(|p| p.backend == backend)
     }
-    pub(crate) fn unsupported_minimum(&self, backend: CodingAgent, version: &str) -> Option<&str> {
-        let version = NativeVersion::parse(version)?;
-        let lowest = self
-            .profiles
-            .iter()
-            .filter(|p| p.backend == backend)
-            .min_by(|a, b| a.min_version.precedence(&b.min_version))?;
-        version
-            .precedence(&lowest.min_version)
-            .is_lt()
-            .then_some(lowest.min_version_text.as_str())
-    }
-    pub(crate) fn detection_coverage(
-        &self,
-        backend: CodingAgent,
-        version: Option<&str>,
-    ) -> Coverage {
+    pub(crate) fn detection_coverage(&self, backend: CodingAgent) -> Coverage {
         if self
-            .matching(backend, version)
+            .profile(backend)
             .is_some_and(|profile| profile.detection.is_some())
         {
             Coverage::Tested
@@ -1117,14 +1076,9 @@ impl ProfileCatalog {
             Coverage::Unknown
         }
     }
-    pub(crate) fn answer_plans(
-        &self,
-        backend: CodingAgent,
-        version: &str,
-        request: &str,
-    ) -> Vec<AnswerPlan> {
-        self.matching(backend, Some(version))
-            .map(|profile| profile.answer_plans(version, request))
+    pub(crate) fn answer_plans(&self, backend: CodingAgent, request: &str) -> Vec<AnswerPlan> {
+        self.profile(backend)
+            .map(|profile| profile.answer_plans(request))
             .unwrap_or_default()
     }
 }
@@ -1146,12 +1100,10 @@ impl ProfileCatalog {
     pub(crate) fn answer_plan(
         &self,
         backend: CodingAgent,
-        version: &str,
         request: &str,
         key: &AnswerKey,
     ) -> Option<AnswerPlan> {
-        self.matching(backend, Some(version))?
-            .answer_plan(version, request, key)
+        self.profile(backend)?.answer_plan(request, key)
     }
 }
 
@@ -1289,22 +1241,19 @@ impl ProfileCatalog {
     pub(crate) fn verified_composer(
         &self,
         backend: CodingAgent,
-        native_version: Option<&str>,
         operation: ComposerOperation,
     ) -> bool {
-        self.matching(backend, native_version)
-            .is_some_and(|profile| {
-                profile.composer.is_some() && profile.submissions[operation.index()].is_some()
-            })
+        self.profile(backend).is_some_and(|profile| {
+            profile.composer.is_some() && profile.submissions[operation.index()].is_some()
+        })
     }
 
     pub(crate) fn composer_plan(
         &self,
         backend: CodingAgent,
-        native_version: &str,
         operation: ComposerOperation,
     ) -> Option<ComposerPlan> {
-        let profile = self.matching(backend, Some(native_version))?;
+        let profile = self.profile(backend)?;
         let submission = profile.submissions[operation.index()].as_ref()?;
         Some(ComposerPlan {
             operation,
@@ -1317,6 +1266,7 @@ impl ProfileCatalog {
 
 #[cfg(test)]
 pub(crate) mod test_support {
+    use crate::coding_agent::NativeVersion;
     use crate::coding_agent::catalog::*;
     use serde_json::Map;
     use serde_json::json;
@@ -1463,17 +1413,13 @@ pub(crate) mod test_support {
         }
     }
 
-    /// One ``<backend> <min_version> <location>: `<construct>` `` line per Perl class, boundary
+    /// One ``<backend> <location>: `<construct>` `` line per Perl class, boundary
     /// or other escape outside the pattern syntax in a profile string the decoder compiles.
     pub(crate) fn implicit_pattern_classes(definitions: &Value) -> Vec<String> {
         let mut found = Vec::new();
         for profile in array(&definitions["profiles"]).expect("catalog profiles") {
             RawProfile::deserialize(profile).expect("the profile decodes before probing");
-            let name = format!(
-                "{} {}",
-                text(&profile["backend"]).expect("profile backend"),
-                text(&profile["min_version"]).expect("profile min_version")
-            );
+            let name = text(&profile["backend"]).expect("profile backend");
             let mut strings = Vec::new();
             profile_strings(profile, String::new(), &mut strings);
             for (pointer, pattern) in strings {
@@ -1742,7 +1688,8 @@ pub(crate) mod test_support {
         id: NonBlank,
         kind: FixtureKind,
         backend: CodingAgent,
-        native_version: NativeVersion,
+        #[serde(rename = "native_version")]
+        _native_version: NativeVersion,
         #[serde(rename = "rows", deserialize_with = "positive_bound")]
         _rows: u16,
         #[serde(rename = "cols", deserialize_with = "positive_bound")]
@@ -1838,7 +1785,6 @@ pub(crate) mod test_support {
     #[derive(Deserialize)]
     struct ProvenanceProfile {
         backend: CodingAgent,
-        min_version: NativeVersion,
         rules: Vec<ProvenanceRule>,
         capabilities: ProvenanceCapabilities,
     }
@@ -1928,20 +1874,6 @@ pub(crate) mod test_support {
         fixture_ids: Ids,
     }
 
-    /// A profile's provenance interval: its `min_version` up to the backend's next threshold.
-    struct Interval<'a> {
-        min: &'a NativeVersion,
-        next: Option<&'a NativeVersion>,
-    }
-    impl Interval<'_> {
-        fn contains(&self, version: &NativeVersion) -> bool {
-            version.precedence(self.min).is_ge()
-                && self
-                    .next
-                    .is_none_or(|next| version.precedence(next).is_lt())
-        }
-    }
-
     pub(crate) fn validate_provenance(definitions: &Value) -> Result<()> {
         let raw = ProvenanceCatalog::deserialize(definitions)
             .map_err(|cause| invalid(cause.to_string()))?;
@@ -1966,23 +1898,7 @@ pub(crate) mod test_support {
                 }
             }
         }
-        let thresholds = raw
-            .profiles
-            .iter()
-            .map(|profile| (profile.backend, &profile.min_version))
-            .collect::<Vec<_>>();
         for profile in &raw.profiles {
-            let interval = Interval {
-                min: &profile.min_version,
-                next: thresholds
-                    .iter()
-                    .filter(|(other, threshold)| {
-                        *other == profile.backend
-                            && threshold.precedence(&profile.min_version).is_gt()
-                    })
-                    .map(|(_, threshold)| *threshold)
-                    .min_by(|a, b| a.precedence(b)),
-            };
             let cite = |cited: &Ids| -> Result<()> {
                 require(!cited.0.is_empty(), "capability provenance required")?;
                 for id in &cited.0 {
@@ -1992,9 +1908,8 @@ pub(crate) mod test_support {
                         .find(|fixture| &fixture.id.0 == id)
                         .ok_or_else(|| invalid("unknown fixture"))?;
                     require(
-                        fixture.backend == profile.backend
-                            && interval.contains(&fixture.native_version),
-                        "fixture backend or capture version outside the profile interval",
+                        fixture.backend == profile.backend,
+                        "fixture backend differs from the profile backend",
                     )?;
                 }
                 Ok(())
@@ -2149,27 +2064,22 @@ pub(crate) mod test_support {
         fixture
     }
 
-    /// A Codex catalog whose profiles are `(label, min_version)` thresholds,
-    /// each citing one fixture captured at its boundary for detection,
-    /// composer observation, both composer operations and an allow answer; the label names that fixture and answer rule.
-    pub(crate) fn thresholds(profiles: &[(&str, &str)]) -> Value {
-        thresholds_for(CodingAgent::Codex, profiles)
-    }
-
-    pub(crate) fn thresholds_for(backend: CodingAgent, profiles: &[(&str, &str)]) -> Value {
+    /// A catalog holding one `backend` profile per `(backend, label)` entry, each citing one
+    /// fixture for detection, composer observation, both composer operations and an allow answer;
+    /// the label names that fixture and answer rule.
+    pub(crate) fn single_profiles(profiles: &[(CodingAgent, &str)]) -> Value {
         let base = synthetic_definitions();
         let composer = simple_definition("composer_empty", true)["profiles"][0]["rules"][0].clone();
         let mut value = base.clone();
         value["fixtures"] = json!([]);
         value["profiles"] = json!([]);
-        for (name, min) in profiles {
+        for (backend, name) in profiles {
             let id = format!("{FIXTURE}-{}-{name}", backend.name());
-            let mut fixture = fixture_at(&id, min);
+            let mut fixture = fixture_at(&id, VERSION);
             fixture["backend"] = json!(backend.name());
             value["fixtures"].as_array_mut().unwrap().push(fixture);
             let mut profile = base["profiles"][0].clone();
             profile["backend"] = json!(backend.name());
-            profile["min_version"] = json!(min);
             profile["rules"]
                 .as_array_mut()
                 .unwrap()
@@ -2227,7 +2137,7 @@ pub(crate) mod test_support {
         json!({
             "schema_version":1,
             "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
-            "profiles":[{"backend":"codex","min_version":"0.0.1-synthetic",
+            "profiles":[{"backend":"codex",
                 "rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
                     "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
                     "matchers":[
@@ -2555,7 +2465,6 @@ pub(crate) mod test_support {
     pub(crate) const EMPTY: &str = "synthetic-composer_empty";
     pub(crate) const PROMPT_FIXTURE: &str = "synthetic-prompt-plan";
     pub(crate) const EXEC_FIXTURE: &str = "synthetic-exec-plan";
-    pub(crate) const VERSION_TWO: &str = "0.0.2-synthetic";
 
     /// A composer catalog whose submission declares both operations; an absent `prompt` or
     /// `exec` takes a placeholder submit key, and [`composer_catalog`] removes its plan.
@@ -2596,11 +2505,11 @@ pub(crate) mod test_support {
 
     pub(crate) fn plan(catalog: &ProfileCatalog, operation: ComposerOperation) -> ComposerPlan {
         catalog
-            .composer_plan(CodingAgent::Codex, VERSION, operation)
+            .composer_plan(CodingAgent::Codex, operation)
             .expect("valid selected operation has an executable plan")
     }
 
-    /// The coverage the profile selected for a backend and version declares per capability.
+    /// The coverage the backend's profile declares per capability.
     pub(crate) struct Capabilities {
         pub(crate) detection: Coverage,
         pub(crate) composer: Coverage,
@@ -2610,12 +2519,8 @@ pub(crate) mod test_support {
     }
 
     impl ProfileCatalog {
-        pub(crate) fn capabilities(
-            &self,
-            backend: CodingAgent,
-            version: Option<&str>,
-        ) -> Capabilities {
-            let profile = self.matching(backend, version);
+        pub(crate) fn capabilities(&self, backend: CodingAgent) -> Capabilities {
+            let profile = self.profile(backend);
             let tested = |declared: bool| {
                 if declared {
                     Coverage::Tested
@@ -2635,7 +2540,7 @@ pub(crate) mod test_support {
                 }
             }
             Capabilities {
-                detection: self.detection_coverage(backend, version),
+                detection: self.detection_coverage(backend),
                 composer: tested(profile.is_some_and(|p| p.composer.is_some())),
                 prompt_submission: submission(ComposerOperation::Prompt),
                 native_exec_submission: submission(ComposerOperation::Exec),
@@ -2647,11 +2552,11 @@ pub(crate) mod test_support {
     pub(crate) fn capabilities(
         catalog: &ProfileCatalog,
         backend: CodingAgent,
-        version: Option<&str>,
         observation: Coverage,
         operations: (Coverage, Coverage),
     ) {
-        let actual = catalog.capabilities(backend, version);
+        let actual = catalog.capabilities(backend);
+
         assert_eq!(actual.composer, observation);
         assert_eq!(actual.prompt_submission, operations.0);
         assert_eq!(actual.native_exec_submission, operations.1);
@@ -2703,19 +2608,11 @@ mod tests {
             for (prompt, exec) in [(true, true), (true, false), (false, true), (false, false)] {
                 let catalog = composer_catalog(prompt.then_some("0d"), exec.then_some("0d"));
                 assert_eq!(
-                    catalog.verified_composer(
-                        CodingAgent::Codex,
-                        Some(VERSION),
-                        ComposerOperation::Prompt
-                    ),
+                    catalog.verified_composer(CodingAgent::Codex, ComposerOperation::Prompt),
                     prompt
                 );
                 assert_eq!(
-                    catalog.verified_composer(
-                        CodingAgent::Codex,
-                        Some(VERSION),
-                        ComposerOperation::Exec
-                    ),
+                    catalog.verified_composer(CodingAgent::Codex, ComposerOperation::Exec),
                     exec
                 );
             }
@@ -2726,77 +2623,45 @@ mod tests {
             let catalog = load(&definitions()).unwrap();
             assert!(
                 catalog
-                    .composer_plan(CodingAgent::Codex, VERSION, ComposerOperation::Prompt)
+                    .composer_plan(CodingAgent::Codex, ComposerOperation::Prompt)
                     .is_none()
             );
-            assert!(!catalog.verified_composer(
-                CodingAgent::Codex,
-                Some(VERSION),
-                ComposerOperation::Prompt
-            ));
-            assert!(!catalog.verified_composer(
-                CodingAgent::Codex,
-                Some(VERSION),
-                ComposerOperation::Exec
-            ));
+            assert!(!catalog.verified_composer(CodingAgent::Codex, ComposerOperation::Prompt));
+            assert!(!catalog.verified_composer(CodingAgent::Codex, ComposerOperation::Exec));
         }
 
         #[test]
-        fn verified_composer_uses_the_recorded_backend_and_native_version() {
+        fn verified_composer_uses_the_recorded_backends_profile() {
             let catalog = composer_catalog(Some("0d"), Some("0d"));
-            assert!(catalog.verified_composer(
-                CodingAgent::Codex,
-                Some(VERSION),
-                ComposerOperation::Prompt
-            ));
-            for version in [None, Some("not-a-native-version"), Some("0.0.0")] {
-                assert!(
-                    !catalog.verified_composer(
-                        CodingAgent::Codex,
-                        version,
-                        ComposerOperation::Prompt
-                    ),
-                    "{version:?}"
-                );
+            assert!(catalog.verified_composer(CodingAgent::Codex, ComposerOperation::Prompt));
+            for &backend in CodingAgent::all() {
+                if backend != CodingAgent::Codex {
+                    assert!(
+                        !catalog.verified_composer(backend, ComposerOperation::Prompt),
+                        "{backend:?}"
+                    );
+                }
             }
-            assert!(!catalog.verified_composer(
-                CodingAgent::Claude,
-                Some(VERSION),
-                ComposerOperation::Prompt
-            ));
             let absent = load(&simple_definition("permission_request", false)).unwrap();
-            assert!(!absent.verified_composer(
-                CodingAgent::Codex,
-                Some(VERSION),
-                ComposerOperation::Prompt
-            ));
+            assert!(!absent.verified_composer(CodingAgent::Codex, ComposerOperation::Prompt));
         }
 
         #[test]
-        fn verified_composer_uses_only_the_profile_selected_for_the_recorded_version() {
-            let definition = thresholds(&[("first", VERSION), ("second", VERSION_TWO)]);
+        fn verified_composer_follows_the_backends_single_profile_per_operation() {
+            let definition = single_profiles(&[
+                (CodingAgent::Codex, "codex"),
+                (CodingAgent::Claude, "claude"),
+            ]);
             let mut catalog = load(&definition).unwrap();
-            let later = catalog
+            let claude = catalog
                 .profiles
                 .iter_mut()
-                .find(|profile| profile.min_version_text == VERSION_TWO)
-                .expect("the synthetic later profile exists");
-            later.submissions[ComposerOperation::Exec.index()] = None;
-            assert!(catalog.verified_composer(
-                CodingAgent::Codex,
-                Some(VERSION),
-                ComposerOperation::Exec
-            ));
-            assert!(!catalog.verified_composer(
-                CodingAgent::Codex,
-                Some(VERSION_TWO),
-                ComposerOperation::Exec
-            ));
-            assert!(catalog.verified_composer(
-                CodingAgent::Codex,
-                Some(VERSION_TWO),
-                ComposerOperation::Prompt
-            ));
+                .find(|profile| profile.backend == CodingAgent::Claude)
+                .expect("the synthetic claude profile exists");
+            claude.submissions[ComposerOperation::Exec.index()] = None;
+            assert!(catalog.verified_composer(CodingAgent::Codex, ComposerOperation::Exec));
+            assert!(!catalog.verified_composer(CodingAgent::Claude, ComposerOperation::Exec));
+            assert!(catalog.verified_composer(CodingAgent::Claude, ComposerOperation::Prompt));
         }
     }
 
@@ -3494,7 +3359,7 @@ mod tests {
             value.pointer_mut(ANSWERS).unwrap().as_array_mut().unwrap()
         }
         fn plan(catalog: &ProfileCatalog, request: &str, key: AnswerKey) -> Option<AnswerPlan> {
-            catalog.answer_plan(CodingAgent::Codex, VERSION, request, &key)
+            catalog.answer_plan(CodingAgent::Codex, request, &key)
         }
         fn choice(id: &str) -> AnswerKey {
             AnswerKey::Choice(id.into())
@@ -3509,7 +3374,6 @@ mod tests {
             let capability = decline.capability();
             assert_eq!(capability.key(), &choice("decline"));
             assert_eq!(capability.backend(), CodingAgent::Codex);
-            assert_eq!(capability.native_version(), VERSION);
             assert_eq!(capability.request_rule_id(), QUESTION_RULE);
             assert_eq!(capability.answer_rule_id(), QUESTION_DECLINE_PLAN);
             assert_eq!(decline.choice_id(), "decline");
@@ -3691,7 +3555,6 @@ mod tests {
             let deny = catalog
                 .answer_plan(
                     CodingAgent::Codex,
-                    VERSION,
                     GATED_RULE,
                     &AnswerKey::Decision(PermissionDecision::Deny),
                 )
@@ -3784,7 +3647,6 @@ mod tests {
                     .as_array_mut()
                     .unwrap()
                     .push(sibling);
-                definitions["profiles"][0]["min_version"] = json!("1.2.3");
                 definitions["profiles"][0]["capabilities"]["detection"]["fixture_ids"] =
                     json!([PRIMARY]);
 
@@ -4309,12 +4171,22 @@ mod tests {
             let value = &mut definitions["profiles"][profile];
             *value["rules"][rule].pointer_mut(suffix).unwrap() = json!(pattern);
             let location = format!(
-                "{} {} rule {}",
+                "{} rule {}",
                 value["backend"].as_str().unwrap(),
-                value["min_version"].as_str().unwrap(),
                 value["rules"][rule]["id"].as_str().unwrap()
             );
             (definitions, location)
+        }
+
+        #[test]
+        fn the_explicit_class_guard_line_reads_backend_location_and_construct() {
+            let mut value = definitions();
+            value["profiles"][0]["rules"][0]["matchers"][0]["pattern"] =
+                json!(r"^Operation:\s(?P<operation>.+)$");
+            assert_eq!(
+                implicit_pattern_classes(&value),
+                vec!["codex rule synthetic-permission: `\\s`".to_owned()]
+            );
         }
 
         const PATTERN_FIELDS: &[&str] = &[
@@ -4482,14 +4354,12 @@ mod tests {
             let plan = catalog
                 .answer_plan(
                     CodingAgent::Codex,
-                    "0.0.1-synthetic",
                     "synthetic-permission",
                     &AnswerKey::Decision(decision),
                 )
                 .unwrap();
             let capability = plan.capability();
             assert_eq!(capability.backend(), CodingAgent::Codex);
-            assert_eq!(capability.native_version(), "0.0.1-synthetic");
             assert_eq!(capability.request_rule_id(), "synthetic-permission");
             assert_eq!(capability.answer_rule_id(), rule);
             assert_eq!(capability.key(), &AnswerKey::Decision(decision));
@@ -4506,29 +4376,20 @@ mod tests {
             catalog
                 .answer_plan(
                     CodingAgent::Claude,
-                    "0.0.1-synthetic",
                     "synthetic-permission",
                     &AnswerKey::Decision(PermissionDecision::Allow)
                 )
                 .is_none()
         );
-        for (version, rule, decision) in [
-            ("0.0.1-synthetic", "unknown", PermissionDecision::Allow),
-            (
-                "0.0.1-synthetic",
-                "inspection-alternate-request",
-                PermissionDecision::Deny,
-            ),
+        for (rule, decision) in [
+            ("unknown", PermissionDecision::Allow),
+            ("inspection-alternate-request", PermissionDecision::Deny),
         ] {
             assert!(
                 catalog
-                    .answer_plan(
-                        CodingAgent::Codex,
-                        version,
-                        rule,
-                        &AnswerKey::Decision(decision)
-                    )
-                    .is_none()
+                    .answer_plan(CodingAgent::Codex, rule, &AnswerKey::Decision(decision))
+                    .is_none(),
+                "{rule} {decision:?}"
             );
         }
     }
@@ -4544,7 +4405,6 @@ mod tests {
         let plan = catalog
             .answer_plan(
                 CodingAgent::Codex,
-                "0.0.1-synthetic",
                 "synthetic-permission",
                 &AnswerKey::Decision(PermissionDecision::Allow),
             )
@@ -4592,29 +4452,22 @@ mod tests {
         value
     }
     #[test]
-    fn runtime_profile_capabilities_are_independent_and_version_selected() {
+    fn runtime_profile_capabilities_are_independent_and_backend_selected() {
         let catalog = crate::coding_agent::catalog::test_support::load(&definitions()).unwrap();
-        let supported = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
+        let supported = catalog.capabilities(CodingAgent::Codex);
         assert_eq!(supported.detection, Coverage::Tested);
         assert_eq!(supported.composer, Coverage::Unknown);
         assert!(supported.answer_decisions.is_empty());
-        let unknown = catalog.capabilities(CodingAgent::Codex, None);
-        assert_eq!(unknown.detection, Coverage::Unknown);
-        assert_eq!(unknown.composer, Coverage::Unknown);
-        assert!(unknown.answer_decisions.is_empty());
         for &backend in CodingAgent::all()
             .iter()
             .filter(|&&backend| backend != CodingAgent::Codex)
         {
-            assert_eq!(
-                catalog.capabilities(backend, Some(VERSION)).detection,
-                Coverage::Unknown
-            );
+            assert_eq!(catalog.capabilities(backend).detection, Coverage::Unknown);
         }
     }
 
     #[test]
-    fn runtime_profile_answer_decisions_have_separate_request_and_version_capabilities() {
+    fn runtime_profile_answer_decisions_have_separate_request_and_backend_capabilities() {
         for (name, decision, other) in [
             ("allow", PermissionDecision::Allow, PermissionDecision::Deny),
             ("deny", PermissionDecision::Deny, PermissionDecision::Allow),
@@ -4622,19 +4475,12 @@ mod tests {
             let value = with_answer(name);
             let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             assert_eq!(
-                catalog
-                    .capabilities(CodingAgent::Codex, Some(VERSION))
-                    .answer_decisions,
+                catalog.capabilities(CodingAgent::Codex).answer_decisions,
                 vec![decision]
             );
             assert_eq!(
                 catalog
-                    .answer_plan(
-                        CodingAgent::Codex,
-                        VERSION,
-                        RULE,
-                        &AnswerKey::Decision(decision)
-                    )
+                    .answer_plan(CodingAgent::Codex, RULE, &AnswerKey::Decision(decision))
                     .unwrap()
                     .capability()
                     .answer_rule_id(),
@@ -4642,29 +4488,18 @@ mod tests {
             );
             assert!(
                 catalog
-                    .answer_plan(
-                        CodingAgent::Codex,
-                        VERSION,
-                        RULE,
-                        &AnswerKey::Decision(other)
-                    )
+                    .answer_plan(CodingAgent::Codex, RULE, &AnswerKey::Decision(other))
                     .is_none()
             );
             assert!(
                 catalog
-                    .answer_plan(
-                        CodingAgent::Claude,
-                        VERSION,
-                        RULE,
-                        &AnswerKey::Decision(decision)
-                    )
+                    .answer_plan(CodingAgent::Claude, RULE, &AnswerKey::Decision(decision))
                     .is_none()
             );
             assert!(
                 catalog
                     .answer_plan(
                         CodingAgent::Codex,
-                        VERSION,
                         "another-form",
                         &AnswerKey::Decision(decision)
                     )
@@ -4719,9 +4554,9 @@ mod tests {
             ("/fixtures/0/cols", json!(-1)),
             ("/fixtures/0/sha256", json!("A".repeat(64))),
             ("/fixtures/0/source_ref", json!(" ")),
-            ("/profiles/0/min_version", json!(" ")),
-            ("/profiles/0/min_version", json!([VERSION])),
-            ("/profiles/0/min_version", Value::Null),
+            ("/fixtures/0/native_version", json!(" ")),
+            ("/fixtures/0/native_version", json!([VERSION])),
+            ("/fixtures/0/native_version", Value::Null),
             ("/profiles/0/rules/0/priority", json!(1.5)),
             ("/profiles/0/rules/0/observation", json!("approved")),
             (
@@ -4744,7 +4579,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_profile_duplicate_identity_and_ambiguous_backend_version_fail() {
+    fn runtime_profile_duplicate_identity_and_a_second_backend_profile_fail() {
         invalid(|value| {
             let copy = value["fixtures"][0].clone();
             value["fixtures"].as_array_mut().unwrap().push(copy);
@@ -4753,11 +4588,7 @@ mod tests {
             let copy = value["profiles"][0].clone();
             value["profiles"].as_array_mut().unwrap().push(copy);
         });
-        invalid(|value| {
-            let mut copy = value["profiles"][0].clone();
-            copy["min_version"] = json!("0.0.1-synthetic+build.2");
-            value["profiles"].as_array_mut().unwrap().push(copy);
-        });
+
         for array in [
             "/profiles/0/rules",
             "/profiles/0/rules/0/matchers",
@@ -4859,7 +4690,6 @@ mod tests {
     fn runtime_profile_capability_provenance_references_are_checked() {
         for (path, replacement) in [
             ("/fixtures/0/backend", json!("claude")),
-            ("/fixtures/0/native_version", json!("0.0.0")),
             (
                 "/profiles/0/capabilities/detection/rule_ids",
                 json!(["missing-rule"]),
@@ -4997,7 +4827,6 @@ mod tests {
                 .unwrap()
                 .answer_plan(
                     CodingAgent::Codex,
-                    VERSION,
                     GATED_RULE,
                     &AnswerKey::Decision(decision),
                 )
@@ -5425,14 +5254,11 @@ mod tests {
                     "operation fixture set",
                 );
             }
-            for (field, value) in [
-                ("backend", json!("claude")),
-                ("native_version", json!("0.0.0")),
-            ] {
+            {
                 let mut bad = good.clone();
                 let mut foreign = bad["fixtures"][0].clone();
                 foreign["id"] = json!("foreign-operation-fixture");
-                foreign[field] = value;
+                foreign["backend"] = json!("claude");
                 bad["fixtures"].as_array_mut().unwrap().push(foreign);
                 bad["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
                     json!(["foreign-operation-fixture"]);
@@ -5450,29 +5276,6 @@ mod tests {
         }
 
         #[test]
-        fn composer_operation_provenance_captured_inside_the_interval_serves_every_later_run() {
-            let mut good = definition(Some("7e"), Some("6b6c"));
-            for fixture in good["fixtures"].as_array_mut().unwrap() {
-                if fixture["id"] != FIXTURE {
-                    fixture["native_version"] = json!(VERSION_TWO);
-                }
-            }
-            let catalog = crate::coding_agent::catalog::test_support::load(&good).unwrap();
-            for (operation, submit) in [
-                (ComposerOperation::Prompt, &b"~"[..]),
-                (ComposerOperation::Exec, &b"kl"[..]),
-            ] {
-                let selected = catalog
-                    .composer_plan(CodingAgent::Codex, "7.0.0-beta.1", operation)
-                    .expect("a later run reuses the profile's plan");
-                assert_eq!(
-                    selected.encode("literal").unwrap(),
-                    expected(operation, "literal", submit)
-                );
-            }
-        }
-
-        #[test]
         fn composer_rule_references_keep_component_identity_and_declared_order() {
             let mut good = definition(Some("7e"), Some("6b6c"));
             good["profiles"][0]["rules"]
@@ -5483,7 +5286,7 @@ mod tests {
                 json!({"rule_ids":[RULE],"fixture_ids":[FIXTURE]});
             let catalog = crate::coding_agent::catalog::test_support::load(&good).unwrap();
             assert_eq!(
-                catalog.detection_coverage(CodingAgent::Codex, Some(VERSION)),
+                catalog.detection_coverage(CodingAgent::Codex),
                 Coverage::Tested
             );
             for invalid in [
@@ -5624,8 +5427,8 @@ mod tests {
             (IDLE, COMPOSER, IDLE_RULE),
             (
                 "claude-2.1.302-auto-model-switch-question-1",
-                UNKNOWN,
-                UNMATCHED,
+                QUESTION,
+                "claude-ask-user-question",
             ),
             (QUOTE, COMPOSER, IDLE_RULE),
             (NOTICE_EXPIRED, COMPOSER, IDLE_RULE),
@@ -5704,7 +5507,6 @@ mod tests {
                 let plan = catalog
                     .answer_plan(
                         CodingAgent::Claude,
-                        CLAUDE_VERSION,
                         ASK_RULE,
                         &AnswerKey::Decision(decision),
                     )
@@ -5729,7 +5531,6 @@ mod tests {
                 let predecessor = catalog
                     .answer_plan(
                         CodingAgent::Claude,
-                        CLAUDE_VERSION,
                         PERMISSION_RULE,
                         &AnswerKey::Decision(decision),
                     )
@@ -5784,7 +5585,6 @@ mod tests {
                 let plan = catalog
                     .answer_plan(
                         CodingAgent::Claude,
-                        CLAUDE_VERSION,
                         TIP_RULE,
                         &AnswerKey::Decision(decision),
                     )
@@ -5808,12 +5608,7 @@ mod tests {
                         "{decision:?} tip plan on {other}"
                     );
                     let foreign = catalog
-                        .answer_plan(
-                            CodingAgent::Claude,
-                            CLAUDE_VERSION,
-                            rule,
-                            &AnswerKey::Decision(decision),
-                        )
+                        .answer_plan(CodingAgent::Claude, rule, &AnswerKey::Decision(decision))
                         .unwrap();
                     assert!(
                         detector(catalog)
@@ -5901,7 +5696,6 @@ mod tests {
                 let plan = catalog
                     .answer_plan(
                         CodingAgent::Claude,
-                        CLAUDE_VERSION,
                         READ_RULE,
                         &AnswerKey::Decision(decision),
                     )
@@ -5925,12 +5719,7 @@ mod tests {
                         "{decision:?} read-outside plan on {other}"
                     );
                     let foreign = catalog
-                        .answer_plan(
-                            CodingAgent::Claude,
-                            CLAUDE_VERSION,
-                            rule,
-                            &AnswerKey::Decision(decision),
-                        )
+                        .answer_plan(CodingAgent::Claude, rule, &AnswerKey::Decision(decision))
                         .unwrap();
                     assert!(
                         detector(catalog)
@@ -5970,12 +5759,7 @@ mod tests {
                 for decision in [PermissionDecision::Allow, PermissionDecision::Deny] {
                     assert!(
                         catalog
-                            .answer_plan(
-                                CodingAgent::Claude,
-                                CLAUDE_VERSION,
-                                rule,
-                                &AnswerKey::Decision(decision)
-                            )
+                            .answer_plan(CodingAgent::Claude, rule, &AnswerKey::Decision(decision))
                             .is_none(),
                         "{rule} {decision:?}"
                     );
@@ -5986,7 +5770,6 @@ mod tests {
                     catalog
                         .answer_plan(
                             CodingAgent::Claude,
-                            CLAUDE_VERSION,
                             STARTUP_RULE,
                             &AnswerKey::Choice(choice.into())
                         )
@@ -5996,7 +5779,7 @@ mod tests {
             }
             assert!(
                 catalog
-                    .answer_plans(CodingAgent::Claude, CLAUDE_VERSION, WIZARD_RULE)
+                    .answer_plans(CodingAgent::Claude, WIZARD_RULE)
                     .is_empty(),
                 "the wizard has no answer plan"
             );
@@ -6577,7 +6360,7 @@ mod tests {
         }
 
         fn plan(rule: &str, key: AnswerKey) -> Option<AnswerPlan> {
-            ProfileCatalog::bundled().answer_plan(CodingAgent::Claude, VERSION_312, rule, &key)
+            ProfileCatalog::bundled().answer_plan(CodingAgent::Claude, rule, &key)
         }
         #[test]
         fn dialog_a_decline_resolves_to_two_marker_gated_stages() {
@@ -6632,9 +6415,7 @@ mod tests {
             assert!(plan(OFFER, AnswerKey::Choice("yes".into())).is_none());
             for rule in [WIZARD, NOTICE] {
                 assert!(
-                    catalog
-                        .answer_plans(CodingAgent::Claude, VERSION_312, rule)
-                        .is_empty(),
+                    catalog.answer_plans(CodingAgent::Claude, rule).is_empty(),
                     "{rule}"
                 );
             }
@@ -6708,86 +6489,213 @@ mod tests {
         }
     }
 
-    mod bundled_codex_auto {
+    mod bundled_claude_ask_user_question {
         use crate::coding_agent::catalog::tests::*;
 
-        const CODEX_VERSION: &str = "0.163.0";
-        const IDLE_RULE: &str = "codex-idle-composer";
-        const UNMATCHED: &str = "unmatched-screen";
+        const ASK_VERSION: &str = "2.1.322";
+        const FORM_RULE: &str = "claude-ask-user-question";
+        const REVIEW_RULE: &str = "claude-ask-user-question-review";
 
-        const IDLE: &str = "codex-0.163.0-auto-idle-composer-1";
-        const APPROVED: &str = "codex-0.163.0-auto-approved-escalated-1";
-        const REFUSAL_IDLE: &str = "codex-0.163.0-auto-refusal-idle-1";
-        const REFUSAL_WORKING: &str = "codex-0.163.0-auto-refusal-working-1";
-        const REVIEWING: &str = "codex-0.163.0-auto-reviewing-1";
-        const OVERLAY: &str = "codex-0.163.0-auto-refusal-warning-overlay-1";
-        const AFTER_OVERLAY: &str = "codex-0.163.0-auto-refusal-after-overlay-1";
-        const TWO_REFUSALS: &str = "codex-0.163.0-auto-two-refusals-1";
-        const RESIZED: &str = "codex-0.163.0-auto-two-refusals-resized-1";
-        const RESTORED: &str = "codex-0.163.0-auto-two-refusals-restored-1";
-        const DENIAL_LIMIT: &str = "codex-0.163.0-auto-denial-limit-interrupted-1";
-        const QUOTE: &str = "codex-0.163.0-auto-quote-false-positive-1";
-        const STATUS: &str = "codex-0.163.0-auto-status-indicator-1";
-
-        type Expected = (&'static str, ObservationKind, &'static str);
-
-        const COMPOSER: ObservationKind = ObservationKind::ComposerEmpty;
-        const UNKNOWN: ObservationKind = ObservationKind::Unknown;
-
-        const CLASSIFICATION: [Expected; 19] = [
-            (APPROVED, COMPOSER, IDLE_RULE),
-            (DENIAL_LIMIT, COMPOSER, IDLE_RULE),
-            (
-                "codex-0.163.0-auto-denial-limit-warning-1",
-                UNKNOWN,
-                UNMATCHED,
-            ),
-            ("codex-0.163.0-auto-expanded-detail-1", COMPOSER, IDLE_RULE),
-            ("codex-0.163.0-auto-fresh-idle-1", COMPOSER, IDLE_RULE),
-            (IDLE, COMPOSER, IDLE_RULE),
-            (QUOTE, COMPOSER, IDLE_RULE),
-            (AFTER_OVERLAY, COMPOSER, IDLE_RULE),
-            (REFUSAL_IDLE, COMPOSER, IDLE_RULE),
-            (OVERLAY, UNKNOWN, UNMATCHED),
-            (REFUSAL_WORKING, COMPOSER, IDLE_RULE),
-            (REVIEWING, COMPOSER, IDLE_RULE),
-            ("codex-0.163.0-auto-sandbox-failure-1", COMPOSER, IDLE_RULE),
-            (
-                "codex-0.163.0-auto-second-launch-idle-1",
-                COMPOSER,
-                IDLE_RULE,
-            ),
-            (STATUS, COMPOSER, IDLE_RULE),
-            (TWO_REFUSALS, COMPOSER, IDLE_RULE),
-            (RESIZED, COMPOSER, IDLE_RULE),
-            (RESTORED, COMPOSER, IDLE_RULE),
-            ("codex-0.163.0-auto-warning-overlay-1", UNKNOWN, UNMATCHED),
+        pub(super) const FORMS: [&str; 19] = [
+            "claude-2.1.322-ask-single-tmux-120-1",
+            "claude-2.1.322-ask-tabs-tmux-120-1",
+            "claude-2.1.322-ask-tabs-tmux-120-2",
+            "claude-2.1.322-ask-multi-tmux-120-1",
+            "claude-2.1.322-ask-multi-tmux-120-2",
+            "claude-2.1.322-ask-multi-tmux-120-3",
+            "claude-2.1.322-ask-review-tmux-120-1",
+            "claude-2.1.322-ask-review-narrow-tmux-060-1",
+            "claude-2.1.322-ask-typing-tmux-120-1",
+            "claude-2.1.322-ask-typing-tmux-120-2",
+            "claude-2.1.322-ask-narrow-tmux-060-1",
+            "claude-2.1.322-ask-pending-tmux-120-1",
+            "claude-2.1.322-ask-single-herdr-359-1",
+            "claude-2.1.322-ask-tabs-herdr-359-1",
+            "claude-2.1.322-ask-tabs-herdr-359-2",
+            "claude-2.1.322-ask-multi-herdr-359-1",
+            "claude-2.1.322-ask-multi-herdr-359-2",
+            "claude-2.1.322-ask-multi-herdr-359-3",
+            "claude-2.1.322-ask-review-herdr-359-1",
+        ];
+        pub(super) const REVIEWS: [&str; 4] = [
+            "claude-2.1.322-ask-review-tmux-120-2",
+            "claude-2.1.322-ask-review-narrow-tmux-060-2",
+            "claude-2.1.322-ask-review-narrow-tmux-040-2",
+            "claude-2.1.322-ask-review-herdr-359-2",
+        ];
+        pub(super) const BELOW_W_MIN: [&str; 2] = [
+            "claude-2.1.322-ask-narrow-tmux-040-1",
+            "claude-2.1.322-ask-review-narrow-tmux-040-1",
+        ];
+        pub(super) const QUOTED: &str = "claude-2.1.322-ask-quoted-tmux-120-1";
+        pub(super) const CLOSED: [&str; 2] = [
+            "claude-2.1.322-ask-single-closed-tmux-120-1",
+            "claude-2.1.322-ask-single-closed-herdr-359-1",
+        ];
+        /// Native dialogs drawn with the AskUserQuestion component.
+        const SAME_COMPONENT: [&str; 1] = ["claude-2.1.302-auto-model-switch-question-1"];
+        const TRANSCRIPT_VIEWERS: [&str; 2] = [
+            "claude-2.1.302-auto-transcript-viewer-1",
+            "claude-2.1.302-auto-verbose-transcript-viewer-1",
         ];
 
-        fn screen(id: &str) -> ScreenSnapshot {
-            replay_as_captured(id, |_| {}, None)
-        }
-
-        fn detector(catalog: &ProfileCatalog) -> Detector {
-            Detector::new(catalog, CodingAgent::Codex, Some(CODEX_VERSION))
-        }
-
         fn observe(id: &str) -> ScreenObservation {
-            detector(ProfileCatalog::bundled())
-                .observe(&screen(id))
-                .unwrap()
+            observe_bundled(
+                CodingAgent::Claude,
+                ASK_VERSION,
+                &replay_as_captured(id, |_| {}, None),
+            )
+        }
+
+        fn assert_choiceless_question(id: &str, rule: &str) {
+            let observed = observe(id);
+            assert_eq!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::Question),
+                "{id}"
+            );
+            assert_eq!(observed.rule_id, rule, "{id}");
+            assert_eq!(observed.match_evidence, MatchEvidence::Complete, "{id}");
+            assert!(!observed.verified_noninteraction, "{id}");
+            assert_eq!(observed.raw_evidence["operation"], Value::Null, "{id}");
+            assert_eq!(observed.raw_evidence["choices"], json!([]), "{id}");
+            assert!(observed.fingerprint.is_some(), "{id}");
+        }
+
+        fn assert_no_question(id: &str) {
+            let observed = observe(id);
+            assert_ne!(
+                observed.kind,
+                ObservationKind::Interaction(InteractionClass::Question),
+                "{id} is decided by {}",
+                observed.rule_id
+            );
+            assert!(
+                observed.rule_id != FORM_RULE && observed.rule_id != REVIEW_RULE,
+                "{id} is decided by {}",
+                observed.rule_id
+            );
         }
 
         #[test]
-        fn bundled_codex_auto_fixtures_produce_their_primary_observation() {
-            for (id, kind, rule) in CLASSIFICATION {
+        fn every_ask_user_question_form_capture_opens_a_choiceless_question() {
+            for id in FORMS {
+                assert_choiceless_question(id, FORM_RULE);
+            }
+        }
+
+        #[test]
+        fn a_native_dialog_drawn_with_the_same_component_opens_the_same_choiceless_question() {
+            for id in SAME_COMPONENT {
+                assert_choiceless_question(id, FORM_RULE);
+            }
+        }
+
+        #[test]
+        fn every_review_your_answers_capture_opens_a_choiceless_question() {
+            for id in REVIEWS {
+                assert_choiceless_question(id, REVIEW_RULE);
+            }
+        }
+
+        #[test]
+        fn a_form_narrower_than_its_w_min_is_unmatched() {
+            for id in BELOW_W_MIN {
                 let observed = observe(id);
-                assert_eq!(observed.kind, kind, "{id}");
-                assert_eq!(observed.rule_id, rule, "{id}");
+                assert_eq!(observed.kind, ObservationKind::Unknown, "{id}");
+                assert_eq!(observed.rule_id, "unmatched-screen", "{id}");
+            }
+        }
+
+        #[test]
+        fn the_quoted_form_and_the_transcript_viewers_yield_no_question() {
+            for id in std::iter::once(QUOTED).chain(TRANSCRIPT_VIEWERS) {
+                assert_no_question(id);
+            }
+        }
+
+        #[test]
+        fn the_answered_form_returns_to_a_verified_idle_composer() {
+            for id in CLOSED {
+                let observed = observe(id);
+                assert_eq!(observed.kind, ObservationKind::ComposerEmpty, "{id}");
+                assert!(observed.verified_noninteraction, "{id}");
+            }
+        }
+
+        /// The bundled catalog without the two AskUserQuestion rules.
+        fn without_ask_rules() -> ProfileCatalog {
+            let mut definitions = bundled_definitions();
+            let claude = definitions["profiles"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|profile| profile["backend"] == "claude")
+                .expect("the bundled claude profile");
+            let ask = |id: &Value| id == FORM_RULE || id == REVIEW_RULE;
+            claude["rules"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|rule| !ask(&rule["id"]));
+            claude["capabilities"]["detection"]["rule_ids"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|id| !ask(id));
+            ProfileCatalog::from_definitions(&definitions).unwrap()
+        }
+
+        #[test]
+        fn every_existing_claude_fixture_keeps_its_observation_with_the_ask_rules_present() {
+            let ask_captures: BTreeSet<&str> = FORMS
+                .into_iter()
+                .chain(REVIEWS)
+                .chain(BELOW_W_MIN)
+                .chain(CLOSED)
+                .chain(SAME_COMPONENT)
+                .chain([QUOTED])
+                .collect();
+
+            let without = without_ask_rules();
+            let definitions = bundled_definitions();
+            let existing: Vec<(&str, &str)> = definitions["fixtures"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|fixture| fixture["backend"] == "claude")
+                .map(|fixture| {
+                    (
+                        fixture["id"].as_str().unwrap(),
+                        fixture["native_version"].as_str().unwrap(),
+                    )
+                })
+                .filter(|(id, _)| !ask_captures.contains(id))
+                .collect();
+            assert!(!existing.is_empty());
+            for (id, version) in existing {
+                let screen = replay_as_captured(id, |_| {}, None);
+                let with = Detector::new(
+                    ProfileCatalog::bundled(),
+                    CodingAgent::Claude,
+                    Some(version),
+                )
+                .observe(&screen)
+                .unwrap();
+                let before = Detector::new(&without, CodingAgent::Claude, Some(version))
+                    .observe(&screen)
+                    .unwrap();
+                assert_eq!(with.kind, before.kind, "{id}");
+                assert_eq!(with.rule_id, before.rule_id, "{id}");
                 assert_eq!(
-                    observed.raw_evidence["native_version"], CODEX_VERSION,
+                    with.verified_noninteraction, before.verified_noninteraction,
                     "{id}"
                 );
+                for field in ["operation", "choices"] {
+                    assert_eq!(
+                        with.raw_evidence[field], before.raw_evidence[field],
+                        "{id}: {field}"
+                    );
+                }
+                assert!(with.fingerprint == before.fingerprint, "{id}");
             }
         }
     }
@@ -6808,7 +6716,7 @@ mod tests {
                 ),
             ] {
                 let plan = bundled
-                    .composer_plan(CodingAgent::Hermes, "2026.9.24", operation)
+                    .composer_plan(CodingAgent::Hermes, operation)
                     .unwrap_or_else(|| panic!("{name} plan"));
                 assert_eq!(
                     plan.stages(literal, LiteralFraming::Plain).unwrap(),
@@ -6835,7 +6743,7 @@ mod tests {
                 ),
             ] {
                 let plan = bundled
-                    .composer_plan(CodingAgent::Pi, "1.5.0", operation)
+                    .composer_plan(CodingAgent::Pi, operation)
                     .unwrap_or_else(|| panic!("{name} plan"));
                 assert_eq!(
                     plan.stages(literal, LiteralFraming::Plain).unwrap(),
@@ -6867,7 +6775,7 @@ mod tests {
                     (ComposerOperation::Exec, "exec"),
                 ] {
                     bundled
-                        .composer_plan(backend, run, operation)
+                        .composer_plan(backend, operation)
                         .unwrap_or_else(|| panic!("{backend:?} {name} plan"));
                     let cited =
                         profile["capabilities"]["composer"]["submission"][name]["fixture_ids"]
@@ -7035,7 +6943,6 @@ mod tests {
             ProfileCatalog::bundled()
                 .answer_plan(
                     CodingAgent::Opencode,
-                    OPENCODE_VERSION,
                     PERMISSION_RULE,
                     &AnswerKey::Decision(decision),
                 )
@@ -7088,7 +6995,6 @@ mod tests {
             ProfileCatalog::bundled()
                 .answer_plan(
                     CodingAgent::Opencode,
-                    OPENCODE_VERSION,
                     request,
                     &AnswerKey::Decision(decision),
                 )
@@ -7522,22 +7428,17 @@ mod tests {
         }
     }
 
-    mod profile_thresholds {
+    mod single_profile {
         use crate::coding_agent::catalog::tests::*;
 
-        fn catalog(profiles: &[(&str, &str)]) -> ProfileCatalog {
-            crate::coding_agent::catalog::test_support::load(&thresholds(profiles)).unwrap()
+        fn catalog(profiles: &[(CodingAgent, &str)]) -> ProfileCatalog {
+            crate::coding_agent::catalog::test_support::load(&single_profiles(profiles)).unwrap()
         }
 
-        /// The label of the threshold profile selected for `probe`, named by its allow plan.
-        fn selected_for(
-            catalog: &ProfileCatalog,
-            backend: CodingAgent,
-            probe: &str,
-        ) -> Option<String> {
+        /// The label of `backend`'s profile, named by its allow plan.
+        fn label(catalog: &ProfileCatalog, backend: CodingAgent) -> Option<String> {
             let plan = catalog.answer_plan(
                 backend,
-                probe,
                 RULE,
                 &AnswerKey::Decision(PermissionDecision::Allow),
             )?;
@@ -7545,24 +7446,11 @@ mod tests {
                 .capability()
                 .answer_rule_id()
                 .strip_suffix("-allow-plan")
-                .expect("a threshold answer plan is named after its label");
+                .expect("a single-profile answer plan is named after its label");
             Some(label.to_owned())
         }
 
-        fn selected<'a>(
-            catalog: &ProfileCatalog,
-            declarations: &[(&'a str, &str)],
-            probe: &str,
-        ) -> Option<&'a str> {
-            let label = selected_for(catalog, CodingAgent::Codex, probe)?;
-            let (label, _) = declarations
-                .iter()
-                .find(|(declared, _)| *declared == label)
-                .expect("selection names a declared threshold");
-            Some(label)
-        }
-
-        fn rejected(value: &Value, label: &str) {
+        fn rejected(value: &Value, label: &str) -> String {
             match crate::coding_agent::catalog::test_support::load(value) {
                 Err(error) => {
                     assert_eq!(error.exit_code(), 2, "{label}: {}", error.message());
@@ -7571,6 +7459,7 @@ mod tests {
                         "{label}: {}",
                         error.message()
                     );
+                    error.message().to_string()
                 }
                 Ok(_) => panic!("{label} accepted"),
             }
@@ -7588,132 +7477,65 @@ mod tests {
         ];
 
         #[test]
-        fn threshold_selection_picks_the_greatest_boundary_at_or_below_the_version_in_any_order() {
-            for declarations in [
-                [("first", "2.1.302"), ("second", "2.1.310")],
-                [("second", "2.1.310"), ("first", "2.1.302")],
-            ] {
-                let catalog = catalog(&declarations);
-                for (probe, expected) in [
-                    ("2.1.302", Some("first")),
-                    ("2.1.308", Some("first")),
-                    ("2.1.310-beta.1", Some("first")),
-                    ("2.1.310", Some("second")),
-                    ("99.0.0", Some("second")),
-                    ("2.1.301", None),
-                ] {
-                    assert_eq!(
-                        selected(&catalog, &declarations, probe),
-                        expected,
-                        "{declarations:?} {probe}"
-                    );
-                    let detection = catalog
-                        .capabilities(CodingAgent::Codex, Some(probe))
-                        .detection;
-                    assert_eq!(detection == Coverage::Tested, expected.is_some(), "{probe}");
-                }
-            }
-            let first = [("first", "2.1.302")];
-            let both = [("first", "2.1.302"), ("second", "2.1.310")];
-            let before = catalog(&first);
-            let after = catalog(&both);
-            for probe in ["2.1.302", "2.1.308", "2.1.310-beta.1"] {
-                assert_eq!(
-                    selected(&after, &both, probe),
-                    selected(&before, &first, probe),
-                    "{probe}"
-                );
-            }
-        }
-
-        #[test]
-        fn threshold_selection_orders_versions_by_semver_precedence() {
-            type Group = (
-                &'static str,
-                &'static [(&'static str, &'static str)],
-                &'static [(&'static str, Option<&'static str>)],
-            );
-            let groups: [Group; 3] = [
+        fn catalog_rejects_a_second_profile_for_one_backend() {
+            type Case = (&'static str, &'static [(CodingAgent, &'static str)]);
+            const CASES: [Case; 3] = [
                 (
-                    "numeric components compare numerically",
-                    &[("nine", "0.9.0"), ("ten", "0.10.0")],
+                    "two codex profiles",
                     &[
-                        ("0.9.99", Some("nine")),
-                        ("0.10.0", Some("ten")),
-                        ("0.8.9", None),
+                        (CodingAgent::Codex, "first"),
+                        (CodingAgent::Codex, "second"),
                     ],
                 ),
                 (
-                    "prereleases order by semver precedence",
+                    "a second codex profile after a claude profile",
                     &[
-                        ("alpha-1", "1.0.0-alpha.1"),
-                        ("beta-2", "1.0.0-beta.2"),
-                        ("beta-11", "1.0.0-beta.11"),
-                        ("release", "1.0.0"),
-                    ],
-                    &[
-                        ("1.0.0-alpha", None),
-                        ("1.0.0-alpha.beta", Some("alpha-1")),
-                        ("1.0.0-beta.10", Some("beta-2")),
-                        ("1.0.0-beta.11", Some("beta-11")),
-                        ("1.0.0-rc.1", Some("beta-11")),
-                        ("1.0.0", Some("release")),
+                        (CodingAgent::Codex, "first"),
+                        (CodingAgent::Claude, "claude"),
+                        (CodingAgent::Codex, "second"),
                     ],
                 ),
                 (
-                    "build metadata has no precedence",
-                    &[("built", "1.2.0+build.1"), ("older", "1.0.0")],
+                    "two claude profiles",
                     &[
-                        ("1.2.0", Some("built")),
-                        ("1.2.0+other.9", Some("built")),
-                        ("1.2.0-rc.1+build.1", Some("older")),
+                        (CodingAgent::Claude, "first"),
+                        (CodingAgent::Claude, "second"),
                     ],
                 ),
             ];
-            for (name, declarations, probes) in groups {
-                let catalog = catalog(declarations);
-                for (probe, expected) in probes {
-                    assert_eq!(
-                        selected(&catalog, declarations, probe),
-                        *expected,
-                        "{name}: {probe}"
-                    );
+            for (name, profiles) in CASES {
+                let value = single_profiles(profiles);
+                match ProfileCatalog::from_definitions(&value) {
+                    Err(error) => {
+                        assert_eq!(error.exit_code(), 2, "{name}");
+                        assert_eq!(
+                            error.message(),
+                            "invalid native profile: more than one profile for one backend",
+                            "{name}"
+                        );
+                    }
+                    Ok(_) => panic!("{name} accepted"),
                 }
             }
         }
 
         #[test]
-        fn threshold_selection_stays_within_each_backend() {
-            let mut value = thresholds(&[("codex-low", "0.5.0"), ("codex-high", "2.0.0")]);
-            let claude = thresholds_for(CodingAgent::Claude, &[("claude-only", "2.0.0")]);
-            for key in ["fixtures", "profiles"] {
-                value[key]
-                    .as_array_mut()
-                    .unwrap()
-                    .extend(claude[key].as_array().unwrap().iter().cloned());
-            }
-            let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
-            for (backend, probe, expected) in [
-                (CodingAgent::Codex, "1.0.0", Some("codex-low")),
-                (CodingAgent::Claude, "1.0.0", None),
-                (CodingAgent::Claude, "2.0.0", Some("claude-only")),
-                (CodingAgent::Opencode, "2.0.0", None),
-            ] {
-                assert_eq!(
-                    selected_for(&catalog, backend, probe).as_deref(),
-                    expected,
-                    "{backend:?} {probe}"
-                );
-            }
+        fn catalog_profile_keys_are_backend_rules_and_capabilities() {
+            let value = single_profiles(&[(CodingAgent::Codex, "only")]);
+            let keys = value["profiles"][0]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(keys, BTreeSet::from(["backend", "capabilities", "rules"]));
+            assert!(crate::coding_agent::catalog::test_support::load(&value).is_ok());
         }
 
         #[test]
-        fn threshold_validation_rejects_malformed_profile_and_fixture_versions() {
+        fn validation_rejects_malformed_fixture_capture_versions() {
             assert!(crate::coding_agent::catalog::test_support::load(&definitions()).is_ok());
             for malformed in MALFORMED {
-                let mut value = definitions();
-                value["profiles"][0]["min_version"] = json!(malformed);
-                rejected(&value, &format!("min_version {malformed:?}"));
                 let mut value = definitions();
                 value["fixtures"][0]["native_version"] = json!(malformed);
                 rejected(&value, &format!("fixture native_version {malformed:?}"));
@@ -7721,56 +7543,80 @@ mod tests {
         }
 
         #[test]
-        fn threshold_validation_rejects_equal_precedence_thresholds_for_one_backend() {
-            for pair in [
-                [("first", "1.0.0"), ("second", "1.0.0")],
-                [("first", "1.0.0"), ("second", "1.0.0+build.2")],
-            ] {
-                rejected(&thresholds(&pair), &format!("{pair:?}"));
-            }
-        }
-
-        #[test]
-        fn fixture_interval_bounds_every_cited_capture_by_its_profile_thresholds() {
-            fn citing(profile: usize, citation: &str, captured: &str) -> Value {
-                let mut value = thresholds(&[("first", "1.0.0"), ("second", "2.0.0")]);
-                value["fixtures"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(fixture_at("interval-probe", captured));
-                *value
-                    .pointer_mut(&format!("/profiles/{profile}/capabilities/{citation}"))
-                    .unwrap() = json!(["interval-probe"]);
-                value
-            }
-            for citation in [
-                "detection/fixture_ids",
-                "composer/fixture_ids",
-                "composer/submission/prompt/fixture_ids",
-                "composer/submission/exec/fixture_ids",
-                "answers/0/fixture_ids",
-            ] {
-                for (profile, captured) in [(0, "1.5.0"), (0, "2.0.0-rc.1"), (1, "9.0.0")] {
+        fn provenance_accepts_a_citation_of_its_backends_fixture_at_any_capture_version() {
+            for citation in CITATIONS {
+                for captured in ["0.0.1", "1.0.0-rc.1", "2.0.0+build.1", "99.0.0"] {
+                    let value = citing(citation, CodingAgent::Codex, captured);
                     assert!(
-                        crate::coding_agent::catalog::test_support::load(&citing(
-                            profile, citation, captured
-                        ))
-                        .is_ok(),
-                        "{citation} profile {profile} {captured}"
-                    );
-                }
-                for (profile, captured) in [(0, "1.0.0-rc.1"), (0, "2.0.0+build.1"), (1, "1.9.9")] {
-                    rejected(
-                        &citing(profile, citation, captured),
-                        &format!("{citation} profile {profile} {captured}"),
+                        crate::coding_agent::catalog::test_support::load(&value).is_ok(),
+                        "{citation} {captured}"
                     );
                 }
             }
         }
 
         #[test]
-        fn capability_reuse_resolves_every_capability_through_the_selected_profile() {
-            let catalog = catalog(&[("first", "1.0.0"), ("second", "2.0.0")]);
+        fn provenance_rejects_a_citation_of_another_backends_fixture() {
+            for citation in CITATIONS {
+                for other in CodingAgent::all()
+                    .iter()
+                    .copied()
+                    .filter(|backend| *backend != CodingAgent::Codex)
+                {
+                    let label = format!("{citation} citing a {other:?} fixture");
+                    let message = rejected(&citing(citation, other, VERSION), &label);
+                    assert!(message.contains("fixture backend"), "{label}: {message}");
+                }
+            }
+        }
+
+        const CITATIONS: [&str; 5] = [
+            "detection/fixture_ids",
+            "composer/fixture_ids",
+            "composer/submission/prompt/fixture_ids",
+            "composer/submission/exec/fixture_ids",
+            "answers/0/fixture_ids",
+        ];
+
+        /// The single Codex profile with `citation` naming one extra fixture of `backend`
+        /// captured on `captured`.
+        fn citing(citation: &str, backend: CodingAgent, captured: &str) -> Value {
+            let mut value = single_profiles(&[(CodingAgent::Codex, "only")]);
+            let mut fixture = fixture_at("citation-probe", captured);
+            fixture["backend"] = json!(backend.name());
+            value["fixtures"].as_array_mut().unwrap().push(fixture);
+            *value
+                .pointer_mut(&format!("/profiles/0/capabilities/{citation}"))
+                .unwrap() = json!(["citation-probe"]);
+            value
+        }
+
+        #[test]
+        fn each_backend_resolves_only_its_own_profile() {
+            let catalog = catalog(&[
+                (CodingAgent::Codex, "codex-only"),
+                (CodingAgent::Claude, "claude-only"),
+            ]);
+            for (backend, expected) in [
+                (CodingAgent::Codex, Some("codex-only")),
+                (CodingAgent::Claude, Some("claude-only")),
+                (CodingAgent::Opencode, None),
+                (CodingAgent::Hermes, None),
+                (CodingAgent::Pi, None),
+            ] {
+                assert_eq!(label(&catalog, backend).as_deref(), expected, "{backend:?}");
+                let tested = if expected.is_some() {
+                    Coverage::Tested
+                } else {
+                    Coverage::Unknown
+                };
+                assert_eq!(catalog.detection_coverage(backend), tested, "{backend:?}");
+            }
+        }
+
+        #[test]
+        fn every_run_version_resolves_every_capability_through_the_backends_profile() {
+            let catalog = catalog(&[(CodingAgent::Codex, "only")]);
             let mut rows = vec![
                 "Live footer".to_owned(),
                 "Refused: write outside.txt".to_owned(),
@@ -7778,33 +7624,35 @@ mod tests {
             ];
             rows.extend(lines("write disposable.txt"));
             let screen = terminal(&rows, 80, false).snapshot();
-            for (run, name) in [("1.4.2", "first"), ("3.1.4", "second")] {
-                let observed = Detector::new(&catalog, CodingAgent::Codex, Some(run))
+            for run in [Some("0.0.1"), Some("1.4.2"), Some("99.0.0-beta.1"), None] {
+                let observed = Detector::new(&catalog, CodingAgent::Codex, run)
                     .observe(&screen)
                     .unwrap();
                 assert_eq!(
                     observed.kind,
-                    ObservationKind::Interaction(InteractionClass::PermissionRequest)
+                    ObservationKind::Interaction(InteractionClass::PermissionRequest),
+                    "{run:?}"
                 );
-                assert_eq!(observed.raw_evidence["native_version"], run);
-                for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                    catalog
-                        .composer_plan(CodingAgent::Codex, run, operation)
-                        .unwrap_or_else(|| panic!("{run} {operation:?} plan"));
-                }
-                let capability = catalog
-                    .answer_plan(
-                        CodingAgent::Codex,
-                        run,
-                        RULE,
-                        &AnswerKey::Decision(PermissionDecision::Allow),
-                    )
-                    .unwrap_or_else(|| panic!("{run} answer plan"))
-                    .capability()
-                    .clone();
-                assert_eq!(capability.native_version(), run);
-                assert_eq!(capability.answer_rule_id(), format!("{name}-allow-plan"));
+                assert_eq!(
+                    observed.raw_evidence["native_version"],
+                    run.map_or(Value::Null, |run| json!(run)),
+                    "{run:?}"
+                );
             }
+            for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
+                assert!(
+                    catalog.verified_composer(CodingAgent::Codex, operation),
+                    "{operation:?}"
+                );
+                catalog
+                    .composer_plan(CodingAgent::Codex, operation)
+                    .unwrap_or_else(|| panic!("{operation:?} plan"));
+            }
+            assert_eq!(label(&catalog, CodingAgent::Codex).as_deref(), Some("only"));
+            assert_eq!(
+                catalog.detection_coverage(CodingAgent::Codex),
+                Coverage::Tested
+            );
         }
     }
 
@@ -7822,14 +7670,13 @@ mod tests {
             capabilities(
                 &catalog,
                 CodingAgent::Codex,
-                Some(VERSION),
                 observation,
                 (Coverage::Unknown, Coverage::Unknown),
             );
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
                 assert!(
                     catalog
-                        .composer_plan(CodingAgent::Codex, VERSION, operation)
+                        .composer_plan(CodingAgent::Codex, operation)
                         .is_none()
                 );
             }
@@ -7854,20 +7701,12 @@ mod tests {
         ] {
             let catalog = value;
             plan(&catalog, operation);
-            capabilities(
-                &catalog,
-                CodingAgent::Codex,
-                Some(VERSION),
-                Coverage::Tested,
-                coverage,
-            );
+            capabilities(&catalog, CodingAgent::Codex, Coverage::Tested, coverage);
             assert!(
-                catalog
-                    .composer_plan(CodingAgent::Codex, VERSION, other)
-                    .is_none(),
+                catalog.composer_plan(CodingAgent::Codex, other).is_none(),
                 "{operation:?}"
             );
-            let actual = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
+            let actual = catalog.capabilities(CodingAgent::Codex);
             assert_eq!(actual.detection, Coverage::Unknown);
             assert!(actual.answer_decisions.is_empty());
         }
@@ -7896,34 +7735,25 @@ mod tests {
         capabilities(
             &catalog,
             CodingAgent::Codex,
-            Some(VERSION),
             Coverage::Tested,
             (Coverage::Tested, Coverage::Tested),
         );
-        let actual = catalog.capabilities(CodingAgent::Codex, Some(VERSION));
+        let actual = catalog.capabilities(CodingAgent::Codex);
         assert_eq!(actual.detection, Coverage::Tested);
         assert_eq!(
             actual.answer_decisions,
             [PermissionDecision::Allow, PermissionDecision::Deny]
-        );
-        capabilities(
-            &catalog,
-            CodingAgent::Codex,
-            None,
-            Coverage::Unknown,
-            (Coverage::Unknown, Coverage::Unknown),
         );
         for &backend in CodingAgent::all() {
             if backend == CodingAgent::Codex {
                 continue;
             }
             for operation in [ComposerOperation::Prompt, ComposerOperation::Exec] {
-                assert!(catalog.composer_plan(backend, VERSION, operation).is_none());
+                assert!(catalog.composer_plan(backend, operation).is_none());
             }
             capabilities(
                 &catalog,
                 backend,
-                Some(VERSION),
                 Coverage::Unknown,
                 (Coverage::Unknown, Coverage::Unknown),
             );
