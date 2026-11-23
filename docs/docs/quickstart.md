@@ -79,9 +79,8 @@ Keep an existing automatic reviewer that supports the needed escalation.
 [Codex configuration](concepts/coding-agents.md#codex-configuration) explains
 reviewer selection and conditional sandbox grants.
 
-Launch the Director with daemon support enabled. Registration may ask for its
-pane ID and server ([Director pane verification](concepts/members.md#director-pane-verification)).
-If listener startup fails, follow [Codex listener troubleshooting](concepts/coding-agents.md#codex-listener-startup).
+Registration may ask for the Director's pane ID and server
+([Director pane verification](concepts/members.md#director-pane-verification)).
 
 ### OpenCode
 

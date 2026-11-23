@@ -14,7 +14,7 @@ CAFleet coordinates independent coding-agent sessions in tmux or herdr through d
 | broker | The CLI's synchronous SQLite data-access layer | [Storage](storage.md) |
 | message | One point-to-point delivery, consumed through `input_required → completed` | [Output and formatting](https://github.com/himkt/cafleet/blob/main/SPEC.md#64-output--formatting) |
 | inline preview | A literal one-line notification submitted through the member’s recorded transport when input is eligible, carrying the full body or a poll pointer | [Push notifications](https://github.com/himkt/cafleet/blob/main/SPEC.md#push-notifications) |
-| listener | The Director's persistent read-only `message listen` process that notifies pending messages as JSONL wake notices that name the consuming poll; the `message poll` each notice prompts consumes them | [Message listen](https://github.com/himkt/cafleet/blob/main/SPEC.md#message-listen) |
+| Director delivery | The fleet's member runners typing each pending Director message as a `[cafleet msg …]` preview into the Director's pane, only into a composer verified empty with no dialog open; the `message poll` each preview prompts consumes the messages | [Director delivery sweep](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-delivery-sweep) |
 | runner | The owned PTY observer and input arbiter for a member run | [Member permission events](members.md#member-permission-events) |
 | runtime event | A durable typed terminal/lifecycle observation linked to the Director’s inbox | [Member runtime](https://github.com/himkt/cafleet/blob/main/SPEC.md#69-member-pty-runtime) |
 | coding-agent backend | The selected agent binary recorded in a placement | [Coding agents](coding-agents.md) |

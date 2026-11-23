@@ -7,7 +7,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 | Entry | Responsibility |
 |---|---|
 | `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters and the SQL schema, the `SCHEMA_SQL` constant in `src/db.rs`; built by the root `Cargo.toml` and `build.rs` together with the embedded `assets/` tree |
-| `assets/` | Data files: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate; `assets/profiles/` one runner-profile file per backend with its native screen fixtures. The binary embeds every file |
+| `assets/` | Data files: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director goals and, where the backend has no native per-tool approval, the Director question tool and the member gate; `assets/profiles/` one runner-profile file per backend with its native screen fixtures. The binary embeds every file |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
 | `design-docs/` | Numbered design documents and local evidence |
 
@@ -70,11 +70,11 @@ Use safe PTY/terminal APIs behind deterministic transport traits; the crate sets
 
 Evaluate a candidate backend against the role bar before it ships:
 
-1. Open a design doc for the candidate with a `## Role evaluation` section: a `Role | Requirement | Source | Delivery | Eligible | Evidence` table with Director `goal`, `listen` and `verdict` rows and one Member row, shaped like the [SPEC Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) table.
-2. Check each role's Eligible-tier requirements in [SPEC §6.7 Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) against an installed native version, recording the version per requirement group: official documentation and installed `--help` / `--version` for host capabilities, CAFleet PTY probes on each registered multiplexer for runtime behavior. Record the Director `goal` and `listen` sources (`native` or `extension`) and the `listen` at the highest tier established: `subscribe` delivery from a passing [subscribe probe](#run-a-cafleet-subscribe-probe), or `compromise` delivery from a passing [stream probe](#run-a-cafleet-stream-probe) together with the negative evidence Role requirements defines.
-3. A verdict is `yes` only when every requirement is established, otherwise `no` with "not established" or the observed failure; the Director `verdict` is `yes` only when `goal` and `listen` are both `yes`, otherwise it names the unmet requirements.
+1. Open a design doc for the candidate with a `## Role evaluation` section: a `Role | Requirement | Source | Eligible | Evidence` table with Director `goal`, `pane delivery` and `verdict` rows and one Member row, shaped like the [SPEC Role eligibility](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-eligibility) table.
+2. Check each role's Eligible-tier requirements in [SPEC §6.7 Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) against an installed native version, recording the version per requirement group: official documentation and installed `--help` / `--version` for host capabilities, CAFleet PTY probes on each registered multiplexer for runtime behavior. Record the Director `goal` source (`native` or `extension`), and establish `pane delivery` with the backend's `director_delivery` profile capability and a passing [Director delivery probe](#run-a-cafleet-director-delivery-probe) on both tmux and herdr.
+3. A verdict is `yes` only when every requirement is established, otherwise `no` with "not established" or the observed failure; the Director `verdict` is `yes` only when `goal` and `pane delivery` are both `yes`, otherwise it names the unmet requirements.
 4. For a Member-eligible candidate, claim detection and request-bound allow and deny answers for every approval form the default mode renders, and record the profile's layout limits (`W_min`, wrapped or clipped operations, uncaptured geometries); a default mode rendering no approval form needs no request rules. Claim other bundled-support capabilities with the evidence in the table below; an unclaimed optional capability ships as `unknown` coverage.
-5. On shipping, copy the rows into the SPEC Role eligibility table, summarize each role as a `Role | Eligible | Basis` row (sources, delivery, checked versions and runtime caveats) in the backend's Role eligibility subsection of `assets/skills/cafleet/reference/coding-agents.md`, and ship only the roles marked `yes`.
+5. On shipping, copy the rows into the SPEC Role eligibility table, summarize each role as a `Role | Eligible | Basis` row (sources, checked versions and runtime caveats) in the backend's Role eligibility subsection of `assets/skills/cafleet/reference/coding-agents.md`, and ship only the roles marked `yes`.
 
 | Capability | Required native evidence |
 |---|---|
@@ -84,50 +84,33 @@ Evaluate a candidate backend against the role bar before it ships:
 
 Every claimed detector/composer/answer capability requires CAFleet-owned positive and adversarial replay fixtures, including redraw, wrapping, fragmented ANSI/UTF-8, alternate screens, competing forms and quoted transcript false positives. Every capture is real native PTY evidence from the installed native version on each registered multiplexer, including concurrent output/input and the observed-state race boundary. A submission plan is measured, not an assumed Enter mapping. [Release acceptance](#release-acceptance) owns the minimum policies, evidence fields and fault cases. A launch-help probe supplies no detector/composer/answer claim; missing minimum native evidence fails feature acceptance.
 
-### Run a CAFleet subscribe probe
+### Run a CAFleet Director delivery probe
 
-The subscribe probe establishes a tier-1 (native) or tier-2 (extension) subscribe listen as SPEC Role requirements defines it. The candidate Director starts its receiver through the mechanism under test, such as a native tool or a CAFleet plugin tool, and a probe member sends the messages. A probe message ID is *observed through a notice* when the one `poll` that a `pending` record the receiver delivers prompts returns it.
-
-1. Prepare the isolated database, Director session and probe member as in steps 1–3 of the stream probe below, and start the receiver after the Director consumes the ready. Then give the Director the instruction below the steps.
-2. **Idle.** With the Director idle, send one message. A notice must start a turn without user input, and the poll it prompts must return the message.
-3. **Busy.** Ask the Director to run a foreground command of at least 60 s, such as `sleep 90`, and send two messages while it runs. The command must not be interrupted; a notice must arrive no later than the end of that turn, and the poll it prompts must return both IDs.
-4. **Burst.** Ask the Director to run a foreground command of at least 60 s and under 300 s, and send 150 messages back to back while it runs. At most two notice turns may arrive for the burst, and every ID must be returned by a notice-prompted poll. On Codex the forwarder must stay alive with no `codex queue` refusal.
-5. **Consumed notice.** Direct one turn: a 30 s foreground command while m1 is sent, one poll, a second 30 s foreground command while m2 is sent, one poll, then end the turn. Every notice turn delivered after the directed turn must run one poll, which returns `[]`.
-6. **Hold ceiling.** Say `hold`, then send `hold-probe 1` to the idle Director and record t1, the time its notice turn starts; the Director ends that turn without polling. After that turn ends and 60 s have passed since t1, send `hold-probe 2`. No notice may arrive before t1 + 285 s; one notice must arrive between t1 + 285 s and t1 + 315 s, and the poll it prompts must return both IDs.
-7. **Owner exit.** End the Director session the receiver belongs to, and confirm with `ps` that no `cafleet message listen` survives it.
-8. Record the backend, native version, mechanism, message IDs, send timestamps, each notice's delivery turn and timestamp, each poll's timestamp and returned IDs and the receiver's exit in the design doc's evidence record.
-
-The Director instruction for step 1:
-
-> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, run the command in the record's `next` field once. Run no other `poll` or `show` unless a step below directs it. When I say `hold`, end only the next notice turn without running its command, then apply the rule above to every later notice turn, including the ceiling re-notice.
-
-A `poll` or `show` that first reveals a probe ID without a preceding notice turn invalidates the run; the poll a notice prompts is part of consumption. The ±15 s hold-ceiling tolerance covers the receiver latency between the listener's delivery and t1 and the listener's one-second check interval. Probe each mechanism separately; the backend's Director reception recipe owns the concrete tool calls.
-
-### Run a CAFleet stream probe
-
-The stream probe establishes a tier-3 built-in compromise listen as SPEC Role requirements defines it: the Director reads its background listener's output while supervision continues. The candidate starts `cafleet message listen` through its native background-execution facility and keeps working on something unrelated in the same session; the run classification below the steps grades each run. Probe each native mechanism that can read a running background process separately. A pass is recorded only with tier-1 and tier-2 negative evidence, and the backend's Director reception recipe owns the concrete tool calls.
+The Director delivery probe establishes `pane delivery` as [SPEC Role requirements](https://github.com/himkt/cafleet/blob/main/SPEC.md#role-requirements) defines it. Run it per backend on tmux and on herdr, with the shipped build installed through `mise //:install`:
 
 1. Create an isolated database in a fresh short absolute directory, such as one from `mktemp -d`, so the member runtime socket path stays within the platform limit; record its location and run `cafleet setup --database-url sqlite:///<probe dir>/director.db`. Pass the same `--database-url` on every `cafleet` command of the probe.
-2. In a tmux pane, start the candidate Director session and register it with `cafleet fleet create --name <name> --coding-agent <backend>`, adding the pane ID and server it asks for when it cannot confirm the candidate's pane ([Director pane verification](concepts/members.md#director-pane-verification)).
-3. Have the Director spawn one probe member on any Member-eligible backend, with a spawn prompt that carries the `{database_url}` placeholder, sends `ready` and then ends its turn without further broker traffic; its ID is the sender identity.
-4. After the Director consumes the ready, have it start `cafleet message listen <director-id> --timeout 300` through the mechanism under test, then send the task prompt below the steps.
-5. From a separate shell, send three probe messages at 20 s, 60 s and 120 s after the task prompt: `cafleet message send --from-member-id <probe-id> --to-member-id <director-id> "stream-probe 1"`, then `2` and `3`. Record each printed message ID and timestamp.
-6. Classify the run by the run classification below the steps. Capture the Director pane and retain the session records that show each probe ID's first observation.
-7. Record the backend, native version, mechanism (tool call and flags), message IDs, send timestamps, each probe ID's first observation (the notice-prompted poll that first returned it, the tool result or injected event carrying the `pending` line that prompted that poll, and their timestamps), poll timestamps, the listener's exit timestamp, the task-turn end timestamp and the classification in the design doc's evidence record.
+2. In a pane of the multiplexer under test, start the candidate Director session and register it with `cafleet fleet create --name <name> --coding-agent <backend>`, adding the pane ID and server it asks for when it cannot confirm the candidate's pane ([Director pane verification](concepts/members.md#director-pane-verification)).
+3. Have the Director spawn one probe member on any Member-eligible backend, with a spawn prompt that carries the `{database_url}` placeholder, sends `ready` and then ends its turn without further broker traffic; its ID is the sender identity. From a separate shell, send each probe message with `cafleet message send --from-member-id <probe-id> --to-member-id <director-id> "<text>"`, recording its ID and timestamp.
+4. **Idle.** Send one message to the idle Director. The preview must start a turn without other input, and the Director's poll must return the message.
+5. **Busy.** Ask the Director to run a foreground command of at least 60 s, such as `sleep 90`, and send two messages while it runs. The command must not be interrupted, and both previews must be read no later than the end of that turn.
+6. **Draft hold.** Type a draft into the Director composer, send one message, wait 10 s, then clear the draft. Nothing may be typed while the draft exists and the draft must stay intact; after clearing, the preview must arrive.
+7. **Interaction hold.** Open a native approval dialog with the setup below, send one message, then answer the dialog. Nothing may be typed into the dialog; the preview must arrive after it closes.
+8. **Burst.** During a foreground command, send 10 messages. Every preview must be accepted, and polls must return every ID.
+9. **Long preview.** Send a body whose preview reaches the profile's `director_delivery.plain_limit` (the 4000-scalar inline limit when it is null) and one above it. The first preview must arrive intact inline, and the second in the pointer form.
+10. **Settle race.** Type a key during the settle window of a delivery. The attempt must record `literal_mismatch` in the delivering member's `director_delivery` diagnostic without a submit key; after you clear the composer, the preview must arrive.
+11. Record the backend, native version, multiplexer and its version, pane geometry, message IDs and the check date in the design doc's evidence record.
 
-The task prompt for step 4 sets `<mechanism instruction>` to "between steps, read your background listener with `<tool call>`" for a pull mechanism and "consume each record your background listener delivers" for a push mechanism:
-
-> Summarize the files `<file 1>`, `<file 2>`, … one at a time. `<mechanism instruction>`. Learn about broker messages only from that listener's output; run no other `poll` or `show`. When a `pending` record appears there, run the command in its `next` field once and continue. Keep working until a poll has returned `stream-probe 3` or 240 seconds have passed since this prompt, then end your turn.
-
-Classify each run as follows; the 240-second turn bound leaves 60 seconds of the 300-second lease for turn-boundary delivery.
-
-| Classification | Condition |
+| Backend | Interaction-hold setup |
 |---|---|
-| Invalid | The task turn ended before 240 s without a poll having returned `stream-probe 3`; the task turn was still running when the listener exited; a probe ID was first revealed outside a notice-prompted poll, or the Director ran any other `poll` or `show`; every `pending` record reached the session while the listener ran but a poll one of them prompted ran at or after the listener exited; or user input was given after the task prompt. Repeat the run, up to three runs per mechanism. |
-| Pass | A valid run in which every probe ID was first returned, before the listener exited, by a poll that a `pending` record delivered through the mechanism under test prompted. |
-| Fail | A valid run in which any probe ID was first returned only after the listener exited, or was never returned by a notice-prompted poll. |
+| claude | Launch the Director with `--permission-mode default`, then ask it to run a Bash command outside its allow rules |
+| codex | Launch with `-s read-only -a on-request -c approvals_reviewer="user"`, then ask it to run a command that writes a file |
+| opencode | Add a project `opencode.json` with `"permission": {"bash": "ask"}` (`OPENCODE_PERMISSION` has no effect), then ask it to run a shell command |
+| hermes | Use a probe Hermes home with `approvals.mode: manual`, then ask it to run a command matching Hermes's dangerous-command patterns, such as recursively deleting a temporary directory |
+| pi | Record `—`: pi has no native approval dialog, because the CAFleet pi gate runs only in members |
 
-A mechanism with three invalid runs is recorded as "not established" with the invalidating cause.
+Record `—` only for a backend with no native approval dialog; a dialog you cannot reproduce fails the step.
+
+A failed step removes that multiplexer from the backend's `director_delivery.multiplexers`, and the whole capability when none remains. The `pane delivery` row then reads `no`, naming the failed step, multiplexer and version, and the verdict row names `pane delivery`; the backend still runs Director delivery on each listed multiplexer, but is not Director-eligible.
 
 ## Testing and release acceptance
 
@@ -156,10 +139,7 @@ The capture-to-fixture conversion inserts the converted screen under its fixture
 
 ### Storage deadline mechanisms
 
-The SQLite mechanisms below enforce the storage deadlines that SPEC states as outcomes:
-
-- A `message listen` snapshot uses scoped busy waiting and an execution progress handler every 1,000 VM instructions, checking the deadline before and after prepare and execution, before and after decoding each row, and before commit. Every path restores busy handling and removes the listener-owned progress handler, preserving cleanup failures alongside the original cause.
-- A runner SQLite attempt replaces the connection's default five-second busy wait with its bounded budget, cancels long-running statements within that deadline and restores the prior handler and connection hooks after the attempt.
+A runner SQLite attempt enforces the storage deadlines that SPEC states as outcomes: it replaces the connection's default five-second busy wait with its bounded budget, cancels long-running statements within that deadline and restores the prior handler and connection hooks after the attempt.
 
 ### Release acceptance
 
