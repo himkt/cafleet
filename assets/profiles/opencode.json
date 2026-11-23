@@ -248,7 +248,7 @@
         "region": {
           "screen": "primary",
           "start_pattern": "^┃ ",
-          "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?cafleet(?:-ask)? · ",
+          "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?(?:[A-RT-Za-df-z0-9][^·]*|S(?:[^h·][^·]*)?|Sh(?:[^e·][^·]*)?|She(?:[^l·][^·]*)?|Shel(?:[^l·][^·]*)?|Shell[^·]+|e(?:[^s·][^·]*)?|es(?:[^c·][^·]*)?|esc(?:[^ ·][^·]*)?|esc (?:[^n·][^·]*)?|esc n(?:[^o·][^·]*)?|esc no(?:[^r·][^·]*)?|esc nor(?:[^m·][^·]*)?|esc norm(?:[^a·][^·]*)?|esc norma(?:[^l·][^·]*)?|esc normal[^·]+) · ",
           "max_rows": 3,
           "cursor": "after_prompt"
         },
@@ -272,7 +272,7 @@
         "region": {
           "screen": "primary",
           "start_pattern": "^┃ ",
-          "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?cafleet(?:-ask)? · ",
+          "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?(?:[A-RT-Za-df-z0-9][^·]*|S(?:[^h·][^·]*)?|Sh(?:[^e·][^·]*)?|She(?:[^l·][^·]*)?|Shel(?:[^l·][^·]*)?|Shell[^·]+|e(?:[^s·][^·]*)?|es(?:[^c·][^·]*)?|esc(?:[^ ·][^·]*)?|esc (?:[^n·][^·]*)?|esc n(?:[^o·][^·]*)?|esc no(?:[^r·][^·]*)?|esc nor(?:[^m·][^·]*)?|esc norm(?:[^a·][^·]*)?|esc norma(?:[^l·][^·]*)?|esc normal[^·]+) · ",
           "max_rows": 3,
           "cursor": "after_prompt"
         },
@@ -298,6 +298,30 @@
             }
           }
         }
+      },
+      {
+        "id": "opencode-composer-text",
+        "priority": 40,
+        "observation": "composer_text",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^ *$",
+          "end_pattern": "^(?:[^┃]|$)",
+          "max_rows": 40,
+          "cursor": "inside"
+        },
+        "matchers": [
+          {
+            "id": "composer",
+            "scope": "region",
+            "pattern": "\\A *\\n┃ "
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
       }
     ],
     "capabilities": {
@@ -343,6 +367,17 @@
           "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1",
           "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1"
         ],
+        "text": {
+          "rule_ids": [
+            "opencode-composer-text"
+          ],
+          "first_prefix": "^┃ ",
+          "continuation_prefix": "^┃ ",
+          "mode_prefix": "!",
+          "wrap": "word",
+          "placeholders": [],
+          "framed": true
+        },
         "submission": {
           "prompt": {
             "prefix_hex": "",
@@ -353,10 +388,16 @@
               "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1",
               "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1",
               "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
-              "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1"
+              "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1",
+              "opencode-2.3.0-composer-prompt-wrap-literal-tmux-120-1",
+              "opencode-2.3.0-composer-prompt-plain-380-literal-tmux-80-1",
+              "opencode-2.3.0-composer-prompt-plain-380-literal-herdr-82-1"
             ],
             "literal_framing": "plain",
-            "plain_literal_limit": null
+            "plain_literal_limit": {
+              "unit": "scalars",
+              "max": 380
+            }
           },
           "exec": {
             "prefix_hex": "2120",
@@ -367,10 +408,16 @@
               "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1",
               "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1",
               "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1",
-              "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1"
+              "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1",
+              "opencode-2.3.0-composer-exec-wrap-literal-tmux-120-1",
+              "opencode-2.3.0-composer-exec-plain-380-literal-tmux-80-1",
+              "opencode-2.3.0-composer-exec-plain-380-literal-herdr-82-1"
             ],
             "literal_framing": "plain",
-            "plain_literal_limit": null
+            "plain_literal_limit": {
+              "unit": "scalars",
+              "max": 380
+            }
           }
         }
       },
@@ -499,7 +546,35 @@
             "opencode-2.2.7-deny-pre-stage-3-tmux-036-1"
           ]
         }
-      ]
+      ],
+      "director_delivery": {
+        "coverage": "tested",
+        "multiplexers": [
+          "tmux",
+          "herdr"
+        ],
+        "rule_ids": [
+          "opencode-idle-composer",
+          "opencode-suggestion-composer",
+          "opencode-composer-text"
+        ],
+        "plain_limit": {
+          "unit": "scalars",
+          "max": 380
+        },
+        "fixture_ids": [
+          "opencode-2.3.0-director-busy-herdr-120-1",
+          "opencode-2.3.0-director-busy-tmux-120-1",
+          "opencode-2.3.0-director-idle-empty-herdr-120-1",
+          "opencode-2.3.0-director-idle-empty-tmux-120-1",
+          "opencode-2.3.0-director-one-herdr-120-1",
+          "opencode-2.3.0-director-one-tmux-120-1",
+          "opencode-2.3.0-director-plain-380-herdr-82-1",
+          "opencode-2.3.0-director-plain-380-tmux-80-1",
+          "opencode-2.3.0-director-wrap-herdr-120-1",
+          "opencode-2.3.0-director-wrap-tmux-120-1"
+        ]
+      }
     }
   },
   "screens": {
@@ -4304,7 +4379,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -4363,7 +4439,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -4421,7 +4498,8 @@
         {
           "operation": "prompt",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -4480,7 +4558,8 @@
         {
           "operation": "prompt",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -15065,7 +15144,8 @@
         {
           "operation": "prompt",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -15631,12 +15711,6 @@
         {
           "operation": "prompt",
           "multiplexer": "tmux",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
-        },
-        {
-          "operation": "prompt",
-          "multiplexer": "tmux",
           "kind": "post_submit"
         }
       ],
@@ -16179,7 +16253,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -17141,12 +17216,6 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
-        },
-        {
-          "operation": "exec",
-          "multiplexer": "tmux",
           "kind": "post_submit"
         }
       ],
@@ -17581,7 +17650,8 @@
         {
           "operation": "prompt",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 36,
@@ -18141,12 +18211,6 @@
         {
           "operation": "prompt",
           "multiplexer": "herdr",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
-        },
-        {
-          "operation": "prompt",
-          "multiplexer": "herdr",
           "kind": "post_submit"
         }
       ],
@@ -18656,7 +18720,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 36,
@@ -19600,12 +19665,6 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
-        },
-        {
-          "operation": "exec",
-          "multiplexer": "herdr",
           "kind": "post_submit"
         }
       ],
@@ -20039,6 +20098,3819 @@
           "row": 30,
           "start_col": 74,
           "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-idle-empty-tmux-120-1": {
+      "native_version": "2.3.0",
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 3,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "                                                                                                                        ",
+        "┃ Ask anything, / for commands, @ for context…                                                                          ",
+        "                                                                                                                        ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                                                 ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 50,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-one-tmux-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 31,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 3,
+      "cursor_col": 43,
+      "lines": [
+        "",
+        "",
+        "                                                                                                                        ",
+        "┃ Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                                                             ",
+        "                                                                                                                        ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                                                 ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 43,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 50,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-wrap-tmux-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 5,
+      "cursor_col": 86,
+      "lines": [
+        "",
+        "",
+        "                                                                                                                        ",
+        "┃ Reply OK.                                                                                                             ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                  ",
+        "                                                                                                                        ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                                                 ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 86,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 50,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-busy-tmux-120-1": {
+      "native_version": "2.3.0",
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 5,
+      "cursor_col": 2,
+      "lines": [
+        "",
+        "",
+        "",
+        "› Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import time; time.sleep(60)'  ",
+        "                                                                                                                        ",
+        "┃                                                                                                                       ",
+        "                                                                                                                        ",
+        "🯦 esc interrupt · Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                               ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 80,
+            "g": 134,
+            "b": 210
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 2,
+          "end_col": 15,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 15,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 18,
+          "end_col": 23,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 23,
+          "end_col": 26,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 26,
+          "end_col": 45,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 45,
+          "end_col": 62,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 62,
+          "end_col": 68,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 68,
+          "end_col": 73,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-idle-empty-herdr-120-1": {
+      "native_version": "2.3.0",
+      "rows": 7,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "SIZE4 119 40",
+        "",
+        "",
+        "                                                                                                                       ",
+        "┃ Ask anything, / for commands, @ for context…                                                                         ",
+        "                                                                                                                       ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                                                "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 50,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-one-herdr-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 31,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 7,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "SIZE4 119 40",
+        "",
+        "",
+        "                                                                                                                       ",
+        "┃ Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                                                            ",
+        "                                                                                                                       ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                                                "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 43,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 50,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-wrap-herdr-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 9,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "SIZE4 119 40",
+        "",
+        "",
+        "                                                                                                                       ",
+        "┃ Reply OK.                                                                                                            ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                ",
+        "                                                                                                                       ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                                                "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 117,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 87,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 50,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-busy-herdr-120-1": {
+      "native_version": "2.3.0",
+      "rows": 9,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "SIZE4 119 40",
+        "",
+        "",
+        "",
+        "› Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import time; time.sleep(60)'",
+        "                                                                                                                       ",
+        "┃                                                                                                                      ",
+        "                                                                                                                       ",
+        "🯦 esc interrupt · Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                              "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 80,
+            "g": 134,
+            "b": 210
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 2,
+          "end_col": 15,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 15,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 18,
+          "end_col": 23,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 23,
+          "end_col": 26,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 26,
+          "end_col": 45,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 45,
+          "end_col": 62,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 62,
+          "end_col": 68,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 68,
+          "end_col": 73,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-composer-prompt-wrap-literal-tmux-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 5,
+      "cursor_col": 86,
+      "lines": [
+        "",
+        "",
+        "                                                                                                                        ",
+        "┃ Reply OK.                                                                                                             ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                  ",
+        "                                                                                                                        ",
+        "cafleet-ask · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                                                           ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 86,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 11,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 14,
+          "end_col": 33,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 33,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 50,
+          "end_col": 56,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 56,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-composer-exec-wrap-literal-tmux-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 195,
+            "prefix": "! true "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 5,
+      "cursor_col": 81,
+      "lines": [
+        "",
+        "",
+        "                                                                                                                        ",
+        "┃  true                                                                                                                 ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                       ",
+        "                                                                                                                        ",
+        "Shell · esc normal                                                                                                      ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 7,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 81,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 8,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 11,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-composer-prompt-plain-380-literal-tmux-80-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 380,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 380
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 7,
+      "cursor_col": 78,
+      "lines": [
+        "",
+        "",
+        "                                                                                ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "                                                                                ",
+        "cafleet-ask · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                   ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 11,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 14,
+          "end_col": 33,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 33,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 50,
+          "end_col": 56,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 56,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-composer-prompt-plain-380-literal-herdr-82-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 380,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 380
+          }
+        }
+      ],
+      "rows": 11,
+      "cols": 82,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "SIZE8 80 40",
+        "",
+        "",
+        "                                                                                ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "                                                                                ",
+        "cafleet-ask · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                   "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 224,
+            "g": 108,
+            "b": 117
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 11,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 14,
+          "end_col": 33,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 33,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 50,
+          "end_col": 56,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 56,
+          "end_col": 61,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-composer-exec-plain-380-literal-tmux-80-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 373,
+            "prefix": "! true "
+          }
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 380
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 8,
+      "cursor_col": 71,
+      "lines": [
+        "",
+        "",
+        "                                                                                ",
+        "┃  true                                                                         ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa         ",
+        "                                                                                ",
+        "Shell · esc normal                                                              ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 7,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 2,
+          "end_col": 71,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 8,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 11,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-composer-exec-plain-380-literal-herdr-82-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 373,
+            "prefix": "! true "
+          }
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 380
+          }
+        }
+      ],
+      "rows": 12,
+      "cols": 82,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "SIZE8 80 40",
+        "",
+        "",
+        "                                                                                ",
+        "┃  true                                                                         ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa         ",
+        "                                                                                ",
+        "Shell · esc normal                                                              "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 7,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 250,
+            "g": 178,
+            "b": 131
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 71,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 8,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 11,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-plain-380-tmux-80-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 380,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 80,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 7,
+      "cursor_col": 78,
+      "lines": [
+        "",
+        "",
+        "                                                                                ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "                                                                                ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                         ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 50,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-plain-380-herdr-82-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 380,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 11,
+      "cols": 82,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "SIZE9 80 40",
+        "",
+        "",
+        "                                                                                ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "┃ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "                                                                                ",
+        "Build · GPT-6 Luna [medium] · OpenCode Go · ctrl+p menu                         "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 2,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 27,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 44,
+          "end_col": 50,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 50,
+          "end_col": 55,
           "faint": false,
           "foreground": {
             "kind": "rgb",

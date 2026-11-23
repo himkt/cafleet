@@ -442,7 +442,8 @@ stored_enum!(test_values ArchiveReason, "member_runtime_events.archive_reason", 
 stored_enum!(RunnerDiagnosticSource, "member_runner_diagnostics.source", {
     EventWriter => "event_writer", Observation => "observation",
     DeferredInput => "deferred_input", QueueHousekeeping => "queue_housekeeping",
-    PreviewSweep => "preview_sweep", InputResult => "input_result",
+    PreviewSweep => "preview_sweep", DirectorDelivery => "director_delivery",
+    InputResult => "input_result",
     PermissionAnswer => "permission_answer", Shutdown => "shutdown"
 });
 
@@ -559,7 +560,7 @@ stored_enum!(test_values InputDisposition, "member_input_operations.disposition"
 });
 stored_enum!(StopCause, "member_input_operations.stop_cause", {
     InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
-    DeadlineExpired => "deadline_expired",
+    DeadlineExpired => "deadline_expired", LiteralMismatch => "literal_mismatch",
     SubmitUnconfirmed => "submit_unconfirmed", ShortWrite => "short_write",
     WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
 });
@@ -571,6 +572,7 @@ impl StopCause {
             Self::InteractionCandidate
                 | Self::InteractionOpen
                 | Self::DeadlineExpired
+                | Self::LiteralMismatch
                 | Self::SubmitUnconfirmed
         )
     }

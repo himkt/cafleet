@@ -180,6 +180,8 @@ pub(crate) struct InputCoordinator {
     preview_wait: Option<PreviewWait>,
     blocked_wait: Option<BlockedWait>,
     diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    /// Reads the composer text back for the pre-submit comparison.
+    composer_reader: crate::coding_agent::Detector,
 }
 
 /// The sweep's selected preview while the composer holds it; the stall watchdog runs from `since`.
@@ -3967,6 +3969,47 @@ impl InputCoordinator {
         Ok(None)
     }
 
+    /// Before a verified-composer submit key, the composer must render exactly the written
+    /// literal; every other stage, and a run whose profile reads no composer text, passes.
+    fn composer_renders_literal(&self, id: AttemptKey, transport: &Transport) -> Result<bool> {
+        let Some(composer) = self.pending.as_ref().and_then(PendingInput::composer) else {
+            return Ok(true);
+        };
+        let retained = self.operations.get(&id).expect("pending receipt remains");
+        let RetainedSelection::Composer {
+            stages, next_stage, ..
+        } = &retained.selection
+        else {
+            return Err(error("ordinary writer selection changed"));
+        };
+        let literal_index = usize::from(composer.method == storage::DeliveryMethod::Fallback);
+        if *next_stage + 1 != stages.len()
+            || *next_stage <= literal_index
+            || !self.verified_composer(composer.operation)
+        {
+            return Ok(true);
+        }
+        let prefix = composer.operation.prefix();
+        let literal = &stages[literal_index];
+        let body = literal
+            .strip_prefix(prefix)
+            .ok_or_else(|| error("composer literal stage lacks its operation prefix"))?;
+        let body = body
+            .strip_prefix(PASTE_OPEN)
+            .and_then(|framed| framed.strip_suffix(PASTE_CLOSE))
+            .unwrap_or(body);
+        let body = std::str::from_utf8(body).map_err(|_| error("composer literal is not UTF-8"))?;
+        let prefix = std::str::from_utf8(prefix).expect("operation prefixes are UTF-8");
+        let chunks = [prefix, body]
+            .into_iter()
+            .filter(|chunk| !chunk.is_empty())
+            .collect::<Vec<_>>();
+        Ok(self
+            .composer_reader
+            .composer_text(&transport.snapshot())?
+            .is_some_and(|text| text.matches(&chunks)))
+    }
+
     fn composer_interruption(
         &self,
         id: AttemptKey,
@@ -4035,6 +4078,16 @@ impl InputCoordinator {
         let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
             return Ok(None);
         };
+        if !self.composer_renders_literal(id, transport)? {
+            *terminal_bookkeeping = true;
+            return self.interrupt_composer(
+                conn,
+                id,
+                observation,
+                effective,
+                storage::StopCause::LiteralMismatch,
+            );
+        }
         let retained = self
             .operations
             .get_mut(&id)
@@ -4973,7 +5026,9 @@ impl InputCoordinator {
             Ok(member.placement)
         })?;
         let backend = coding_agent(&run.backend).ok_or_else(|| error("unknown input backend"))?;
+        let composer_reader = crate::coding_agent::Detector::new(&services.catalog, backend, None);
         Ok(Self {
+            composer_reader,
             placement,
             operations: BTreeMap::new(),
             answered_interactions: BTreeSet::new(),
@@ -6275,7 +6330,10 @@ mod tests {
                 definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(composer["codex"]["profile"]["rules"][0].clone());
+                    .extend([
+                        composer["codex"]["profile"]["rules"][0].clone(),
+                        crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                    ]);
                 definition["codex"]["profile"]["capabilities"]["composer"] =
                     composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 for operation in ["prompt", "exec"] {
@@ -7273,15 +7331,28 @@ mod tests {
                     }
                 }
 
-                fn result_cause(host: &Host, message_id: i64) -> Option<String> {
-                    host.fixture
+                /// The cause kind of the preview's receipt-free delivery result, once the event
+                /// writer has persisted it.
+                fn result_cause(host: &mut Host, message_id: i64) -> Option<String> {
+                    host.drain();
+                    let payloads: Vec<Value> = host
+                        .fixture
                         .conn
-                        .query_row(
-                            "SELECT json_extract(payload_json,'$.cause.kind') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.message_id')=?2",
-                            rusqlite::params![host.fixture.run.run_id, message_id],
-                            |row| row.get(0),
+                        .prepare(
+                            "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result'",
                         )
                         .unwrap()
+                        .query_map([host.fixture.run.run_id], |row| row.get::<_, String>(0))
+                        .unwrap()
+                        .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                        .collect();
+                    let result = payloads
+                        .iter()
+                        .find(|payload| payload["message_id"] == message_id)
+                        .unwrap_or_else(|| {
+                            panic!("a delivery result names message {message_id}: {payloads:?}")
+                        });
+                    result["cause"]["kind"].as_str().map(str::to_owned)
                 }
 
                 fn preview(
@@ -7339,7 +7410,7 @@ mod tests {
                             };
                             assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
                             assert!(host.pty.written.ends_with(&program), "{name}");
-                            assert_eq!(host.pty.program, [program.clone()], "{name}");
+                            assert_eq!(host.pty.program, std::slice::from_ref(&program), "{name}");
                         });
                     }
                 }
@@ -7400,7 +7471,10 @@ mod tests {
                 definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(composer["codex"]["profile"]["rules"][0].clone());
+                    .extend([
+                        composer["codex"]["profile"]["rules"][0].clone(),
+                        crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                    ]);
                 definition["codex"]["profile"]["capabilities"]["composer"] =
                     composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 prompt_plan_catalog(&definition)
@@ -7769,7 +7843,7 @@ mod tests {
                         name: "a keystroke during the settle",
                         armed: false,
                         event: keystroke,
-                        cause: None,
+                        cause: Some(storage::StopCause::LiteralMismatch),
                     },
                     StagedEvent {
                         name: "a keystroke once the submit stage is armed",
@@ -7792,7 +7866,7 @@ mod tests {
                 ];
 
                 #[test]
-                fn only_an_appearing_interaction_stops_a_staged_write() {
+                fn only_an_appearing_interaction_or_a_literal_mismatch_stops_a_staged_write() {
                     for case in STAGED_EVENTS {
                         with_interaction_host(|host| {
                             host.confirm_submissions = false;
@@ -7857,25 +7931,13 @@ mod tests {
 
                 #[test]
                 fn post_submit_verification_detects_an_unsubmitted_result() {
-                    for (name, mixed_keystroke, verifies_empty) in [
-                        (
-                            "a composer that verifies empty after the submit key",
-                            false,
-                            true,
-                        ),
-                        ("a composer that never verifies empty", false, false),
-                        (
-                            "a keystroke mixed into the composer during the settle",
-                            true,
-                            false,
-                        ),
+                    for (name, verifies_empty) in [
+                        ("a composer that verifies empty after the submit key", true),
+                        ("a composer that never verifies empty", false),
                     ] {
                         with_interaction_host(|host| {
                             host.confirm_submissions = false;
                             until_literal_written(host, prompt_request(host, "prompt:post-submit"));
-                            if mixed_keystroke {
-                                keystroke(host);
-                            }
                             let reply =
                                 crate::runtime::input::tests::ordinary_prompt::composer_reliability::finish(
                                     host,
@@ -8026,7 +8088,13 @@ mod tests {
                 while !done(host) {
                     assert!(
                         host.clock.now() < host.until,
-                        "queued work resolves in time"
+                        "queued work resolves in time; offers {:?}; screen {:?}",
+                        host.pty
+                            .offers
+                            .iter()
+                            .map(|offer| String::from_utf8_lossy(offer).into_owned())
+                            .collect::<Vec<_>>(),
+                        host.transport.snapshot().screen.contents()
                     );
                     housekeep(host);
                     host.drain();
@@ -9443,7 +9511,10 @@ mod tests {
                 definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(empty);
+                    .extend([
+                        empty,
+                        crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                    ]);
                 definition["codex"]["profile"]["capabilities"]["composer"] =
                     composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 prompt_plan_catalog(&definition)
@@ -10207,9 +10278,9 @@ mod tests {
                 database_url: String,
                 hooks: Arc<Hooks>,
                 clock: Arc<TestClock>,
-                /// Whether the child paints typed input into the synthetic composer, as a native
-                /// composer shows its unsubmitted literal before the submit key.
-                pub(crate) echo: bool,
+                /// How the child paints typed input into its composer, as a native composer shows
+                /// its unsubmitted literal before the submit key.
+                painter: Option<crate::coding_agent::catalog::test_support::ComposerPainter>,
                 typed: Vec<u8>,
             }
             impl Pty {
@@ -10219,10 +10290,14 @@ mod tests {
                     self.program_offset = 0;
                     self.typed.clear();
                 }
+                /// The child redrew its empty composer after a submit key inside a longer program.
+                fn clear_typed(&mut self) {
+                    self.typed.clear();
+                }
                 /// Echoes accepted programmatic bytes; the program's completing stage is its
                 /// submit key, which empties the composer.
                 fn echo_program(&mut self, bytes: &[u8], starts_program: bool, completed: bool) {
-                    if !self.echo {
+                    if self.painter.is_none() {
                         return;
                     }
                     if starts_program || completed {
@@ -10237,7 +10312,10 @@ mod tests {
                 /// Echoes typed characters that land in a composer already holding a literal;
                 /// escape sequences such as pointer reports paint nothing.
                 fn echo_manual(&mut self, bytes: &[u8]) {
-                    if !self.echo || self.typed.is_empty() || bytes.first() == Some(&0x1b) {
+                    if self.painter.is_none()
+                        || self.typed.is_empty()
+                        || bytes.first() == Some(&0x1b)
+                    {
                         return;
                     }
                     self.typed.extend(
@@ -10259,9 +10337,8 @@ mod tests {
                         }
                     }
                     let shown = shown.strip_prefix(b"\x1b").unwrap_or(&shown);
-                    let echo = crate::coding_agent::catalog::test_support::synthetic_composer_echo(
-                        &String::from_utf8_lossy(shown),
-                    );
+                    let painter = self.painter.as_ref().expect("an echoing child paints");
+                    let echo = painter(&String::from_utf8_lossy(shown));
                     queue(&mut self.child, &echo);
                 }
                 pub(crate) fn expect_program(&mut self, bytes: Vec<u8>) {
@@ -10468,6 +10545,8 @@ mod tests {
                 pub(crate) stage_settle: Duration,
                 pub(crate) confirm_submissions: bool,
                 confirmation_frame: Vec<u8>,
+                /// The empty-composer screen the host started on.
+                idle_frame: Vec<u8>,
                 confirmation_programs: std::collections::VecDeque<Vec<u8>>,
                 confirmed_bytes: usize,
                 expires: u64,
@@ -10539,7 +10618,16 @@ mod tests {
                         clock_lead,
                     } = profile;
                     let catalog = catalog();
-                    let echo = screen == SCREEN;
+                    let painter = if screen == SCREEN {
+                        Some(
+                            crate::coding_agent::catalog::test_support::synthetic_composer_painter(
+                            ),
+                        )
+                    } else {
+                        crate::coding_agent::catalog::test_support::native_composer_painter(
+                            backend, size, &screen,
+                        )
+                    };
                     let composer_selected =
                         catalog.capabilities(backend).composer == storage::Coverage::Tested;
                     let RunnerFixture {
@@ -10603,7 +10691,7 @@ mod tests {
                         database_url: url,
                         hooks: hooks.clone(),
                         clock: clock.clone(),
-                        echo,
+                        painter,
                         typed: Vec::new(),
                     };
                     let mut host = Self {
@@ -10620,6 +10708,7 @@ mod tests {
                         until,
                         stage_settle,
                         confirm_submissions: true,
+                        idle_frame: screen.clone(),
                         confirmation_frame: screen,
                         confirmation_programs: std::collections::VecDeque::new(),
                         confirmed_bytes: 0,
@@ -10659,9 +10748,13 @@ mod tests {
                 pub(crate) fn show(&mut self, bytes: Vec<u8>) {
                     self.child_output(&bytes);
                     self.drain();
+                    if bytes == self.idle_frame {
+                        self.pty.clear_composer();
+                    }
                     if self.controller.health(&self.writer).eligibility
                         == InputEligibility::ComposerEmpty
                     {
+                        self.pty.clear_composer();
                         self.confirmation_frame = bytes;
                     }
                 }
@@ -10757,6 +10850,7 @@ mod tests {
                     if ordinary && self.confirm_submissions && complete_program {
                         self.confirmation_programs.pop_front();
                         self.confirmed_bytes = self.pty.written.len();
+                        self.pty.clear_typed();
                         self.child_output(self.confirmation_frame.clone());
                     }
                     result
@@ -11061,7 +11155,10 @@ mod tests {
             definition["codex"]["profile"]["rules"]
                 .as_array_mut()
                 .unwrap()
-                .push(composer["codex"]["profile"]["rules"][0].clone());
+                .extend([
+                    composer["codex"]["profile"]["rules"][0].clone(),
+                    crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                ]);
             definition["codex"]["profile"]["capabilities"]["composer"] =
                 composer["codex"]["profile"]["capabilities"]["composer"].clone();
             with_profile_host(

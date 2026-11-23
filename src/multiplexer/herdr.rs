@@ -131,8 +131,8 @@ impl HerdrMultiplexer {
         }
     }
 
-    /// `pane`'s `rect.width` in the `api snapshot` layouts.
-    fn pane_width(&self, pane: &str) -> Result<u16, MultiplexerError> {
+    /// `pane`'s `rect.width` and `scroll.viewport_rows` in the `api snapshot` layouts.
+    fn pane_geometry(&self, pane: &str) -> Result<(u16, u16), MultiplexerError> {
         let result = self.run_json(&self.core.argv(&["herdr", "api", "snapshot"]))?;
         let layouts = result["snapshot"]["layouts"]
             .as_array()
@@ -145,12 +145,18 @@ impl HerdrMultiplexer {
             .ok_or_else(|| {
                 MultiplexerError::new(format!("herdr api snapshot has no pane {pane}"))
             })?;
-        let width = f64_field(&entry["rect"], "api snapshot", "width")?;
-        (width.fract() == 0.0 && width >= 1.0 && width <= f64::from(u16::MAX))
-            .then_some(width as u16)
-            .ok_or_else(|| {
-                MultiplexerError::new(format!("herdr api snapshot width {width} of {pane}"))
-            })
+        let dimension = |object: &Value, field: &str| {
+            let value = f64_field(object, "api snapshot", field)?;
+            (value.fract() == 0.0 && value >= 1.0 && value <= f64::from(u16::MAX))
+                .then_some(value as u16)
+                .ok_or_else(|| {
+                    MultiplexerError::new(format!("herdr api snapshot {field} {value} of {pane}"))
+                })
+        };
+        Ok((
+            dimension(&entry["rect"], "width")?,
+            dimension(&entry["scroll"], "viewport_rows")?,
+        ))
     }
 
     fn list_panes(&self) -> Result<Vec<Value>, MultiplexerError> {
@@ -331,20 +337,20 @@ impl Multiplexer for HerdrMultiplexer {
         Ok(crate::multiplexer::capture_window(&raw, lines))
     }
 
-    /// herdr exposes neither the cursor nor the screen mode; the visible read's line count is
-    /// the row count.
+    /// herdr exposes neither the cursor nor the screen mode. The visible read keeps leading and
+    /// interior blank rows at their positions and drops only trailing blank rows, so its lines
+    /// fill the screen from the top.
     fn capture_screen(&self, pane: &str) -> Result<ScreenCapture, MultiplexerError> {
-        let cols = self.pane_width(pane)?;
+        let (cols, rows) = self.pane_geometry(pane)?;
         let body = self.core.run(&self.core.argv(&[
             "herdr", "pane", "read", pane, "--source", "visible", "--format", "ansi",
         ]))?;
         let lines = body.strip_suffix('\n').unwrap_or(&body).split('\n').count();
-        let rows = u16::try_from(lines)
-            .ok()
-            .filter(|rows| *rows > 0 && !body.is_empty())
-            .ok_or_else(|| {
-                MultiplexerError::new(format!("herdr pane read of {pane} printed {lines} rows"))
-            })?;
+        if lines > usize::from(rows) {
+            return Err(MultiplexerError::new(format!(
+                "herdr pane read of {pane} printed {lines} rows for a {rows}-row viewport"
+            )));
+        }
         Ok(ScreenCapture {
             rows,
             cols,

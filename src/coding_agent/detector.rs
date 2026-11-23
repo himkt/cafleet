@@ -2,6 +2,7 @@ use crate::broker::runtime::InteractionClass;
 use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::catalog::Capture;
+use crate::coding_agent::catalog::ComposerText;
 use crate::coding_agent::catalog::CursorRule;
 use crate::coding_agent::catalog::FocusStyle;
 use crate::coding_agent::catalog::MarginRows;
@@ -25,6 +26,8 @@ pub(crate) enum ObservationKind {
     Interaction(InteractionClass),
     PermissionContinuation,
     ComposerEmpty,
+    /// A composer holding typed text, which `composer.text` reads back.
+    ComposerText,
     Unknown,
 }
 
@@ -43,6 +46,7 @@ impl ObservationKind {
         Ok(match value {
             "permission_continuation" => Self::PermissionContinuation,
             "composer_empty" => Self::ComposerEmpty,
+            "composer_text" => Self::ComposerText,
             "unknown" => Self::Unknown,
             _ => return Err(CafleetError::Usage("invalid profile observation".into())),
         })
@@ -52,6 +56,7 @@ impl ObservationKind {
             Self::Interaction(class) => class.as_str(),
             Self::PermissionContinuation => "permission_continuation",
             Self::ComposerEmpty => "composer_empty",
+            Self::ComposerText => "composer_text",
             Self::Unknown => "unknown",
         }
     }
@@ -287,6 +292,12 @@ fn match_rule<'a>(
         return None;
     }
     let candidates = qualifying_regions(rule, screen, lines);
+    if rule.kind == ObservationKind::ComposerText {
+        return candidates
+            .into_iter()
+            .filter_map(|candidate| extract(rule, lines, candidate))
+            .last();
+    }
     if cursor_free(screen) {
         let mut matched = candidates
             .into_iter()
@@ -322,11 +333,20 @@ fn qualifying_regions(
     screen: &ScreenSnapshot,
     lines: &[LogicalLine],
 ) -> Vec<Candidate> {
-    region_candidates(&rule.region, rule.suggestion, screen, lines)
+    region_candidates(
+        &rule.region,
+        rule.suggestion,
+        rule.kind == ObservationKind::ComposerText,
+        screen,
+        lines,
+    )
 }
+/// With `first_later_end`, each start row's only candidate ends at the first later row that
+/// matches `end_pattern`, as a `composer_text` region does.
 fn region_candidates(
     region_rule: &Region,
     suggestion: Option<SuggestionStyle>,
+    first_later_end: bool,
     screen: &ScreenSnapshot,
     lines: &[LogicalLine],
 ) -> Vec<Candidate> {
@@ -346,7 +366,11 @@ fn region_candidates(
             continue;
         };
         let after_prompt = line.boundaries.get(prompt.end()).copied();
-        for (end, last) in lines.iter().enumerate().skip(start) {
+        for (end, last) in lines
+            .iter()
+            .enumerate()
+            .skip(start + usize::from(first_later_end))
+        {
             if last.end - line.start + 1 > region_rule.max_rows {
                 break;
             }
@@ -361,8 +385,6 @@ fn region_candidates(
                 top: line.start,
                 bottom: last.end + 1,
             };
-            // A pending-wrap cursor (column == cols) stands on its row's last cell, inside the
-            // full-width region.
             let qualified = match (region_rule.cursor, cursor) {
                 (CursorRule::Any, _) | (_, None) => true,
                 (CursorRule::AtEnd, Some(at)) => last.boundaries.get(found.end()) == Some(&at),
@@ -378,9 +400,31 @@ fn region_candidates(
             if qualified {
                 regions.push((start, end, region));
             }
+            if first_later_end {
+                break;
+            }
         }
     }
     regions
+}
+/// `row`'s text without cells drawn in any of `styles`, trailing blanks trimmed.
+fn typed_row(screen: &ScreenSnapshot, row: u16, styles: &[SuggestionStyle]) -> Result<String> {
+    let mut text = String::new();
+    for col in 0..screen.cols {
+        let cell = screen
+            .screen
+            .cell(row, col)
+            .ok_or_else(|| CafleetError::App("screen cell geometry mismatch".into()))?;
+        if cell.is_wide_continuation() || styles.iter().any(|style| suggestion_cell(cell, *style)) {
+            continue;
+        }
+        text.push_str(if cell.has_contents() {
+            cell.contents()
+        } else {
+            " "
+        });
+    }
+    Ok(text.trim_end().to_owned())
 }
 /// Whether every cell from `col` to the row's last non-blank cell carries the suggestion style.
 fn suggestion_only(screen: &ScreenSnapshot, row: u16, col: u16, style: SuggestionStyle) -> bool {
@@ -700,7 +744,74 @@ impl Detector {
             profile: catalog.profile(backend).cloned(),
         }
     }
+    /// The composer text of `screen`: the one `composer.text` rule matching the screen bounds
+    /// the rows, read with the profile's prefixes after dropping suggestion-styled cells; `None`
+    /// when no rule or several rules match, or the first row lacks the first prefix.
+    pub(crate) fn composer_text(&self, screen: &ScreenSnapshot) -> Result<Option<ComposerText>> {
+        let Some(profile) = &self.profile else {
+            return Ok(None);
+        };
+        let Some(spec) = &profile.composer_text else {
+            return Ok(None);
+        };
+        let rules = spec
+            .rule_ids
+            .iter()
+            .map(|id| {
+                profile
+                    .rules
+                    .iter()
+                    .find(|rule| &rule.id == id)
+                    .expect("validated composer text rule")
+            })
+            .collect::<Vec<_>>();
+        let lines = ScreenLines::new(screen, profile)?;
+        let mut regions = rules.iter().filter_map(|rule| {
+            match_rule(rule, screen, lines.of(rule)).map(|m| (rule.kind, m.region))
+        });
+        let (Some((kind, region)), None) = (regions.next(), regions.next()) else {
+            return Ok(None);
+        };
+        let text_bottom = if kind == ObservationKind::ComposerText {
+            region.bottom - 1
+        } else {
+            region.bottom
+        };
+        let styles = rules
+            .iter()
+            .filter_map(|rule| rule.suggestion)
+            .collect::<Vec<_>>();
+        let rows = (region.top..text_bottom)
+            .map(|row| typed_row(screen, row, &styles))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(spec.read(region, &rows))
+    }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
+        self.observe_where(screen, |profile, rule| {
+            rule.continuation.is_some()
+                || [profile.detection.as_ref(), profile.composer.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .any(|cap| cap.rules.contains(&rule.id))
+        })
+    }
+    /// Observes a Director screen over `composer_rules` plus every interaction rule.
+    pub(crate) fn observe_director(
+        &self,
+        screen: &ScreenSnapshot,
+        composer_rules: &[String],
+    ) -> Result<ScreenObservation> {
+        self.observe_where(screen, |_, rule| {
+            rule.continuation.is_some()
+                || matches!(rule.kind, ObservationKind::Interaction(_))
+                || composer_rules.contains(&rule.id)
+        })
+    }
+    fn observe_where(
+        &self,
+        screen: &ScreenSnapshot,
+        selected: impl Fn(&Profile, &Rule) -> bool,
+    ) -> Result<ScreenObservation> {
         let mut observation = ScreenObservation {
             kind: ObservationKind::Unknown,
             rule_id: "unmatched-screen".into(),
@@ -719,13 +830,7 @@ impl Detector {
         let mut matched = profile
             .rules
             .iter()
-            .filter(|rule| {
-                rule.continuation.is_some()
-                    || [profile.detection.as_ref(), profile.composer.as_ref()]
-                        .into_iter()
-                        .flatten()
-                        .any(|cap| cap.rules.contains(&rule.id))
-            })
+            .filter(|rule| selected(profile, rule))
             .filter_map(|rule| match_rule(rule, screen, lines.of(rule)))
             .collect::<Vec<_>>();
         let Some(priority) = matched.iter().map(|m| m.rule.priority).max() else {

@@ -244,6 +244,30 @@
           "choices": []
         },
         "verified_noninteraction": true
+      },
+      {
+        "id": "hermes-composer-text",
+        "priority": 40,
+        "observation": "composer_text",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^(?:☤ )?❯ ",
+          "end_pattern": "^─",
+          "max_rows": 40,
+          "cursor": "inside"
+        },
+        "matchers": [
+          {
+            "id": "prompt",
+            "scope": "line",
+            "pattern": "^(?:☤ )?❯ "
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
       }
     ],
     "capabilities": {
@@ -330,6 +354,20 @@
           "hermes-2026.9.24-composer-exec-plain-4000-args-max-preview-chunks-post-500ms-tapped-v2-herdr-119-93",
           "hermes-2026.9.24-suggestion-tmux-120-1"
         ],
+        "text": {
+          "rule_ids": [
+            "hermes-composer-text"
+          ],
+          "first_prefix": "^(?:☤ )?❯ ",
+          "continuation_prefix": "^  ",
+          "wrap": "char",
+          "placeholders": [
+            {
+              "pattern": "\\[Pasted text #[0-9]+: (?P<count>[0-9]+) lines → [^\\]]*\\]",
+              "unit": "lines"
+            }
+          ]
+        },
         "submission": {
           "prompt": {
             "prefix_hex": "",
@@ -5649,7 +5687,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -5708,7 +5747,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,

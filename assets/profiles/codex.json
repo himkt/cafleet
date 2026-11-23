@@ -129,6 +129,30 @@
             "faint": true
           }
         }
+      },
+      {
+        "id": "codex-composer-text",
+        "priority": 40,
+        "observation": "composer_text",
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^[›!] ",
+          "end_pattern": "^ *$",
+          "max_rows": 40,
+          "cursor": "inside"
+        },
+        "matchers": [
+          {
+            "id": "prompt",
+            "scope": "line",
+            "pattern": "^[›!] "
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
       }
     ],
     "capabilities": {
@@ -210,6 +234,21 @@
           "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1",
           "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1"
         ],
+        "text": {
+          "rule_ids": [
+            "codex-composer-text"
+          ],
+          "first_prefix": "^[›!] ",
+          "continuation_prefix": "^  ",
+          "mode_prefix": "!",
+          "wrap": "word",
+          "placeholders": [
+            {
+              "pattern": "\\[Pasted Content (?P<count>[0-9]+) chars\\]",
+              "unit": "scalars"
+            }
+          ]
+        },
         "submission": {
           "prompt": {
             "prefix_hex": "",
@@ -288,7 +327,35 @@
             "codex-0.167.0-deny-pre-stage-tmux-120-1"
           ]
         }
-      ]
+      ],
+      "director_delivery": {
+        "coverage": "tested",
+        "multiplexers": [
+          "tmux",
+          "herdr"
+        ],
+        "rule_ids": [
+          "codex-idle-composer",
+          "codex-suggestion-composer",
+          "codex-composer-text"
+        ],
+        "plain_limit": {
+          "unit": "scalars",
+          "max": 1024
+        },
+        "fixture_ids": [
+          "codex-0.169.0-director-busy-herdr-120-1",
+          "codex-0.169.0-director-busy-tmux-120-1",
+          "codex-0.169.0-director-idle-empty-herdr-120-1",
+          "codex-0.169.0-director-idle-empty-tmux-120-1",
+          "codex-0.169.0-director-one-herdr-120-1",
+          "codex-0.169.0-director-one-tmux-120-1",
+          "codex-0.169.0-director-plain-1024-herdr-120-1",
+          "codex-0.169.0-director-plain-1024-tmux-120-1",
+          "codex-0.169.0-director-wrap-herdr-120-1",
+          "codex-0.169.0-director-wrap-tmux-120-1"
+        ]
+      }
     }
   },
   "screens": {
@@ -2719,7 +2786,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -2783,7 +2851,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -2846,7 +2915,8 @@
         {
           "operation": "prompt",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "CF228_RETAIN_prompt_herdr_1794671922561553059"
         }
       ],
       "rows": 40,
@@ -2914,7 +2984,8 @@
         {
           "operation": "prompt",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "CF228_RETAIN_prompt_tmux_1794671921279867495"
         }
       ],
       "rows": 39,
@@ -5652,7 +5723,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -6369,7 +6441,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 36,
@@ -7102,7 +7175,8 @@
         {
           "operation": "prompt",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -8695,7 +8769,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -10295,7 +10370,8 @@
         {
           "operation": "prompt",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 36,
@@ -11775,7 +11851,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 36,
@@ -12910,6 +12987,2452 @@
             "g": 167,
             "b": 103
           }
+        }
+      ]
+    },
+    "codex-0.169.0-director-idle-empty-tmux-120-1": {
+      "native_version": "0.169.0",
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "› Ask Codex to do anything    ",
+        "                              ",
+        "",
+        "",
+        "  ← for agents · ? for shortcuts                            "
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "codex-0.169.0-director-one-tmux-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 31,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 43,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                 ",
+        "                                                                                                                        ",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-director-wrap-tmux-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 85,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "› Reply OK.                   ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                   ",
+        "                                                                                                                        ",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-director-plain-1024-tmux-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 1024,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 90,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "› aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                              ",
+        "                                                                                                                        ",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-director-busy-tmux-120-1": {
+      "native_version": "0.169.0",
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 2,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "› Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import time; time.sleep(60)'  ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "• I’ll run the command as written and wait for it to exit.                                                              ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "• Working (9s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "› Ask Codex to do anything                                                                                              ",
+        "                                                                                                                        ",
+        "",
+        "",
+        "  ← for agents · ? for shortcuts                            "
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "rgb",
+            "r": 68,
+            "g": 68,
+            "b": 68
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "rgb",
+            "r": 68,
+            "g": 68,
+            "b": 68
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 120,
+          "bg": {
+            "kind": "rgb",
+            "r": 68,
+            "g": 68,
+            "b": 68
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 2,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 31,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 167,
+            "g": 167,
+            "b": 167
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 2,
+          "end_col": 9,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 31,
+          "start_col": 10,
+          "end_col": 16,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 31,
+          "start_col": 19,
+          "end_col": 96,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "codex-0.169.0-director-idle-empty-herdr-120-1": {
+      "native_version": "0.169.0",
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "",
+        "",
+        "  ← for agents · ? for shortcuts"
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "codex-0.169.0-director-one-herdr-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 31,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 39,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-director-wrap-herdr-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› Reply OK.",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 39,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-director-plain-1024-herdr-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 1024,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " ",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 39,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-director-busy-herdr-120-1": {
+      "native_version": "0.169.0",
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        "                                                                                                                       ",
+        "› Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import time; time.sleep(60)' ",
+        "                                                                                                                       ",
+        " ",
+        "• I’ll run the command in the foreground and wait for it to exit.",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "• Working (8s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close",
+        " ",
+        " ",
+        "› Ask Codex to do anything",
+        " ",
+        "",
+        "",
+        "  ← for agents · ? for shortcuts"
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 119,
+          "bg": {
+            "kind": "rgb",
+            "r": 68,
+            "g": 68,
+            "b": 68
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 119,
+          "bg": {
+            "kind": "rgb",
+            "r": 68,
+            "g": 68,
+            "b": 68
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 119,
+          "bg": {
+            "kind": "rgb",
+            "r": 68,
+            "g": 68,
+            "b": 68
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 2,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 2,
+          "end_col": 16,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 32,
+          "start_col": 19,
+          "end_col": 96,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
         }
       ]
     }

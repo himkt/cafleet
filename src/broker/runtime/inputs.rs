@@ -533,6 +533,27 @@ pub(crate) fn stamp_preview(
     })
 }
 
+/// Stamps a Director preview's `notified_at`; `false` when the column was already set.
+pub(crate) fn stamp_director_preview(
+    conn: &mut Connection,
+    owner: &RunOwner,
+    message_id: i64,
+) -> Result<bool, CafleetError> {
+    owned_transaction(conn, owner, |conn, run| {
+        let message = crate::broker::messaging::get_message(conn, message_id)?;
+        require(
+            message.to_member_id == run.director_member_id,
+            "message_id",
+            "director preview recipient changed",
+        )?;
+        let stamped = conn.execute(
+            "UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND notified_at IS NULL",
+            params![now_stamp(), message_id],
+        )?;
+        Ok(stamped == 1)
+    })
+}
+
 pub(crate) const UNRESOLVED_INPUT: &str = "(state IN ('in_progress','accepted','uncertain') OR (state='ready' AND deferred_at IS NOT NULL))";
 
 pub(super) fn require_capacity(conn: &Connection, run_id: i64) -> Result<(), CafleetError> {

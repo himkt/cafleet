@@ -120,6 +120,30 @@
           "choices": []
         },
         "verified_noninteraction": true
+      },
+      {
+        "id": "pi-composer-text",
+        "priority": 40,
+        "observation": "composer_text",
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^(?:─+|── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+) *$",
+          "end_pattern": "^─+ *$",
+          "max_rows": 40,
+          "cursor": "inside"
+        },
+        "matchers": [
+          {
+            "id": "editor",
+            "scope": "region",
+            "pattern": "\\A(?:─+|── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+) *\\n"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
       }
     ],
     "capabilities": {
@@ -201,6 +225,16 @@
           "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
           "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
         ],
+        "text": {
+          "rule_ids": [
+            "pi-composer-text"
+          ],
+          "first_prefix": "^",
+          "continuation_prefix": "^",
+          "wrap": "char",
+          "placeholders": [],
+          "framed": true
+        },
         "submission": {
           "prompt": {
             "prefix_hex": "",
@@ -9229,7 +9263,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -9293,7 +9328,8 @@
         {
           "operation": "prompt",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -9357,7 +9393,8 @@
         {
           "operation": "prompt",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -9420,7 +9457,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true CF228_RETAIN_exec_tmux_1794671923845862112"
         }
       ],
       "rows": 39,
