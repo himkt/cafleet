@@ -2236,9 +2236,56 @@ pub(crate) mod test_support {
         Ok(catalog)
     }
 
-    /// A `composer.text` declaration reading the rows of `rule_ids` with no prefixes.
-    pub(crate) fn synthetic_composer_text(rule_ids: &[&str]) -> Value {
-        json!({"rule_ids":rule_ids,"first_prefix":"^","continuation_prefix":"^","wrap":"char","placeholders":[]})
+    pub(crate) const SYNTHETIC_TEXT_RULE: &str = "synthetic-composer-text";
+
+    /// The scalar count above which the synthetic composer collapses its typed text into a
+    /// `[Typed N chars]` placeholder, as native composers collapse long pastes.
+    const SYNTHETIC_INLINE_SCALARS: usize = 30;
+
+    /// Adds the synthetic typed composer to `backend`'s composer capability: a
+    /// `Synthetic input: ` row above `State end`, read back through `composer.text`.
+    pub(crate) fn add_synthetic_composer_text(value: &mut Value, backend: &str) {
+        value[backend]["profile"]["rules"]
+            .as_array_mut()
+            .expect("profile rules")
+            .push(synthetic_text_rule());
+        let composer = &mut value[backend]["profile"]["capabilities"]["composer"];
+        composer["rule_ids"]
+            .as_array_mut()
+            .expect("composer rule ids")
+            .push(json!(SYNTHETIC_TEXT_RULE));
+        composer["text"] = synthetic_text_declaration();
+    }
+
+    pub(crate) fn synthetic_text_rule() -> Value {
+        json!({
+            "id":SYNTHETIC_TEXT_RULE,"priority":100,"observation":"composer_text",
+            "region":{"screen":"either","start_pattern":"^Synthetic input: ","end_pattern":"^State end$","max_rows":8,"cursor":"any"},
+            "matchers":[{"id":"input","scope":"line","pattern":"^Synthetic input: "}],
+            "extract":{"operation":null,"choices":[]},
+            "verified_noninteraction":true
+        })
+    }
+
+    pub(crate) fn synthetic_text_declaration() -> Value {
+        json!({
+            "rule_ids":[SYNTHETIC_TEXT_RULE],
+            "first_prefix":"^Synthetic input: ",
+            "continuation_prefix":"^  ",
+            "wrap":"char",
+            "placeholders":[{"pattern":"\\[Typed (?P<count>[0-9]+) chars\\]","unit":"scalars"}]
+        })
+    }
+
+    /// The child output that paints `typed` into the synthetic composer of
+    /// [`add_synthetic_composer_text`] over the empty synthetic composer's two bottom rows.
+    pub(crate) fn synthetic_composer_echo(typed: &str) -> Vec<u8> {
+        let shown = if typed.chars().count() > SYNTHETIC_INLINE_SCALARS {
+            format!("[Typed {} chars]", typed.chars().count())
+        } else {
+            typed.to_owned()
+        };
+        format!("\x1b[23;1H\x1b[2KSynthetic input: {shown}\r\n\x1b[2KState end").into_bytes()
     }
 
     impl ProfileCatalog {
@@ -2281,12 +2328,12 @@ pub(crate) mod test_support {
             profile["rules"]
                 .as_array_mut()
                 .unwrap()
-                .push(composer.clone());
+                .extend([composer.clone(), synthetic_text_rule()]);
             let capabilities = &mut profile["capabilities"];
             capabilities["detection"]["fixture_ids"] = json!([id]);
             capabilities["composer"] = json!({
-                "rule_ids":["synthetic-composer_empty"],"fixture_ids":[id],
-                "text":synthetic_composer_text(&["synthetic-composer_empty"]),
+                "rule_ids":["synthetic-composer_empty", SYNTHETIC_TEXT_RULE],"fixture_ids":[id],
+                "text":synthetic_text_declaration(),
                 "submission":{
                     "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[id]},
                     "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[id]}
@@ -2642,7 +2689,6 @@ pub(crate) mod test_support {
         let declaration = json!({"rule_ids":[format!("synthetic-{kind}")],"fixture_ids":[FIXTURE]});
         value["codex"]["profile"]["capabilities"] = if kind.starts_with("composer_") {
             let mut composer = declaration;
-            composer["text"] = synthetic_composer_text(&[&format!("synthetic-{kind}")]);
             composer["submission"] = json!({
                 "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
                 "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[FIXTURE]}
@@ -2651,6 +2697,9 @@ pub(crate) mod test_support {
         } else {
             json!({"detection":declaration,"composer":null,"answers":[]})
         };
+        if kind.starts_with("composer_") {
+            add_synthetic_composer_text(&mut value, "codex");
+        }
         value
     }
 
@@ -2672,8 +2721,8 @@ pub(crate) mod test_support {
         let prompt = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":prompt.unwrap_or("0d"),"fixture_ids":[PROMPT_FIXTURE]});
         let exec = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
         value["codex"]["profile"]["capabilities"]["composer"] = json!({
-            "rule_ids":[EMPTY],"fixture_ids":[FIXTURE],
-            "text":synthetic_composer_text(&[EMPTY]),
+            "rule_ids":[EMPTY, SYNTHETIC_TEXT_RULE],"fixture_ids":[FIXTURE],
+            "text":synthetic_text_declaration(),
             "submission":{"prompt":prompt,"exec":exec}
         });
         value

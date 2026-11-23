@@ -6011,14 +6011,35 @@ mod tests {
                     assert!(fixture_id.contains("-composer-prompt-"), "{fixture_id}");
                     ComposerOperation::Prompt
                 };
-                let literal = "printf native-verification";
                 let catalog = ProfileCatalog::bundled().clone();
                 let plan = catalog.composer_plan(backend, operation).unwrap();
-                assert!(plan.plain_literal_allowed(literal));
-                let expected = plan
-                    .stages(literal, LiteralFraming::Plain)
-                    .unwrap()
-                    .concat();
+                let prefix = std::str::from_utf8(operation.prefix()).unwrap();
+                let (pre_submit, literal) = same_geometry
+                    .iter()
+                    .filter(|(_, candidate)| candidate.get("lines").is_some())
+                    .flat_map(|(id, candidate)| {
+                        crate::coding_agent::catalog::test_support::pre_submit_records(candidate)
+                            .unwrap()
+                            .into_iter()
+                            .filter(|record| record.operation == operation)
+                            .filter_map(|record| {
+                                record
+                                    .literal
+                                    .strip_prefix(prefix)
+                                    .map(|literal| ((*id).clone(), literal.to_owned()))
+                            })
+                    })
+                    .find(|(_, literal)| plan.plain_literal_allowed(literal))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{fixture_id}: its backend/geometry has a plain pre-submit screen for the operation"
+                        )
+                    });
+                let literal = literal.as_str();
+                let [literal_bytes, submit_bytes] =
+                    plan.stages(literal, LiteralFraming::Plain).unwrap();
+                let literal_stage = literal_bytes.len();
+                let expected = [literal_bytes, submit_bytes].concat();
                 with_profile_host(
                     catalog,
                     expected.clone(),
@@ -6054,6 +6075,8 @@ mod tests {
                             InputControlOperation::SubmitPrompt(input)
                         };
                         assert!(host.handle(request).unwrap().is_none());
+                        until_written(host, literal_stage);
+                        host.child_output(native_fixture_bytes(&bundled_screen(&pre_submit)));
                         until_written(host, expected.len());
                         assert_eq!(host.pty.written, expected, "{fixture_id}");
                         assert!(
@@ -6150,9 +6173,10 @@ mod tests {
 
             /// Sends `body` to the run's member and drives the coordinator's receipt-free sweep
             /// preview of it to its reply, confirming each submit with the idle screen.
-            fn sweep_preview(
+            pub(super) fn sweep_preview(
                 host: &mut Host,
                 body: &str,
+                program: impl FnOnce(&crate::broker::MessageRecord) -> Vec<u8>,
             ) -> (crate::broker::MessageRecord, SubmissionResult) {
                 host.confirm_submissions = false;
                 let run = host.fixture.run.clone();
@@ -6163,6 +6187,7 @@ mod tests {
                     body,
                 )
                 .unwrap();
+                host.pty.expect_program(program(&message));
                 let until = host.until;
                 let reply = match host
                     .coordinator
@@ -6215,11 +6240,12 @@ mod tests {
                 ];
                 for (name, catalog, body, line, prefix, submit) in cases {
                     with_catalog_host(catalog, Vec::new(), |host| {
-                        let (message, reply) = sweep_preview(host, &body);
+                        let program = |message: &crate::broker::MessageRecord| {
+                            [prefix, line(message).as_bytes(), submit].concat()
+                        };
+                        let (message, reply) = sweep_preview(host, &body, program);
                         assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
-                        let mut expected = prefix.to_vec();
-                        expected.extend_from_slice(line(&message).as_bytes());
-                        expected.extend_from_slice(submit);
+                        let expected = program(&message);
                         assert_eq!(
                             String::from_utf8_lossy(&host.pty.written),
                             String::from_utf8_lossy(&expected),
@@ -7094,6 +7120,229 @@ mod tests {
                     assert_eq!(row(host, later).state, storage::InputState::Ready);
                     assert_eq!(host.pty.written, written);
                 });
+            }
+
+            mod pre_submit {
+                use crate::runtime::input::tests::ordinary_prompt::composer_reliability::*;
+
+                fn reply_after(host: &mut Host) -> SubmissionResult {
+                    for _ in 0..256 {
+                        if let Some(reply) = turn(host) {
+                            return reply;
+                        }
+                    }
+                    panic!("the coordinator replies within bounded turns");
+                }
+
+                fn erased(host: &Host) -> bool {
+                    host.pty
+                        .written
+                        .iter()
+                        .any(|byte| matches!(byte, 0x08 | 0x15 | 0x17 | 0x7f))
+                }
+
+                fn assert_mismatch_without_submit(host: &Host, reply: &SubmissionResult) {
+                    assert_uncertain(host, reply, storage::StopCause::LiteralMismatch);
+                    assert_eq!(reply.stage, SubmissionStage::Partial);
+                    assert!(
+                        host.pty.program.is_empty(),
+                        "no submit key completes the program"
+                    );
+                    assert!(!erased(host), "the mismatch erases nothing");
+                }
+
+                #[test]
+                fn a_composer_rendering_the_written_literal_continues_to_the_submit_key() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-match", LITERAL);
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(stored(host, &reply).stop_cause, None);
+                        assert_eq!(host.pty.written, encoded());
+                    });
+                }
+
+                #[test]
+                fn a_key_typed_during_the_settle_records_literal_mismatch_without_a_submit_key() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-appended", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.type_human(b"x");
+                        let reply = reply_after(host);
+                        assert_mismatch_without_submit(host, &reply);
+                        assert_eq!(
+                            host.pty.written,
+                            [LITERAL.as_bytes(), b"x"].concat(),
+                            "the literal and the typed key stay, with no submit key"
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_collapsed_literal_matches_through_its_placeholder_count() {
+                    let literal = "λ".repeat(40);
+                    for (name, typed, accepted) in [
+                        ("the placeholder count", None, true),
+                        ("one extra scalar", Some(b"y".as_slice()), false),
+                    ] {
+                        with_catalog_host(catalog(), program(&literal, false), |host| {
+                            start(host, "prompt:pre-submit-placeholder", &literal);
+                            until_written(host, literal.len());
+                            if let Some(typed) = typed {
+                                host.type_human(typed);
+                            }
+                            let reply = if accepted {
+                                finish(host, true)
+                            } else {
+                                reply_after(host)
+                            };
+                            if accepted {
+                                assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
+                                assert_eq!(stored(host, &reply).stop_cause, None, "{name}");
+                            } else {
+                                assert_mismatch_without_submit(host, &reply);
+                            }
+                        });
+                    }
+                }
+
+                #[test]
+                fn an_unextractable_composer_records_literal_mismatch() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-unextractable", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.child_output(b"\x1b[2J\x1b[1;1Hunrelated output");
+                        let reply = reply_after(host);
+                        assert_mismatch_without_submit(host, &reply);
+                        assert_eq!(host.pty.written, LITERAL.as_bytes());
+                    });
+                }
+
+                fn exec_request(host: &Host, key: &str) -> InputControlRequest {
+                    let mut request = host.request(key);
+                    request.operation = InputControlOperation::SubmitExec(SubmitInput {
+                        operation_key: key.into(),
+                        input_kind: storage::InputKind::Exec,
+                        literal: LITERAL.into(),
+                    });
+                    request
+                }
+
+                #[test]
+                fn a_mismatched_prompt_or_exec_stays_uncertain_and_stops_the_fifo() {
+                    let both =
+                        crate::coding_agent::catalog::test_support::load(&catalog_definition())
+                            .unwrap();
+                    for exec in [false, true] {
+                        let (program, literal_stage) = if exec {
+                            (
+                                [b"! ", LITERAL.as_bytes(), b"\r"].concat(),
+                                2 + LITERAL.len(),
+                            )
+                        } else {
+                            (encoded(), LITERAL.len())
+                        };
+                        with_catalog_host(both.clone(), program, |host| {
+                            host.confirm_submissions = false;
+                            let first = if exec {
+                                exec_request(host, "exec:pre-submit-fifo")
+                            } else {
+                                request(host, "prompt:pre-submit-fifo", LITERAL)
+                            };
+                            assert!(host.handle(first).unwrap().is_none());
+                            until_written(host, literal_stage);
+                            let later = queued(
+                                host,
+                                request(host, "prompt:behind-mismatch", LITERAL),
+                                "earlier_input",
+                            );
+                            host.type_human(b"x");
+                            let reply = reply_after(host);
+                            assert_mismatch_without_submit(host, &reply);
+                            let written = host.pty.written.clone();
+                            for _ in 0..64 {
+                                let _ = turn(host);
+                            }
+                            assert_eq!(
+                                row(host, later).state,
+                                storage::InputState::Ready,
+                                "exec={exec}: the queued head waits behind the mismatch"
+                            );
+                            assert_eq!(host.pty.written, written, "exec={exec}");
+                        });
+                    }
+                }
+
+                fn result_cause(host: &Host, message_id: i64) -> Option<String> {
+                    host.fixture
+                        .conn
+                        .query_row(
+                            "SELECT json_extract(payload_json,'$.cause.kind') FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result' AND json_extract(payload_json,'$.message_id')=?2",
+                            rusqlite::params![host.fixture.run.run_id, message_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap()
+                }
+
+                fn preview(
+                    host: &mut Host,
+                    message: &crate::broker::MessageRecord,
+                ) -> Option<InputControlReply> {
+                    let until = host.until;
+                    host.coordinator
+                        .handle_preview(&mut host.fixture.conn, message, &host.controller, until)
+                        .unwrap()
+                }
+
+                #[test]
+                fn a_mismatched_preview_is_typed_again_once_the_composer_is_cleared() {
+                    type Clear = fn(&mut Host);
+                    let cases: [(&str, Clear); 2] = [
+                        ("the user clears the composer", |_| {}),
+                        ("a member press clears the composer", |host| {
+                            host.type_human(b"\x15");
+                        }),
+                    ];
+                    for (name, clear) in cases {
+                        with_host(|host| {
+                            host.confirm_submissions = false;
+                            let run = host.fixture.run.clone();
+                            let message = crate::broker::send_message(
+                                &mut host.fixture.conn,
+                                run.director_member_id,
+                                run.member_id,
+                                "retyped after a mismatch",
+                            )
+                            .unwrap();
+                            let line = crate::runtime::preview::canonical_preview_line(&message);
+                            let program = [line.as_bytes(), b"~"].concat();
+                            host.pty.expect_program(program.clone());
+                            assert!(preview(host, &message).is_none(), "{name}");
+                            until_written(host, line.len());
+                            host.type_human(b"x");
+                            let reply = reply_after(host);
+                            assert_eq!(reply.status, SubmissionStatus::Uncertain, "{name}");
+                            assert_eq!(reply.stage, SubmissionStage::Partial, "{name}");
+                            assert!(host.pty.program.is_empty(), "{name}: no submit key");
+                            assert_eq!(
+                                result_cause(host, message.message_id).as_deref(),
+                                Some("literal_mismatch"),
+                                "{name}"
+                            );
+                            clear(host);
+                            host.pty.clear_composer();
+                            host.show(SCREEN.to_vec());
+                            host.pty.expect_program(program.clone());
+                            let reply = match preview(host, &message) {
+                                Some(reply) => submitted(reply),
+                                None => finish(host, true),
+                            };
+                            assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
+                            assert!(host.pty.written.ends_with(&program), "{name}");
+                            assert_eq!(host.pty.program, [program.clone()], "{name}");
+                        });
+                    }
+                }
             }
         }
 
@@ -9776,6 +10025,9 @@ mod tests {
                         "submission":{"prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
                     }
                 });
+                crate::coding_agent::catalog::test_support::add_synthetic_composer_text(
+                    &mut value, "codex",
+                );
                 value
             }
 
@@ -9955,8 +10207,63 @@ mod tests {
                 database_url: String,
                 hooks: Arc<Hooks>,
                 clock: Arc<TestClock>,
+                /// Whether the child paints typed input into the synthetic composer, as a native
+                /// composer shows its unsubmitted literal before the submit key.
+                pub(crate) echo: bool,
+                typed: Vec<u8>,
             }
             impl Pty {
+                /// The child empties its composer: the partly written program is abandoned and
+                /// the next programmatic write starts a fresh one.
+                pub(crate) fn clear_composer(&mut self) {
+                    self.program_offset = 0;
+                    self.typed.clear();
+                }
+                /// Echoes accepted programmatic bytes; the program's completing stage is its
+                /// submit key, which empties the composer.
+                fn echo_program(&mut self, bytes: &[u8], starts_program: bool, completed: bool) {
+                    if !self.echo {
+                        return;
+                    }
+                    if starts_program || completed {
+                        self.typed.clear();
+                    }
+                    if completed {
+                        return;
+                    }
+                    self.typed.extend_from_slice(bytes);
+                    self.paint_composer();
+                }
+                /// Echoes typed characters that land in a composer already holding a literal;
+                /// escape sequences such as pointer reports paint nothing.
+                fn echo_manual(&mut self, bytes: &[u8]) {
+                    if !self.echo || self.typed.is_empty() || bytes.first() == Some(&0x1b) {
+                        return;
+                    }
+                    self.typed.extend(
+                        bytes
+                            .iter()
+                            .copied()
+                            .filter(|byte| !byte.is_ascii_control()),
+                    );
+                    self.paint_composer();
+                }
+                fn paint_composer(&mut self) {
+                    let mut shown = self.typed.clone();
+                    for marker in [b"\x1b[200~".as_slice(), b"\x1b[201~"] {
+                        while let Some(at) = shown
+                            .windows(marker.len())
+                            .position(|window| window == marker)
+                        {
+                            shown.drain(at..at + marker.len());
+                        }
+                    }
+                    let shown = shown.strip_prefix(b"\x1b").unwrap_or(&shown);
+                    let echo = crate::coding_agent::catalog::test_support::synthetic_composer_echo(
+                        &String::from_utf8_lossy(shown),
+                    );
+                    queue(&mut self.child, &echo);
+                }
                 pub(crate) fn expect_program(&mut self, bytes: Vec<u8>) {
                     assert_eq!(self.program_offset, 0, "no partially written program");
                     self.expected_program = bytes;
@@ -10000,21 +10307,25 @@ mod tests {
                             "a programmatic stage writes only for an in-progress reservation"
                         );
                         assert!(self.hooks.count("before") > 0);
+                        let starts_program = belongs_to_program && self.program_offset == 0;
                         self.stages.push((self.clock.now(), bytes.to_vec()));
                         let accepted = self.short.unwrap_or(bytes.len()).min(bytes.len());
                         self.written.extend_from_slice(&bytes[..accepted]);
                         if belongs_to_program {
                             self.program_offset += accepted;
                         }
-                        if belongs_to_program && self.program_offset == self.expected_program.len()
-                        {
+                        let completed = belongs_to_program
+                            && self.program_offset == self.expected_program.len();
+                        if completed {
                             self.program.push(self.expected_program.clone());
                             self.program_offset = 0;
                         }
+                        self.echo_program(&bytes[..accepted], starts_program, completed);
                         Ok(accepted)
                     } else {
                         self.manual.extend_from_slice(bytes);
                         self.written.extend_from_slice(bytes);
+                        self.echo_manual(bytes);
                         Ok(bytes.len())
                     }
                 }
@@ -10228,6 +10539,7 @@ mod tests {
                         clock_lead,
                     } = profile;
                     let catalog = catalog();
+                    let echo = screen == SCREEN;
                     let composer_selected =
                         catalog.capabilities(backend).composer == storage::Coverage::Tested;
                     let RunnerFixture {
@@ -10291,6 +10603,8 @@ mod tests {
                         database_url: url,
                         hooks: hooks.clone(),
                         clock: clock.clone(),
+                        echo,
+                        typed: Vec::new(),
                     };
                     let mut host = Self {
                         fixture,

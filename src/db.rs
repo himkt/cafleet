@@ -1751,6 +1751,54 @@ mod tests {
         }
 
         #[test]
+        fn input_stop_causes_accept_literal_mismatch_on_an_uncertain_input() {
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            let input = fixture.input(run, "prompt:mismatch").unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET state='uncertain',stop_cause='literal_mismatch' WHERE input_id=?1",
+                    [input],
+                )
+                .unwrap();
+            let cause: String = fixture
+                .conn
+                .query_row(
+                    "SELECT stop_cause FROM member_input_operations WHERE input_id=?1",
+                    [input],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(cause, "literal_mismatch");
+            assert!(
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET stop_cause='literal_garbled' WHERE input_id=?1",
+                        [input],
+                    )
+                    .is_err(),
+                "an unknown stop cause is refused"
+            );
+        }
+
+        #[test]
+        fn runner_diagnostics_accept_the_director_delivery_source() {
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            let insert = |source: &str| {
+                fixture.conn.execute(
+                    "INSERT INTO member_runner_diagnostics(run_id,source,message,first_at,last_at,count)
+                     VALUES(?1,?2,'director delivery: message 7 held: composer_busy',?3,?3,1)",
+                    params![run, source, NOW],
+                )
+            };
+            insert("director_delivery").unwrap();
+            assert!(insert("director_receiver").is_err());
+        }
+
+        #[test]
         fn runtime_foreign_keys_retain_history_and_reject_orphans() {
             let fixture = Fixture::new();
             assert!(fixture.interaction(404, 1, "question").is_err());

@@ -2606,6 +2606,10 @@ pub(crate) mod test_support {
                     "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
                 }
             }});
+            crate::coding_agent::catalog::test_support::add_synthetic_composer_text(
+                &mut catalog,
+                "codex",
+            );
             let coverage = if detecting {
                 let fixture_id = crate::coding_agent::catalog::test_support::FIXTURE;
                 catalog["codex"]["profile"]["rules"]
