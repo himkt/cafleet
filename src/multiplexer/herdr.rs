@@ -8,6 +8,7 @@ use crate::multiplexer::PLACEMENT_MISMATCH;
 use crate::multiplexer::PaneCleanup;
 use crate::multiplexer::PaneOwnership;
 use crate::multiplexer::PaneTarget;
+use crate::multiplexer::ScreenCapture;
 use crate::multiplexer::SpawnedPane;
 use crate::multiplexer::layout::ColumnSide;
 use serde_json::Value;
@@ -128,6 +129,28 @@ impl HerdrMultiplexer {
             }
             Err(error) => Err(self.core.map_error(&argv, error)),
         }
+    }
+
+    /// `pane`'s `rect.width` in the `api snapshot` layouts.
+    fn pane_width(&self, pane: &str) -> Result<u16, MultiplexerError> {
+        let result = self.run_json(&self.core.argv(&["herdr", "api", "snapshot"]))?;
+        let layouts = result["snapshot"]["layouts"]
+            .as_array()
+            .ok_or_else(|| MultiplexerError::new("herdr api snapshot missing 'layouts' field"))?;
+        let entry = layouts
+            .iter()
+            .filter_map(|layout| layout["panes"].as_array())
+            .flatten()
+            .find(|entry| entry["pane_id"].as_str() == Some(pane))
+            .ok_or_else(|| {
+                MultiplexerError::new(format!("herdr api snapshot has no pane {pane}"))
+            })?;
+        let width = f64_field(&entry["rect"], "api snapshot", "width")?;
+        (width.fract() == 0.0 && width >= 1.0 && width <= f64::from(u16::MAX))
+            .then_some(width as u16)
+            .ok_or_else(|| {
+                MultiplexerError::new(format!("herdr api snapshot width {width} of {pane}"))
+            })
     }
 
     fn list_panes(&self) -> Result<Vec<Value>, MultiplexerError> {
@@ -306,6 +329,49 @@ impl Multiplexer for HerdrMultiplexer {
             &fetch_depth.to_string(),
         ]))?;
         Ok(crate::multiplexer::capture_window(&raw, lines))
+    }
+
+    /// herdr exposes neither the cursor nor the screen mode; the visible read's line count is
+    /// the row count.
+    fn capture_screen(&self, pane: &str) -> Result<ScreenCapture, MultiplexerError> {
+        let cols = self.pane_width(pane)?;
+        let body = self.core.run(&self.core.argv(&[
+            "herdr", "pane", "read", pane, "--source", "visible", "--format", "ansi",
+        ]))?;
+        let lines = body.strip_suffix('\n').unwrap_or(&body).split('\n').count();
+        let rows = u16::try_from(lines)
+            .ok()
+            .filter(|rows| *rows > 0 && !body.is_empty())
+            .ok_or_else(|| {
+                MultiplexerError::new(format!("herdr pane read of {pane} printed {lines} rows"))
+            })?;
+        Ok(ScreenCapture {
+            rows,
+            cols,
+            cursor: None,
+            alternate_screen: None,
+            body,
+        })
+    }
+
+    fn type_literal(&self, pane: &str, literal: &str) -> Result<(), MultiplexerError> {
+        self.core.acknowledged_run(
+            &self
+                .core
+                .argv(&["herdr", "pane", "send-text", pane, literal]),
+            "text",
+        )
+    }
+
+    fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError> {
+        let keys = crate::multiplexer::PressKeys::from_bytes(submit).ok_or_else(|| {
+            MultiplexerError::new(format!(
+                "herdr has no key mapping for the submit bytes {submit:02x?}"
+            ))
+        })?;
+        let mut argv = self.core.argv(&["herdr", "pane", "send-keys", pane]);
+        argv.extend(keys.herdr_arguments());
+        self.core.acknowledged_run(&argv, "submit key")
     }
 
     fn close_pane(&self, target_pane_id: &str, window_id: &str) -> Result<(), MultiplexerError> {

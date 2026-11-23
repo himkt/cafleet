@@ -1089,9 +1089,10 @@ pub(crate) struct ScreenSnapshot {
     pub(crate) title: String,
     pub(crate) rows: u16,
     pub(crate) cols: u16,
-    pub(crate) cursor_row: u16,
-    pub(crate) cursor_col: u16,
-    pub(crate) alternate_screen: bool,
+    /// `(row, col)`; `None` for a capture whose source exposes no cursor.
+    pub(crate) cursor: Option<(u16, u16)>,
+    /// `None` for a capture whose source exposes no screen mode.
+    pub(crate) alternate_screen: Option<bool>,
     pub(crate) screen_seq: u64,
     pub(crate) screen: vt100::Screen,
 }
@@ -1192,18 +1193,44 @@ impl TerminalState {
         );
         Ok(())
     }
+    /// A fresh terminal of the capture's size with each captured row written at its row
+    /// position, carrying exactly the cursor and screen mode the capture reports.
+    pub(crate) fn replay(capture: &crate::multiplexer::ScreenCapture) -> Result<ScreenSnapshot> {
+        let mut terminal = Self::new(TerminalSize {
+            rows: capture.rows,
+            cols: capture.cols,
+        })?;
+        let mut bytes = Vec::new();
+        if capture.alternate_screen == Some(true) {
+            bytes.extend_from_slice(b"\x1b[?1049h");
+        }
+        let body = capture.body.strip_suffix('\n').unwrap_or(&capture.body);
+        for (row, line) in body.split('\n').take(usize::from(capture.rows)).enumerate() {
+            bytes.extend_from_slice(format!("\x1b[{};1H", row + 1).as_bytes());
+            bytes.extend_from_slice(line.strip_suffix('\r').unwrap_or(line).as_bytes());
+            bytes.extend_from_slice(b"\x1b[0m");
+        }
+        if let Some((row, col)) = capture.cursor {
+            bytes.extend_from_slice(format!("\x1b[{};{}H", row + 1, col + 1).as_bytes());
+        }
+        terminal.feed(&bytes)?;
+        Ok(ScreenSnapshot {
+            cursor: capture.cursor,
+            alternate_screen: capture.alternate_screen,
+            ..terminal.snapshot()
+        })
+    }
+
     pub(crate) fn snapshot(&self) -> ScreenSnapshot {
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();
-        let (cursor_row, cursor_col) = screen.cursor_position();
         ScreenSnapshot {
             #[cfg(test)]
             title: self.parser.callbacks().title.clone(),
             rows: rows.get(),
             cols: cols.get(),
-            cursor_row,
-            cursor_col,
-            alternate_screen: screen.alternate_screen(),
+            cursor: Some(screen.cursor_position()),
+            alternate_screen: Some(screen.alternate_screen()),
             screen_seq: self.sequence,
             screen: screen.clone(),
         }

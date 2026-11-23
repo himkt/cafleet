@@ -8,6 +8,7 @@ use crate::multiplexer::PLACEMENT_MISMATCH;
 use crate::multiplexer::PaneCleanup;
 use crate::multiplexer::PaneTarget;
 use crate::multiplexer::RunError;
+use crate::multiplexer::ScreenCapture;
 use crate::multiplexer::SpawnedPane;
 use crate::multiplexer::argv;
 use crate::multiplexer::layout::ColumnSide;
@@ -54,6 +55,31 @@ impl TmuxMultiplexer {
 
 fn unexpected_output(out: &str) -> MultiplexerError {
     MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
+}
+
+const SCREEN_METADATA: &str =
+    "#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}";
+const SCREEN_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+const LITERAL_CHUNK_CHARS: usize = 256;
+
+/// Parses a [`SCREEN_METADATA`] line into rows, columns, cursor and screen mode.
+fn screen_metadata(line: &str) -> Result<(u16, u16, (u16, u16), bool), MultiplexerError> {
+    let fields = line.split_whitespace().collect::<Vec<_>>();
+    let [rows, cols, cursor_y, cursor_x, alternate] = fields.as_slice() else {
+        return Err(unexpected_output(line));
+    };
+    let number = |field: &str| field.parse::<u16>().map_err(|_| unexpected_output(line));
+    let alternate = match *alternate {
+        "0" => false,
+        "1" => true,
+        _ => return Err(unexpected_output(line)),
+    };
+    Ok((
+        number(rows)?,
+        number(cols)?,
+        (number(cursor_y)?, number(cursor_x)?),
+        alternate,
+    ))
 }
 
 impl Multiplexer for TmuxMultiplexer {
@@ -223,6 +249,57 @@ impl Multiplexer for TmuxMultiplexer {
             &format!("-{fetch_depth}"),
         ]))?;
         Ok(crate::multiplexer::capture_window(&raw, lines))
+    }
+
+    /// Reads the metadata, the body, then the metadata again, and retries the whole capture
+    /// while the two metadata lines differ.
+    fn capture_screen(&self, pane: &str) -> Result<ScreenCapture, MultiplexerError> {
+        let body_argv = self
+            .core
+            .argv(&["tmux", "capture-pane", "-p", "-e", "-N", "-t", pane]);
+        loop {
+            let before = self.display(pane, SCREEN_METADATA)?;
+            let body = self.core.run(&body_argv)?;
+            let after = self.display(pane, SCREEN_METADATA)?;
+            if before == after {
+                let (rows, cols, cursor, alternate) = screen_metadata(&before)?;
+                return Ok(ScreenCapture {
+                    rows,
+                    cols,
+                    cursor: Some(cursor),
+                    alternate_screen: Some(alternate),
+                    body,
+                });
+            }
+            std::thread::sleep(SCREEN_RETRY_INTERVAL);
+        }
+    }
+
+    /// A failure after the first chunk's process started may leave a partial literal.
+    fn type_literal(&self, pane: &str, literal: &str) -> Result<(), MultiplexerError> {
+        let characters = literal.chars().collect::<Vec<_>>();
+        for (index, chunk) in characters.chunks(LITERAL_CHUNK_CHARS).enumerate() {
+            let chunk = chunk.iter().collect::<String>();
+            let argv = self
+                .core
+                .argv(&["tmux", "send-keys", "-t", pane, "-l", "--", &chunk]);
+            self.core
+                .acknowledged_run(&argv, "literal")
+                .map_err(|error| {
+                    if index > 0 {
+                        error.after_write()
+                    } else {
+                        error
+                    }
+                })?;
+        }
+        Ok(())
+    }
+
+    fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError> {
+        let mut argv = self.core.argv(&["tmux", "send-keys", "-t", pane, "-H"]);
+        argv.extend(submit.iter().map(|byte| format!("{byte:02x}")));
+        self.core.acknowledged_run(&argv, "submit key")
     }
 
     fn close_pane(&self, target_pane_id: &str, window_id: &str) -> Result<(), MultiplexerError> {

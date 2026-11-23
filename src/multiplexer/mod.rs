@@ -37,6 +37,17 @@ pub(crate) enum PaneTarget {
     },
 }
 
+/// One screenful of a pane as the multiplexer renders it. `cursor` and `alternate_screen` are
+/// `None` when the capture source exposes no cursor or screen-mode data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScreenCapture {
+    pub(crate) rows: u16,
+    pub(crate) cols: u16,
+    pub(crate) cursor: Option<(u16, u16)>,
+    pub(crate) alternate_screen: Option<bool>,
+    pub(crate) body: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SpawnedPane {
     pub(crate) pane_id: String,
@@ -285,14 +296,44 @@ impl BackendCore {
             .remaining()
             .map_err(|error| MultiplexerError::new(error.message()))?;
         self.runner.run_for(argv, remaining).map_err(|error| {
-            let started = writing && matches!(&error, RunError::Failed { .. } | RunError::Timeout);
-            let mapped = self.map_error(argv, error);
-            if started {
-                mapped.after_write()
+            if writing {
+                self.write_error(argv, error)
             } else {
-                mapped
+                self.map_error(argv, error)
             }
         })
+    }
+
+    /// A failed or timed-out writing process started, so its input may have reached the pane.
+    fn write_error(&self, argv: &[String], error: RunError) -> MultiplexerError {
+        let started = matches!(&error, RunError::Failed { .. } | RunError::Timeout);
+        let mapped = self.map_error(argv, error);
+        if started {
+            mapped.after_write()
+        } else {
+            mapped
+        }
+    }
+
+    /// One writing process bounded by the runner's own deadline, acknowledged like
+    /// [`BackendCore::acknowledged_write`].
+    fn acknowledged_run(&self, argv: &[String], what: &str) -> Result<(), MultiplexerError> {
+        let output = self
+            .runner
+            .run(argv)
+            .map_err(|error| self.write_error(argv, error))?;
+        self.acknowledge(&output, what)
+    }
+
+    fn acknowledge(&self, output: &str, what: &str) -> Result<(), MultiplexerError> {
+        if !output.trim().is_empty() {
+            return Err(MultiplexerError::new(format!(
+                "{} {what} acknowledgment was unreadable",
+                self.name
+            ))
+            .after_write());
+        }
+        Ok(())
     }
 
     fn send_keys(
@@ -310,14 +351,7 @@ impl BackendCore {
         what: &str,
     ) -> Result<(), MultiplexerError> {
         let output = self.press_run(argv, deadline, true)?;
-        if !output.trim().is_empty() {
-            return Err(MultiplexerError::new(format!(
-                "{} {what} acknowledgment was unreadable",
-                self.name
-            ))
-            .after_write());
-        }
-        Ok(())
+        self.acknowledge(&output, what)
     }
 }
 
@@ -427,6 +461,16 @@ pub(crate) trait Multiplexer {
     ) -> Result<SpawnedPane, MultiplexerError>;
 
     fn capture_pane(&self, target_pane_id: &str, lines: i64) -> Result<String, MultiplexerError>;
+
+    /// The visible screen of `pane` with its geometry, plus the cursor and screen mode when the
+    /// backend exposes them.
+    fn capture_screen(&self, pane: &str) -> Result<ScreenCapture, MultiplexerError>;
+
+    /// Types `literal` into `pane` as plain text, without a paste frame.
+    fn type_literal(&self, pane: &str, literal: &str) -> Result<(), MultiplexerError>;
+
+    /// Presses the key sequence whose bytes are `submit`.
+    fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError>;
 
     /// Closes the pane and records `window_id` for the next [`Multiplexer::restore_after_close`].
     fn close_pane(&self, target_pane_id: &str, window_id: &str) -> Result<(), MultiplexerError>;
@@ -692,6 +736,31 @@ impl PressKeys {
             })?);
         }
         Ok(Self(parsed))
+    }
+
+    /// The keys whose bytes are `bytes`, or `None` when a byte has no explicit-key mapping.
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let named = |name: &str| {
+            NAMED_KEYS
+                .iter()
+                .find(|named| named.0 == name)
+                .map(PressKey::Named)
+        };
+        bytes
+            .iter()
+            .map(|byte| match byte {
+                b'!'..=b'~' => Some(PressKey::Literal(*byte)),
+                b' ' => named("Space"),
+                0x1b => named("Escape"),
+                b'\r' => named("Enter"),
+                b'\t' => named("Tab"),
+                0x7f => named("Backspace"),
+                0x01..=0x1a => Some(PressKey::Control(b'a' + byte - 1)),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .filter(|keys| !keys.is_empty())
+            .map(Self)
     }
 
     pub(crate) fn canonical(&self) -> Vec<String> {

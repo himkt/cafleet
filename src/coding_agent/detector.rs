@@ -286,10 +286,25 @@ fn match_rule<'a>(
     if rule.frame.is_some() && !frame_guard_holds(rule, lines) {
         return None;
     }
-    match qualifying_regions(rule, screen, lines).as_slice() {
+    let candidates = qualifying_regions(rule, screen, lines);
+    if cursor_free(screen) {
+        let mut matched = candidates
+            .into_iter()
+            .filter_map(|candidate| extract(rule, lines, candidate));
+        return match (matched.next(), matched.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
+        };
+    }
+    match candidates.as_slice() {
         [candidate] => extract(rule, lines, *candidate),
         _ => None,
     }
+}
+/// A capture without cursor or screen-mode data: cursor conditions read as `any`, the screen
+/// selector is ignored and exactly one candidate must satisfy the region matchers.
+fn cursor_free(screen: &ScreenSnapshot) -> bool {
+    screen.cursor.is_none() || screen.alternate_screen.is_none()
 }
 fn frame_guard_holds(rule: &Rule, lines: &[LogicalLine]) -> bool {
     let frame = rule.frame.as_ref().expect("guarded rules declare a frame");
@@ -315,8 +330,12 @@ fn region_candidates(
     screen: &ScreenSnapshot,
     lines: &[LogicalLine],
 ) -> Vec<Candidate> {
-    if (region_rule.screen == ScreenSelector::Primary && screen.alternate_screen)
-        || (region_rule.screen == ScreenSelector::Alternate && !screen.alternate_screen)
+    let (cursor, alternate) = match (screen.cursor, screen.alternate_screen) {
+        (Some(cursor), Some(alternate)) => (Some(cursor), Some(alternate)),
+        _ => (None, None),
+    };
+    if (region_rule.screen == ScreenSelector::Primary && alternate == Some(true))
+        || (region_rule.screen == ScreenSelector::Alternate && alternate == Some(false))
     {
         return Vec::new();
     }
@@ -344,19 +363,15 @@ fn region_candidates(
             };
             // A pending-wrap cursor (column == cols) stands on its row's last cell, inside the
             // full-width region.
-            let inside = screen.cursor_row >= region.top
-                && screen.cursor_row < region.bottom
-                && screen.cursor_col <= screen.cols;
-            let qualified = match region_rule.cursor {
-                CursorRule::AtEnd => {
-                    last.boundaries.get(found.end())
-                        == Some(&(screen.cursor_row, screen.cursor_col))
+            let qualified = match (region_rule.cursor, cursor) {
+                (CursorRule::Any, _) | (_, None) => true,
+                (CursorRule::AtEnd, Some(at)) => last.boundaries.get(found.end()) == Some(&at),
+                (CursorRule::AfterPrompt, Some(at)) => after_prompt == Some(at),
+                // A pending-wrap cursor (column == cols) stands on its row's last cell, inside
+                // the full-width region.
+                (CursorRule::Inside, Some((row, col))) => {
+                    row >= region.top && row < region.bottom && col <= screen.cols
                 }
-                CursorRule::AfterPrompt => {
-                    after_prompt == Some((screen.cursor_row, screen.cursor_col))
-                }
-                CursorRule::Inside => inside,
-                CursorRule::Any => true,
             } && suggestion.is_none_or(|style| {
                 after_prompt.is_some_and(|(row, col)| suggestion_only(screen, row, col, style))
             });
