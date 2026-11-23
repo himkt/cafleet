@@ -14,6 +14,16 @@ CAFleet multiplexes coding-agent sessions and coordinates them through durable p
 
 Use full mise monorepo task paths and discover available operations with `mise tasks --all`. The root `mise.toml` owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`; see `.claude/rules/commands.md` for invocation conventions.
 
+## Development models
+
+Launch these backends with the model below for development sessions, experiments and live probes:
+
+| Backend | Launch |
+|---|---|
+| `opencode` | `--model opencode-go/gpt-6-luna` |
+| `hermes` | `--provider openrouter -m openai/gpt-6-luna` |
+| `pi` | `--provider openrouter --model openai/gpt-6-luna` |
+
 ## Tests
 
 Write every Rust test as a unit test in a `#[cfg(test)] mod tests` block of the implementation file it exercises; never add a test-only file or folder. `.claude/rules/code-quality.md` § Test placement owns the convention.
