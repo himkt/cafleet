@@ -189,7 +189,7 @@ pub(crate) mod test_support {
     use crate::broker::members::test_support::placement;
     use crate::broker::runtime as storage;
     use crate::broker::runtime::*;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
     use crate::runtime::*;
     pub(crate) const STARTED_AT: &str = "2026-10-27T14:00:00.000000+00:00";
 
@@ -273,7 +273,7 @@ pub(crate) mod test_support {
     impl Fixture {
         pub(crate) fn new() -> Self {
             let dir = short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "runner-contract");
             let mut placement = placement(Some("%2"));
             placement.coding_agent = "codex".into();

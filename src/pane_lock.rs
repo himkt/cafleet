@@ -381,7 +381,7 @@ pub(crate) mod test_support {
 
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
     use crate::pane_lock::*;
 
     pub(super) const TEST_WORK_RESERVE: Duration = Duration::from_millis(3500);
@@ -396,7 +396,7 @@ pub(crate) mod test_support {
     impl LockFixture {
         pub(crate) fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "locks");
             let worker = register(&mut conn, fleet, "worker", Some("%2"));
             let member = crate::broker::get_member(&conn, worker, fleet)

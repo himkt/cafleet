@@ -829,7 +829,7 @@ pub(crate) mod test_support {
     use crate::broker::members::test_support::register;
     use crate::broker::runtime as storage;
     use crate::broker::runtime::*;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
     use crate::db::test_support::table_rows;
     use crate::output::format_json;
 
@@ -887,7 +887,7 @@ pub(crate) mod test_support {
     impl Fixture {
         pub(crate) fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "runtime-contract");
             let member = register(&mut conn, fleet, "worker", Some("%2"));
             let spec = Self::spec(&conn, fleet, director, member);

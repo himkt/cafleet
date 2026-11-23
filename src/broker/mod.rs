@@ -216,12 +216,12 @@ mod tests {
     use crate::broker;
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
     use crate::error::CafleetError;
 
     fn fixture() -> (tempfile::TempDir, rusqlite::Connection, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "typed-records");
         (dir, conn, fleet, director)
     }

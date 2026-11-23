@@ -764,7 +764,7 @@ mod tests {
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
     use crate::cli::message::*;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
 
     mod runner_pull {
         use crate::runtime::service::test_support::input_service::*;
@@ -2296,7 +2296,7 @@ printf '%s' "$?" >"$CAFLEET_TEST_LISTENER_STATUS""#;
 
         fn broker() -> Broker {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "codex forwarding");
             let worker = register(&mut conn, fleet, "worker", Some("%2"));
             let url =

@@ -546,12 +546,12 @@ mod tests {
     use crate::broker::members::test_support::register;
     use crate::broker::members::test_support::register_member;
     use crate::broker::members::*;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
 
     #[test]
     fn registration_and_placement_updates_preserve_required_fields_and_valid_absence() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, _) = create_fleet_fixture(&mut conn, "alpha");
         let registered = register_member(
             &mut conn,
@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn registration_rolls_back_member_and_identifier_when_placement_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         conn.execute_batch("CREATE TRIGGER fail_placement BEFORE INSERT ON member_placements BEGIN SELECT RAISE(ABORT, 'placement failure'); END").unwrap();
         assert!(
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn live_fleet_and_director_checks_guard_member_registration() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         assert!(register_member(&mut conn, 999, "x", "assignment", &placement(None)).is_err());
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         assert!(deregister_member(&mut conn, director).is_err());
@@ -604,7 +604,7 @@ mod tests {
     #[test]
     fn deregistration_is_fleet_scoped_and_keeps_history() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         let (other, _) = create_fleet_fixture(&mut conn, "other");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn roster_preserves_all_placement_states_and_activity() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "activity");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let pending = register(&mut conn, fleet, "pending", None);
@@ -791,7 +791,7 @@ mod tests {
         use crate::broker::members::test_support::deregister_member;
         use crate::broker::members::test_support::register_in_slot;
         use crate::broker::members::*;
-        use crate::db::test_support::migrated_conn;
+        use crate::db::test_support::initialized_file_conn;
         use crate::multiplexer::layout::ColumnSide;
 
         /// `(ordinal, window ID, window name, left panes, right panes)`.
@@ -815,7 +815,7 @@ mod tests {
         #[test]
         fn occupancy_groups_concrete_placements_by_ordinal_and_side_in_registry_order() {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "layout");
             for (name, ordinal, side, concrete) in [
                 ("a", 0, ColumnSide::Right, ("@1", "main", "%2")),
@@ -841,7 +841,7 @@ mod tests {
         #[test]
         fn occupancy_excludes_the_director_pending_deregistered_and_other_fleet_rows() {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "layout");
             let (other, _) = create_fleet_fixture(&mut conn, "other");
             assert!(concrete_occupancy(&conn, fleet).unwrap().is_empty());
@@ -881,7 +881,7 @@ mod tests {
         #[test]
         fn window_members_lists_every_active_member_of_one_ordinal_ascending() {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "layout");
             let (other, _) = create_fleet_fixture(&mut conn, "other");
             let window = ("@7", "cafleet-1-1");
@@ -941,7 +941,7 @@ mod tests {
         #[test]
         fn a_stored_column_side_outside_left_and_right_fails_decoding() {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "layout");
             let worker = register_in_slot(
                 &mut conn,
@@ -978,7 +978,7 @@ mod tests {
         #[test]
         fn member_reads_decode_the_recorded_slot_and_window() {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "layout");
             let pending = register_in_slot(&mut conn, fleet, "pending", 2, ColumnSide::Left, None);
             let placed = register_in_slot(

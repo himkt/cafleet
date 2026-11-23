@@ -1234,7 +1234,7 @@ mod tests {
         use crate::broker::fleets::test_support::create_fleet_fixture;
         use crate::broker::members::test_support::register;
         use crate::cli::fleet::test_support::guarded_delete_fleet;
-        use crate::db::test_support::migrated_conn;
+        use crate::db::test_support::initialized_file_conn;
         use rusqlite::Connection;
 
         fn row_count(conn: &Connection, table: &str) -> i64 {
@@ -1248,7 +1248,7 @@ mod tests {
         fn fleet_deletion_is_atomic_soft_idempotent_and_preserves_messages() {
             let trigger = "BEFORE DELETE ON member_placements";
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
             let worker = register(&mut conn, fleet, "worker", None);
             let message =
@@ -2322,7 +2322,7 @@ mod tests {
         use crate::broker::runtime::RunRecord;
         use crate::cli::fleet::DeletionHost;
         use crate::cli::fleet::delete_fleet_with_layout_wait;
-        use crate::db::test_support::migrated_conn;
+        use crate::db::test_support::initialized_file_conn;
         use crate::error::CafleetError;
         use crate::pane_lock::LayoutLock;
         use crate::pane_lock::PaneLock;
@@ -2363,7 +2363,7 @@ mod tests {
         #[test]
         fn a_busy_layout_lock_fails_fleet_delete_and_leaves_every_member_unchanged() {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let settings =
                 crate::config::Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "layout-fleet-busy");
@@ -2514,7 +2514,7 @@ mod tests {
         use crate::cli::fleet::CreateRequest;
         use crate::cli::fleet::create_with;
         use crate::coding_agent::CodingAgent;
-        use crate::db::test_support::migrated_conn;
+        use crate::db::test_support::initialized_file_conn;
         use crate::error::CafleetError;
         use crate::multiplexer::MuxBackend;
         use crate::multiplexer::caller::CallerMux;
@@ -2703,7 +2703,7 @@ mod tests {
 
         fn database() -> (TempDir, Connection) {
             let dir = tempfile::tempdir().unwrap();
-            let conn = migrated_conn(&dir);
+            let conn = initialized_file_conn(&dir);
             (dir, conn)
         }
 

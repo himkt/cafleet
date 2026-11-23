@@ -627,7 +627,7 @@ pub(crate) mod test_support {
     use rusqlite::types::Value;
     use tempfile::TempDir;
 
-    pub(crate) fn migrated_conn(dir: &TempDir) -> Connection {
+    pub(crate) fn initialized_file_conn(dir: &TempDir) -> Connection {
         let url = format!("sqlite:///{}", dir.path().join("broker.db").display());
         let mut conn = crate::db::connect(&url).unwrap();
         crate::db::initialize(&mut conn, &url).unwrap();
@@ -1338,7 +1338,7 @@ mod tests {
 
         use crate::broker::fleets::test_support::create_fleet_fixture;
         use crate::broker::members::test_support::register;
-        use crate::db::tests::test_support::migrated_conn;
+        use crate::db::tests::test_support::initialized_file_conn;
 
         const NOW: &str = "2026-10-26T10:00:00.000000+00:00";
 
@@ -1353,7 +1353,7 @@ mod tests {
         impl Fixture {
             fn new() -> Self {
                 let dir = tempfile::tempdir().unwrap();
-                let conn = migrated_conn(&dir);
+                let conn = initialized_file_conn(&dir);
                 Self::seeded(dir, conn)
             }
 
