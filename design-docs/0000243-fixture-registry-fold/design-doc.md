@@ -1,7 +1,7 @@
 # Fold the fixture registry into per-backend profile files
 
 **Status**: Approved
-**Progress**: 26/30 tasks complete
+**Progress**: 30/30 tasks complete
 **Last Updated**: 2026-11-23
 
 ## Overview
@@ -273,10 +273,10 @@ Script `BASE/.scripts/fold_registry.py`, run with `python3 -I` from the reposito
 
 ### Step 7: Verification
 
-- [ ] `mise //:test` passes <!-- completed: -->
-- [ ] `mise //:lint` passes <!-- completed: -->
-- [ ] `mise //docs:build` passes <!-- completed: -->
-- [ ] Run `mise //:build`, compare the size of `target/release/cafleet` with the Step 3 baseline and report the delta (expected ≈ +2.88 MB, per Background) to the Director <!-- completed: -->
+- [x] `mise //:test` passes <!-- completed: 2026-11-23T08:15 -->
+- [x] `mise //:lint` passes <!-- completed: 2026-11-23T08:15 -->
+- [x] `mise //docs:build` passes <!-- completed: 2026-11-23T08:15 -->
+- [x] Run `mise //:build`, compare the size of `target/release/cafleet` with the Step 3 baseline and report the delta (expected ≈ +2.88 MB, per Background) to the Director <!-- completed: 2026-11-23T08:15 -->
 
 ---
 
