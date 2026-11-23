@@ -1,6 +1,6 @@
 # Fold the fixture registry into per-backend profile files
 
-**Status**: Approved
+**Status**: Complete
 **Progress**: 30/30 tasks complete
 **Last Updated**: 2026-11-23
 
@@ -10,13 +10,13 @@ Replace `assets/profiles/bundled.json` (one profile per backend plus a 526-entry
 
 ## Success Criteria
 
-- [ ] `assets/profiles/bundled.json` and `assets/profiles/native/` no longer exist; `assets/profiles/<backend>.json` exists for every backend that has a bundled profile today, holding exactly `schema_version`, `backend`, `profile` and `screens`.
-- [ ] Every one of today's 526 registry entries appears as exactly one screen, carrying the entry's `native_version` and (for the 80 entries that have it) its `composer_evidence`; no screen carries `id`, `kind`, `backend`, `source_ref` or `sha256`.
-- [ ] The production binary embeds every profile file and builds the bundled catalog from them, decoding each profile while skipping the `screens` contents.
-- [ ] The bundled-catalog guard validates every screen of every profile file (exact field set, geometry, masking, cell runs, composer evidence), fixture-id uniqueness across files, rejection of repeated object keys in a profile file's text, and that every `fixture_ids` value names a screen of the same profile file.
-- [ ] No catalog JSON, production or test, contains a fixture registry; `FixtureKind`, `source_ref` and `sha256` handling are gone from the code.
-- [ ] `SPEC.md`, `docs/docs/contributing.md` and `.claude/rules/code-quality.md` describe the per-backend layout; no living document mentions `bundled.json`, `native/<backend>.json`, `fixtures[]`, the fixture registry, fixture digests or screen-key ordering.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] `assets/profiles/bundled.json` and `assets/profiles/native/` no longer exist; `assets/profiles/<backend>.json` exists for every backend that has a bundled profile today, holding exactly `schema_version`, `backend`, `profile` and `screens`.
+- [x] Every one of today's 526 registry entries appears as exactly one screen, carrying the entry's `native_version` and (for the 80 entries that have it) its `composer_evidence`; no screen carries `id`, `kind`, `backend`, `source_ref` or `sha256`.
+- [x] The production binary embeds every profile file and builds the bundled catalog from them, decoding each profile while skipping the `screens` contents.
+- [x] The bundled-catalog guard validates every screen of every profile file (exact field set, geometry, masking, cell runs, composer evidence), fixture-id uniqueness across files, rejection of repeated object keys in a profile file's text, and that every `fixture_ids` value names a screen of the same profile file.
+- [x] No catalog JSON, production or test, contains a fixture registry; `FixtureKind`, `source_ref` and `sha256` handling are gone from the code.
+- [x] `SPEC.md`, `docs/docs/contributing.md` and `.claude/rules/code-quality.md` describe the per-backend layout; no living document mentions `bundled.json`, `native/<backend>.json`, `fixtures[]`, the fixture registry, fixture digests or screen-key ordering.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
 
