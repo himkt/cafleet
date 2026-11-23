@@ -1538,24 +1538,24 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 | Backend | Role | Requirement | Source | Eligible | Evidence |
 |---|---|---|---|---|---|
 | `claude` | Director | `goal` | `native` | `yes` | [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. |
-| `claude` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
-| `claude` | Director | `verdict` | — | `no` | `pane delivery` |
+| `claude` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–18, 2.1.325, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `claude` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `claude` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the bundled Claude profile. |
 | `codex` | Director | `goal` | `native` | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through a 200-message burst, idle and forced-failure steps, 0.165.0, checked 2026-11-06. |
-| `codex` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
-| `codex` | Director | `verdict` | — | `no` | `pane delivery` |
+| `codex` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–18, 0.169.0, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `codex` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `codex` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the bundled Codex profile. |
 | `opencode` | Director | `goal` | `extension` | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
-| `opencode` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
-| `opencode` | Director | `verdict` | — | `no` | `pane delivery` |
+| `opencode` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–18, 2.3.0, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `opencode` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `opencode` | Member | — | — | `yes` | PTY lifecycle and coverage declaration: live runner acceptance on herdr only (`coverage=tested`), 2.1.4, checked 2026-10-29. Default-mode approval-prompt coverage: the omitted `cafleet-ask` preset's shell permission form, whose detection and allow and deny answers the bundled OpenCode profile declares `tested` (§6.9 Bundled profiles and native screen fixtures). Bundled support: the bundled OpenCode profile. |
 | `hermes` | Director | `goal` | `native` | `yes` | Native `/goal` set, status, pause, resume and clear on the TUI client, 2026.9.24, checked 2026-11-06. |
-| `hermes` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
-| `hermes` | Director | `verdict` | — | `no` | `pane delivery` |
+| `hermes` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–17 and 19, 2026.9.24, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `hermes` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `hermes` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the bundled Hermes profile. |
 | `pi` | Director | `goal` | `extension` | `yes` | CAFleet pi extension `/cafleet-goal` and goal tools under plain `pi`: set, status, pause, resume, clear, complete, automatic continuation, the no-progress stop, an interrupt pausing, manual `/compact` and `/quit` then `pi --continue` on the same session, 1.5.0 (minimum), checked 2026-11-08. A threshold compaction inside a continuation chain and a continuation by the first turn after restart were not separately observed. |
-| `pi` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
-| `pi` | Director | `verdict` | — | `no` | `pane delivery` |
+| `pi` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, burst, long preview and settle race (interaction hold `—`, no native approval dialog) on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–17, 1.5.2, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `pi` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `pi` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet-ask` gate mode's approval form: live runner acceptance on tmux and herdr (protected directories, routed command and `member exec`, busy delivery, and `cafleet-ask` allow and deny answers), 1.5.0, checked 2026-11-08. Bundled support: the bundled pi profile. |
 
 | Column | Values |

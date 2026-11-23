@@ -80,7 +80,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `no` | `goal` `native` (2.1.296); `pane delivery` not established: the Director delivery probe has not run on the shipped build |
+| Director | `yes` | `goal` `native` (2.1.296); `pane delivery` on tmux 3.8 and herdr 0.9.5 (2.1.325, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact |
 | Member | `yes` | Omitted `auto` automatic review; the bundled Claude profile |
 
 ## codex
@@ -137,7 +137,7 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `no` | `goal` `native` (0.162.1); `pane delivery` not established: the Director delivery probe has not run on the shipped build |
+| Director | `yes` | `goal` `native` (0.162.1); `pane delivery` on tmux 3.8 and herdr 0.9.5 (0.169.0, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact |
 | Member | `yes` | Omitted `--approve-for-me` automatic review; the bundled Codex profile |
 
 ## opencode
@@ -327,7 +327,7 @@ After a restart, the session's next event restores an active goal.
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `no` | `goal` `extension` through the `cafleet` plugin under `opencode mini --standalone` (2.2.0 minimum); `pane delivery` not established: the Director delivery probe has not run on the shipped build |
+| Director | `yes` | `goal` `extension` through the `cafleet` plugin under `opencode mini --standalone` (2.2.0 minimum); `pane delivery` on tmux 3.8 and herdr 0.9.5 (2.3.0, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact |
 | Member | `yes` | Omitted `cafleet-ask`, whose form the bundled OpenCode profile detects and answers; runner acceptance on herdr only |
 
 ## hermes
@@ -373,7 +373,7 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `no` | `goal` `native` `/goal` on the TUI client (2026.9.24); `pane delivery` not established: the Director delivery probe has not run on the shipped build |
+| Director | `yes` | `goal` `native` `/goal` on the TUI client (2026.9.24); `pane delivery` on tmux 3.8 and herdr 0.9.5 (2026.9.24, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact; the Director runs the TUI client, whose screen the Director rules read |
 | Member | `yes` | Default `smart` approval-prompt coverage (ESCALATE and override); the bundled Hermes profile |
 
 ## pi
@@ -429,5 +429,5 @@ After `pi --continue`, the session's next turn continues an active goal.
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `no` | `goal` `extension` `/cafleet-goal` from the CAFleet pi extension under plain `pi` (1.5.0); `pane delivery` not established: the Director delivery probe has not run on the shipped build |
+| Director | `yes` | `goal` `extension` `/cafleet-goal` from the CAFleet pi extension under plain `pi` (1.5.0); `pane delivery` on tmux 3.8 and herdr 0.9.5 (1.5.2, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact; pi has no native approval dialog, so the interaction hold is `—` |
 | Member | `yes` | Omitted `cafleet-ask`, whose gate form the bundled pi profile detects and answers |

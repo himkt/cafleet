@@ -29,7 +29,7 @@ A Director backend needs two capabilities, checked independently: goal lifecycle
 | `hermes` | The TUI client, `hermes chat --tui` | Waits for the end of the turn | Native `/goal` |
 | `pi` | Plain `pi` from the project directory | Waits for the end of the turn | The CAFleet pi extension's `/cafleet-goal` command |
 
-A draft in the Director's composer or an open dialog in its pane holds every preview until you clear the draft or answer the dialog, so keep the composer clear between turns. [Receive results](../mixed-backend-team.md#receive-results) covers the points where the Director polls by hand.
+A draft in the Director's composer or an open dialog in its pane holds every preview until you clear the draft or answer the dialog, so keep the composer clear between turns. Keep the Director pane at least 80 columns wide (and, for pi and the Hermes TUI, at least 24 rows tall): a narrower pane can scroll or clip a long preview, which then stays in the composer unsent until you clear it. [Receive results](../mixed-backend-team.md#receive-results) covers the points where the Director polls by hand.
 
 The shared OpenCode background service passes no client environment to plugins, so it is not a supported Director launch.
 
