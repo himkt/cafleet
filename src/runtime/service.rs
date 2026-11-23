@@ -711,9 +711,6 @@ pub(crate) fn run_service(
         director_sweep,
         ..
     } = runner;
-    if let Some(director_sweep) = director_sweep {
-        director_sweep.stop_and_join();
-    }
     let (loop_result, unwind) = match loop_result {
         Ok(result) => (result, None),
         Err(payload) => (Err(error("runner loop unwound")), Some(payload)),
@@ -741,6 +738,9 @@ pub(crate) fn run_service(
             deadlines
         }
     };
+    if let Some(director_sweep) = director_sweep {
+        director_sweep.stop_and_join(deadlines.child_deadline());
+    }
     if let Some(coordinator) = coordinator.as_mut() {
         let fenced = coordinator.fence(deadlines.storage_deadline());
         coordinator.finish_pending_attempt();
@@ -1329,6 +1329,7 @@ fn sweep_snapshot(conn: &mut Connection, run: &RunRecord) -> Result<Option<broke
 /// The Director sweep on its own runner thread, connection and multiplexer adapter.
 struct DirectorSweepThread {
     stop: Arc<AtomicBool>,
+    shutdown: Arc<std::sync::Mutex<Option<Instant>>>,
     handle: std::thread::JoinHandle<()>,
 }
 
@@ -1340,39 +1341,106 @@ impl DirectorSweepThread {
         clock: Arc<dyn crate::time::Clock>,
         diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
     ) -> Self {
+        Self::start_with_runner(database_url, run, catalog, clock, diagnostics, || {
+            std::rc::Rc::new(crate::runtime::system::SystemRunner)
+        })
+    }
+
+    /// Starts the sweep with the command runner `runner` builds on the sweep thread.
+    fn start_with_runner(
+        database_url: String,
+        run: RunRecord,
+        catalog: crate::coding_agent::ProfileCatalog,
+        clock: Arc<dyn crate::time::Clock>,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+        runner: impl FnOnce() -> std::rc::Rc<dyn crate::multiplexer::CommandRunner> + Send + 'static,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
-        let stopping = stop.clone();
+        let shutdown = Arc::new(std::sync::Mutex::new(None));
+        let (stopping, shutting_down) = (stop.clone(), shutdown.clone());
         let handle = std::thread::spawn(move || {
-            let mut conn = match crate::db::connect(&database_url) {
-                Ok(conn) => conn,
-                Err(cause) => {
-                    eprintln!("member runtime: director delivery: storage unavailable: {cause}");
-                    return;
-                }
-            };
-            let mut sweep = DirectorSweep::new(
-                run,
-                catalog,
-                std::rc::Rc::new(crate::runtime::system::SystemRunner),
-                clock.clone(),
-                diagnostics,
-            );
+            let runner = std::rc::Rc::new(ShutdownBoundRunner {
+                inner: runner(),
+                shutdown: shutting_down.clone(),
+            });
+            let mut sweep = DirectorSweep::new(run, catalog, runner, clock.clone(), diagnostics);
+            let mut conn = None;
             while !stopping.load(Ordering::Acquire) {
-                if let Err(cause) = sweep.tick(&mut conn, &stopping, None) {
-                    sweep.record(&format!("director delivery: sweep failed: {cause}"));
+                let deadline = *shutting_down
+                    .lock()
+                    .expect("the shutdown deadline lock is never poisoned");
+                if conn.is_none() {
+                    conn = sweep.connect(&database_url);
+                }
+                if let Some(conn) = conn.as_mut()
+                    && let Err(cause) = sweep.tick(conn, &stopping, deadline)
+                {
+                    sweep.storage_unavailable(&cause);
                 }
                 clock.sleep(DIRECTOR_SWEEP_IDLE);
             }
         });
-        Self { stop, handle }
+        Self {
+            stop,
+            shutdown,
+            handle,
+        }
     }
 
-    /// Stops the sweep before its next stage; a stopped attempt starts no new writing stage.
-    fn stop_and_join(self) {
+    /// Clips every later attempt to `shutdown`, then stops the sweep before its next stage; a
+    /// stopped attempt starts no new writing stage.
+    fn stop_and_join(self, shutdown: Instant) {
+        *self
+            .shutdown
+            .lock()
+            .expect("the shutdown deadline lock is never poisoned") = Some(shutdown);
         self.stop.store(true, Ordering::Release);
         if self.handle.join().is_err() {
             eprintln!("member runtime: director delivery: the sweep thread panicked");
         }
+    }
+}
+
+/// Clips every subprocess of the sweep to the shutdown deadline once the runner hands it over,
+/// including a process of an attempt already in flight.
+struct ShutdownBoundRunner {
+    inner: std::rc::Rc<dyn crate::multiplexer::CommandRunner>,
+    shutdown: Arc<std::sync::Mutex<Option<Instant>>>,
+}
+
+impl crate::multiplexer::CommandRunner for ShutdownBoundRunner {
+    fn binary_exists(&self, name: &str) -> bool {
+        self.inner.binary_exists(name)
+    }
+
+    fn run(&self, argv: &[String]) -> std::result::Result<String, crate::multiplexer::RunError> {
+        match self.remaining() {
+            None => self.inner.run(argv),
+            Some(remaining) => self.run_for(argv, remaining),
+        }
+    }
+
+    fn run_for(
+        &self,
+        argv: &[String],
+        timeout: Duration,
+    ) -> std::result::Result<String, crate::multiplexer::RunError> {
+        let timeout = self
+            .remaining()
+            .map_or(timeout, |remaining| timeout.min(remaining));
+        if timeout.is_zero() {
+            return Err(crate::multiplexer::RunError::deadline_expired());
+        }
+        self.inner.run_for(argv, timeout)
+    }
+}
+
+impl ShutdownBoundRunner {
+    fn remaining(&self) -> Option<Duration> {
+        self.shutdown
+            .lock()
+            .expect("the shutdown deadline lock is never poisoned")
+            .map(|shutdown| shutdown.saturating_duration_since(Instant::now()))
     }
 }
 
@@ -1455,6 +1523,7 @@ enum DirectorHold {
     ComposerBusy,
     InteractionOpen,
     PaneUnavailable,
+    StorageUnavailable,
 }
 
 impl DirectorHold {
@@ -1463,6 +1532,7 @@ impl DirectorHold {
             Self::ComposerBusy => "composer_busy",
             Self::InteractionOpen => "interaction_open",
             Self::PaneUnavailable => "pane_unavailable",
+            Self::StorageUnavailable => "storage_unavailable",
         }
     }
 }
@@ -1526,8 +1596,38 @@ impl DirectorSweep {
         self.backoff_until
     }
 
-    /// One sweep pass at most once per interval and after the backoff; the attempt deadline is
-    /// clipped to `shutdown`.
+    /// The sweep's connection, retried under the storage backoff with a diagnostic per failure.
+    fn connect(&mut self, database_url: &str) -> Option<Connection> {
+        let now = self.clock.now();
+        if self.backoff_until.is_some_and(|at| now < at) {
+            return None;
+        }
+        match crate::db::connect(database_url) {
+            Ok(conn) => Some(conn),
+            Err(cause) => {
+                self.storage_unavailable(&cause);
+                None
+            }
+        }
+    }
+
+    /// Records a storage failure that no selected message owns and backs off.
+    fn storage_unavailable(&mut self, cause: &CafleetError) {
+        self.record(&format!(
+            "director delivery: storage unavailable: {}",
+            cause.message()
+        ));
+        self.back_off(self.clock.now());
+    }
+
+    /// Holds `message_id` for storage and backs off.
+    fn storage_hold(&mut self, message_id: i64) {
+        self.note_hold(message_id, DirectorHold::StorageUnavailable);
+        self.back_off(self.clock.now());
+    }
+
+    /// One sweep pass at most once per interval and after the backoff; every storage step and
+    /// the attempt are clipped to `shutdown`.
     pub(crate) fn tick(
         &mut self,
         conn: &mut Connection,
@@ -1541,46 +1641,78 @@ impl DirectorSweep {
             return Ok(());
         }
         self.next_pass = Some(now + DIRECTOR_SWEEP_INTERVAL);
-        let Ok(target) = director_sweep_snapshot(conn, &self.run, &self.catalog) else {
-            self.back_off(now);
-            return Ok(());
+        let clock = self.clock.clone();
+        let clipped = |at: Instant| shutdown.map_or(at, |shutdown| shutdown.min(at));
+        let storage_until =
+            |at: Instant| Instant::now() + at.saturating_duration_since(clock.now());
+        let snapshot = with_database_deadline(
+            conn,
+            storage_until(clipped(now + DIRECTOR_ATTEMPT)),
+            |conn| director_sweep_snapshot(conn, &self.run, &self.catalog),
+        );
+        let target = match snapshot {
+            Ok(Some(target)) => target,
+            Ok(None) => {
+                self.held = None;
+                return Ok(());
+            }
+            Err(cause) => {
+                match self.held.as_ref().map(|held| held.message_id) {
+                    Some(message_id) => self.storage_hold(message_id),
+                    None => self.storage_unavailable(&cause),
+                }
+                return Ok(());
+            }
         };
-        let Some(target) = target else {
-            self.held = None;
-            return Ok(());
-        };
+        let message_id = target.message.message_id;
         let database_url = format!(
             "sqlite:///{}",
             conn.path()
                 .ok_or_else(|| error("the Director sweep database has no file path"))?
         );
-        let Some(lock) = crate::pane_lock::PaneLock::try_acquire(&database_url, &target.placement)?
-        else {
-            return Ok(());
+        let lock = match crate::pane_lock::PaneLock::try_acquire(&database_url, &target.placement) {
+            Ok(Some(lock)) => lock,
+            Ok(None) => return Ok(()),
+            Err(_) => {
+                self.storage_hold(message_id);
+                return Ok(());
+            }
         };
-        let rechecked = director_target(conn, &self.run, &self.catalog)?;
-        if !rechecked.is_some_and(|current| {
-            current.message.message_id == target.message.message_id
-                && current.placement == target.placement
-        }) {
-            return Ok(());
-        }
-        let locked_at = self.clock.now();
-        let deadline = shutdown.map_or(locked_at + DIRECTOR_ATTEMPT, |shutdown| {
-            shutdown.min(locked_at + DIRECTOR_ATTEMPT)
+        let deadline = clipped(self.clock.now() + DIRECTOR_ATTEMPT);
+        let rechecked = with_database_deadline(conn, storage_until(deadline), |conn| {
+            director_target(conn, &self.run, &self.catalog)
         });
-        let outcome = self.attempt(&target, deadline, stop)?;
-        let message_id = target.message.message_id;
-        match outcome {
+        match rechecked {
+            Ok(current)
+                if current.as_ref().is_some_and(|current| {
+                    current.message.message_id == message_id
+                        && current.placement == target.placement
+                }) => {}
+            Ok(_) => return Ok(()),
+            Err(_) => {
+                self.storage_hold(message_id);
+                return Ok(());
+            }
+        }
+        match self.attempt(&target, deadline, stop) {
             DirectorOutcome::Delivered => {
-                crate::broker::runtime::stamp_director_preview(
-                    conn,
-                    &self.run.owner(),
-                    message_id,
-                )?;
-                self.backoff = SWEEP_BACKOFF_FLOOR;
-                self.backoff_until = None;
-                self.held = None;
+                let stamped = with_database_deadline(conn, storage_until(deadline), |conn| {
+                    crate::broker::runtime::stamp_director_preview(
+                        conn,
+                        &self.run.owner(),
+                        message_id,
+                    )
+                });
+                if stamped.is_ok() {
+                    self.backoff = SWEEP_BACKOFF_FLOOR;
+                    self.backoff_until = None;
+                    self.held = None;
+                } else {
+                    self.record(&format!(
+                        "director delivery: message {message_id} uncertain: storage_unavailable"
+                    ));
+                    self.back_off(self.clock.now());
+                }
             }
             DirectorOutcome::Held(hold) => self.note_hold(message_id, hold),
             DirectorOutcome::Unavailable(cause) => {
@@ -1645,7 +1777,7 @@ impl DirectorSweep {
         target: &DirectorTarget,
         deadline: Instant,
         stop: &AtomicBool,
-    ) -> Result<DirectorOutcome> {
+    ) -> DirectorOutcome {
         let placement = &target.placement;
         let pane = placement.mux_pane_id.as_deref().expect("concrete pane");
         let backend = crate::coding_agent::coding_agent(&placement.coding_agent)
@@ -1663,29 +1795,33 @@ impl DirectorSweep {
         let real_deadline = crate::time::Deadline::until(
             Instant::now() + deadline.saturating_duration_since(self.clock.now()),
         );
-        let mux = crate::multiplexer::multiplexer_for_server(
+        let mux = match crate::multiplexer::multiplexer_for_server(
             &placement.backend,
             &placement.mux_server,
             self.runner.clone(),
-        )
-        .map_err(|cause| error(cause.to_string()))?
-        .bounded(real_deadline);
+        ) {
+            Ok(mux) => mux.bounded(real_deadline),
+            Err(cause) => return DirectorOutcome::Unavailable(cause.to_string()),
+        };
         if stopped() {
-            return Ok(DirectorOutcome::NotStarted);
+            return DirectorOutcome::NotStarted;
         }
         let screen = match capture(mux.as_ref(), pane) {
             Ok(screen) => screen,
-            Err(cause) => return Ok(DirectorOutcome::Unavailable(cause)),
+            Err(cause) => return DirectorOutcome::Unavailable(cause),
         };
-        let observed = detector.observe_director(&screen, delivery.rule_ids())?;
+        let observed = match detector.observe_director(&screen, delivery.rule_ids()) {
+            Ok(observed) => observed,
+            Err(cause) => return DirectorOutcome::Unavailable(cause.message().into_owned()),
+        };
         match observed.kind {
             crate::coding_agent::ObservationKind::ComposerEmpty
                 if observed.match_evidence == crate::coding_agent::MatchEvidence::Complete => {}
             crate::coding_agent::ObservationKind::Interaction(_)
             | crate::coding_agent::ObservationKind::PermissionContinuation => {
-                return Ok(DirectorOutcome::Held(DirectorHold::InteractionOpen));
+                return DirectorOutcome::Held(DirectorHold::InteractionOpen);
             }
-            _ => return Ok(DirectorOutcome::Held(DirectorHold::ComposerBusy)),
+            _ => return DirectorOutcome::Held(DirectorHold::ComposerBusy),
         }
         let canonical = crate::runtime::preview::canonical_preview_line(&target.message);
         let line = if delivery.plain_literal_allowed(&canonical) {
@@ -1693,71 +1829,70 @@ impl DirectorSweep {
         } else {
             crate::runtime::preview::pointer_preview_line(&target.message)
         };
-        let [literal, submit] =
-            plan.stages(&line, crate::coding_agent::catalog::LiteralFraming::Plain)?;
+        let [literal, submit] = plan
+            .stages(&line, crate::coding_agent::catalog::LiteralFraming::Plain)
+            .expect("a measured Director prompt plan encodes a plain preview line");
         let literal = String::from_utf8(literal).expect("an encoded preview is UTF-8");
         let required = DIRECTOR_SETTLE + DIRECTOR_VERIFICATION + DIRECTOR_WRITE_MARGIN;
         if stopped() || deadline.saturating_duration_since(self.clock.now()) < required {
-            return Ok(DirectorOutcome::NotStarted);
+            return DirectorOutcome::NotStarted;
         }
-        if let Err(failure) = mux.type_literal(pane, &literal) {
-            return Ok(if failure.submission_started() {
-                DirectorOutcome::Uncertain("write_failed")
-            } else {
-                DirectorOutcome::Unavailable(failure.to_string())
-            });
+        match mux.type_literal_until(pane, &literal, &stopped) {
+            Ok(true) => {}
+            Ok(false) => return DirectorOutcome::Uncertain("runner_stopped"),
+            Err(failure) if failure.submission_started() => {
+                return DirectorOutcome::Uncertain("write_failed");
+            }
+            Err(failure) => return DirectorOutcome::Unavailable(failure.to_string()),
         }
         if stopped() {
-            return Ok(DirectorOutcome::Uncertain("runner_stopped"));
+            return DirectorOutcome::Uncertain("runner_stopped");
         }
         self.clock.sleep(DIRECTOR_SETTLE);
         if stopped() {
-            return Ok(DirectorOutcome::Uncertain("runner_stopped"));
+            return DirectorOutcome::Uncertain("runner_stopped");
         }
         let window_until = (self.clock.now() + crate::runtime::input::PRE_SUBMIT_WINDOW)
             .min(deadline - (DIRECTOR_VERIFICATION + DIRECTOR_WRITE_MARGIN));
         loop {
             let rendered = capture(mux.as_ref(), pane)
                 .ok()
-                .map(|screen| detector.composer_text(&screen))
-                .transpose()?
-                .flatten()
+                .and_then(|screen| detector.composer_text(&screen).ok().flatten())
                 .is_some_and(|text| text.matches(&[literal.as_str()]));
             if rendered {
                 break;
             }
             if self.clock.now() + DIRECTOR_VERIFICATION_POLL > window_until {
-                return Ok(DirectorOutcome::Uncertain("literal_mismatch"));
+                return DirectorOutcome::Uncertain("literal_mismatch");
             }
             self.clock.sleep(DIRECTOR_VERIFICATION_POLL);
             if stopped() {
-                return Ok(DirectorOutcome::Uncertain("runner_stopped"));
+                return DirectorOutcome::Uncertain("runner_stopped");
             }
         }
         if stopped() {
-            return Ok(DirectorOutcome::Uncertain("runner_stopped"));
+            return DirectorOutcome::Uncertain("runner_stopped");
         }
         if mux.press_submit(pane, &submit).is_err() {
-            return Ok(DirectorOutcome::Uncertain("write_failed"));
+            return DirectorOutcome::Uncertain("write_failed");
         }
         let verify_until = (self.clock.now() + DIRECTOR_VERIFICATION).min(deadline);
         loop {
             if stopped() {
-                return Ok(DirectorOutcome::Uncertain("runner_stopped"));
+                return DirectorOutcome::Uncertain("runner_stopped");
             }
-            let empty = match capture(mux.as_ref(), pane) {
-                Ok(screen) => {
-                    let observed = detector.observe_director(&screen, delivery.rule_ids())?;
+            let empty = capture(mux.as_ref(), pane)
+                .ok()
+                .and_then(|screen| detector.observe_director(&screen, delivery.rule_ids()).ok())
+                .is_some_and(|observed| {
                     observed.kind == crate::coding_agent::ObservationKind::ComposerEmpty
                         && observed.match_evidence == crate::coding_agent::MatchEvidence::Complete
-                }
-                Err(_) => false,
-            };
+                });
             if empty {
-                return Ok(DirectorOutcome::Delivered);
+                return DirectorOutcome::Delivered;
             }
             if self.clock.now() + DIRECTOR_VERIFICATION_POLL > verify_until {
-                return Ok(DirectorOutcome::Uncertain("submit_unconfirmed"));
+                return DirectorOutcome::Uncertain("submit_unconfirmed");
             }
             self.clock.sleep(DIRECTOR_VERIFICATION_POLL);
         }
@@ -6945,6 +7080,10 @@ mod tests {
             submit_clears: bool,
             capture_failure: Option<String>,
             human_key_after_type: Option<&'static str>,
+            /// A database the pane locks exclusively when the submit key arrives, as a
+            /// concurrent writer that takes the lock between submission and the stamp.
+            lock_on_submit: Option<String>,
+            held_lock: Option<rusqlite::Connection>,
             /// How many captures after each typed chunk still show the composer without it, as
             /// a native composer that renders its input late.
             render_delay: usize,
@@ -7025,6 +7164,8 @@ mod tests {
                     submit_clears: true,
                     capture_failure: None,
                     human_key_after_type: None,
+                    lock_on_submit: None,
+                    held_lock: None,
                     render_delay: 0,
                     unrendered: 0,
                     stop_at: None,
@@ -7129,6 +7270,9 @@ mod tests {
                         state.events.push(PaneEvent::Submit(bytes));
                         if state.submit_clears {
                             state.typed.clear();
+                        }
+                        if let Some(path) = state.lock_on_submit.take() {
+                            state.held_lock = Some(exclusive_lock(&path));
                         }
                         Ok(String::new())
                     }
@@ -7326,6 +7470,338 @@ mod tests {
 
         fn line(message: &crate::broker::MessageRecord) -> String {
             crate::runtime::preview::canonical_preview_line(message)
+        }
+
+        /// A second connection holding the exclusive SQLite lock, as a concurrent writer does.
+        fn exclusive_lock(path: &str) -> rusqlite::Connection {
+            let holder = rusqlite::Connection::open(path).unwrap();
+            holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
+            holder
+        }
+
+        fn database_path(run: &DirectorRun) -> String {
+            run.fixture
+                .conn
+                .path()
+                .expect("the fixture database is a file")
+                .to_owned()
+        }
+
+        /// Every stored Director diagnostic takes one of the specified forms.
+        fn assert_contract_diagnostics(run: &DirectorRun) {
+            for (message, _) in run.director_diagnostics() {
+                assert!(
+                    ["held: ", "uncertain: ", "unavailable: "]
+                        .iter()
+                        .any(|form| message.contains(form)),
+                    "{message}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_stop_after_the_first_tmux_literal_chunk_writes_no_further_chunk() {
+            let mut run = DirectorRun::new();
+            let message = run.report(&"c".repeat(400));
+            let preview = line(&message);
+            assert!(
+                preview.chars().count() > 256,
+                "the literal spans two chunks"
+            );
+            run.pane.state().stop_at = Some((StopAt::FirstType, run.stop.clone()));
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            let chunks: Vec<String> = run
+                .pane
+                .events()
+                .into_iter()
+                .filter_map(|event| match event {
+                    PaneEvent::Type(chunk) => Some(chunk),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(chunks, [preview.chars().take(256).collect::<String>()]);
+            assert_eq!(run.pane.submits(), 0, "no submit key");
+            assert!(!run.notified(message.message_id));
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} uncertain: runner_stopped",
+                        message.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        mod storage_busy {
+            use super::*;
+
+            #[test]
+            fn a_busy_snapshot_holds_under_the_doubling_backoff_and_writes_nothing() {
+                let mut run = DirectorRun::new();
+                let message = run.report("waits for storage");
+                let mut sweep = run.sweep(delivering());
+                let lock = exclusive_lock(&database_path(&run));
+                for backoff in [1, 2] {
+                    let now = run.clock.now();
+                    run.tick(&mut sweep);
+                    assert_eq!(
+                        sweep.backoff_until(),
+                        Some(now + Duration::from_secs(backoff)),
+                        "a {backoff} s backoff"
+                    );
+                    assert!(
+                        run.pane.events().is_empty(),
+                        "no capture and no byte while storage is busy"
+                    );
+                    run.clock.advance(Duration::from_secs(backoff));
+                }
+                drop(lock);
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.typed_literals(), line(&message));
+                assert_eq!(run.pane.submits(), 1);
+                assert!(run.notified(message.message_id));
+                assert_eq!(
+                    sweep.backoff_until(),
+                    None,
+                    "a confirmed submission resets the backoff"
+                );
+                assert_contract_diagnostics(&run);
+            }
+
+            #[test]
+            fn a_hold_continued_by_busy_storage_reports_storage_unavailable_after_three_minutes() {
+                let mut run = DirectorRun::new();
+                let message = run.report("held behind a draft, then by busy storage");
+                run.pane.state().typed = "a draft".into();
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.submits(), 0, "the draft holds the preview");
+                run.clock.advance(Duration::from_secs(180));
+                let lock = exclusive_lock(&database_path(&run));
+                run.tick(&mut sweep);
+                drop(lock);
+                assert_eq!(
+                    run.director_diagnostics(),
+                    [(
+                        format!(
+                            "director delivery: message {} held: storage_unavailable",
+                            message.message_id
+                        ),
+                        1
+                    )]
+                );
+                assert!(!run.notified(message.message_id));
+                assert_eq!(run.pane.state().typed, "a draft", "nothing is typed");
+            }
+
+            #[test]
+            fn busy_storage_at_the_stamp_after_submission_is_an_uncertain_preview() {
+                let mut run = DirectorRun::new();
+                let message = run.report("stamped while storage is busy");
+                run.pane.state().lock_on_submit = Some(database_path(&run));
+                let mut sweep = run.sweep(delivering());
+                let now = run.clock.now();
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.submits(), 1, "the preview was submitted");
+                drop(run.pane.state().held_lock.take());
+                assert!(
+                    !run.notified(message.message_id),
+                    "the stamp did not commit"
+                );
+                assert_eq!(
+                    run.director_diagnostics(),
+                    [(
+                        format!(
+                            "director delivery: message {} uncertain: storage_unavailable",
+                            message.message_id
+                        ),
+                        1
+                    )]
+                );
+                assert!(
+                    sweep.backoff_until().is_some_and(|until| until > now),
+                    "the storage failure backs off"
+                );
+            }
+        }
+
+        mod sweep_thread {
+            use std::cell::RefCell;
+            use std::sync::Mutex;
+            use std::sync::mpsc;
+
+            use super::*;
+            use crate::runtime::service::DirectorSweepThread;
+
+            /// The Director pane whose first metadata read blocks until released and whose
+            /// capture then hangs for its whole timeout, as a stuck tmux client does.
+            struct HungPane {
+                pane: FakePane,
+                entered: RefCell<Option<mpsc::Sender<()>>>,
+                release: mpsc::Receiver<()>,
+                timeouts: Arc<Mutex<Vec<(String, Duration)>>>,
+            }
+
+            impl CommandRunner for HungPane {
+                fn binary_exists(&self, name: &str) -> bool {
+                    self.pane.binary_exists(name)
+                }
+
+                fn run(&self, argv: &[String]) -> Result<String, RunError> {
+                    self.pane.run(argv)
+                }
+
+                fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+                    let command = argv[3].clone();
+                    self.timeouts
+                        .lock()
+                        .unwrap()
+                        .push((command.clone(), timeout));
+                    match command.as_str() {
+                        "display-message" => {
+                            if let Some(entered) = self.entered.borrow_mut().take() {
+                                entered.send(()).unwrap();
+                                self.release.recv().unwrap();
+                            }
+                            self.pane.run(argv)
+                        }
+                        "capture-pane" => {
+                            std::thread::sleep(timeout);
+                            Err(RunError::Timeout)
+                        }
+                        _ => self.pane.run(argv),
+                    }
+                }
+            }
+
+            /// Joins `thread` on another thread so a sweep that never stops fails the test
+            /// instead of hanging it.
+            fn join_within(thread: DirectorSweepThread, shutdown: Instant, limit: Duration) {
+                let (joined, done) = mpsc::channel();
+                std::thread::spawn(move || {
+                    thread.stop_and_join(shutdown);
+                    joined.send(()).unwrap();
+                });
+                done.recv_timeout(limit)
+                    .expect("the sweep thread stops and joins");
+            }
+
+            #[test]
+            fn stop_and_join_returns_by_the_shutdown_deadline_with_the_in_flight_attempt_clipped() {
+                let mut run = DirectorRun::new();
+                let message = run.report("in flight at shutdown");
+                let (entered_tx, entered) = mpsc::channel();
+                let (release, release_rx) = mpsc::channel();
+                let timeouts = Arc::new(Mutex::new(Vec::new()));
+                let recorded = timeouts.clone();
+                let thread = DirectorSweepThread::start_with_runner(
+                    format!("sqlite:///{}", database_path(&run)),
+                    run.fixture.run.clone(),
+                    delivering(),
+                    Arc::new(crate::time::SystemClock) as Arc<dyn Clock>,
+                    run.diagnostics.clone(),
+                    move || {
+                        Rc::new(HungPane {
+                            pane: FakePane::new(),
+                            entered: RefCell::new(Some(entered_tx)),
+                            release: release_rx,
+                            timeouts: recorded,
+                        }) as Rc<dyn CommandRunner>
+                    },
+                );
+                entered
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("the attempt reaches its first capture");
+                let shutdown = Instant::now() + Duration::from_millis(600);
+                let (joined, done) = mpsc::channel();
+                std::thread::spawn(move || {
+                    thread.stop_and_join(shutdown);
+                    joined.send(Instant::now()).unwrap();
+                });
+                std::thread::sleep(Duration::from_millis(100));
+                release.send(()).unwrap();
+                let joined_at = done
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("the sweep thread stops and joins");
+                assert!(
+                    joined_at <= shutdown + Duration::from_millis(250),
+                    "joined {:?} after the shutdown deadline",
+                    joined_at.saturating_duration_since(shutdown)
+                );
+                let capture = timeouts
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|(command, _)| command == "capture-pane")
+                    .map(|(_, timeout)| *timeout)
+                    .expect("the in-flight capture ran");
+                assert!(
+                    capture <= Duration::from_millis(500),
+                    "the in-flight capture runs under the clipped deadline: {capture:?}"
+                );
+                assert!(!run.notified(message.message_id));
+            }
+
+            #[test]
+            fn a_connect_failure_retries_under_the_doubling_backoff_and_stores_a_diagnostic() {
+                let run = DirectorRun::new();
+                let blocker = run.fixture._dir.path().join("blocker");
+                std::fs::write(&blocker, b"").unwrap();
+                let clock = Arc::new(TestClock::starting_at(Instant::now()));
+                let thread = DirectorSweepThread::start(
+                    format!("sqlite:///{}/cafleet.db", blocker.display()),
+                    run.fixture.run.clone(),
+                    delivering(),
+                    clock.clone() as Arc<dyn Clock>,
+                    run.diagnostics.clone(),
+                );
+                let waited = Instant::now() + Duration::from_secs(10);
+                while clock.elapsed() < Duration::from_secs(62) {
+                    assert!(
+                        Instant::now() < waited,
+                        "the sweep thread keeps running: {:?}",
+                        clock.elapsed()
+                    );
+                    std::thread::yield_now();
+                }
+                join_within(
+                    thread,
+                    clock.now() + Duration::from_secs(1),
+                    Duration::from_secs(10),
+                );
+                let attempts_by = |elapsed: Duration| {
+                    let (mut at, mut backoff, mut attempts) =
+                        (Duration::ZERO, Duration::from_secs(1), 0);
+                    while at <= elapsed {
+                        attempts += 1;
+                        at += backoff;
+                        backoff = (backoff * 2).min(Duration::from_secs(30));
+                    }
+                    attempts
+                };
+                let elapsed = clock.elapsed();
+                let expected = [
+                    attempts_by(elapsed.saturating_sub(Duration::from_millis(100))),
+                    attempts_by(elapsed),
+                ];
+                let diagnostics = run.director_diagnostics();
+                assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+                assert!(
+                    diagnostics[0]
+                        .0
+                        .starts_with("director delivery: storage unavailable: "),
+                    "{diagnostics:?}"
+                );
+                assert!(
+                    expected.contains(&diagnostics[0].1),
+                    "one connect attempt at 0, 1, 3, 7, 15, 31, 61 s and every 30 s after, \
+                     {expected:?} by {elapsed:?}: {diagnostics:?}"
+                );
+            }
         }
 
         mod snapshot {

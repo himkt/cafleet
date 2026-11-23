@@ -365,13 +365,19 @@ impl Multiplexer for HerdrMultiplexer {
         })
     }
 
-    fn type_literal(&self, pane: &str, literal: &str) -> Result<(), MultiplexerError> {
+    fn type_literal_until(
+        &self,
+        pane: &str,
+        literal: &str,
+        _stopped: &dyn Fn() -> bool,
+    ) -> Result<bool, MultiplexerError> {
         self.core.acknowledged_run(
             &self
                 .core
                 .argv(&["herdr", "pane", "send-text", pane, literal]),
             "text",
-        )
+        )?;
+        Ok(true)
     }
 
     fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError> {

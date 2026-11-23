@@ -467,7 +467,20 @@ pub(crate) trait Multiplexer {
     fn capture_screen(&self, pane: &str) -> Result<ScreenCapture, MultiplexerError>;
 
     /// Types `literal` into `pane` as plain text, without a paste frame.
-    fn type_literal(&self, pane: &str, literal: &str) -> Result<(), MultiplexerError>;
+    #[cfg(test)]
+    fn type_literal(&self, pane: &str, literal: &str) -> Result<(), MultiplexerError> {
+        self.type_literal_until(pane, literal, &|| false)
+            .map(|_| ())
+    }
+
+    /// Types `literal`, checking `stopped` before each write process after the first; returns
+    /// `false` when it stopped before writing every piece.
+    fn type_literal_until(
+        &self,
+        pane: &str,
+        literal: &str,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<bool, MultiplexerError>;
 
     /// Presses the key sequence whose bytes are `submit`.
     fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError>;

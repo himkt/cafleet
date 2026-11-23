@@ -276,9 +276,17 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     /// A failure after the first chunk's process started may leave a partial literal.
-    fn type_literal(&self, pane: &str, literal: &str) -> Result<(), MultiplexerError> {
+    fn type_literal_until(
+        &self,
+        pane: &str,
+        literal: &str,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<bool, MultiplexerError> {
         let characters = literal.chars().collect::<Vec<_>>();
         for (index, chunk) in characters.chunks(LITERAL_CHUNK_CHARS).enumerate() {
+            if index > 0 && stopped() {
+                return Ok(false);
+            }
             let chunk = chunk.iter().collect::<String>();
             let argv = self
                 .core
@@ -293,7 +301,7 @@ impl Multiplexer for TmuxMultiplexer {
                     }
                 })?;
         }
-        Ok(())
+        Ok(true)
     }
 
     fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError> {

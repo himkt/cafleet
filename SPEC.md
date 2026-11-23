@@ -1218,7 +1218,7 @@ Delivery leaves `status_state` unchanged: an inline or pointer preview stays `in
 
 A preview stays pending, with `notified_at` unset, while the recipient's composer is not verified empty on a verified-composer run, an interaction is open, the runner's FIFO holds prompt or exec input or is stopped, the observer is degraded, ownership or storage is unavailable, the pane is not yet placed or the pane input lock is busy; the runner's sweep retries it with no caller command. Pending delivery creates no permission event and grants no native answer.
 
-A Director preview stays pending while the Director composer is not verified empty (a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min`), an interaction is open or a candidate, the Director pane capture or its multiplexer fails, storage is unavailable, the Director pane input lock is busy, an older Director message is held, or no member runner of the fleet is live. It publishes no runtime event; the delivering runner records a `director_delivery` diagnostic (§6.9 Director delivery sweep).
+A Director preview stays pending while the Director composer is not verified empty (a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min`), an interaction is open, the Director pane capture or its multiplexer fails, storage is unavailable, the Director pane input lock is busy, an older Director message is held, or no member runner of the fleet is live. It publishes no runtime event; the delivering runner records a `director_delivery` diagnostic (§6.9 Director delivery sweep).
 
 ##### Accepted trade-offs
 
@@ -2646,10 +2646,10 @@ A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts
 | `continuation_prefix` | Pattern stripped from each later composer row, such as a continuation margin; a row that does not match it ends the composer text |
 | `mode_prefix` | Optional. A written literal that begins with it matches with or without it, because the native CLI may consume it as a mode switch, drawing its own mode prompt or none, or keep it as text |
 | `framed` | Optional, default `false`. The region's start row is a frame row, such as an editor border, and composer text begins on the next row |
-
-A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, `text_wrap` and `text_framed`, which replace the `composer.text` prefixes, `wrap` and `framed` for the regions that rule bounds, so one profile reads composers that differ in margin, wrapping or framing; only `composer_text` rules declare them.
 | `wrap` | `char`: rows join with nothing. `word`: a row break matches either nothing or exactly one literal space |
 | `placeholders` | Collapsed-paste renderings, each with a named `count` group and a `unit` of `scalars` or `lines` |
+
+A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, `text_wrap` and `text_framed`, which replace the `composer.text` prefixes, `wrap` and `framed` for the regions that rule bounds, so one profile reads composers that differ in margin, wrapping or framing; only `composer_text` rules declare them.
 
 Cells drawn in the profile's suggestion style (§6.7 Native suggestions) are excluded before extraction, and trailing blanks are trimmed from each row. A `composer_text` rule's region runs from its start row to the first later row that matches `end_pattern`, so each start row yields one candidate, and that end row is never composer text. A start row with no later `end_pattern` row within `max_rows` is closed by the screen's bottom edge, as a composer drawn on the screen's last rows is, and every row of that region is composer text. Native transcripts echo submitted prompts in the composer's own shape, and the live composer is always below the transcript, so a `composer_text` rule takes the bottom-most candidate that satisfies its matchers instead of requiring a unique one. A wrong pick can only fail the literal comparison, which withholds the submit. `composer_text` rules rank below the empty-composer rules, so a composer that both match classifies empty. No matching rule, several matching rules or a first row that does not match `first_prefix` leave the composer text unextractable.
 
@@ -2690,8 +2690,10 @@ Catalog loading rejects a profile file that:
 | Has an executable composer plan and no `composer.text`, or a `composer.text` rule ID that names a missing or non-composer rule | `composer plan for <backend> requires composer text extraction` |
 | Has a `director_delivery.rule_ids` entry naming a missing rule or a rule that is not a composer rule | `director delivery rule <id> of <backend> is not a composer rule` |
 | Lists in `director_delivery.multiplexers` a multiplexer whose prompt plan's submit bytes have no key mapping there (§6.5 Explicit key dispatch) | `director delivery for <backend> on <multiplexer> has no submit key mapping` |
-| Has a `director_delivery` without `plain_limit`, or with no Director pre-submit fixture at that limit on a listed multiplexer | `director delivery for <backend> requires a measured plain_limit` |
+| Has a `director_delivery` without `plain_limit` | `director delivery for <backend> requires a measured plain_limit` |
 | Has a placeholder pattern without a `count` group or with a unit other than `scalars` or `lines` | `composer placeholder of <backend> must capture count in scalars or lines` |
+
+Provenance validation rejects, with the same `director delivery for <backend> requires a measured plain_limit` text, a `director_delivery` with no Director pre-submit fixture at `plain_limit` on a listed multiplexer.
 
 ###### Cursor-free classification
 
@@ -3259,7 +3261,7 @@ Durability begins at a successful SQLite commit, and notification is claimed onl
 | `deferred_input` | `deferred input: …` |
 | `queue_housekeeping` | `queue housekeeping: …` |
 | `preview_sweep` | `preview sweep: …` |
-| `director_delivery` | `director delivery: message <id> held: <reason>`, `director delivery: message <id> uncertain: <cause>` and `director delivery: pane <pane-id> unavailable: <cause>` (§ Director delivery sweep) |
+| `director_delivery` | `director delivery: message <id> held: <reason>`, `director delivery: message <id> uncertain: <cause>`, `director delivery: pane <pane-id> unavailable: <cause>` and `director delivery: storage unavailable: <cause>` (§ Director delivery sweep) |
 | `input_result` | `input <input_id> result is pending storage: …` and `input <input_id> result is pending recovery: …` |
 | `permission_answer` | `permission answer for interaction <interaction_id> is uncertain: …` |
 | `shutdown` | Each shutdown outcome diagnostic |
@@ -3520,9 +3522,9 @@ Every runner selects the same head and only the lock holder types, so each messa
 
 | Classification | Action | Backoff |
 |---|---|---|
-| Composer verified empty, no open or candidate interaction | Deliver | Reset on confirmed submission |
+| Composer verified empty, no open interaction | Deliver | Reset on confirmed submission |
 | Composer not verified empty: a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min` | Hold | None (retry next interval) |
-| Open or candidate interaction: a permission request, a question or an unknown interaction | Hold | None |
+| Open interaction: a permission request, a question or an unknown interaction | Hold | None |
 | Capture failure, missing pane, multiplexer server error or geometry still changing after retries | Hold | 1 s doubling, capped at 30 s |
 | Storage busy or unavailable | Hold | 1 s doubling, capped at 30 s |
 
@@ -3536,7 +3538,7 @@ Every runner selects the same head and only the lock holder types, so each messa
 
 herdr `pane send-text` takes literal text with no paste option; § Composer-text extraction matches the literal whether the Director screen renders it as typed text or as a collapsed paste placeholder.
 
-**Stop and deadlines.** The attempt deadline is the earlier of the 5 s attempt deadline and the run's shutdown deadline. The thread checks its stop signal before each stage: capture, literal chunk, settle end, each pre-submit capture, submit key and each verification capture. A stopped thread starts no new writing stage and releases the lock. A stop after the first literal byte and before confirmed submission is an uncertain Director preview: the text stays in the Director composer and the message stays unnotified. Every subprocess runs through the bounded subprocess runner (§6.5 Subprocess output and deadlines) under the remaining clipped deadline, so the join completes within the shutdown deadline.
+**Stop and deadlines.** The attempt deadline is the earlier of the 5 s attempt deadline and the run's shutdown deadline, which the runner hands the thread before it sets the stop signal. The snapshot, the re-check under the lock and the `notified_at` stamp each run under a storage deadline clipped to the attempt deadline. The thread checks its stop signal before each stage: capture, literal chunk, settle end, each pre-submit capture, submit key and each verification capture. A stopped thread starts no new writing stage and releases the lock. A stop after the first literal byte and before confirmed submission is an uncertain Director preview: the text stays in the Director composer and the message stays unnotified. Every subprocess runs through the bounded subprocess runner (§6.5 Subprocess output and deadlines) under the remaining clipped deadline, so the join completes within the shutdown deadline.
 
 **Outcomes and diagnostics.** A Director preview creates no durable input receipt and publishes no runtime event, because an event addressed to the Director would wait behind the held preview. Each non-confirmed outcome is a `director_delivery` runner diagnostic (§ Storage pressure and durability boundary), visible through `member show <member-id> --json` of the delivering member. Its message is stable text without timestamps or durations, so the diagnostic buffer deduplicates repeats and counts them:
 
@@ -3546,8 +3548,10 @@ herdr `pane send-text` takes literal text with no paste option; § Composer-text
 | Held for 3 minutes | Unnotified | `director delivery: message <id> held: <reason>` | Once per runner when its continuous hold of that message reaches 3 minutes |
 | `literal_mismatch`, `submit_unconfirmed`, `write_failed`, or `runner_stopped` after the first byte | Unnotified; typed again once the composer verifies empty | `director delivery: message <id> uncertain: <cause>` | Each occurrence |
 | Capture or multiplexer failure | Unnotified | `director delivery: pane <pane-id> unavailable: <cause>` | Each occurrence |
+| Storage failure after a confirmed submission | Unnotified; typed again once the composer verifies empty | `director delivery: message <id> uncertain: storage_unavailable` | Each occurrence |
+| Storage failure before a message is selected, including the sweep connection | Unnotified | `director delivery: storage unavailable: <cause>` | Each failure, retried under the storage backoff |
 
-`<reason>` is `composer_busy`, `interaction_open`, `interaction_candidate`, `pane_unavailable` or `storage_unavailable`. `<cause>` is the stop cause, or the multiplexer or storage error text, truncated at a scalar boundary so the stored message stays within the 512-byte bound.
+`<reason>` is `composer_busy`, `interaction_open`, `pane_unavailable` or `storage_unavailable`; one capture classifies the Director screen, so it has no candidate interaction state. `<cause>` is the stop cause, or the multiplexer or storage error text, truncated at a scalar boundary so the stored message stays within the 512-byte bound.
 
 A mismatch leaves the written literal, plus whatever else was typed, in the Director composer, which then holds every later Director preview until the user clears or submits it. A submitted leftover literal leaves the message unnotified, so the sweep later types its preview again, and the Director deduplicates by message ID.
 

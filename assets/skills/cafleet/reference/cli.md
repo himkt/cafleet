@@ -143,14 +143,14 @@ Previews fold newlines to `⏎`, tabs to `␉` and other C0/DEL controls to `\xN
 
 Every live member runner types the root Director's pending messages into the Director's pane as profile previews, oldest first across senders, one per message. On each `[cafleet msg …]` preview, run `cafleet message poll <director-id> --json` once; `[]` means an earlier poll already consumed the message.
 
-A preview is typed only while the Director-screen profile verifies the composer empty with no open or candidate interaction, as a plain literal with no Escape and no bracketed paste. A body above the Director profile's plain limit arrives as the `poll` pointer. These hold the oldest Director message, and every newer one behind it, with no runtime event:
+A preview is typed only while the Director-screen profile verifies the composer empty with no open interaction, as a plain literal with no Escape and no bracketed paste. A body above the Director profile's plain limit arrives as the `poll` pointer. These hold the oldest Director message, and every newer one behind it, with no runtime event:
 
 - a draft or leftover literal in the Director composer, an unrecognized screen or a pane narrower than the profile's layouts;
 - an open permission dialog, question or unknown interaction in the Director pane;
 - an unavailable Director pane, multiplexer or storage;
 - no live member runner in the fleet.
 
-A key typed during a delivery leaves the literal in the composer unsubmitted; clearing or submitting it resumes delivery, and a submitted leftover may repeat a preview, so deduplicate by message ID. A Director backend or multiplexer without Director-screen coverage receives nothing in its pane and reads by manual poll. A delivering member's `cafleet member show MEMBER_ID --json` `diagnostics` show `director delivery: message <id> held: <reason>` after 3 minutes, `director delivery: message <id> uncertain: <cause>` and `director delivery: pane <pane-id> unavailable: <cause>`.
+A key typed during a delivery leaves the literal in the composer unsubmitted; clearing or submitting it resumes delivery, and a submitted leftover may repeat a preview, so deduplicate by message ID. A Director backend or multiplexer without Director-screen coverage receives nothing in its pane and reads by manual poll. A delivering member's `cafleet member show MEMBER_ID --json` `diagnostics` show `director delivery: message <id> held: <reason>` after 3 minutes, `director delivery: message <id> uncertain: <cause>` (`storage_unavailable` when storage fails after a confirmed submission), `director delivery: pane <pane-id> unavailable: <cause>` and `director delivery: storage unavailable: <cause>`.
 
 Run a manual `cafleet message poll <director-id> --json` at these points:
 
