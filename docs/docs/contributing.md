@@ -7,7 +7,7 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 | Entry | Responsibility |
 |---|---|
 | `src/` | Rust CLI, typed synchronous SQLite broker, multiplexer/process adapters and the SQL schema, the `SCHEMA_SQL` constant in `src/db.rs`; built by the root `Cargo.toml` and `build.rs` together with the embedded `assets/` tree |
-| `assets/` | Data files: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate; `assets/profiles/` the bundled runner-profile catalog and one native screen fixture file per backend with catalogued screens. The binary embeds every file except the native screen fixtures, which the test suite reads |
+| `assets/` | Data files: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director reception, goals and, where the backend has no native per-tool approval, the member gate; `assets/profiles/` one runner-profile file per backend with its native screen fixtures. The binary embeds every file |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
 | `design-docs/` | Numbered design documents and local evidence |
 
@@ -135,23 +135,24 @@ A mechanism with three invalid runs is recorded as "not established" with the in
 
 ### Bundled catalog provenance checks
 
-The bundled-catalog guard tests in `src/coding_agent/catalog.rs` check every provenance rule of [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) against the embedded catalog, so a build whose bundled backend files fail them does not pass `mise //:test`. The guard validates every catalog fixture entry, including screens that no profile capability cites. The production catalog loader skips the contents of the `fixtures` registry and of every `fixture_ids` value, so only the guard reads them, and fixture validation parses capture versions with the version probe's SemVer rule. The guard reports these errors:
+The bundled-catalog guard tests in `src/coding_agent/catalog.rs` check every provenance rule of [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) against the embedded profile files, so a build whose bundled profile files fail them does not pass `mise //:test`. The guard validates every screen of every profile file, including screens that no profile capability cites. The production catalog loader skips the contents of each file's `screens` and of every `fixture_ids` value, so only the guard reads them, and screen validation parses capture versions with the version probe's SemVer rule. The guard reports these errors, each prefixed `invalid native profile: `:
 
 | Condition | Error |
 |---|---|
-| The source file is absent from the test suite's fixture bytes | `bundled fixture bytes are not embedded` |
-| File `schema_version` differs from `1`, `provenance` differs from `native`, or `backend` differs from the entry | `bundled fixture file identity differs from its catalog entry` |
-| The entry's `id` is absent from `screens` | `bundled fixture screen is missing` |
-| A `screens` key has no catalog fixture entry | `bundled fixture file holds an uncited screen` |
-| The canonical screen digest differs from the entry's `sha256` | `bundled fixture digest mismatch for <ID>: catalog <SHA>, computed <SHA>` |
-| Screen `rows` or `cols` differ from the entry | `bundled fixture identity differs from its catalog entry` |
+| A profile file's `schema_version` differs from `1` | `unsupported profile schema` |
+| A profile file's `backend` differs from its file name or test-catalog key | `profile file backend differs from its file` |
+| A fixture id is a screen key in two profile files | `duplicate fixture id <ID>` |
+| An object in a profile file's text repeats a key, a screen id written twice included | `duplicate object key <KEY>` |
+| A `fixture_ids` value names no screen of its own profile file | `<BACKEND> cites unknown fixture <ID>` |
+| A `fixture_ids` value is empty | `capability provenance required` |
+| A bundled screen's fields differ from the screen field set | `exact required object fields expected` |
 | A pattern-bearing field (a rule matcher, frame guard, region matcher, `prompt_pattern` or any other pattern the catalog decoder compiles) contains a Perl class or boundary (`\s \S \d \D \w \W \b \B`) or an escape outside the [pattern syntax](https://github.com/himkt/cafleet/blob/main/SPEC.md#pattern-syntax) | The backend, rule ID and construct, for example `` claude rule claude-bash-command: `\s` `` |
 
-Synthetic fixtures exercise rule and capability validation in the test suite. The guard rejects them for the bundled catalog, and explicitly selected test catalogs that use them pass the same provenance rules.
+Test catalogs exercise rule and capability validation with stub screens, and the test loader derives missing composer evidence from each composer plan. The guard requires complete captured screens in the bundled catalog.
 
 ### Native screen fixture capture
 
-The capture-to-fixture conversion inserts the converted screen under its catalog fixture `id` in `assets/profiles/native/<backend>.json`. It derives `cell_backgrounds` from the capture grid's per-cell `bg` and `cell_styles` from its per-cell faint and foreground attributes, and fixture replay applies each run's background and style before writing its row text. The terminal-screen parser gives a continuation cell default attributes whenever its leading cell receives a wide character, both on the runtime screen and in replay, so replay writes a run's attributes onto the leading cell and leaves the continuation cell to the parser. [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the fixture file format.
+The capture-to-fixture conversion inserts the converted screen under its fixture id in `screens` of `assets/profiles/<backend>.json`, recording the capture's `native_version` and any `composer_evidence` in the screen. It derives `cell_backgrounds` from the capture grid's per-cell `bg` and `cell_styles` from its per-cell faint and foreground attributes, and fixture replay applies each run's background and style before writing its row text. The terminal-screen parser gives a continuation cell default attributes whenever its leading cell receives a wide character, both on the runtime screen and in replay, so replay writes a run's attributes onto the leading cell and leaves the continuation cell to the parser. [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the profile file format.
 
 ### Storage deadline mechanisms
 
