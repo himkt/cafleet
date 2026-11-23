@@ -164,10 +164,3 @@ CREATE TABLE member_runner_diagnostics (
     UNIQUE(run_id, source, message)
 );
 CREATE INDEX idx_member_runner_diagnostics_recent ON member_runner_diagnostics(run_id, last_at);
-
-CREATE TABLE refinery_schema_history (
-    version INT4 PRIMARY KEY,
-    name VARCHAR(255),
-    applied_on VARCHAR(255),
-    checksum VARCHAR(255)
-);

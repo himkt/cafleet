@@ -524,7 +524,7 @@ mod tests {
         crate::db::initialize(&mut conn, &settings.database_url).unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
         conn.execute_batch(mutation).unwrap();
-        conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
+        conn.execute_batch("BEGIN; SELECT * FROM cafleet_database")
             .unwrap();
         let before = crate::db::test_support::wal_snapshot(&path);
         for args in [

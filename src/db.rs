@@ -6,7 +6,7 @@ use rusqlite::TransactionBehavior;
 use std::time::Duration;
 use std::time::Instant;
 
-const BASELINE_SQL: &str = include_str!("../assets/migrations/V1__baseline.sql");
+const SCHEMA_SQL: &str = include_str!("../assets/schema.sql");
 
 /// The file path a `sqlite:///<path>` database URL names.
 pub(crate) fn database_path(database_url: &str) -> Result<&str, CafleetError> {
@@ -64,22 +64,14 @@ pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<()
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(failed)?;
-    match ledger_state(&tx)? {
-        LedgerState::Baseline => return Ok(()),
-        LedgerState::Absent if is_empty_file(&tx)? => {}
-        LedgerState::Absent | LedgerState::Other => {
+    match classify_schema(&tx)? {
+        Classification::Current => return Ok(()),
+        Classification::Incompatible => {
             return Err(incompatible_format(database_path(database_url)?));
         }
+        Classification::Missing => {}
     }
-    tx.execute_batch(BASELINE_SQL).map_err(failed)?;
-    tx.execute(
-        "INSERT INTO refinery_schema_history(version, name, applied_on, checksum) VALUES(1, 'baseline', ?1, ?2)",
-        rusqlite::params![
-            crate::time::now_stamp(),
-            crate::digest::sha256_hex(BASELINE_SQL.as_bytes())
-        ],
-    )
-    .map_err(failed)?;
+    tx.execute_batch(SCHEMA_SQL).map_err(failed)?;
     tx.execute(
         "INSERT INTO cafleet_database(singleton_id, cafleet_version) VALUES(1, ?1)",
         [crate::cli::VERSION],
@@ -241,34 +233,6 @@ impl SchemaState {
     }
 }
 
-enum LedgerState {
-    Absent,
-    Baseline,
-    Other,
-}
-
-fn ledger_state(conn: &Connection) -> Result<LedgerState, CafleetError> {
-    let ledger_exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='refinery_schema_history')",
-        [], |row| row.get(0),
-    )?;
-    if !ledger_exists {
-        return Ok(LedgerState::Absent);
-    }
-    let mut statement =
-        conn.prepare("SELECT version, name FROM refinery_schema_history ORDER BY version")?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    if rows == [(1, "baseline".to_owned())] {
-        Ok(LedgerState::Baseline)
-    } else {
-        Ok(LedgerState::Other)
-    }
-}
-
 fn is_empty_file(conn: &Connection) -> Result<bool, CafleetError> {
     let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
     let populated: bool = conn.query_row(
@@ -309,7 +273,6 @@ fn classify_schema(conn: &Connection) -> Result<Classification, CafleetError> {
     }
     let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
     if identity != crate::db::APPLICATION_ID
-        || !matches!(ledger_state(conn)?, LedgerState::Baseline)
         || !schema_matches(conn)?
         || !records_running_version(conn)?
     {
@@ -942,62 +905,23 @@ mod tests {
         assert!(schema_matches(&conn).unwrap());
         require_current(&conn).unwrap();
         let before = application_rows(&conn);
-        let ledger = rows(
-            &conn,
-            "SELECT * FROM refinery_schema_history ORDER BY version",
-        );
+        let version_row = rows(&conn, "SELECT * FROM cafleet_database");
         for _ in 0..2 {
             initialize(&mut conn, "sqlite:///:memory:").unwrap();
             assert_eq!(application_rows(&conn), before);
-            assert_eq!(
-                rows(
-                    &conn,
-                    "SELECT * FROM refinery_schema_history ORDER BY version"
-                ),
-                ledger
-            );
+            assert_eq!(rows(&conn, "SELECT * FROM cafleet_database"), version_row);
             require_current(&conn).unwrap();
         }
     }
 
     #[test]
-    fn baseline_initialization_records_the_identity_ledger_version_and_shape() {
+    fn initialization_records_the_identity_version_and_shape() {
         assert_eq!(APPLICATION_ID, 0x4341_4639, "ASCII CAF9");
         let conn = initialized_conn();
         assert_eq!(
             conn.query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
             APPLICATION_ID
-        );
-        let ledger = rows(
-            &conn,
-            "SELECT version, name, applied_on, checksum FROM refinery_schema_history",
-        );
-        assert_eq!(ledger.len(), 1, "the ledger holds one row: {ledger:?}");
-        let [
-            rusqlite::types::Value::Integer(1),
-            rusqlite::types::Value::Text(name),
-            rusqlite::types::Value::Text(applied_on),
-            rusqlite::types::Value::Text(checksum),
-        ] = ledger[0].as_slice()
-        else {
-            panic!("the ledger row is fully populated with version 1: {ledger:?}");
-        };
-        assert_eq!(name, "baseline");
-        assert!(
-            crate::time::parse_lenient(applied_on).is_some(),
-            "applied_on is a storage timestamp: {applied_on:?}"
-        );
-        assert_eq!(
-            checksum,
-            &crate::digest::sha256_hex(BASELINE_SQL.as_bytes())
-        );
-        assert!(
-            checksum.len() == 64
-                && checksum
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-            "checksum is 64 lowercase hex characters: {checksum:?}"
         );
         assert_eq!(
             rows(
@@ -1024,22 +948,14 @@ mod tests {
 
     #[test]
     fn a_v8_family_file_is_incompatible_and_left_byte_identical() {
-        const V8_APPLICATION_ID: i64 = 0x4341_4638;
         for (name, damage) in [
-            (
-                "cafleet_v8.db",
-                "UPDATE refinery_schema_history SET version=8, name='stop_cause'",
-            ),
+            ("cafleet_v8.db", "PRAGMA application_id=1128351288"),
             (
                 "cafleet_0.0.0.db",
                 "UPDATE cafleet_database SET cafleet_version='0.0.0'",
             ),
         ] {
             assert_incompatible_and_untouched(name, |conn| {
-                if name == "cafleet_v8.db" {
-                    conn.pragma_update(None, "application_id", V8_APPLICATION_ID)
-                        .unwrap();
-                }
                 conn.execute_batch(damage).unwrap();
             });
         }
@@ -1113,17 +1029,17 @@ mod tests {
 
     const OTHER_FILE_CASES: [OtherFileCase; 4] = [
         OtherFileCase {
-            name: "ledger-row-beyond-baseline",
+            name: "recorded-other-version",
             initialized: true,
-            damage: "INSERT INTO refinery_schema_history(version, name, applied_on, checksum) VALUES(2, 'hermes_backend', 'applied', '0')",
+            damage: "UPDATE cafleet_database SET cafleet_version='0.0.0'",
         },
         OtherFileCase {
-            name: "ledger-row-deleted",
+            name: "required-index-dropped",
             initialized: true,
-            damage: "DELETE FROM refinery_schema_history",
+            damage: "DROP INDEX idx_member_runner_diagnostics_recent",
         },
         OtherFileCase {
-            name: "unrelated-table-without-ledger",
+            name: "unrelated-table-only",
             initialized: false,
             damage: "CREATE TABLE unrelated(value TEXT)",
         },
@@ -1158,7 +1074,7 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_initialization_of_one_fresh_file_applies_the_baseline_once() {
+    fn concurrent_initialization_of_one_fresh_file_applies_the_schema_once() {
         let dir = tempfile::tempdir().unwrap();
         let url = format!("sqlite:///{}", dir.path().join("fresh.db").display());
         let barrier = std::sync::Barrier::new(2);
@@ -1176,27 +1092,8 @@ mod tests {
             assert!(result.is_ok(), "initializer {initializer}: {result:?}");
         }
         let conn = connect(&url).unwrap();
-        assert_eq!(
-            rows(&conn, "SELECT version, name FROM refinery_schema_history").len(),
-            1
-        );
         assert_eq!(rows(&conn, "SELECT * FROM cafleet_database").len(), 1);
         require_current(&conn).unwrap();
-    }
-
-    #[test]
-    fn a_ledger_row_beyond_the_baseline_is_incompatible() {
-        let conn = initialized_conn();
-        require_current(&conn).unwrap();
-        conn.execute(
-            "INSERT INTO refinery_schema_history(version, name, applied_on, checksum) VALUES(2, 'hermes_backend', 'applied', '0')",
-            [],
-        )
-        .unwrap();
-        assert_eq!(
-            classify_schema(&conn).unwrap(),
-            Classification::Incompatible
-        );
     }
 
     #[test]
@@ -1414,7 +1311,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_baseline_initialization_rolls_back_identity_tables_and_ledger() {
+    fn failed_initialization_rolls_back_identity_and_tables() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA max_page_count=1").unwrap();
         assert!(initialize(&mut conn, "sqlite:///:memory:").is_err());
@@ -1935,13 +1832,16 @@ mod tests {
             classify_schema(&conn).unwrap(),
             Classification::Incompatible
         );
-        conn.pragma_update(None, "application_id", crate::db::APPLICATION_ID)
-            .unwrap();
-        conn.execute_batch(
-            "ALTER TABLE refinery_schema_history RENAME COLUMN version TO missing_version",
-        )
-        .unwrap();
-        assert!(classify_schema(&conn).is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not-sqlite.db");
+        std::fs::write(&path, b"not a sqlite database file\n".repeat(64)).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        let failure = classify_schema(&conn).expect_err("non-SQLite bytes fail classification");
+        assert!(
+            failure.message().contains("file is not a database"),
+            "the SQL cause is preserved: {}",
+            failure.message()
+        );
     }
     mod database_scope_tests {
         use crate::db::*;
