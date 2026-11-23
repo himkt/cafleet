@@ -105,7 +105,7 @@ historical record.
 ```
 User → /clean-docs (one workflow)
  └─ Director (resolves BASE, registers the current session, partitions slices,
-              merges partials, retains native reception, holds apply behind review,
+              merges partials, handles previews under Director wake, holds apply behind review,
               verifies and closes owned members)
      ├─ scanner-1  (owns a disjoint file slice: scan → propose → apply after gate)
      ├─ scanner-N  (…)
@@ -114,7 +114,7 @@ User → /clean-docs (one workflow)
 
 | Role | Responsibility |
 |---|---|
-| **Director** | Resolve task-scoped `${BASE}`; register the current Director atomically and arm native reception; assign disjoint whole-file slices; merge partials and hold application behind reviewer approval. Relay approval, apply denied writes through full-file staging, verify, report observations and close owned members before deregistering the fleet. |
+| **Director** | Resolve task-scoped `${BASE}`; register the current Director atomically and handle previews under Director wake; assign disjoint whole-file slices; merge partials and hold application behind reviewer approval. Relay approval, apply denied writes through full-file staging, verify, report observations and close owned members before deregistering the fleet. |
 | **scanner** | Scan its slice, propose actions, record observations and write its partial artifact under `${BASE}`. After relayed approval, apply its slice's approved rows exactly as written, verify the diff and route denied writes. |
 | **reviewer** | Validate the merged artifact before repository edits using the selected workflow's checks. After application, perform its workflow verification. |
 

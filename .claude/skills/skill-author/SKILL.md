@@ -18,7 +18,7 @@ Use CAFleet when independent investigation, implementation or review calls for s
 | Spawning | [Spawn Protocol](../../../assets/skills/cafleet/roles/director.md#spawn-protocol) and [Director policy](../../../assets/skills/cafleet/roles/director.md) | Diagnose environment, register the Director and select members/models |
 | Rendering prompts | [Canonical skeleton](../../../assets/skills/cafleet/roles/director.md#canonical-spawn-prompt-skeleton) and [audit convention](../../../assets/skills/cafleet/roles/director.md#member-create--scratch-and-audit-files) | Supply absolute role/core/backend paths, identity, BASE, host prerequisites and lossless role constraints |
 | Coordination | [Coordination](../../../assets/skills/cafleet-design-doc/reference/coordination.md) | Use artifact pointers and paired issue markers |
-| Receiving | [Director wake](../../../assets/skills/cafleet/roles/director.md#director-wake) and [backend recipes](../../../assets/skills/cafleet/reference/coding-agents.md) | Arm native reception before ready replies and retain one owned receiver until resolution or explicit handoff |
+| Receiving | [Director wake](../../../assets/skills/cafleet/roles/director.md#director-wake) and [backend notes](../../../assets/skills/cafleet/reference/coding-agents.md) | Poll once per preview typed into the Director pane, keep the composer clear and poll by hand at the manual poll points |
 | Recovery / finish | [Recovery](../../../assets/skills/cafleet/roles/director.md#recovery) / [Shutdown](../../../assets/skills/cafleet/roles/director.md#shutdown) | Preserve context and tear down owned members before the fleet |
 
 Members open their authoritative role first, load their own backend and required skills through its supported loader, then use supplied host-rule equivalents for absent optional files. Ready is the first operational broker command; prerequisite shell reads may precede it only when shell is the available reader.
@@ -45,7 +45,7 @@ Run `cafleet doctor`, then register the calling Director:
 cafleet fleet create --name summarize-pr-1234 --coding-agent claude --json
 ```
 
-Suppose this returns fleet 7 and Director 8. Arm native reception through the shared backend recipe and require its ready record before depending on member replies.
+Suppose this returns fleet 7 and Director 8. From then on, member replies arrive as previews in the Director pane under Director wake.
 
 ### Render and spawn
 
@@ -61,8 +61,8 @@ Receive that member's ready and record it. Dispatch its scope when inputs exist.
 
 Receive the Summarizer's report under [Director wake](../../../assets/skills/cafleet/roles/director.md#director-wake).
 
-Read and record the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; keep the owned receiver through the review loop.
+Read and record the completed report, inspect the summary and present it. Record revisions as actionable markers at the artifact pointer and send `ready (doc)`. The member revises, removes the marker and sends `addressed (doc)`; keep handling previews under Director wake through the review loop.
 
 ### Teardown
 
-After the authorized outcome, consume the final inbox, delete fleet 7 and confirm it is absent from the active list. Collect the receiver's fleet-deleted closure and native task exit. Fleet deletion ends each ordinary member as member deletion does, closing its pane, then deregisters the registry while keeping the Director's pane and retaining history. Preserve artifacts and immutable prompt inputs.
+After the authorized outcome, run a final poll, delete fleet 7 and confirm it is absent from the active list. Fleet deletion ends each ordinary member as member deletion does, closing its pane, then deregisters the registry while keeping the Director's pane and retaining history. Preserve artifacts and immutable prompt inputs.
