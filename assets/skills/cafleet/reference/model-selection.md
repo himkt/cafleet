@@ -1,32 +1,28 @@
 # Model Selection Procedures
 
-[Director model selection](../roles/director.md#model-selection) owns the policy, the backend-resolution order and the cost-efficiency trigger. Read these procedures only under the triggers below; a spawn with none of them needs only that policy.
+[Director model selection](../roles/director.md#model-selection) owns the policy, backend-resolution order and cost-efficiency trigger. Read these procedures only under a trigger below.
 
 | Trigger | Sections |
 |---|---|
 | The operator names a model, alias, family word or backend for a member | [Inference](#model-name-to-backend-inference), [worked resolutions](#worked-resolutions), [normalization](#model-name-normalization), [explicit mapping](#explicit-backend-model-mapping), [routing failures](#model-routing-failures) |
-| The originating user request contains `cost efficiency mode` | [OpenCode token selection](#opencode-token-selection) for whole-catalog comparison, routing failures |
+| The originating user request contains `cost efficiency mode` | [OpenCode token selection](#opencode-token-selection) over the whole catalog, routing failures |
 | The selected member backend is `opencode` | OpenCode token selection |
-| A [Model replacement](../roles/director.md#model-replacement) re-selection | OpenCode token selection when the backend is `opencode`, routing failures |
+| A [Model replacement](../roles/director.md#model-replacement) re-selection | OpenCode token selection on `opencode`, routing failures |
 | A backend/model mismatch or an unsuitable or missing model | Routing failures |
 
 ## Model-name-to-backend inference
 
-When the operator names a model rather than a backend ("please create a member with sonnet"), apply the first matching row, using the [comparison key](#model-name-normalization) for family tests and catalog matches:
+When the operator names a model but no backend ("please create a member with sonnet"), apply the first matching row, testing [comparison keys](#model-name-normalization):
 
 | # | Model reference | Backend | Flags to pass |
 |---|---|---|---|
-| 1 | Contains a `/` — provider-prefixed (e.g. `opencode/glm-5.3`, `anthropic/claude-sonnet-4-6`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>`, verbatim |
-| 2 | Claude reference: its key starts with `claude`, `fable`, `opus`, `sonnet` or `haiku` — `claude`, `opus`, `claude-opus-4-8`, `Opus 5.5` | `claude` | `--coding-agent claude --model <token>` resolved through Model-name normalization; the family word `claude` alone uses the claude Role default for the role |
-| 3 | GPT reference: its key starts with `gpt` — `gpt`, `gpt-6.1-sol`, `gpt6.1-sol`, `GPT 6 Luna` | `codex` | `--coding-agent codex --model <token>` resolved through Model-name normalization; the family word `gpt` alone uses the codex Role default for the role |
-| 4 | Any other bare name whose key equals the key of exactly one OpenCode candidate ID (normalization step 1) — `glm-5.3`, `kimi-k3.1-pro` | `opencode` | `--coding-agent opencode --model <token>`, token from OpenCode token selection |
-| 5 | Anything else — no key-equal ID, or more than one (e.g. `o3-mini`, `gemini`) | none | Request an explicit backend/model pair through Model routing failures |
+| 1 | Contains `/` (`opencode/glm-5.3`, `anthropic/claude-sonnet-4-6`) | `opencode` | `--coding-agent opencode --model <provider-id>/<model-id>`, verbatim |
+| 2 | Key starts with `claude`, `fable`, `opus`, `sonnet` or `haiku` (`opus`, `claude-opus-4-8`, `Opus 5.5`) | `claude` | `--coding-agent claude --model <token>` via normalization; bare `claude` uses the claude Role default |
+| 3 | Key starts with `gpt` (`gpt-6.1-sol`, `gpt6.1-sol`, `GPT 6 Luna`) | `codex` | `--coding-agent codex --model <token>` via normalization; bare `gpt` uses the codex Role default |
+| 4 | Key equals the key of exactly one OpenCode candidate ID (`glm-5.3`, `kimi-k3.1-pro`) | `opencode` | `--coding-agent opencode --model <token>` via OpenCode token selection |
+| 5 | Anything else (`o3-mini`, `gemini`) | none | Request an explicit backend/model pair through routing failures |
 
-Apply these rows only when the operator names no backend. Inference never selects `hermes` or `pi`, which require an operator-named backend or a fleet backend of that name ([backend-resolution](../roles/director.md#model-selection) steps 1 and 3).
-
-A bare name infers `opencode` only through row 4; Claude and GPT names select their native backends even when either OpenCode table lists the model.
-
-Match candidate ID keys by equality: `glm-5.3` matches only the ID `glm-5.3`, never `glm-5.3-flash` or `glm-5.3-flash-free`.
+Claude and GPT names select their native backends even when an OpenCode table lists them. Inference never selects `hermes` or `pi`; they require an operator-named or fleet backend ([backend-resolution](../roles/director.md#model-selection) steps 1 and 3). Keys match by equality: `glm-5.3` never matches `glm-5.3-flash`.
 
 ## Worked resolutions
 
@@ -38,78 +34,66 @@ Resolve role-default placeholders from the selected member backend and omit unsu
 | `gpt` ordinary member | `opencode` | `--coding-agent codex --model {other_model} --effort {other_effort}` |
 | OpenCode reviewer | any | `--coding-agent opencode --model {reviewer_model}` |
 | `glm-5.3`, both provider candidates listed | any | `--coding-agent opencode --model opencode-go/glm-5.3` |
-| `opus` with Codex | any | Mismatched pair; Model routing failures |
+| `opus` with Codex | any | Mismatched pair; routing failures |
 | `anthropic/claude-sonnet-4-6` | any | Explicit OpenCode token, verbatim |
 
 ## Model-name normalization
 
-Normalize loose spellings such as "gpt6.1-sol", "GPT 6.1 Sol" and "Opus 5.5" to catalog tokens:
-
-1. **Comparison key.** Lowercase the reference and every candidate token, and drop every character that is not a letter or digit (`gpt-6.1-sol` and `GPT 6.1 Sol` both become `gpt61sol`). OpenCode candidates are the distinct bare IDs of the Console and OpenCode Go tables: strip the `opencode/` or `opencode-go/` prefix before keying, and count an ID listed in both tables once. A Claude candidate also matches its key with the leading `claude` removed (`claude-opus-5-5` becomes `opus55`, matching "Opus 5.5").
-2. **Native catalog first.** For a Claude or GPT reference (classified by the inference table's row 2 / row 3 key-prefix test), a key equal to the key of exactly one `Model` or `Alias` token in the native (`claude` / `codex`) catalog resolves to that row's `Model` token.
-3. **Spelling dictionary.** A Claude or GPT reference equal to no native token key but to exactly one Claude/GPT ID key among the OpenCode candidates resolves to that bare ID. Keep the native backend and pass the ID as a manual `--model` value ("sonnet 4.6" becomes `--coding-agent claude --model claude-sonnet-4-6`).
-4. **Exact shape.** A reference already written as an exact `claude-*` / `gpt-*` token that matches nothing passes through verbatim to its native backend.
-5. **Otherwise ask.** Route a reference with no key-equal token or several tokens sharing the key through Model routing failures.
+1. **Comparison key.** Lowercase and keep only letters and digits (`GPT 6.1 Sol` → `gpt61sol`). OpenCode candidates are the distinct bare IDs of the Console and OpenCode Go tables, keyed after stripping `opencode/` or `opencode-go/`. A Claude candidate also matches its key without the leading `claude` (`claude-opus-5-5` → `opus55`).
+2. **Native catalog first.** A Claude or GPT reference (inference row 2 / 3) whose key equals exactly one `Model` or `Alias` key in the `claude` / `codex` catalog resolves to that row's `Model` token.
+3. **Spelling dictionary.** Otherwise, a key equal to exactly one Claude/GPT OpenCode candidate ID passes that bare ID as a manual `--model` on the native backend ("sonnet 4.6" → `--coding-agent claude --model claude-sonnet-4-6`).
+4. **Exact shape.** An exact `claude-*` / `gpt-*` token that matches nothing passes through verbatim to its native backend.
+5. **Otherwise ask.** Route no match or several key-equal tokens through routing failures.
 
 ## Explicit backend model mapping
 
-When [backend-resolution](../roles/director.md#model-selection) step 1 selects an explicit backend, resolve `--model` from the reference with that backend's first matching row.
+When [backend-resolution](../roles/director.md#model-selection) step 1 selects an explicit backend, resolve `--model` from that backend's first matching row.
 
 **OpenCode.**
 
-| Reference given with the OpenCode request | Resolved `--model` |
+| Reference | Resolved `--model` |
 |---|---|
-| No model (e.g. "spawn an opencode reviewer") | The opencode Role default for the role, verbatim |
+| No model ("spawn an opencode reviewer") | The opencode Role default, verbatim |
 | Provider-prefixed token (`opencode/…`, `opencode-go/…`, `anthropic/…`) | The token, verbatim |
-| Claude family word (`claude`) | `opencode/` + the `claude` backend's Role default for the role, verbatim |
-| GPT family word (`gpt`) | `opencode/` + the `codex` backend's Role default for the role, verbatim |
-| Claude alias (`fable`, `opus`, `sonnet`, `haiku`) | The `claude` catalog Model the alias names, as an ID through OpenCode token selection |
-| Any other model name | The OpenCode candidate ID whose key equals the reference's key, through OpenCode token selection |
+| `claude` | `opencode/` + the `claude` Role default, verbatim |
+| `gpt` | `opencode/` + the `codex` Role default, verbatim |
+| Claude alias (`fable`, `opus`, `sonnet`, `haiku`) | The `claude` catalog Model it names, through OpenCode token selection |
+| Any other name | The one OpenCode candidate ID with an equal step-1 key, through OpenCode token selection ("sonnet 4.6 with OpenCode" → `claude-sonnet-4-6`) |
 
-The last row uses only Model-name normalization step 1, including the leading-`claude` strip, against the OpenCode candidate IDs and requires exactly one key-equal ID: "sonnet 4.6 with OpenCode" resolves to the ID `claude-sonnet-4-6` before provider choice.
-
-Require each Role-default and family-word token to exist in the Console table, and each resolved bare ID in the OpenCode candidate set. A verbatim provider-prefixed reference is exempt; route missing or ambiguous matches through Model routing failures.
+Each Role-default and family-word token must exist in the Console table and each resolved bare ID in the candidate set; route a missing or ambiguous match, except a verbatim provider-prefixed reference, through routing failures.
 
 **Claude Code / Codex.**
 
-| Reference given with the Claude Code or Codex request | Resolved `--model` |
+| Reference | Resolved `--model` |
 |---|---|
-| No model (e.g. "reviewer with Claude Code") | That backend's Role default for the role |
-| The backend's family word (`claude` for Claude Code, `gpt` for Codex) | That backend's Role default for the role |
-| A reference of the backend's own family (inference row 2 for Claude Code, row 3 for Codex) | The token Model-name normalization steps 2–4 resolve against that backend (e.g. "opus 4.8 with Claude Code" becomes `claude-opus-4-8`) |
-| A reference of another family, or a provider-prefixed token | none — relay as a mismatched pair through Model routing failures |
+| No model, or the backend's family word (`claude` / `gpt`) | That backend's Role default |
+| The backend's own family (inference row 2 / 3) | Normalization steps 2–4 against that backend ("opus 4.8 with Claude Code" → `claude-opus-4-8`) |
+| Another family, or a provider-prefixed token | none — a mismatched pair; routing failures |
 
-**Hermes.** Hermes has no maintained catalog, and its Role defaults are `—`.
+**Hermes and pi.** Neither has a maintained catalog; their Role defaults are `—`.
 
-| Reference given with the Hermes request | Resolved `--model` |
+| Reference | Resolved `--model` |
 |---|---|
-| No model, a family word or a backend-only request | None: omit `--model` and `--effort`, so the operator's configured default applies |
-| Any model token, provider-prefixed or bare | The token, verbatim; Hermes rejects an unknown model at launch |
-
-**pi.** pi has no maintained catalog, and its Role defaults are `—`.
-
-| Reference given with the pi request | Resolved `--model` |
-|---|---|
-| No model, a family word or a backend-only request | None: omit `--model` and `--effort`, so the operator's configured pi default applies |
-| A model token ending in `:<thinking>` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` after its last `:`) | The token without that suffix, verbatim, with the level as `--effort`; `member create` refuses the suffix in `--model` |
-| Any other model token (`provider/id`, an exact id or a fuzzy name) | The token, verbatim; pi rejects an unknown model at launch |
+| No model, a family word or a backend-only request | None: omit `--model` and `--effort` so the operator's configured default applies |
+| pi token ending in `:<thinking>` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` after its last `:`) | The token without the suffix, with the level as `--effort`; `member create` refuses the suffix in `--model` |
+| Any other token | The token, verbatim; the backend rejects an unknown model at launch |
 
 ## OpenCode token selection
 
-Complete provider-prefixed tokens from explicit references, defaults or family-word mapping remain verbatim and skip provider choice. A bare resolved ID has `opencode-go/<id>` and/or `opencode/<id>` candidates only where its catalog tables list them.
+Complete provider-prefixed tokens stay verbatim and skip provider choice. A bare ID has `opencode-go/<id>` and/or `opencode/<id>` candidates only where its catalog tables list it.
 
-1. Run `opencode models` once per spawn as your own command. Parse one exact `provider/model` token per line and ignore unrelated providers; route a failed/empty result through Model routing failures.
-2. For a resolved bare ID, choose its listed Go candidate first, otherwise its listed Console candidate. Route neither-listed through Model routing failures.
-3. For cost efficiency selection or replacement, use the specified candidate-ID set: the whole catalog or the stronger set. Prefer every reliable listed Go candidate over every Console candidate, including Console rows priced `0.00`; Go subscription candidates are effectively free, and lower Go-table rates break reliable-candidate ties because they consume less usage.
-4. If no Go candidate can finish reliably, choose the cheapest reliable listed Console candidate by its table prices. Route an empty reliable set through Model routing failures.
+1. Run `opencode models` once per spawn as your own command, reading one `provider/model` token per line and ignoring other providers.
+2. For a bare ID, choose its listed Go candidate, else its listed Console candidate.
+3. For cost efficiency selection or replacement over the specified ID set (whole catalog or stronger set), prefer every reliable listed Go candidate over every Console candidate, Console `0.00` rows included; the lower Go-table rate breaks ties.
+4. With no reliable Go candidate, choose the cheapest reliable listed Console candidate by table price.
 
-The selected cost-ranked token is final and receives no second provider-choice pass.
+A cost-ranked token is final, with no step-2 pass. Route a failed or empty `opencode models` result, a bare ID with neither candidate listed, or an empty reliable set through routing failures.
 
 ## Model routing failures
 
 | Condition | Director behavior |
 |---|---|
-| An explicit OpenCode request's mapped model is absent from both OpenCode tables (e.g. "claude-opus-4-1 with OpenCode"); `opencode models` lists neither candidate token; cost efficiency selection or replacement on OpenCode finds no listed token that can finish the task reliably; a pinned backend and model do not belong together (e.g. "opus member with Codex"); normalization is ambiguous (two tokens share the key) or matches nothing | Relay an operator choice via {decision_surface} before spawning |
-| `opencode models` exits non-zero or prints nothing during provider choice, cost efficiency selection or replacement | Relay via {decision_surface} before spawning; never fall back to `opencode/` |
-| Native backend binary missing (`Error: binary <name> not found on PATH`, exit 1) | Report the failure and relay the operator choice via {decision_surface}; preserve the backend selected by the model reference |
-| OpenCode catalog row removed at a later refresh while a member referenced it | Keep the running member; resolve the next spawn against the current catalog |
+| Mapped OpenCode model in neither table ("claude-opus-4-1 with OpenCode"); `opencode models` lists no candidate; cost efficiency selection or replacement finds no reliable listed token; a mismatched backend/model pair ("opus member with Codex"); normalization ambiguous or unmatched | Relay an operator choice via {decision_surface} before spawning |
+| `opencode models` exits non-zero or prints nothing | Relay via {decision_surface} before spawning; never fall back to `opencode/` |
+| Native backend binary missing (`Error: binary <name> not found on PATH`, exit 1) | Report it and relay via {decision_surface}, keeping the backend the model reference selected |
+| A catalog row a running member uses is removed at refresh | Keep the member; resolve the next spawn against the current catalog |

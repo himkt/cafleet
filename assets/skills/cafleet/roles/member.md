@@ -1,70 +1,56 @@
 # Member Role
 
-You are an ordinary `cafleet member create` member under your recorded launch policy ({permission_flags}). Run role-authorized, host-permitted commands, and route required denials/automatic refusals and all communication through the Director.
+You are an ordinary `cafleet member create` member under your recorded launch policy ({permission_flags}). Run role-authorized, host-permitted commands, and route required denials and all communication through the Director.
 
 ## Required reading
 
-Follow the [core reader rule](../SKILL.md#required-reading), sending ready as your first operational broker shell command, and complete these reads before processing assignments.
-
-| # | Read | Responsibility |
-|---|---|---|
-| 1 | Your backend in [coding-agents.md](../reference/coding-agents.md) | Resolve Runtime bindings and bound notes using `CODING AGENT:`. |
-| 2 | [CAFleet core](../SKILL.md) and this role | Load through your backend's supported loader; learn identity, communication and command authority. |
-| 3 | [BASE](#base) | Inherit the supplied path and disabled-audit state. |
-
-Read the assigned workflow's core, format, coordination and role-required references before task work; Director policy and supervision stay outside member startup.
+Before assignments, resolve your `CODING AGENT:` Runtime bindings and bound notes in [coding-agents.md](../reference/coding-agents.md), then follow the [core reader rule](../SKILL.md#required-reading): load the [core](../SKILL.md) and this role through your backend's loader, and inherit [BASE](#base). Before task work, read the assigned workflow's core, format, coordination and role-required references.
 
 ## On spawn — send the ready signal
 
-Use the literal IDs from your spawn prompt:
+With your spawn prompt's literal IDs, send the bare status `ready` (not the `ready (<pointer>)` verb), optionally with `:` and a brief role recap, then poll:
 
 ```bash
 cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "ready"
 ```
 
-Send the bare status phrase `ready`, not the `ready (<pointer>)` verb, optionally followed by a brief role recap after `:`. Then poll:
-
 ```bash
 cafleet message poll <my-member-id> --json
 ```
 
-Poll after ready, on every wake (a preview arriving is a wake) and before completion reports, recording each returned message under the core [Poll](../SKILL.md#poll) rule. Handle queued assignments before becoming idle; end the turn when none remain.
-
-A `[cafleet msg ID from SENDER TIMESTAMP]` preview carrying its body inline still needs the wake's `poll --json`, which consumes that message and any others in one command. When that poll returns `[]`, an earlier poll consumed the message; read it with `message show MESSAGE_ID --json`. Deduplicate repeated preview lines by message ID.
+Poll after ready, on every wake (any arriving preview, even one carrying its body inline) and before completion reports, recording each message under the core [Poll](../SKILL.md#poll) rule. When that poll returns `[]`, an earlier poll consumed the message; read it with `message show MESSAGE_ID --json`. Deduplicate preview lines by message ID. Handle queued assignments before idling; end the turn when none remain.
 
 ## BASE
 
-The Director resolves `BASE:`. Root scratch, audit and figure writes at the supplied absolute `BASE:`, used literally, or at an explicit consumer-supplied absolute output target, with agent-only artifacts in hidden folders and user deliverables in visible folders.
+Write scratch, audit and figure files under the literal absolute `BASE:` or an explicit consumer-supplied absolute output target: agent-only artifacts in hidden folders, user deliverables in visible ones.
 
-When `BASE:` is omitted, keep audits disabled for the whole run, send `audit-disabled no BASE in spawn prompt` once to the Director as an [anchorless status](../../cafleet-design-doc/reference/coordination.md#anchorless-status), and use every explicit consumer output target supplied. Spawn-audit procedures belong to the Director.
+Without `BASE:`, keep audits disabled for the run, send `audit-disabled no BASE in spawn prompt` once to the Director as an [anchorless status](../../cafleet-design-doc/reference/coordination.md#anchorless-status), and still use explicit consumer output targets.
 
 ## Command execution
 
-Run needed commands, broker commands from startup included, directly through your available shell tool under the host's Bash hygiene and [one-shot isolation](../SKILL.md#one-shot-command-isolation). Inspect actual output, run fresh reads for current state and report observed results; fabricated output and `<bash-input>...</bash-input>` blocks supply no execution evidence.
+Run commands, startup broker commands included, through your shell tool under the host's Bash hygiene and [one-shot isolation](../SKILL.md#one-shot-command-isolation). Report only output observed from fresh reads; `<bash-input>...</bash-input>` blocks are no execution evidence.
 
-**Delivery-dismissed prompts.** A delivery that falls back to Escape can dismiss an approval or question the runner did not detect. A rejection followed by a preview ending with the Escape-dismissal clause came from the delivery, not the user: reissue the tool call or re-ask the question if still needed. A preview with only the resume clause leaves the rejection standing. After a Director prompt or native command, follow that input on whether to retry, and otherwise wait. Explicit operator/Director stop instructions prevail.
+**Delivery-dismissed prompts.** A rejection followed by a preview ending with the Escape-dismissal clause came from the delivery, not the user: reissue the tool call or re-ask if still needed; a resume-clause-only preview leaves the rejection standing. A Director prompt or native command decides whether to retry; explicit operator/Director stop instructions prevail.
 
 ### Reconsider, then route
 
-Try an authorized command, inspect the result, reconsider paths/flags, and use a permitted alternative or drop unnecessary work; automatic reviewer refusals count as permission refusals. Route a correct, necessary command that remains denied:
+On a failed authorized command, reconsider paths/flags, use a permitted alternative or drop unnecessary work; an automatic reviewer refusal is a permission refusal. Route each correct, necessary command that stays denied, all of a step's commands in one request:
 
 ```bash
 cafleet message send --from-member-id <my-member-id> --to-member-id <director-member-id> "Need to run: <command>. My harness denied it."
 ```
 
-When a step needs several such commands, name them all in one request.
+Include the exact command, absolute cwd, required environment overrides and observed refusal; write a hard-to-quote command as one line in a file under BASE and name its path. A denied file edit needs a host allow rule or a Director edit. If broker sending is also denied, report both failures to the operator.
 
-Include the exact attempted command, absolute cwd, required environment overrides and observed refusal. For a hard-to-quote command, write the exact one-line command under the supplied BASE and name its path. A denied file edit needs a host allow rule or Director edit. If broker sending is also denied, report both failures to the operator.
-
-Stop dependent work and end the turn. The Director authorizes separate native dispatch and inspects its result; continue from actual native output when your host resumes you or the Director explicitly prompts continuation. A separately dispatched native command is a new action, not an answer to a pending permission request.
+Then stop dependent work and end the turn; continue from actual native output when resumed or prompted; a Director-dispatched native command is a new action, not an answer to a pending permission request.
 
 ## Native interactions
 
-Leave a native permission prompt open in your pane for the Director or user to answer, and continue only from the result your host shows.
+Leave a native permission prompt open for the Director or user, and continue from the result your host shows.
 
 ## Identity and authority
 
-Pass the literal IDs and any `--database-url` from your spawn lines explicitly ([IDs](../SKILL.md#ids)); CLI validation surfaces missing identity. Use Send, Poll and `message show` on your own inbox; every other `cafleet` command is Director-owned, and the [guarded subset](../reference/cli.md#director-only-command-guard) refuses your own ID with a `Director-only command` error. Route a need for any Director-owned command, naming the command and its purpose, with the message in [Reconsider, then route](#reconsider-then-route).
+Pass the literal IDs and any `--database-url` from your spawn lines ([IDs](../SKILL.md#ids)). You run Send, Poll and `message show` on your own inbox; every other `cafleet` command is the Director's, and the [guarded subset](../reference/cli.md#director-only-command-guard) refuses your ID with a `Director-only command` error. Route a need for one, with its purpose, as in [Reconsider, then route](#reconsider-then-route).
 
 ## Shutdown
 

@@ -50,67 +50,40 @@
 | YYYY-MM-DD | Initial draft |
 ```
 
-## Core Principle
+Overview, Success Criteria (measurable and verifiable) and Implementation (named steps with checkbox tasks) are always present; include Specification when there are design decisions to record.
 
-**Comprehensive with structured readability.** Write a document complete enough that an agent can implement the feature from it alone, kept scannable with tables, lists and code blocks. Every sentence must earn its place, but completeness wins over brevity when it prevents implementation guesswork.
+## Writing Standard
 
-## Formatting Guidelines
+Write a scannable document from which an agent can implement the feature alone; completeness wins over brevity. Record each design decision with brief rationale, data-model field names, types and constraints, API request/response shapes, enumerated error cases and exact integration interfaces.
 
-| Content Type | Preferred Format |
+| Content | Format |
 |---|---|
 | Enumerated options or states | Table |
 | Sequential steps | Numbered list |
 | Requirements or constraints | Bulleted list |
 | Data structures or schemas | Code block |
-| Decision rationale | Prose (keep to 2-3 sentences max) |
+| Decision rationale | Prose, 2-3 sentences |
 
-## Section Rules
-
-- **Overview**: Always include. Max 3 sentences.
-- **Success Criteria**: Always include. Measurable and verifiable.
-- **Background**: Only when the reader lacks context.
-- **Specification**: Include when there are design decisions to record. Use code examples over prose when possible.
-- **Implementation**: Always include. Each step has a clear name and checkbox tasks.
-- **Changelog**: Optional. Use only for spec-level revisions, not implementation progress.
+State each fact once, omit what the code or context makes obvious, and add a section only when its content is needed. For simple changes, fold testing, error handling and future considerations into Specification or Implementation; record future considerations only when the current design must accommodate them.
 
 ## File Layout
 
-Normalize the design-doc argument to the task folder before [task-scope resolution](#task-scope-resolution): strip a trailing `/design-doc.md`; for a relative argument, also strip a leading `design-docs/` if present and prepend `design-docs/` once; an absolute argument loses only the trailing filename and its folder is used directly. Task-scope resolution owns containment; the Director's [scratch and audit procedure](../../cafleet/roles/director.md#member-create--scratch-and-audit-files) owns guarded writes and disabled-audit behavior. The invoking workflow owns document discovery and its explicit output target.
-
-Design documents live at `design-docs/NNNNNNN-<slug>/design-doc.md` in every repository using CAFleet, with a short kebab-case feature description as `<slug>`.
+Design documents live at `design-docs/NNNNNNN-<slug>/design-doc.md`, with a short kebab-case feature description as `<slug>`. Normalize a design-doc argument to its task folder by stripping a trailing `/design-doc.md`; a relative argument also drops a leading `design-docs/` and gets `design-docs/` prepended once, and an absolute argument's folder is used directly. [Task-scope resolution](#task-scope-resolution) owns containment, the Director's [scratch and audit procedure](../../cafleet/roles/director.md#member-create--scratch-and-audit-files) owns guarded writes and disabled audits, and the invoking workflow owns document discovery and its explicit output target.
 
 ### Task-scope resolution
 
-Use this resolver when a consumer operates on a task folder. The Director or consumer resolves BASE; members inherit the supplied absolute BASE or follow the [missing-line disabled-audit state](../../cafleet/roles/member.md#base).
+A task-folder consumer resolves BASE thus, writing no files; members inherit the supplied absolute BASE or the [disabled-audit state](../../cafleet/roles/member.md#base).
 
-1. Run `git rev-parse --show-toplevel` from CWD. A non-zero exit or empty output means no Git ancestor: stop and tell the user to change to the repository root and retry.
-2. Normalize the consumer's argument to its task folder (a relative or absolute folder, not a child filename): design-doc workflows use the normalization above, and other consumers own their bucket conventions.
-3. Resolve the folder against the repository root when relative. Reject a relative path that equals the root (`the repo root is not a task folder`) or escapes it (`refusing to create a task folder outside the repo`). Resolve an absolute path directly: if it equals the root or is not strictly below it, return `<unset>` and create nothing.
-4. For a folder strictly below the repository root, return its absolute path as BASE. Create the selected folder lazily on the first consumer write, with audits under the task folder.
-
-The resolver applies containment to the normalized folder without writing files.
+1. Run `git rev-parse --show-toplevel` from CWD. On a non-zero exit or empty output, stop and tell the user to change to the repository root and retry.
+2. Normalize the argument to its task folder: design-doc workflows use [File Layout](#file-layout), and other consumers own their bucket conventions.
+3. Resolve a relative folder against the repository root, rejecting one that equals the root (`the repo root is not a task folder`) or escapes it (`refusing to create a task folder outside the repo`). For an absolute folder that equals the root or is not strictly below it, return `<unset>` and create nothing.
+4. Return the absolute path of a folder strictly below the root as BASE. The folder, with audits inside it, is created on the first consumer write.
 
 ### Numbering
 
-For a new document's folder, inspect the target repository's `design-docs/` directories, take the highest existing numeric prefix, add 1 and zero-pad it to seven digits, starting at `0000001` when there are no numbered directories. Count every numbered directory, even one whose document is unfinished, so its number stays reserved.
+A new folder takes the highest numeric prefix among the repository's `design-docs/` directories plus 1, zero-padded to seven digits (`0000001` when none exist); unfinished documents still reserve their numbers. A topic or unnumbered slug such as `my-feature` takes the next number, e.g. `0000001-my-feature`, resolved through BASE before any document or audit write; recheck availability before creating the folder and take the next free number if it is taken.
 
-Fresh creation from a topic or an unnumbered slug such as `my-feature` uses the next number in a folder such as `0000001-my-feature`, resolved through BASE before writing any document or audit artifacts. Recheck availability before creating the folder, and select the next available number if another task has taken it.
-
-The create and execute workflows accept an existing directory name such as `0000001-my-feature` or a document path, and preserve existing targets when resuming or executing. Honor an explicit user-supplied output path; numbering supplies the default location when the workflow chooses a new folder.
-
-## What "Comprehensive" Means
-
-- All design decisions are recorded with brief rationale
-- Data models include field names, types, and constraints
-- API contracts include request/response shapes
-- Error cases are enumerated, not left as "handle errors appropriately"
-- Integration points specify exact interfaces
-
-## Anti-patterns to Avoid
-
-- Restating what the code or context makes obvious, or repeating information across Overview, Background and Specification.
-- Adding sections only because the template has them, or long prose where a table or list suffices.
-- Separate "Testing Strategy" / "Error Handling" / "Future Considerations" sections for simple changes — fold them into Specification or Implementation; include speculative "Future Considerations" only when the current design must accommodate them.
+The create and execute workflows also accept an existing directory name or document path and preserve that target. An explicit user-supplied output path overrides numbering.
 
 ## Completeness Check
 
