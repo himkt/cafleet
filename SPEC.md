@@ -17,7 +17,7 @@ The core is synchronous. A send previews pending ordinary-member messages within
 | Concern | Responsibility |
 |---|---|
 | Configuration | Selected database from `--database-url` |
-| Persistence | Connection factory, format/shape diagnosis and the embedded schema |
+| Persistence | Connection factory, format diagnosis and the embedded schema |
 | Broker | Typed fleet/member/message/asset records and synchronous transactions |
 | Output | Ordered wire presenters, truncation and capture formatting |
 | Multiplexer | Discovery, pane creation/capture/input/kill and layout compensation |
@@ -283,7 +283,6 @@ The binary carries the data files of the `assets/` tree listed below. The native
 | `assets/skills/` | One directory per skill, embedded file by file | Skill installation (this section) |
 | `assets/presets/` | One directory per backend with presets | Preset installation (table below) |
 | `assets/extensions/` | One directory per backend with an extension | Extension installation (table below) |
-| `assets/schema.sql` | The complete database schema | Schema initialization (§8 Database schema) |
 | `assets/profiles/` | The embedded bundled catalog `bundled.json`, and the native screen fixtures `native/<backend>.json` that it cites | The profile catalog (§6.9 Bundled profiles and native screen fixtures) |
 
 Each agent's presets and extensions, where they exist, are static files embedded in the binary next to the skills; their targets resolve per §6.3 Config-dir resolution. Per backend, setup replaces every embedded skill sequentially, then each preset in table order, then each extension target followed by its executable record, then (for `hermes`) runs the plugin enablement:
@@ -357,7 +356,7 @@ hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup
 
 #### Schema-version guard
 
-Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated, identified or malformed file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
+Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
 
 `--help` renders at parse time and exits before any command body runs, so neither group-level help (`cafleet fleet --help`) nor subcommand help (`cafleet fleet create --help`) triggers the guard; both print help and exit 0 even under a missing database.
 
@@ -3775,7 +3774,7 @@ Agents run each CAFleet process as the only command in its shell-tool invocation
 
 ## 8. Database schema
 
-The binary embeds one complete schema, `assets/schema.sql` (§6.3 Asset installation), whose application identity is `PRAGMA application_id` `1128351289` (`0x43414639`, ASCII `CAF9`). Each cafleet version owns its default database file, `cafleet_<VERSION>.db`, where `<VERSION>` is the release version (§7.6), so each version starts from a fresh file; schema initialization records that version in the `cafleet_database` row. A fresh initialization creates exactly the application tables declared in the schema. Compatibility diagnosis verifies, in order, the application identity, every required table’s column shape with required indexes/foreign keys, and a recorded version equal to the running binary's. Any other identified or populated file, including one recorded by another cafleet version, is an incompatible format whose bytes are preserved, and `cafleet doctor` reports the version's default file as absent until `cafleet setup` creates it. Unrelated auxiliary tables, indexes and triggers are compatible while those required definitions remain intact.
+The binary embeds one complete schema, whose application identity is `PRAGMA application_id` `1128351289` (`0x43414639`, ASCII `CAF9`). Each cafleet version owns its default database file, `cafleet_<VERSION>.db`, where `<VERSION>` is the release version (§7.6), so each version starts from a fresh file; schema initialization records that version in the `cafleet_database` row. A fresh initialization creates exactly the application tables declared in the schema. Compatibility diagnosis verifies, in order, the application identity and a `cafleet_database` row recording the running binary's version. Any other identified or populated file, including one recorded by another cafleet version and one with the application identity but no `cafleet_database` table, is an incompatible format whose bytes are preserved, and `cafleet doctor` reports the version's default file as absent until `cafleet setup` creates it.
 
 | Table | Responsibility |
 |---|---|
@@ -3996,7 +3995,7 @@ A read error during that classification fails initialization with its cause and 
 
 `native_session_json` records a `hermes` run's native session identity for work settlement (§6.7 Hermes work settlement) and is null for every other backend and for a run whose identity is not yet captured.
 
-The DDL above owns every runtime table column, type, enum, nullability constraint, foreign key, uniqueness invariant and partial unique index. Section 6.9 specifies their runtime semantics, including database-instance identity and privacy. Setup's required-shape check includes `stop_cause` on `member_input_operations`; runtime validates the free-text defer/outcome reasons of §6.9 Delivery reporting.
+The DDL above owns every runtime table column, type, enum, nullability constraint, foreign key, uniqueness invariant and partial unique index. Section 6.9 specifies their runtime semantics, including database-instance identity and privacy. Runtime validates the free-text defer/outcome reasons of §6.9 Delivery reporting.
 
 ## 9. Testing strategy
 

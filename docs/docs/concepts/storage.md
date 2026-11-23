@@ -14,13 +14,13 @@ Typed columns store every routing field and required enum. The [database schema]
 
 ## Schema management
 
-A compatible file has CAFleet's application identity, the cafleet version that initialized it equal to the running CLI's, and the expected table/column shapes; unrelated auxiliary tables, indexes and triggers stay compatible. An incompatible selected file is preserved unchanged: diagnosis runs before any database content write or asset installation.
+A compatible file has CAFleet's application identity and records that the running CLI's cafleet version initialized it. An incompatible selected file is preserved unchanged: diagnosis runs before any database content write or asset installation.
 
 | Selected state | Setup behavior |
 |---|---|
 | Missing file, or an empty SQLite file with identity zero and no user tables | Apply the embedded schema transactionally |
 | Valid file of this version | Proceed idempotently |
-| Other populated/identified file, another version's file or malformed schema | Report incompatible format before writes |
+| Other populated/identified file or another version's file | Report incompatible format before writes |
 
 Run `cafleet setup` after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis; the [schema-version guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#schema-version-guard) has the exact errors.
 

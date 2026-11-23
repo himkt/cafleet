@@ -6,7 +6,173 @@ use rusqlite::TransactionBehavior;
 use std::time::Duration;
 use std::time::Instant;
 
-const SCHEMA_SQL: &str = include_str!("../assets/schema.sql");
+const SCHEMA_SQL: &str = r#"PRAGMA application_id = 1128351289;
+
+CREATE TABLE members (
+    member_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    fleet_id INTEGER NOT NULL REFERENCES fleets (fleet_id) ON DELETE RESTRICT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL,
+    registered_at TEXT NOT NULL
+);
+CREATE INDEX idx_members_fleet_status ON members (fleet_id, status);
+
+CREATE TABLE fleets (
+    fleet_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT,
+    director_member_id INTEGER REFERENCES members (member_id) ON DELETE RESTRICT,
+    last_window_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(last_window_ordinal >= 0)
+);
+
+CREATE TABLE member_placements (
+    member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members (member_id) ON DELETE CASCADE,
+    mux_session TEXT NOT NULL,
+    mux_window_id TEXT,
+    mux_window_name TEXT,
+    window_ordinal INTEGER NOT NULL CHECK(window_ordinal >= 0),
+    column_side TEXT NOT NULL CHECK(column_side IN ('left','right')),
+    mux_pane_id TEXT,
+    backend TEXT NOT NULL,
+    mux_server TEXT NOT NULL,
+    coding_agent TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK((mux_pane_id IS NULL) = (mux_window_id IS NULL)
+          AND (mux_window_id IS NULL) = (mux_window_name IS NULL))
+);
+
+CREATE TABLE messages (
+    message_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    from_member_id INTEGER NOT NULL REFERENCES members (member_id) ON DELETE RESTRICT,
+    to_member_id INTEGER NOT NULL REFERENCES members (member_id) ON DELETE RESTRICT,
+    created_at TEXT NOT NULL,
+    status_state TEXT NOT NULL,
+    status_timestamp TEXT NOT NULL,
+    text TEXT NOT NULL,
+    notified_at TEXT
+);
+CREATE INDEX idx_messages_to_member_status_ts ON messages (to_member_id, status_timestamp);
+CREATE INDEX idx_messages_from_member_created_at ON messages (from_member_id, created_at);
+
+CREATE TABLE runtime_database_identity (
+    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    instance_id TEXT NOT NULL CHECK(length(instance_id) = 32 AND instance_id NOT GLOB '*[^0-9a-f]*')
+);
+INSERT INTO runtime_database_identity VALUES(1, lower(hex(randomblob(16))));
+
+CREATE TABLE cafleet_database (
+    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    cafleet_version TEXT NOT NULL CHECK(length(trim(cafleet_version)) > 0)
+);
+
+CREATE TABLE member_runs (
+    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
+    fleet_id INTEGER NOT NULL REFERENCES fleets(fleet_id) ON DELETE RESTRICT,
+    director_member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
+    backend TEXT NOT NULL CHECK(backend IN ('claude','codex','opencode','hermes','pi')),
+    database_identity_json TEXT NOT NULL CHECK(json_valid(database_identity_json) AND json_type(database_identity_json) = 'object'),
+    launch_nonce TEXT NOT NULL CHECK(length(launch_nonce) = 64 AND launch_nonce NOT GLOB '*[^0-9a-f]*'),
+    runtime_path TEXT NOT NULL CHECK(length(trim(runtime_path)) > 0),
+    requested_mode TEXT,
+    resolved_mode TEXT NOT NULL CHECK(length(trim(resolved_mode)) > 0),
+    mode_source TEXT NOT NULL CHECK(mode_source IN ('default','explicit')),
+    permission_argv_json TEXT NOT NULL CHECK(json_valid(permission_argv_json) AND json_type(permission_argv_json) = 'array'),
+    coverage TEXT NOT NULL CHECK(coverage IN ('tested','unknown')),
+    status TEXT NOT NULL CHECK(status IN ('starting','prepared','running','degraded','recovering','exited','failed','lost')),
+    native_version TEXT,
+    owner_epoch INTEGER NOT NULL CHECK(owner_epoch > 0),
+    owner_kind TEXT NOT NULL CHECK(owner_kind IN ('creator','runner','reconciler')),
+    owner_pid INTEGER NOT NULL CHECK(owner_pid > 0),
+    owner_start_identity TEXT NOT NULL CHECK(length(trim(owner_start_identity)) > 0),
+    cleanup_state TEXT NOT NULL CHECK(cleanup_state IN ('complete','incomplete')),
+    runtime_dir_identity_json TEXT CHECK(runtime_dir_identity_json IS NULL OR (json_valid(runtime_dir_identity_json) AND json_type(runtime_dir_identity_json) = 'object')),
+    run_lock_identity_json TEXT CHECK(run_lock_identity_json IS NULL OR (json_valid(run_lock_identity_json) AND json_type(run_lock_identity_json) = 'object')),
+    runner_pid INTEGER CHECK(runner_pid IS NULL OR runner_pid > 0),
+    runner_start_identity TEXT,
+    child_pid INTEGER CHECK(child_pid IS NULL OR child_pid > 0),
+    child_start_identity TEXT,
+    started_at TEXT,
+    last_health_at TEXT,
+    ended_at TEXT,
+    exit_code INTEGER,
+    cleanup_diagnostics_json TEXT CHECK(cleanup_diagnostics_json IS NULL OR (json_valid(cleanup_diagnostics_json) AND json_type(cleanup_diagnostics_json) = 'array')),
+    recovery_origin_status TEXT CHECK(recovery_origin_status IS NULL OR recovery_origin_status IN ('starting','prepared','running','degraded','recovering','exited','failed','lost')),
+    native_session_json TEXT CHECK(native_session_json IS NULL OR (json_valid(native_session_json) AND json_type(native_session_json) = 'object')),
+    CHECK((mode_source = 'default' AND requested_mode IS NULL) OR (mode_source = 'explicit' AND requested_mode IS NOT NULL))
+);
+CREATE UNIQUE INDEX idx_member_runs_active ON member_runs(member_id) WHERE status NOT IN ('exited','failed','lost');
+
+CREATE TABLE member_interactions (
+    interaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
+    episode_seq INTEGER NOT NULL CHECK(episode_seq > 0),
+    classification TEXT NOT NULL CHECK(classification IN ('permission_request','question','unknown_interaction')),
+    evidence_digest TEXT NOT NULL,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    close_reason TEXT CHECK(close_reason IS NULL OR close_reason IN ('not_visible','superseded','process_exited','monitor_lost')),
+    evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json) AND json_type(evidence_json) = 'object'),
+    UNIQUE(run_id, episode_seq),
+    CHECK((closed_at IS NULL) = (close_reason IS NULL))
+);
+CREATE UNIQUE INDEX idx_member_interactions_open ON member_interactions(run_id) WHERE closed_at IS NULL;
+
+CREATE TABLE member_runtime_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
+    event_seq INTEGER NOT NULL CHECK(event_seq > 0),
+    interaction_id INTEGER REFERENCES member_interactions(interaction_id) ON DELETE RESTRICT,
+    kind TEXT NOT NULL CHECK(kind IN ('coverage_unknown','interaction_opened','interaction_closed','input_delivery_result','input_delivery_stalled','runner_degraded','runner_lost','runner_exited')),
+    observed_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL CHECK(json_valid(payload_json) AND json_type(payload_json) = 'object'),
+    notification_state TEXT NOT NULL CHECK(notification_state IN ('inbox','archived')),
+    message_id INTEGER UNIQUE REFERENCES messages(message_id) ON DELETE RESTRICT,
+    archive_reason TEXT CHECK(archive_reason IS NULL OR archive_reason IN ('member_inactive','fleet_deleted','director_inactive','head_not_ready','duplicate_delivery')),
+    UNIQUE(run_id, event_seq),
+    CHECK((notification_state = 'inbox' AND message_id IS NOT NULL AND archive_reason IS NULL) OR
+          (notification_state = 'archived' AND message_id IS NULL AND archive_reason IS NOT NULL))
+);
+
+CREATE TABLE member_input_operations (
+    input_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
+    operation_key TEXT NOT NULL CHECK(length(trim(operation_key)) > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('prompt','exec')),
+    payload_digest TEXT NOT NULL CHECK(length(payload_digest) = 64 AND payload_digest NOT GLOB '*[^0-9a-f]*'),
+    state TEXT NOT NULL CHECK(state IN ('ready','in_progress','accepted','uncertain','settled')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    disposition TEXT CHECK(disposition IS NULL OR disposition IN ('submitted','not_submitted','abandoned_uncertain')),
+    evidence_ref TEXT,
+    delivery_method TEXT CHECK(delivery_method IS NULL OR delivery_method IN ('profile','fallback')),
+    delivery_reason TEXT CHECK(delivery_reason IS NULL OR length(trim(delivery_reason)) > 0),
+    deferred_at TEXT,
+    defer_reason TEXT CHECK((deferred_at IS NULL AND defer_reason IS NULL)
+        OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
+            AND kind IN ('prompt','exec'))),
+    stop_cause TEXT CHECK(stop_cause IS NULL
+        OR (stop_cause IN ('interaction_open','interaction_candidate','submit_unconfirmed',
+                          'deadline_expired','short_write','write_failed','runner_stopped')
+            AND state IN ('uncertain','settled'))),
+    UNIQUE(run_id, operation_key),
+    CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
+);
+
+CREATE TABLE member_runner_diagnostics (
+    diagnostic_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
+    source TEXT NOT NULL CHECK(source IN ('event_writer','observation','deferred_input','queue_housekeeping','preview_sweep','input_result','permission_answer','shutdown')),
+    message TEXT NOT NULL CHECK(length(trim(message)) > 0 AND length(CAST(message AS BLOB)) <= 512),
+    first_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    count INTEGER NOT NULL CHECK(count > 0),
+    UNIQUE(run_id, source, message)
+);
+CREATE INDEX idx_member_runner_diagnostics_recent ON member_runner_diagnostics(run_id, last_at);
+"#;
 
 /// The file path a `sqlite:///<path>` database URL names.
 pub(crate) fn database_path(database_url: &str) -> Result<&str, CafleetError> {
@@ -82,136 +248,6 @@ pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<()
 
 pub(crate) const APPLICATION_ID: i64 = 1128351289;
 
-fn metadata_rows(
-    conn: &Connection,
-    sql: &str,
-    name: &str,
-) -> Result<Vec<Vec<rusqlite::types::Value>>, CafleetError> {
-    let mut statement = conn.prepare(sql)?;
-    let rows = statement.query_map([name], |row| {
-        (0..row.as_ref().column_count())
-            .map(|column| row.get(column))
-            .collect::<rusqlite::Result<Vec<_>>>()
-    })?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(crate::error::CafleetError::from)
-}
-
-const COLUMNS: &str =
-    "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1) ORDER BY cid";
-const FOREIGN_KEYS: &str = "SELECT \"table\", \"from\", \"to\", on_update, on_delete, \"match\" FROM pragma_foreign_key_list(?1) ORDER BY \"from\", \"to\"";
-const INDEX_COLUMNS: &str = "SELECT seqno, cid, name FROM pragma_index_info(?1) ORDER BY seqno";
-type Metadata = Vec<Vec<rusqlite::types::Value>>;
-
-struct SchemaIndex {
-    name: String,
-    unique: i64,
-    partial: i64,
-    columns: Metadata,
-}
-
-struct SchemaTable {
-    name: String,
-    columns: Metadata,
-    foreign_keys: Metadata,
-    indexes: Vec<SchemaIndex>,
-}
-
-impl SchemaTable {
-    fn matches(&self, conn: &Connection) -> Result<bool, CafleetError> {
-        if metadata_rows(conn, COLUMNS, &self.name)? != self.columns
-            || metadata_rows(conn, FOREIGN_KEYS, &self.name)? != self.foreign_keys
-        {
-            return Ok(false);
-        }
-        for index in &self.indexes {
-            let definition: Option<(i64, i64)> = conn
-                .query_row(
-                    "SELECT \"unique\", partial FROM pragma_index_list(?1) WHERE name=?2",
-                    rusqlite::params![self.name, index.name],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()?;
-            if definition != Some((index.unique, index.partial))
-                || metadata_rows(conn, INDEX_COLUMNS, &index.name)? != index.columns
-            {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-}
-
-fn all_match(tables: &[SchemaTable], conn: &Connection) -> Result<bool, CafleetError> {
-    for table in tables {
-        if !table.matches(conn)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-fn read_schema(conn: &Connection) -> Result<Vec<SchemaTable>, CafleetError> {
-    let mut tables = conn.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-    )?;
-    let names = tables
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut schema = Vec::new();
-    for name in names {
-        let mut indexes =
-            conn.prepare("SELECT name, \"unique\", partial FROM pragma_index_list(?1)")?;
-        let indexes = indexes
-            .query_map([&name], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        let indexes = indexes
-            .into_iter()
-            .map(|(name, unique, partial)| {
-                Ok(SchemaIndex {
-                    columns: metadata_rows(conn, INDEX_COLUMNS, &name)?,
-                    name,
-                    unique,
-                    partial,
-                })
-            })
-            .collect::<Result<Vec<_>, CafleetError>>()?;
-        schema.push(SchemaTable {
-            columns: metadata_rows(conn, COLUMNS, &name)?,
-            foreign_keys: metadata_rows(conn, FOREIGN_KEYS, &name)?,
-            name,
-            indexes,
-        });
-    }
-    Ok(schema)
-}
-
-fn reference_schema() -> Result<Vec<SchemaTable>, CafleetError> {
-    let mut expected = Connection::open_in_memory()?;
-    initialize(&mut expected, "sqlite:///:memory:")?;
-    read_schema(&expected)
-}
-
-pub(crate) fn schema_matches(conn: &Connection) -> Result<bool, CafleetError> {
-    let reference = reference_schema()?;
-    let snapshot = if conn.is_autocommit() {
-        Some(conn.unchecked_transaction()?)
-    } else {
-        None
-    };
-    let matches = all_match(&reference, conn)?;
-    if let Some(snapshot) = snapshot {
-        snapshot.commit()?;
-    }
-    Ok(matches)
-}
-
 #[derive(Debug)]
 pub(crate) enum SchemaState {
     Missing,
@@ -244,6 +280,14 @@ fn is_empty_file(conn: &Connection) -> Result<bool, CafleetError> {
 }
 
 fn records_running_version(conn: &Connection) -> Result<bool, CafleetError> {
+    let has_version_table: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='cafleet_database')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_version_table {
+        return Ok(false);
+    }
     let recorded: Option<String> = conn
         .query_row(
             "SELECT cafleet_version FROM cafleet_database WHERE singleton_id=1",
@@ -272,10 +316,7 @@ fn classify_schema(conn: &Connection) -> Result<Classification, CafleetError> {
         return Ok(Classification::Missing);
     }
     let identity: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
-    if identity != crate::db::APPLICATION_ID
-        || !schema_matches(conn)?
-        || !records_running_version(conn)?
-    {
+    if identity != crate::db::APPLICATION_ID || !records_running_version(conn)? {
         return Ok(Classification::Incompatible);
     }
     Ok(Classification::Current)
@@ -902,7 +943,6 @@ mod tests {
                     (8, 1, 2, 'created-8', 'input_required', 'status-8', 'notified', 'notified-8'),
                     (9, 2, 1, 'created-9', 'completed', 'status-9', 'completed', NULL);"
             ).unwrap();
-        assert!(schema_matches(&conn).unwrap());
         require_current(&conn).unwrap();
         let before = application_rows(&conn);
         let version_row = rows(&conn, "SELECT * FROM cafleet_database");
@@ -915,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn initialization_records_the_identity_version_and_shape() {
+    fn initialization_records_the_identity_and_version() {
         assert_eq!(APPLICATION_ID, 0x4341_4639, "ASCII CAF9");
         let conn = initialized_conn();
         assert_eq!(
@@ -933,17 +973,6 @@ mod tests {
                 rusqlite::types::Value::Text(crate::cli::VERSION.into())
             ]]
         );
-        assert!(schema_matches(&conn).unwrap());
-    }
-
-    #[test]
-    fn composer_receipt_required_columns_are_checked_without_modifying_the_selected_database() {
-        assert_incompatible_and_untouched("missing-composer-receipt-column.db", |conn| {
-            conn.execute_batch(
-                "ALTER TABLE member_input_operations RENAME COLUMN stop_cause TO missing_stop_cause",
-            )
-            .unwrap();
-        });
     }
 
     #[test]
@@ -1027,16 +1056,21 @@ mod tests {
         damage: &'static str,
     }
 
-    const OTHER_FILE_CASES: [OtherFileCase; 4] = [
+    const OTHER_FILE_CASES: [OtherFileCase; 5] = [
         OtherFileCase {
             name: "recorded-other-version",
             initialized: true,
             damage: "UPDATE cafleet_database SET cafleet_version='0.0.0'",
         },
         OtherFileCase {
-            name: "required-index-dropped",
+            name: "identity-without-version-row",
             initialized: true,
-            damage: "DROP INDEX idx_member_runner_diagnostics_recent",
+            damage: "DELETE FROM cafleet_database",
+        },
+        OtherFileCase {
+            name: "identity-without-version-table",
+            initialized: true,
+            damage: "DROP TABLE cafleet_database",
         },
         OtherFileCase {
             name: "unrelated-table-only",
@@ -1094,85 +1128,6 @@ mod tests {
         let conn = connect(&url).unwrap();
         assert_eq!(rows(&conn, "SELECT * FROM cafleet_database").len(), 1);
         require_current(&conn).unwrap();
-    }
-
-    #[test]
-    fn selected_reference_rechecks_ddl_and_accepts_auxiliary_objects() {
-        let conn = initialized_conn();
-        conn.execute_batch(
-            "CREATE TABLE operator_data(value TEXT);
-             CREATE INDEX operator_messages ON messages(text);
-             CREATE TRIGGER operator_message_insert AFTER INSERT ON messages BEGIN
-                INSERT INTO operator_data VALUES(NEW.text);
-             END;",
-        )
-        .unwrap();
-        assert!(schema_matches(&conn).unwrap());
-        conn.execute_batch("ALTER TABLE messages RENAME COLUMN text TO broken")
-            .unwrap();
-        assert!(!schema_matches(&conn).unwrap());
-        conn.execute_batch("ALTER TABLE messages RENAME COLUMN broken TO text")
-            .unwrap();
-        assert!(schema_matches(&conn).unwrap());
-        conn.execute_batch("CREATE TEMP TABLE messages(wrong TEXT)")
-            .unwrap();
-        assert!(!schema_matches(&conn).unwrap());
-    }
-
-    #[test]
-    fn required_schema_components_and_identity_are_refused() {
-        for damage in [
-            "DROP INDEX idx_messages_to_member_status_ts",
-            "DROP INDEX idx_messages_to_member_status_ts; CREATE INDEX idx_messages_to_member_status_ts ON messages(from_member_id, status_timestamp)",
-            "DROP TABLE member_placements",
-            "DELETE FROM cafleet_database",
-        ] {
-            let conn = initialized_conn();
-            conn.execute_batch(damage).unwrap();
-            assert!(require_current(&conn).is_err(), "{damage}");
-        }
-    }
-
-    #[test]
-    fn structural_reference_checks_required_keys_types_defaults_and_foreign_keys() {
-        for (table, original, replacement) in [
-            (
-                "member_placements",
-                "member_id INTEGER NOT NULL PRIMARY KEY REFERENCES members",
-                "member_id INTEGER NOT NULL REFERENCES members",
-            ),
-            ("members", "name TEXT NOT NULL", "name TEXT"),
-            ("messages", "text TEXT NOT NULL", "text INTEGER NOT NULL"),
-            (
-                "member_placements",
-                "backend TEXT NOT NULL,",
-                "backend TEXT NOT NULL DEFAULT 'tmux',",
-            ),
-            ("messages", "ON DELETE RESTRICT", "ON DELETE CASCADE"),
-        ] {
-            let conn = initialized_conn();
-            let ddl: String = conn
-                .query_row(
-                    "SELECT sql FROM sqlite_schema WHERE name=?1",
-                    [table],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(ddl.contains(original));
-            let version: i64 = conn
-                .query_row("PRAGMA schema_version", [], |row| row.get(0))
-                .unwrap();
-            conn.execute_batch("PRAGMA writable_schema=ON").unwrap();
-            conn.execute(
-                "UPDATE sqlite_schema SET sql=?1 WHERE name=?2",
-                rusqlite::params![ddl.replace(original, replacement), table],
-            )
-            .unwrap();
-            conn.pragma_update(None, "schema_version", version + 1)
-                .unwrap();
-            conn.execute_batch("PRAGMA writable_schema=OFF").unwrap();
-            assert!(!schema_matches(&conn).unwrap(), "{table}: {original}");
-        }
     }
 
     #[test]
@@ -1831,6 +1786,15 @@ mod tests {
         assert_eq!(
             classify_schema(&conn).unwrap(),
             Classification::Incompatible
+        );
+        let identified = crate::db::connect("sqlite:///:memory:").unwrap();
+        identified
+            .pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        assert_eq!(
+            classify_schema(&identified).unwrap(),
+            Classification::Incompatible,
+            "CAFleet identity without a cafleet_database table"
         );
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("not-sqlite.db");
