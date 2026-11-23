@@ -1,5 +1,4 @@
 use crate::coding_agent::CodingAgent;
-use crate::coding_agent::hermes::HermesConfig;
 use crate::config::EnvLookup;
 use crate::config::opencode_skills_base;
 use crate::error::CafleetError;
@@ -8,7 +7,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) struct AgentPaths {
-    base: PathBuf,
     skills_dir: PathBuf,
     presets: Vec<(String, PathBuf)>,
     extension: Option<FileExtension>,
@@ -21,23 +19,8 @@ struct FileExtension {
     record: &'static str,
 }
 
-/// How setup reaches Hermes for the plugin configuration.
-pub(crate) enum HermesSetup<'a> {
-    Available(&'a dyn HermesConfig),
-    /// `--coding-agent hermes` was given and no `hermes` is on `PATH`.
-    MissingRequired,
-    /// Plain setup found no `hermes` on `PATH`.
-    Absent,
-}
-
-/// Each Hermes setup phase (the read batch, every write, the re-read) gets its own budget.
-const HERMES_SETUP_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
-
 pub(crate) const OPENCODE_EXTENSION_PREFIX: &str = "opencode/";
 pub(crate) const OPENCODE_EXECUTABLE_RECORD: &str = "cafleet.executable";
-pub(crate) const HERMES_EXTENSION_PREFIX: &str = "hermes/cafleet/";
-pub(crate) const HERMES_PLUGIN_DIR: &str = "plugins/cafleet";
-pub(crate) const HERMES_EXECUTABLE_RECORD: &str = "executable";
 pub(crate) const PI_EXTENSION_PREFIX: &str = "pi/";
 pub(crate) const PI_EXECUTABLE_RECORD: &str = "cafleet.executable";
 
@@ -80,7 +63,6 @@ pub(crate) fn agent_paths(
         CodingAgent::Claude | CodingAgent::Codex | CodingAgent::Hermes => None,
     };
     Ok(AgentPaths {
-        base,
         skills_dir,
         presets,
         extension,
@@ -103,12 +85,6 @@ pub(crate) fn pi_extensions_dir(pi_base: &Path) -> PathBuf {
     pi_base.join("extensions")
 }
 
-impl AgentPaths {
-    pub(crate) fn base(&self) -> &Path {
-        &self.base
-    }
-}
-
 /// Every embedded extension file under `prefix`, with its path relative to the extension root.
 pub(crate) fn embedded_extension(prefix: &str) -> Vec<(&'static str, &'static [u8])> {
     let files = EXTENSIONS
@@ -122,7 +98,6 @@ pub(crate) fn embedded_extension(prefix: &str) -> Vec<(&'static str, &'static [u
 pub(crate) fn install_agent(
     agent: CodingAgent,
     paths: &AgentPaths,
-    hermes: HermesSetup<'_>,
     out: &mut dyn Write,
 ) -> Result<(), CafleetError> {
     let version = crate::cli::VERSION;
@@ -177,33 +152,13 @@ pub(crate) fn install_agent(
             target.display()
         ))?;
     }
-    let extension_line = |target: &Path| {
-        format!(
-            "{}: installed extension (v{version}) -> {}",
-            agent.name(),
-            target.display()
-        )
-    };
     if let Some(extension) = &paths.extension {
         for target in install_file_extension(extension)? {
-            report(extension_line(&target))?;
-        }
-    }
-    if agent == CodingAgent::Hermes {
-        match hermes {
-            HermesSetup::Available(hermes) => {
-                let line = install_hermes_plugin(hermes, paths, &mut |plugin_dir| {
-                    report(extension_line(plugin_dir))
-                })?;
-                report(line)?;
-            }
-            HermesSetup::MissingRequired => {
-                return Err(extension_failure(
-                    &paths.base,
-                    "binary hermes not found on PATH",
-                ));
-            }
-            HermesSetup::Absent => report("hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes".into())?,
+            report(format!(
+                "{}: installed extension (v{version}) -> {}",
+                agent.name(),
+                target.display()
+            ))?;
         }
     }
     Ok(())
@@ -230,20 +185,6 @@ fn install_file_extension(extension: &FileExtension) -> Result<Vec<PathBuf>, Caf
     }
     write_executable_record(&extension.dir.join(extension.record))?;
     Ok(installed)
-}
-
-/// Replaces the Hermes plugin directory with exactly the embedded files and the executable record.
-fn install_hermes_extension(plugin_dir: &Path) -> Result<(), CafleetError> {
-    let fail = |error: std::io::Error| extension_failure(plugin_dir, error);
-    remove_existing_target(plugin_dir).map_err(fail)?;
-    std::fs::create_dir_all(plugin_dir).map_err(fail)?;
-    for (relative, bytes) in embedded_extension(HERMES_EXTENSION_PREFIX) {
-        let target = plugin_dir.join(relative);
-        std::fs::create_dir_all(target.parent().expect("plugin file has a parent"))
-            .map_err(fail)?;
-        std::fs::write(&target, bytes).map_err(fail)?;
-    }
-    write_executable_record(&plugin_dir.join(HERMES_EXECUTABLE_RECORD))
 }
 
 fn write_executable_record(record: &Path) -> Result<(), CafleetError> {
@@ -294,43 +235,6 @@ pub(crate) fn installed_file_problem(target: &Path, embedded: &[u8]) -> Option<S
         Ok(_) => Some("differs from the embedded copy".into()),
         Err(error) => Some(error.to_string()),
     }
-}
-
-/// Installs the Hermes extension and enables its plugin: one concurrent `config path` and
-/// `plugins` read, the extension (reported through `installed` before the plugin is evaluated),
-/// then the plugin writes. Returns the plugin setup line.
-fn install_hermes_plugin(
-    hermes: &dyn HermesConfig,
-    paths: &AgentPaths,
-    installed: &mut dyn FnMut(&Path) -> Result<(), CafleetError>,
-) -> Result<String, CafleetError> {
-    use crate::coding_agent::hermes::PLUGIN_NAME;
-    let (config, plugins) = crate::coding_agent::hermes::read_batch(
-        hermes,
-        std::time::Instant::now() + HERMES_SETUP_BUDGET,
-    );
-    let (config, plugin_dir) = config
-        .and_then(|config| {
-            crate::coding_agent::hermes::plugin_dir(&config).map(|dir| (config, dir))
-        })
-        .map_err(|cause| extension_failure(&paths.base, cause))?;
-    install_hermes_extension(&plugin_dir)?;
-    installed(&plugin_dir)?;
-    let fail = |cause: String| {
-        CafleetError::App(format!(
-            "failed to enable hermes plugin {PLUGIN_NAME} in {config}: {cause}"
-        ))
-    };
-    let state = plugins
-        .and_then(crate::coding_agent::hermes::plugin_state)
-        .map_err(fail)?;
-    let wrote = crate::coding_agent::hermes::enable_plugin(hermes, &state, HERMES_SETUP_BUDGET)
-        .map_err(fail)?;
-    Ok(if wrote {
-        format!("hermes: enabled plugin {PLUGIN_NAME} -> {config}")
-    } else {
-        format!("hermes: plugin {PLUGIN_NAME} already enabled -> {config}")
-    })
 }
 
 fn remove_existing_target(target: &Path) -> std::io::Result<()> {
@@ -637,7 +541,6 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let paths = agent_paths(&|_| Ok(None), home.path(), CodingAgent::Opencode).unwrap();
         let base = home.path().join(".config/opencode");
-        assert_eq!(paths.base, base);
         install_agent(CodingAgent::Opencode, &paths, &mut Vec::<u8>::new()).unwrap();
         for (source, target) in expected_presets(CodingAgent::Opencode, &base) {
             assert_eq!(

@@ -1,4 +1,3 @@
-use crate::assets::HermesSetup;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
 use crate::broker::runtime::RunRecord;
@@ -6,8 +5,6 @@ use crate::cli::member::ObservationProbe;
 use crate::cli::member::probe_observation;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::SpawnProbe;
-use crate::coding_agent::hermes::HermesCli;
-use crate::coding_agent::hermes::HermesConfig;
 use crate::config::EnvLookup;
 use crate::config::Settings;
 use crate::db;
@@ -27,13 +24,11 @@ use chrono::DateTime;
 use chrono::Utc;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
-use std::time::Instant;
 
 #[derive(Args)]
 pub(crate) struct SetupArgs {
@@ -45,13 +40,7 @@ pub(crate) struct SetupArgs {
 pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     prepare_database(settings)?;
     let home = crate::config::home_dir()?;
-    let hermes = SystemProbe.resolve_binary(CodingAgent::Hermes.name());
-    install_selected(
-        &args.coding_agent,
-        &crate::config::process_env,
-        &home,
-        hermes.as_deref(),
-    )
+    install_selected(&args.coding_agent, &crate::config::process_env, &home)
 }
 
 fn prepare_database(settings: &Settings) -> Result<(), CafleetError> {
@@ -93,20 +82,11 @@ fn install_selected(
     selected: &[CodingAgent],
     env: EnvLookup<'_>,
     home: &Path,
-    hermes_executable: Option<&Path>,
 ) -> Result<(), CafleetError> {
     for agent in CodingAgent::all() {
         if selected.is_empty() || selected.contains(agent) {
             let paths = agent_paths(env, home, *agent)?;
-            let cli = hermes_executable
-                .filter(|_| *agent == CodingAgent::Hermes)
-                .map(|executable| HermesCli::new(executable.to_path_buf(), paths.base().into()));
-            let hermes = match &cli {
-                Some(cli) => HermesSetup::Available(cli),
-                None if selected.contains(&CodingAgent::Hermes) => HermesSetup::MissingRequired,
-                None => HermesSetup::Absent,
-            };
-            install_agent(*agent, &paths, hermes, &mut std::io::stdout())?;
+            install_agent(*agent, &paths, &mut std::io::stdout())?;
         }
     }
     Ok(())
@@ -186,9 +166,6 @@ pub(crate) struct DoctorInputs<'a> {
     pub(crate) settings: &'a Settings,
     pub(crate) probe: &'a dyn SpawnProbe,
     pub(crate) home: &'a Result<PathBuf, CafleetError>,
-    /// The Hermes reader, present whenever `probe` resolves `hermes` and its configuration
-    /// resolves.
-    pub(crate) hermes: Option<&'a dyn HermesConfig>,
 }
 
 pub(crate) struct Report {
@@ -219,13 +196,11 @@ pub(crate) fn doctor_with(
     table: &dyn ProcessTable,
 ) -> Result<(), CafleetError> {
     let home = crate::config::home_dir();
-    let hermes = hermes_reader(&SystemProbe, &home);
     let report = gather(&DoctorInputs {
         caller: &|| detect_caller(table),
         settings,
         probe: &SystemProbe,
         home: &home,
-        hermes: hermes.as_ref().map(|cli| cli as &dyn HermesConfig),
     });
     let mode = if args.json { Mode::Json } else { Mode::Text };
     crate::cli::write_output(&render(&report, mode))?;
@@ -234,20 +209,6 @@ pub(crate) fn doctor_with(
     } else {
         Ok(())
     }
-}
-
-/// The Hermes reader, absent when the configuration or the executable is unusable; the
-/// `hermes.configuration` and `hermes.executable` rows report why.
-fn hermes_reader(
-    probe: &dyn SpawnProbe,
-    home: &Result<PathBuf, CafleetError>,
-) -> Option<HermesCli> {
-    let home = home.as_ref().ok()?;
-    let base = CodingAgent::Hermes
-        .config_dir(&|name| probe.env_var(name), home)
-        .ok()?;
-    let executable = probe.resolve_binary(CodingAgent::Hermes.name())?;
-    Some(HermesCli::new(executable, base))
 }
 
 /// The `fleet create` verification without `--pane`, as doctor reports it.
@@ -307,23 +268,10 @@ fn read_caller_pane(
     }
 }
 
-/// Runs every check: the Hermes batch starts first and overlaps the multiplexer, database and
-/// OpenCode checks, and the member probes overlap the backend checks; rows keep their order.
+/// Runs every check, the member probes overlapping the backend checks; rows keep their order.
 pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
     let backends = resolve_backends(inputs.probe, inputs.home);
-    let hermes = backends
-        .iter()
-        .find(|backend| backend.agent == CodingAgent::Hermes)
-        .expect("the registry includes hermes");
     std::thread::scope(|scope| {
-        let runs = hermes.executable.is_some() && hermes.paths.as_ref().is_ok_and(|b| b.exists());
-        let batch = runs.then(|| {
-            let reader = inputs
-                .hermes
-                .expect("doctor builds a Hermes reader whenever hermes and its base resolve");
-            let deadline = Instant::now() + HERMES_DOCTOR_BUDGET;
-            scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline))
-        });
         let mut checks = multiplexer_rows((inputs.caller)());
         let (database_check, runs) = database(inputs.settings);
         checks.push(database_check);
@@ -336,8 +284,7 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
                 })
             })
             .collect();
-        let hermes_reading = || batch.map(crate::coding_agent::hermes::joined);
-        let agents = agent_checks(&backends, hermes_reading);
+        let agents = agent_checks(&backends);
         let now = Utc::now();
         let database_url = inputs
             .settings
@@ -351,8 +298,6 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
         Report { checks }
     })
 }
-
-const HERMES_DOCTOR_BUDGET: Duration = Duration::from_secs(2);
 
 pub(crate) fn render(report: &Report, mode: Mode) -> String {
     match mode {
@@ -572,9 +517,6 @@ fn resolve_backends(probe: &dyn SpawnProbe, home: &Result<PathBuf, CafleetError>
         .collect()
 }
 
-/// The Hermes batch's `config path` and `plugins` results.
-type HermesReading = (Result<String, String>, Result<Option<Value>, String>);
-
 /// The `info` row of a check whose backend configuration failed or whose executable is absent.
 fn unavailable(
     name: &str,
@@ -589,26 +531,7 @@ fn unavailable(
     Some(Check::new(name, CheckStatus::Info, detail))
 }
 
-/// A Hermes row without a batch reading: unavailable, or no Hermes home at the base.
-fn hermes_row_without_reading(name: &str, hermes: &Backend) -> Check {
-    unavailable(name, &hermes.paths, hermes.executable.is_some()).unwrap_or_else(|| {
-        let base = hermes
-            .paths
-            .as_ref()
-            .expect("an available hermes has a base");
-        Check::new(
-            name,
-            CheckStatus::Info,
-            format!("unavailable: no Hermes home at {}", base.display()),
-        )
-    })
-}
-
-fn agent_checks(
-    backends: &[Backend],
-    hermes_reading: impl FnOnce() -> Option<HermesReading>,
-) -> Vec<Check> {
-    let mut hermes_reading = Some(hermes_reading);
+fn agent_checks(backends: &[Backend]) -> Vec<Check> {
     let mut checks = Vec::new();
     for backend in backends {
         let agent = backend.agent;
@@ -647,18 +570,6 @@ fn agent_checks(
         }
         if agent == CodingAgent::Pi {
             checks.push(pi_extension_check(paths, available));
-        }
-        if agent == CodingAgent::Hermes {
-            match hermes_reading.take().expect("one hermes backend")() {
-                Some((config_path, plugins)) => {
-                    checks.push(hermes_extension_check(config_path));
-                    checks.push(hermes_plugin_enabled_check(plugins));
-                }
-                None => checks.extend(
-                    ["hermes.extension", "hermes.plugin_enabled"]
-                        .map(|name| hermes_row_without_reading(name, backend)),
-                ),
-            }
         }
         checks.push(skills_check(name, &backend.skills, available));
     }
@@ -805,65 +716,6 @@ fn file_extension_check(
         .collect::<Vec<_>>()
         .join(", ");
     extension_check(name, &files, &dir.join(record), ok_detail)
-}
-
-fn hermes_extension_check(config_path: Result<String, String>) -> Check {
-    const NAME: &str = "hermes.extension";
-    let plugin_dir = config_path.and_then(|path| crate::coding_agent::hermes::plugin_dir(&path));
-    match plugin_dir {
-        Ok(plugin_dir) => extension_check(
-            NAME,
-            &extension_files(&plugin_dir, crate::assets::HERMES_EXTENSION_PREFIX),
-            &plugin_dir.join(crate::assets::HERMES_EXECUTABLE_RECORD),
-            plugin_dir.display().to_string(),
-        ),
-        Err(cause) => Check::new(
-            NAME,
-            CheckStatus::Error,
-            format!("cannot read hermes configuration through 'hermes config path': {cause}"),
-        ),
-    }
-}
-
-fn hermes_plugin_enabled_check(plugins: Result<Option<Value>, String>) -> Check {
-    use crate::coding_agent::hermes::PLUGIN_NAME;
-    use crate::coding_agent::hermes::PLUGINS_DISABLED_KEY;
-    const NAME: &str = "hermes.plugin_enabled";
-    let state = match plugins.and_then(crate::coding_agent::hermes::plugin_state) {
-        Ok(state) => state,
-        Err(cause) => {
-            return Check::new(
-                NAME,
-                CheckStatus::Error,
-                format!("cannot read hermes configuration through 'hermes config get': {cause}"),
-            );
-        }
-    };
-    if state.disabled_lists_cafleet {
-        return Check::new(
-            NAME,
-            CheckStatus::Error,
-            format!(
-                "hermes {PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}; remove it, then run 'cafleet setup --coding-agent hermes'"
-            ),
-        );
-    }
-    let missing = state.missing();
-    if missing.is_empty() {
-        return Check::new(
-            NAME,
-            CheckStatus::Ok,
-            "cafleet enabled with gateway injection",
-        );
-    }
-    Check::fixable(
-        NAME,
-        CheckStatus::Error,
-        format!(
-            "hermes plugin {PLUGIN_NAME} is not enabled: {}",
-            missing.join(", ")
-        ),
-    )
 }
 
 #[cfg(test)]
@@ -1815,6 +1667,7 @@ mod tests {
         use rusqlite::Connection;
         use serde_json::Value;
         use serde_json::json;
+        use std::time::Instant;
 
         const TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
 

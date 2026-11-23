@@ -1,16 +1,9 @@
 use crate::error::CafleetError;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
-
-pub(crate) const PLUGINS_KEY: &str = "plugins";
-pub(crate) const PLUGINS_DISABLED_KEY: &str = "plugins.disabled";
-pub(crate) const PLUGINS_ENABLED_KEY: &str = "plugins.enabled";
-pub(crate) const GATEWAY_INJECTION_KEY: &str = "plugins.entries.cafleet.allow_gateway_injection";
-pub(crate) const PLUGIN_NAME: &str = "cafleet";
 
 /// Runs `hermes` with `HERMES_HOME=<base>`.
 pub(crate) struct HermesCli {
@@ -22,10 +15,6 @@ pub(crate) struct HermesCli {
 pub(crate) trait HermesConfig: Sync {
     /// The trimmed stdout of `hermes config path`.
     fn config_path(&self, deadline: Instant) -> Result<String, String>;
-    /// `hermes config get --json KEY`; `None` is the *not set* answer.
-    fn get(&self, key: &str, deadline: Instant) -> Result<Option<Value>, String>;
-    /// `hermes config set KEY VALUE`.
-    fn set(&self, key: &str, value: &str, deadline: Instant) -> Result<(), String>;
 }
 
 /// A completed `hermes` process: its exit code, stdout and stderr.
@@ -70,133 +59,12 @@ impl HermesConfig for HermesCli {
     fn config_path(&self, deadline: Instant) -> Result<String, String> {
         succeeded(self.run(&["config", "path"], deadline)?).map(|stdout| stdout.trim().to_owned())
     }
-
-    fn get(&self, key: &str, deadline: Instant) -> Result<Option<Value>, String> {
-        let output = self.run(&["config", "get", "--json", key], deadline)?;
-        let not_set = format!("Config key not set: {key}");
-        if output.0 == 1 && output.2.lines().any(|line| line.trim() == not_set) {
-            return Ok(None);
-        }
-        let stdout = succeeded(output)?;
-        serde_json::from_str(&stdout)
-            .map(Some)
-            .map_err(|cause| format!("{key} printed no JSON value: {cause}"))
-    }
-
-    fn set(&self, key: &str, value: &str, deadline: Instant) -> Result<(), String> {
-        succeeded(self.run(&["config", "set", key, value], deadline)?).map(drop)
-    }
-}
-
-/// The plugin directory under the Hermes home that owns `config_path`.
-pub(crate) fn plugin_dir(config_path: &str) -> Result<PathBuf, String> {
-    home_of_config_path(config_path).map(|home| home.join(crate::assets::HERMES_PLUGIN_DIR))
-}
-
-/// The CAFleet-relevant members of the resolved `plugins` subtree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PluginState {
-    pub(crate) disabled_lists_cafleet: bool,
-    pub(crate) enabled: Vec<String>,
-    pub(crate) injection_allowed: bool,
-}
-
-impl PluginState {
-    /// The keys whose values still keep the plugin from loading with gateway injection.
-    pub(crate) fn missing(&self) -> Vec<&'static str> {
-        let mut missing = Vec::new();
-        if !self.enabled.iter().any(|name| name == PLUGIN_NAME) {
-            missing.push(PLUGINS_ENABLED_KEY);
-        }
-        if !self.injection_allowed {
-            missing.push(GATEWAY_INJECTION_KEY);
-        }
-        missing
-    }
-}
-
-fn read_plugin_state(hermes: &dyn HermesConfig, deadline: Instant) -> Result<PluginState, String> {
-    plugin_state(hermes.get(PLUGINS_KEY, deadline)?)
-}
-
-/// Interprets a `plugins` reading: a missing member is that key's *not set* state, and a
-/// *not set* `plugins` key leaves all three unset.
-pub(crate) fn plugin_state(plugins: Option<Value>) -> Result<PluginState, String> {
-    let plugins = plugins.unwrap_or_else(|| Value::Object(Default::default()));
-    if !plugins.is_object() {
-        return Err(format!("{PLUGINS_KEY} is not a JSON object"));
-    }
-    let disabled = plugin_list(PLUGINS_DISABLED_KEY, plugins.get("disabled"))?;
-    Ok(PluginState {
-        disabled_lists_cafleet: disabled.iter().any(|name| name == PLUGIN_NAME),
-        enabled: plugin_list(PLUGINS_ENABLED_KEY, plugins.get("enabled"))?,
-        injection_allowed: plugins.pointer("/entries/cafleet/allow_gateway_injection")
-            == Some(&Value::Bool(true)),
-    })
-}
-
-/// A set plugin list, which must be a JSON array of strings.
-fn plugin_list(key: &str, value: Option<&Value>) -> Result<Vec<String>, String> {
-    match value {
-        None => Ok(Vec::new()),
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|cause| format!("{key} is not a JSON array of strings: {cause}")),
-    }
-}
-
-/// Runs `config path` and the `plugins` read as one concurrent batch under `deadline`.
-pub(crate) fn read_batch(
-    hermes: &dyn HermesConfig,
-    deadline: Instant,
-) -> (Result<String, String>, Result<Option<Value>, String>) {
-    std::thread::scope(|scope| {
-        let path = scope.spawn(|| hermes.config_path(deadline));
-        let plugins = scope.spawn(|| hermes.get(PLUGINS_KEY, deadline));
-        (joined(path), joined(plugins))
-    })
 }
 
 pub(crate) fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
     handle
         .join()
         .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-}
-
-/// Writes the plugin keys `state` lacks, serially because each set rewrites `config.yaml`, then
-/// re-reads `plugins` once when something was written; returns whether it wrote.
-pub(crate) fn enable_plugin(
-    hermes: &dyn HermesConfig,
-    state: &PluginState,
-    budget: std::time::Duration,
-) -> Result<bool, String> {
-    if state.disabled_lists_cafleet {
-        return Err(format!(
-            "{PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}; remove it from {PLUGINS_DISABLED_KEY}, then rerun 'cafleet setup --coding-agent hermes'"
-        ));
-    }
-    let missing = state.missing();
-    if missing.contains(&PLUGINS_ENABLED_KEY) {
-        let mut enabled = state.enabled.clone();
-        enabled.push(PLUGIN_NAME.to_owned());
-        let value = serde_json::to_string(&enabled).expect("a list of strings serializes as JSON");
-        hermes.set(PLUGINS_ENABLED_KEY, &value, Instant::now() + budget)?;
-    }
-    if missing.contains(&GATEWAY_INJECTION_KEY) {
-        hermes.set(GATEWAY_INJECTION_KEY, "true", Instant::now() + budget)?;
-    }
-    if missing.is_empty() {
-        return Ok(false);
-    }
-    match read_plugin_state(hermes, Instant::now() + budget)?
-        .missing()
-        .first()
-    {
-        None => Ok(true),
-        Some(&PLUGINS_ENABLED_KEY) => Err(format!(
-            "{PLUGINS_ENABLED_KEY} still lacks {PLUGIN_NAME} after the write"
-        )),
-        Some(key) => Err(format!("{key} is still not true after the write")),
-    }
 }
 
 /// The member run's Hermes session identity, stored in `member_runs.native_session_json`.
@@ -746,6 +614,7 @@ mod tests {
 
         mod composer_reliability {
             use crate::coding_agent::hermes::tests::settlement::*;
+            use serde_json::Value;
 
             pub(super) fn frame(region: &str) -> String {
                 let border = "─".repeat(80);

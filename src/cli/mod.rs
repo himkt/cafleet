@@ -233,7 +233,7 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             match command {
                 Command::Fleet(cmd) => fleet::run(&mut conn, settings, cmd, deadline),
                 Command::Member(cmd) => member::run(&mut conn, settings, cmd, deadline),
-                Command::Message(cmd) => message::run(&mut conn, settings, cmd),
+                Command::Message(cmd) => message::run(&mut conn, cmd),
                 Command::Event(cmd) => runtime::event(&conn, cmd),
                 Command::Input(cmd) => runtime::input(&mut conn, settings, cmd, deadline),
                 Command::Setup(_)

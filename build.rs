@@ -47,10 +47,8 @@ fn walk(root: &Path, dir: &Path, paths: &mut Vec<String>) {
     }
 }
 
-/// Hermes rewrites a plugin's `__pycache__` on load, so an embedded cache
-/// would never match its installed copy.
 fn is_excluded(name: &str) -> bool {
-    name.starts_with('.') || name == "__pycache__" || name.ends_with(".pyc")
+    name.starts_with('.')
 }
 
 /// Emit `pub static <name>: &[(&str, &[u8])]` mapping each relative path to

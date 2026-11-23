@@ -1,16 +1,10 @@
 use crate::broker::MemberStatus;
 use crate::broker::MessageRecord;
-use crate::db::with_database_budget;
 use crate::error::CafleetError;
-use crate::time::Deadline;
 use crate::time::now_stamp;
 use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use rusqlite::params;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 pub(crate) const MESSAGE_COLUMNS: &str =
     "message_id, from_member_id, to_member_id, created_at, status_state, status_timestamp, text";
@@ -143,173 +137,6 @@ pub(crate) fn poll_messages(
     Ok(consumed)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InboxClosure {
-    MemberInactive,
-    FleetDeleted,
-}
-
-#[derive(Debug)]
-pub(crate) enum InboxSnapshot {
-    Open {
-        fleet_id: i64,
-        messages: Vec<MessageRecord>,
-    },
-    Closed {
-        fleet_id: i64,
-        reason: InboxClosure,
-    },
-}
-
-pub(crate) fn listen_snapshot(
-    conn: &mut Connection,
-    member_id: i64,
-    expected_fleet: Option<i64>,
-    deadline: Deadline,
-) -> Result<InboxSnapshot, CafleetError> {
-    listen_snapshot_with_clock(conn, member_id, expected_fleet, deadline, Instant::now)
-}
-
-fn listen_snapshot_with_clock(
-    conn: &mut Connection,
-    member_id: i64,
-    expected_fleet: Option<i64>,
-    deadline: Deadline,
-    now: impl Fn() -> Instant,
-) -> Result<InboxSnapshot, CafleetError> {
-    with_database_budget(conn, deadline, |conn| {
-        let interrupted = Arc::new(AtomicBool::new(false));
-        let observed = Arc::clone(&interrupted);
-        conn.progress_handler(
-            1_000,
-            Some(move || {
-                let expired = deadline.remaining().is_err();
-                if expired {
-                    observed.store(true, Ordering::Relaxed);
-                }
-                expired
-            }),
-        )?;
-        let result = read_listen_snapshot(
-            conn,
-            member_id,
-            expected_fleet,
-            deadline,
-            &now,
-            &interrupted,
-        );
-        let cleanup = conn
-            .progress_handler(0, None::<fn() -> bool>)
-            .map_err(|cleanup| {
-                let cleanup = CafleetError::from(cleanup);
-                if result.is_err() {
-                    CafleetError::App(format!(
-                        "removing listener progress handler failed: {cleanup}"
-                    ))
-                } else {
-                    cleanup
-                }
-            });
-        CafleetError::merge_cleanup(result, cleanup)
-    })
-}
-
-fn read_listen_snapshot(
-    conn: &mut Connection,
-    member_id: i64,
-    expected_fleet: Option<i64>,
-    deadline: Deadline,
-    now: &impl Fn() -> Instant,
-    interrupted: &AtomicBool,
-) -> Result<InboxSnapshot, CafleetError> {
-    deadline.remaining_at(now())?;
-    let tx = conn.transaction()?;
-    let result = select_listen_snapshot(&tx, member_id, expected_fleet, deadline, now).and_then(
-        |snapshot| {
-            deadline.remaining_at(now())?;
-            tx.execute_batch("COMMIT")?;
-            Ok(snapshot)
-        },
-    );
-    let error = match result {
-        Ok(snapshot) => return Ok(snapshot),
-        Err(_) if interrupted.load(Ordering::Relaxed) => CafleetError::DeadlineExceeded,
-        Err(error) => error,
-    };
-    let cleanup = tx.rollback().map_err(|cleanup| {
-        CafleetError::App(format!(
-            "rolling back listener snapshot failed: {}",
-            CafleetError::from(cleanup)
-        ))
-    });
-    CafleetError::merge_cleanup(Err(error), cleanup)
-}
-
-fn select_listen_snapshot(
-    conn: &Connection,
-    member_id: i64,
-    expected_fleet: Option<i64>,
-    deadline: Deadline,
-    now: &impl Fn() -> Instant,
-) -> Result<InboxSnapshot, CafleetError> {
-    deadline.remaining_at(now())?;
-    let subject = crate::broker::members::member_fleet_status(conn, member_id)?;
-    let Some((fleet_id, status)) = subject else {
-        return Err(if expected_fleet.is_some() {
-            CafleetError::InvalidStoredValue {
-                field: "members.member_id".into(),
-                value: member_id.to_string(),
-            }
-        } else {
-            CafleetError::App(format!("Member {member_id} not found"))
-        });
-    };
-    crate::broker::members::require_pinned_fleet(member_id, fleet_id, expected_fleet, "listen")?;
-    if expected_fleet.is_none() && status != MemberStatus::Active {
-        return Err(CafleetError::App(format!("Member {member_id} not found")));
-    }
-    deadline.remaining_at(now())?;
-    let fleet = crate::broker::fleets::get_fleet(conn, fleet_id)?.ok_or_else(|| {
-        CafleetError::InvalidStoredValue {
-            field: "fleets.fleet_id".into(),
-            value: fleet_id.to_string(),
-        }
-    })?;
-    if expected_fleet.is_some() {
-        if fleet.deleted_at.is_some() {
-            return Ok(InboxSnapshot::Closed {
-                fleet_id,
-                reason: InboxClosure::FleetDeleted,
-            });
-        }
-        if status != MemberStatus::Active {
-            return Ok(InboxSnapshot::Closed {
-                fleet_id,
-                reason: InboxClosure::MemberInactive,
-            });
-        }
-    }
-    deadline.remaining_at(now())?;
-    crate::broker::fleets::require_live_fleet(conn, fleet_id)?;
-    deadline.remaining_at(now())?;
-    crate::broker::runtime::member_runtime(conn, member_id)?;
-    deadline.remaining_at(now())?;
-    let mut statement = conn.prepare(&format!(
-        "SELECT {MESSAGE_COLUMNS} FROM messages \
-             WHERE to_member_id=?1 AND status_state='input_required' \
-             ORDER BY created_at ASC, message_id ASC"
-    ))?;
-    deadline.remaining_at(now())?;
-    let mut rows = statement.query([member_id])?;
-    let mut messages = Vec::new();
-    loop {
-        deadline.remaining_at(now())?;
-        let Some(row) = rows.next()? else { break };
-        messages.push(map_message_row(row)?);
-    }
-    Ok(InboxSnapshot::Open { fleet_id, messages })
-}
-
 #[cfg(test)]
 mod tests {
     use crate::broker;
@@ -317,6 +144,7 @@ mod tests {
     use crate::broker::members::test_support::register;
     use crate::broker::messaging::*;
     use crate::db::test_support::initialized_file_conn;
+    use std::sync::atomic::Ordering;
     use tempfile::TempDir;
 
     fn status_state(conn: &rusqlite::Connection, message_id: i64) -> String {

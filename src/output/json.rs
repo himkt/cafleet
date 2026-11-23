@@ -67,18 +67,6 @@ pub(crate) fn message(row: &MessageRecord) -> Value {
         "status_timestamp":row.status_timestamp,"text":row.text})
 }
 
-pub(crate) fn listen_ready(member_id: i64, fleet_id: i64) -> Value {
-    json!({"event":"ready", "member_id":member_id, "fleet_id":fleet_id})
-}
-
-pub(crate) fn listen_pending(next: &str) -> Value {
-    json!({"event":"pending", "next":next})
-}
-
-pub(crate) fn listen_closed(member_id: i64, reason: &str) -> Value {
-    json!({"event":"closed", "member_id":member_id, "reason":reason})
-}
-
 pub(crate) fn message_envelope(row: &MessageRecord) -> Value {
     json!({"message":message(row)})
 }
