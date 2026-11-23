@@ -131,20 +131,25 @@ impl HerdrMultiplexer {
         }
     }
 
-    /// `pane`'s `rect.width` and `scroll.viewport_rows` in the `api snapshot` layouts.
+    /// `pane`'s `rect.width` from the `api snapshot` layouts and its `scroll.viewport_rows` from
+    /// the snapshot's `panes`, joined by pane id.
     fn pane_geometry(&self, pane: &str) -> Result<(u16, u16), MultiplexerError> {
         let result = self.run_json(&self.core.argv(&["herdr", "api", "snapshot"]))?;
-        let layouts = result["snapshot"]["layouts"]
-            .as_array()
-            .ok_or_else(|| MultiplexerError::new("herdr api snapshot missing 'layouts' field"))?;
-        let entry = layouts
+        let snapshot = &result["snapshot"];
+        let entries = |field: &str| {
+            snapshot[field].as_array().ok_or_else(|| {
+                MultiplexerError::new(format!("herdr api snapshot missing '{field}' field"))
+            })
+        };
+        let absent = || MultiplexerError::new(format!("herdr api snapshot has no pane {pane}"));
+        let is_pane = |entry: &&Value| entry["pane_id"].as_str() == Some(pane);
+        let layout_entry = entries("layouts")?
             .iter()
             .filter_map(|layout| layout["panes"].as_array())
             .flatten()
-            .find(|entry| entry["pane_id"].as_str() == Some(pane))
-            .ok_or_else(|| {
-                MultiplexerError::new(format!("herdr api snapshot has no pane {pane}"))
-            })?;
+            .find(is_pane)
+            .ok_or_else(absent)?;
+        let pane_entry = entries("panes")?.iter().find(is_pane).ok_or_else(absent)?;
         let dimension = |object: &Value, field: &str| {
             let value = f64_field(object, "api snapshot", field)?;
             (value.fract() == 0.0 && value >= 1.0 && value <= f64::from(u16::MAX))
@@ -154,8 +159,8 @@ impl HerdrMultiplexer {
                 })
         };
         Ok((
-            dimension(&entry["rect"], "width")?,
-            dimension(&entry["scroll"], "viewport_rows")?,
+            dimension(&layout_entry["rect"], "width")?,
+            dimension(&pane_entry["scroll"], "viewport_rows")?,
         ))
     }
 
@@ -1909,26 +1914,49 @@ mod tests {
 
         const PANE: &str = "w1:p2";
 
-        fn snapshot_reply(panes_by_layout: serde_json::Value) -> Result<String, RunError> {
-            Ok(serde_json::json!({
-                "id": 1,
-                "type": "response",
-                "result": {"snapshot": {"layouts": panes_by_layout}},
+        /// An `api snapshot` reply in herdr 0.9.5's shape: `layouts[].panes[]` entries carry
+        /// `focused`, `pane_id` and `rect`, and only the `panes[]` entries carry `scroll`.
+        fn snapshot_reply(
+            layouts: serde_json::Value,
+            panes: serde_json::Value,
+        ) -> Result<String, RunError> {
+            Ok(herdr_envelope(json!({
+                "snapshot": {"layouts": layouts, "panes": panes, "version": 1}
+            })))
+        }
+
+        fn layout_pane(id: &str, width: i64, height: i64) -> serde_json::Value {
+            json!({
+                "focused": false,
+                "pane_id": id,
+                "rect": {"height": height, "width": width, "x": 0, "y": 0}
             })
-            .to_string())
         }
 
-        /// A snapshot pane entry with its layout rect and its viewport row count.
-        fn viewport_pane(id: &str, width: i64, viewport_rows: i64) -> serde_json::Value {
-            let mut entry = pane(id, 0, 0, width, viewport_rows);
-            entry["scroll"] = json!({"viewport_rows": viewport_rows});
-            entry
+        fn pane_state(id: &str, viewport_rows: i64) -> serde_json::Value {
+            json!({
+                "agent_status": "unknown",
+                "focused": false,
+                "pane_id": id,
+                "scroll": {"max_offset_from_bottom": 0, "offset_from_bottom": 0, "viewport_rows": viewport_rows},
+                "workspace_id": "w2"
+            })
         }
 
-        fn director_layouts(viewport_rows: i64) -> serde_json::Value {
+        fn director_layouts() -> serde_json::Value {
             json!([
-                {"panes": [viewport_pane("w1:p1", 60, 40)]},
-                {"panes": [viewport_pane("w2:p1", 120, 40), viewport_pane(PANE, 97, viewport_rows)]},
+                {"panes": [layout_pane("w1:p1", 60, 40)], "tab_id": "w1:t1"},
+                {"panes": [layout_pane("w2:p1", 120, 40), layout_pane(PANE, 97, 33)], "tab_id": "w2:t1"},
+            ])
+        }
+
+        /// The snapshot `panes[]` with `PANE` between two other panes, each with its own
+        /// viewport row count, so only a join by `pane_id` reads `viewport_rows`.
+        fn director_panes(viewport_rows: i64) -> serde_json::Value {
+            json!([
+                pane_state("w1:p1", 40),
+                pane_state(PANE, viewport_rows),
+                pane_state("w2:p1", 41),
             ])
         }
 
@@ -1952,7 +1980,7 @@ mod tests {
          {
             let body = "› \x1b[2mAsk anything\x1b[0m\r\n\r\nstatus line\r\n";
             let runner = FakeRunner::with_binary("herdr");
-            runner.respond(snapshot_reply(director_layouts(3)));
+            runner.respond(snapshot_reply(director_layouts(), director_panes(3)));
             runner.respond(Ok(body.to_owned()));
             let capture = on_server(runner.clone()).capture_screen(PANE).unwrap();
             assert_eq!((capture.rows, capture.cols), (3, 97));
@@ -1973,7 +2001,7 @@ mod tests {
         {
             let body = "\r\nfirst row\r\n\r\nlast drawn row\r\n";
             let runner = FakeRunner::with_binary("herdr");
-            runner.respond(snapshot_reply(director_layouts(30)));
+            runner.respond(snapshot_reply(director_layouts(), director_panes(30)));
             runner.respond(Ok(body.to_owned()));
             let capture = on_server(runner).capture_screen(PANE).unwrap();
             assert_eq!(
@@ -1991,12 +2019,43 @@ mod tests {
         fn capture_screen_fails_for_a_pane_absent_from_the_snapshot_or_an_unreadable_reply() {
             for (name, snapshot) in [
                 (
-                    "pane absent",
-                    snapshot_reply(json!([{"panes": [viewport_pane("w1:p1", 60, 40)]}])),
+                    "pane absent from the layouts",
+                    snapshot_reply(
+                        json!([{"panes": [layout_pane("w1:p1", 60, 40)]}]),
+                        director_panes(30),
+                    ),
+                ),
+                (
+                    "pane absent from the snapshot panes",
+                    snapshot_reply(
+                        director_layouts(),
+                        json!([pane_state("w1:p1", 40), pane_state("w2:p1", 41)]),
+                    ),
+                ),
+                (
+                    "no snapshot panes",
+                    Ok(herdr_envelope(
+                        json!({"snapshot": {"layouts": director_layouts()}}),
+                    )),
                 ),
                 (
                     "no viewport rows",
-                    snapshot_reply(json!([{"panes": [pane(PANE, 0, 0, 97, 30)]}])),
+                    snapshot_reply(
+                        director_layouts(),
+                        json!([{"pane_id": PANE, "scroll": {"offset_from_bottom": 0}}]),
+                    ),
+                ),
+                (
+                    "scroll only on the layout entry",
+                    snapshot_reply(
+                        json!([{"panes": [{
+                            "focused": true,
+                            "pane_id": PANE,
+                            "rect": {"height": 30, "width": 97, "x": 0, "y": 0},
+                            "scroll": {"viewport_rows": 30}
+                        }]}]),
+                        json!([{"pane_id": PANE}]),
+                    ),
                 ),
                 ("non-JSON snapshot", Ok("not json".to_owned())),
                 (
