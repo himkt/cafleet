@@ -1714,14 +1714,25 @@ impl DirectorSweep {
         if stopped() {
             return Ok(DirectorOutcome::Uncertain("runner_stopped"));
         }
-        let rendered = capture(mux.as_ref(), pane)
-            .ok()
-            .map(|screen| detector.composer_text(&screen))
-            .transpose()?
-            .flatten()
-            .is_some_and(|text| text.matches(&[literal.as_str()]));
-        if !rendered {
-            return Ok(DirectorOutcome::Uncertain("literal_mismatch"));
+        let window_until = (self.clock.now() + crate::runtime::input::PRE_SUBMIT_WINDOW)
+            .min(deadline - (DIRECTOR_VERIFICATION + DIRECTOR_WRITE_MARGIN));
+        loop {
+            let rendered = capture(mux.as_ref(), pane)
+                .ok()
+                .map(|screen| detector.composer_text(&screen))
+                .transpose()?
+                .flatten()
+                .is_some_and(|text| text.matches(&[literal.as_str()]));
+            if rendered {
+                break;
+            }
+            if self.clock.now() + DIRECTOR_VERIFICATION_POLL > window_until {
+                return Ok(DirectorOutcome::Uncertain("literal_mismatch"));
+            }
+            self.clock.sleep(DIRECTOR_VERIFICATION_POLL);
+            if stopped() {
+                return Ok(DirectorOutcome::Uncertain("runner_stopped"));
+            }
         }
         if stopped() {
             return Ok(DirectorOutcome::Uncertain("runner_stopped"));
@@ -6934,6 +6945,10 @@ mod tests {
             submit_clears: bool,
             capture_failure: Option<String>,
             human_key_after_type: Option<&'static str>,
+            /// How many captures after each typed chunk still show the composer without it, as
+            /// a native composer that renders its input late.
+            render_delay: usize,
+            unrendered: usize,
             stop_at: Option<(StopAt, Arc<AtomicBool>)>,
             events: Vec<PaneEvent>,
             calls: usize,
@@ -7010,6 +7025,8 @@ mod tests {
                     submit_clears: true,
                     capture_failure: None,
                     human_key_after_type: None,
+                    render_delay: 0,
+                    unrendered: 0,
                     stop_at: None,
                     events: Vec::new(),
                     calls: 0,
@@ -7075,7 +7092,16 @@ mod tests {
                     ["capture-pane", "-p", "-e", "-N", "-t", _] => {
                         state.events.push(PaneEvent::Capture);
                         state.stop(StopAt::Capture);
-                        let mut body = state.rows().join("\n");
+                        let mut body = if state.unrendered > 0 {
+                            state.unrendered -= 1;
+                            let typed = std::mem::take(&mut state.typed);
+                            let rows = state.rows();
+                            state.typed = typed;
+                            rows
+                        } else {
+                            state.rows()
+                        }
+                        .join("\n");
                         body.push('\n');
                         Ok(body)
                     }
@@ -7086,6 +7112,7 @@ mod tests {
                             .any(|event| matches!(event, PaneEvent::Type(_)));
                         state.events.push(PaneEvent::Type((*chunk).to_owned()));
                         state.typed.push_str(chunk);
+                        state.unrendered = state.render_delay;
                         if let Some(key) = state.human_key_after_type.take() {
                             state.typed.push_str(key);
                         }
@@ -7700,6 +7727,74 @@ mod tests {
             let mut sweep = run.sweep(catalog(Some(&["tmux", "herdr"]), 200));
             run.tick(&mut sweep);
             assert_eq!(run.pane.typed_literals(), line(&message));
+        }
+
+        /// The captures taken between the first typed chunk and the submit key.
+        fn pre_submit_captures(pane: &FakePane) -> usize {
+            pane.events()
+                .into_iter()
+                .skip_while(|event| !matches!(event, PaneEvent::Type(_)))
+                .take_while(|event| !matches!(event, PaneEvent::Submit(_)))
+                .filter(|event| matches!(event, PaneEvent::Capture))
+                .count()
+        }
+
+        #[test]
+        fn a_preview_rendering_within_the_pre_submit_window_is_submitted_and_notified() {
+            let mut run = DirectorRun::new();
+            let message = run.report("renders after the settle");
+            run.pane.state().render_delay = 4;
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.typed_literals(), line(&message));
+            assert_eq!(
+                pre_submit_captures(&run.pane),
+                5,
+                "the composer is re-observed until the literal renders"
+            );
+            assert_eq!(run.pane.submits(), 1, "the submit key follows the render");
+            assert!(run.notified(message.message_id));
+            assert!(
+                !run.director_diagnostics()
+                    .iter()
+                    .any(|(text, _)| text.contains("literal_mismatch")),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        #[test]
+        fn an_appended_key_records_literal_mismatch_when_the_pre_submit_window_closes() {
+            let mut run = DirectorRun::new();
+            let message = run.report("races a human key past the window");
+            run.pane.state().human_key_after_type = Some("x");
+            let mut sweep = run.sweep(delivering());
+            let started = run.clock.elapsed();
+            run.tick(&mut sweep);
+            let waited = run.clock.elapsed() - started;
+            assert!(
+                waited
+                    >= super::super::DIRECTOR_SETTLE + crate::runtime::input::PRE_SUBMIT_WINDOW
+                        - super::super::DIRECTOR_VERIFICATION_POLL,
+                "the mismatch waits for the window to close: {waited:?}"
+            );
+            assert!(
+                pre_submit_captures(&run.pane) > 1,
+                "the composer is re-observed inside the window"
+            );
+            assert_eq!(run.pane.submits(), 0, "no submit key after the mismatch");
+            assert!(!run.notified(message.message_id));
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} uncertain: literal_mismatch",
+                        message.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
         }
 
         #[test]

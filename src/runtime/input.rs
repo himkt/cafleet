@@ -40,6 +40,7 @@ const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
 const STALL_BOUND: Duration = Duration::from_secs(180);
 const POST_SUBMIT_VERIFICATION: Duration = Duration::from_secs(2);
+pub(crate) const PRE_SUBMIT_WINDOW: Duration = Duration::from_secs(1);
 const PASTE_CLOSE_RESERVE: Duration = Duration::from_millis(250);
 const PASTE_OPEN: &[u8] = b"\x1b[200~";
 const PASTE_CLOSE: &[u8] = b"\x1b[201~";
@@ -4010,6 +4011,17 @@ impl InputCoordinator {
             .is_some_and(|text| text.matches(&chunks)))
     }
 
+    /// A literal can render after the settle ends, so the composer is re-observed until the
+    /// pre-submit window after the settle closes; the attempt deadline closes it earlier, and
+    /// `arm_pending` then records the unmatched literal as `literal_mismatch`.
+    fn pre_submit_window_open(&self) -> bool {
+        self.pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .and_then(|composer| composer.settle_until)
+            .is_some_and(|until| self.services.clock.now() < until + PRE_SUBMIT_WINDOW)
+    }
+
     fn composer_interruption(
         &self,
         id: AttemptKey,
@@ -4063,6 +4075,13 @@ impl InputCoordinator {
             return Ok(None);
         }
         if let Some(cause) = self.composer_interruption(id, observation)? {
+            let cause = if cause == storage::StopCause::DeadlineExpired
+                && !self.composer_renders_literal(id, transport)?
+            {
+                storage::StopCause::LiteralMismatch
+            } else {
+                cause
+            };
             *terminal_bookkeeping = true;
             return self.interrupt_composer(conn, id, observation, effective, cause);
         }
@@ -4075,10 +4094,11 @@ impl InputCoordinator {
         {
             return Ok(None);
         }
-        let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
-            return Ok(None);
-        };
+        let fresh = self.fresh_drain(transport, observation, effective)?;
         if !self.composer_renders_literal(id, transport)? {
+            if self.pre_submit_window_open() {
+                return Ok(None);
+            }
             *terminal_bookkeeping = true;
             return self.interrupt_composer(
                 conn,
@@ -4088,6 +4108,9 @@ impl InputCoordinator {
                 storage::StopCause::LiteralMismatch,
             );
         }
+        let Some(output_seq) = fresh else {
+            return Ok(None);
+        };
         let retained = self
             .operations
             .get_mut(&id)
@@ -6350,7 +6373,9 @@ mod tests {
                     .pending
                     .as_mut()
                     .and_then(PendingInput::composer_mut)
-                    && composer.settle_until.is_some()
+                    && composer
+                        .settle_until
+                        .is_some_and(|until| until > host.clock.now())
                 {
                     composer.settle_until = Some(host.clock.now());
                 }
@@ -6372,6 +6397,9 @@ mod tests {
                 panic!("the actual writer reaches its checkpoint within bounded turns");
             }
 
+            /// The virtual time a waiting helper lets pass between turns.
+            pub(super) const WAIT_STEP: Duration = Duration::from_millis(20);
+
             pub(super) fn finish(host: &mut Host, confirm: bool) -> SubmissionResult {
                 for _ in 0..256 {
                     if host.coordinator.pending.is_some()
@@ -6391,6 +6419,7 @@ mod tests {
                     if let Some(reply) = turn(host) {
                         return reply;
                     }
+                    host.clock.advance(WAIT_STEP);
                 }
                 panic!("the actual coordinator finishes within bounded turns");
             }
@@ -7160,11 +7189,13 @@ mod tests {
             mod pre_submit {
                 use crate::runtime::input::tests::ordinary_prompt::composer_reliability::*;
 
+                /// Drives turns, letting virtual time pass so the pre-submit window can close.
                 fn reply_after(host: &mut Host) -> SubmissionResult {
                     for _ in 0..256 {
                         if let Some(reply) = turn(host) {
                             return reply;
                         }
+                        host.clock.advance(WAIT_STEP);
                     }
                     panic!("the coordinator replies within bounded turns");
                 }
@@ -7194,6 +7225,65 @@ mod tests {
                         assert_eq!(reply.status, SubmissionStatus::Accepted);
                         assert_eq!(stored(host, &reply).stop_cause, None);
                         assert_eq!(host.pty.written, encoded());
+                    });
+                }
+
+                /// The child repaints its composer empty, as a native CLI that has not yet rendered
+                /// the written literal shows it.
+                const UNRENDERED: &[u8] = b"[23;1H[2KSynthetic state
+[2KState end";
+
+                /// Drives turns for `span` of virtual time, asserting the pre-submit window holds
+                /// the write: no reply and no submit key.
+                fn hold_for(host: &mut Host, span: Duration) {
+                    let until = host.clock.now() + span;
+                    while host.clock.now() < until {
+                        assert!(turn(host).is_none(), "the pre-submit window is still open");
+                        host.clock.advance(WAIT_STEP);
+                    }
+                    assert!(
+                        host.pty.program.is_empty(),
+                        "no submit key inside the window"
+                    );
+                }
+
+                #[test]
+                fn a_literal_rendering_within_the_pre_submit_window_continues_to_the_submit_key() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-late-render", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.child_output(UNRENDERED);
+                        hold_for(host, crate::runtime::input::PRE_SUBMIT_WINDOW / 2);
+                        host.child_output(
+                            crate::coding_agent::catalog::test_support::synthetic_composer_echo(
+                                LITERAL,
+                            ),
+                        );
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(stored(host, &reply).stop_cause, None);
+                        assert_eq!(host.pty.written, encoded());
+                    });
+                }
+
+                #[test]
+                fn an_appended_key_records_literal_mismatch_when_the_pre_submit_window_closes() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-window-close", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.type_human(b"x");
+                        let opened = host.clock.now();
+                        hold_for(
+                            host,
+                            crate::runtime::input::PRE_SUBMIT_WINDOW - 5 * WAIT_STEP,
+                        );
+                        let reply = reply_after(host);
+                        assert!(
+                            host.clock.now() >= opened + crate::runtime::input::PRE_SUBMIT_WINDOW,
+                            "the mismatch is recorded once the window closes"
+                        );
+                        assert_mismatch_without_submit(host, &reply);
+                        assert_eq!(host.pty.written, [LITERAL.as_bytes(), b"x"].concat());
                     });
                 }
 
