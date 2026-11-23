@@ -2443,7 +2443,7 @@ mod tests {
                 "composer_empty",
                 true,
             );
-            let rule = &mut definition["profiles"][0]["rules"][0];
+            let rule = &mut definition["codex"]["profile"]["rules"][0];
             rule["region"] = json!({"screen":"either","start_pattern":"^> ","end_pattern":"^> ","max_rows":1,"cursor":"after_prompt"});
             rule["matchers"] = json!([{"id":"prompt","scope":"line","pattern":"^> "}]);
             rule["suggestion"] = json!({"style":style});
@@ -2614,15 +2614,6 @@ mod tests {
             strict_idle: bool,
         }
 
-        fn backend_profile<'a>(definitions: &'a Value, backend: &str) -> &'a Value {
-            definitions["profiles"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|profile| profile["backend"] == backend)
-                .expect("a bundled fixture is served by its backend's profile")
-        }
-
         fn line_patterns(rule: &Value) -> impl Iterator<Item = &str> {
             rule["matchers"]
                 .as_array()
@@ -2652,35 +2643,36 @@ mod tests {
             })
         }
 
-        /// Every bundled `-suggestion-` fixture with its backend profile's suggestion rule ids
-        /// and whether that profile's idle rule is strict.
+        /// Every bundled `-suggestion-` screen with its profile file's suggestion rule ids and
+        /// whether that profile's idle rule is strict.
         fn suggestion_fixtures() -> Vec<SuggestionFixture> {
-            let definitions = bundled_definitions();
-            let fixtures: Vec<SuggestionFixture> = definitions["fixtures"]
-                .as_array()
+            let files = bundled_files();
+            let fixtures: Vec<SuggestionFixture> = files
+                .as_object()
                 .unwrap()
                 .iter()
-                .filter(|fixture| fixture["id"].as_str().unwrap().contains("-suggestion-"))
-                .map(|fixture| {
-                    let backend = fixture["backend"].as_str().unwrap();
-                    let version = fixture["native_version"].as_str().unwrap();
-                    let profile = backend_profile(&definitions, backend);
-                    SuggestionFixture {
-                        id: fixture["id"].as_str().unwrap().to_owned(),
-                        backend: *CodingAgent::all()
-                            .iter()
-                            .find(|agent| agent.name() == backend)
-                            .expect("a bundled fixture names a supported backend"),
-                        version: version.to_owned(),
-                        suggestion_rules: profile["rules"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .filter(|rule| rule.get("suggestion").is_some())
-                            .map(|rule| rule["id"].as_str().unwrap().to_owned())
-                            .collect(),
-                        strict_idle: has_strict_idle_rule(profile),
-                    }
+                .flat_map(|(backend, file)| {
+                    let backend = crate::coding_agent::coding_agent(backend)
+                        .expect("a bundled profile file names a supported backend");
+                    let profile = &file["profile"];
+                    file["screens"]
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .filter(|(id, _)| id.contains("-suggestion-"))
+                        .map(move |(id, screen)| SuggestionFixture {
+                            id: id.clone(),
+                            backend,
+                            version: screen["native_version"].as_str().unwrap().to_owned(),
+                            suggestion_rules: profile["rules"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .filter(|rule| rule.get("suggestion").is_some())
+                                .map(|rule| rule["id"].as_str().unwrap().to_owned())
+                                .collect(),
+                            strict_idle: has_strict_idle_rule(profile),
+                        })
                 })
                 .collect();
             assert!(
@@ -3192,7 +3184,7 @@ mod tests {
         }
         fn declaring() -> Value {
             let mut value = definitions();
-            value["profiles"][0]["rules"][0]["region"]["panel_separator"] = json!("│");
+            value["codex"]["profile"]["rules"][0]["region"]["panel_separator"] = json!("│");
             value
         }
         fn observe(definition: &Value, screen: &ScreenSnapshot) -> ScreenObservation {
@@ -3242,7 +3234,7 @@ mod tests {
         #[test]
         fn a_clipped_request_answers_through_the_same_plan() {
             let mut value = inspection_fixture_definition();
-            value["profiles"][0]["rules"][0]["region"]["panel_separator"] = json!("│");
+            value["codex"]["profile"]["rules"][0]["region"]["panel_separator"] = json!("│");
             let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
             let plan = catalog
@@ -3397,11 +3389,11 @@ mod tests {
         }
         fn with_state_rule(separator: bool) -> Value {
             let mut value = declaring();
-            value["profiles"][0]["rules"]
+            value["codex"]["profile"]["rules"]
                 .as_array_mut()
                 .unwrap()
                 .push(state_rule("synthetic-panel-state", separator));
-            value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+            value["codex"]["profile"]["capabilities"]["detection"]["rule_ids"] =
                 json!([RULE, "synthetic-panel-state"]);
             value
         }
@@ -3580,7 +3572,7 @@ mod tests {
         #[test]
         fn marker_focus_resolves_no_choice_when_the_marker_row_holds_several_choice_labels() {
             let mut value = question_fixture_definition();
-            value["profiles"][0]["rules"][1]["matchers"][4]["pattern"] =
+            value["codex"]["profile"]["rules"][1]["matchers"][4]["pattern"] =
                 json!(" / (?P<label>Ask later)$");
             let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
             let plan = catalog
@@ -3634,7 +3626,7 @@ mod tests {
 
         fn framed_catalog() -> ProfileCatalog {
             let mut value = question_fixture_definition();
-            value["profiles"][0]["rules"][1]["frame"] =
+            value["codex"]["profile"]["rules"][1]["frame"] =
                 json!({"require_patterns":[],"reject_patterns":["^Live composer$"]});
             crate::coding_agent::catalog::test_support::load(&value).unwrap()
         }
@@ -3679,7 +3671,7 @@ mod tests {
         #[test]
         fn an_interaction_frame_require_pattern_must_appear_on_the_screen() {
             let mut value = question_fixture_definition();
-            value["profiles"][0]["rules"][1]["frame"] = json!({
+            value["codex"]["profile"]["rules"][1]["frame"] = json!({
                 "require_patterns":["^Footer: question$"],"reject_patterns":["^Live composer$"]
             });
             let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
@@ -4010,7 +4002,7 @@ mod tests {
     #[test]
     fn runtime_detector_missing_or_empty_configured_capture_keeps_the_rule_incomplete() {
         let mut definition = definitions();
-        definition["profiles"][0]["rules"][0]["matchers"][0]["pattern"] =
+        definition["codex"]["profile"]["rules"][0]["matchers"][0]["pattern"] =
             json!("^Operation: (?P<operation>.*)$");
         assert_permission(&observation(
             &definition,
@@ -4020,7 +4012,7 @@ mod tests {
             &definition,
             &terminal(&lines(""), 80, false).snapshot(),
         ));
-        definition["profiles"][0]["rules"][0]["matchers"][0]["pattern"] =
+        definition["codex"]["profile"]["rules"][0]["matchers"][0]["pattern"] =
             json!("^Operation: (?:write disposable.txt|(?P<operation>other))$");
         assert_incomplete(&observation(
             &definition,
@@ -4037,7 +4029,7 @@ mod tests {
             &terminal(&duplicate, 80, false).snapshot(),
         ));
         let mut definition = definitions();
-        definition["profiles"][0]["rules"][0]["region"]["cursor"] = json!("any");
+        definition["codex"]["profile"]["rules"][0]["region"]["cursor"] = json!("any");
         let one = lines("write disposable.txt");
         assert_permission(&observation(
             &definition,
@@ -4055,12 +4047,12 @@ mod tests {
     fn runtime_detector_region_limits_screen_selection_and_cursor_are_enforced() {
         let screen = terminal(&lines("write disposable.txt"), 80, false).snapshot();
         let mut definition = definitions();
-        definition["profiles"][0]["rules"][0]["region"]["max_rows"] = json!(6);
+        definition["codex"]["profile"]["rules"][0]["region"]["max_rows"] = json!(6);
         assert_permission(&observation(&definition, &screen));
-        definition["profiles"][0]["rules"][0]["region"]["max_rows"] = json!(5);
+        definition["codex"]["profile"]["rules"][0]["region"]["max_rows"] = json!(5);
         assert_incomplete(&observation(&definition, &screen));
         definition = definitions();
-        definition["profiles"][0]["rules"][0]["region"]["screen"] = json!("alternate");
+        definition["codex"]["profile"]["rules"][0]["region"]["screen"] = json!("alternate");
         assert_incomplete(&observation(&definition, &screen));
         assert_permission(&observation(
             &definition,
@@ -4070,14 +4062,15 @@ mod tests {
         terminal.feed(b"\x1b[1;1H").unwrap();
         assert_incomplete(&observation(&definitions(), &terminal.snapshot()));
         definition = definitions();
-        definition["profiles"][0]["rules"][0]["region"]["cursor"] = json!("inside");
+        definition["codex"]["profile"]["rules"][0]["region"]["cursor"] = json!("inside");
         assert_incomplete(&observation(&definition, &terminal.snapshot()));
     }
 
     #[test]
     fn runtime_detector_cursor_endpoint_uses_wide_display_cells() {
         let mut definition = definitions();
-        definition["profiles"][0]["rules"][0]["region"]["end_pattern"] = json!("^Selection界: $");
+        definition["codex"]["profile"]["rules"][0]["region"]["end_pattern"] =
+            json!("^Selection界: $");
         let mut rows = lines("write disposable.txt");
         *rows.last_mut().unwrap() = "Selection界: ".into();
         let mut state = terminal(&rows, 80, false);
@@ -4108,7 +4101,7 @@ mod tests {
     #[test]
     fn runtime_detector_region_extraction_preserves_hard_newlines() {
         let mut definition = definitions();
-        definition["profiles"][0]["rules"][0]["matchers"][0] = json!({"id":"operation","scope":"region","pattern":"(?m)^Operation: (?P<operation>[\\s\\S]+?)\\n> Allow once$"});
+        definition["codex"]["profile"]["rules"][0]["matchers"][0] = json!({"id":"operation","scope":"region","pattern":"(?m)^Operation: (?P<operation>[\\s\\S]+?)\\n> Allow once$"});
         let first = observation(&definition, &wrapped("printf 'ab'", 80));
         let second = observation(&definition, &wrapped("printf 'a\r\nb'", 80));
         assert_permission(&first);
@@ -4260,15 +4253,17 @@ mod tests {
         ];
         for (case, change, reverse, kind, evidence) in cases {
             let mut definition = definitions();
-            let mut other = definition["profiles"][0]["rules"][0].clone();
+            let mut other = definition["codex"]["profile"]["rules"][0].clone();
             other["id"] = json!("synthetic-other");
             change(&mut other);
-            let rules = definition["profiles"][0]["rules"].as_array_mut().unwrap();
+            let rules = definition["codex"]["profile"]["rules"]
+                .as_array_mut()
+                .unwrap();
             rules.push(other);
             if reverse {
                 rules.reverse();
             }
-            definition["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+            definition["codex"]["profile"]["capabilities"]["detection"]["rule_ids"] =
                 json!([RULE, "synthetic-other"]);
             let result = observation(
                 &definition,
@@ -4279,15 +4274,15 @@ mod tests {
             assert!(result.raw_evidence.is_object(), "{case}");
         }
         let mut conflicting = definition(None, None);
-        let mut twin = conflicting["profiles"][0]["rules"][0].clone();
+        let mut twin = conflicting["codex"]["profile"]["rules"][0].clone();
         twin["id"] = json!("synthetic-unknown-twin");
         twin["observation"] = json!("unknown");
         twin["verified_noninteraction"] = json!(false);
-        conflicting["profiles"][0]["rules"]
+        conflicting["codex"]["profile"]["rules"]
             .as_array_mut()
             .unwrap()
             .push(twin);
-        conflicting["profiles"][0]["capabilities"]["detection"] =
+        conflicting["codex"]["profile"]["capabilities"]["detection"] =
             json!({"rule_ids":["synthetic-unknown-twin"],"fixture_ids":[FIXTURE]});
         let composers = observation(
             &conflicting,
@@ -4305,15 +4300,15 @@ mod tests {
     #[test]
     fn runtime_detector_lower_priority_rule_cannot_override_the_stronger_permission_form() {
         let mut definition = definitions();
-        let mut other = definition["profiles"][0]["rules"][0].clone();
+        let mut other = definition["codex"]["profile"]["rules"][0].clone();
         other["id"] = json!("synthetic-lower");
         other["observation"] = json!("question");
         other["priority"] = json!(99);
-        definition["profiles"][0]["rules"]
+        definition["codex"]["profile"]["rules"]
             .as_array_mut()
             .unwrap()
             .insert(0, other);
-        definition["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+        definition["codex"]["profile"]["capabilities"]["detection"]["rule_ids"] =
             json!([RULE, "synthetic-lower"]);
         assert_permission(&observation(
             &definition,
@@ -4366,7 +4361,7 @@ mod tests {
         /// the `Operation:` prefix and the choice rows.
         fn rowed(margin_rows: Option<&str>, trailer: Option<&str>) -> Value {
             let mut value = definitions();
-            let rule = &mut value["profiles"][0]["rules"][0];
+            let rule = &mut value["codex"]["profile"]["rules"][0];
             rule["matchers"][0] = json!({
                 "id":"operation","scope":"region",
                 "pattern":"(?m)^Operation: (?P<operation>[^\\n]+(?:\\n[^>\\n][^\\n]*)*)\\n> Allow once$"
@@ -4445,14 +4440,14 @@ mod tests {
         #[test]
         fn the_default_margin_rows_keep_the_shipped_all_rows_extraction() {
             let mut definition = rowed(None, None);
-            definition["profiles"][0]["rules"][0]["matchers"][0]["pattern"] = json!(
+            definition["codex"]["profile"]["rules"][0]["matchers"][0]["pattern"] = json!(
                 "(?m)^Operation:(?P<operation> [^\\n]+(?:\\n[^>\\n][^\\n]*)*)\\n> Allow once$"
             );
-            definition["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] =
+            definition["codex"]["profile"]["rules"][0]["extract"]["operation"]["row_margin"] =
                 json!(" ");
             let explicit = {
                 let mut value = definition.clone();
-                value["profiles"][0]["rules"][0]["extract"]["operation"]["margin_rows"] =
+                value["codex"]["profile"]["rules"][0]["extract"]["operation"]["margin_rows"] =
                     json!("all");
                 value
             };
@@ -4489,7 +4484,7 @@ mod tests {
         #[test]
         fn a_trailer_applies_to_a_single_row_operation_without_a_margin() {
             let mut definition = definitions();
-            definition["profiles"][0]["rules"][0]["extract"]["operation"]["row_trailer"] =
+            definition["codex"]["profile"]["rules"][0]["extract"]["operation"]["row_trailer"] =
                 json!("█");
             let observed = observation(
                 &definition,
@@ -4503,9 +4498,9 @@ mod tests {
         #[test]
         fn a_blank_margined_row_inside_a_multi_line_command_still_matches() {
             let mut definition = rowed(None, None);
-            definition["profiles"][0]["rules"][0]["matchers"][0]["pattern"] =
+            definition["codex"]["profile"]["rules"][0]["matchers"][0]["pattern"] =
                 json!("(?m)^Operation:(?P<operation> [^\\n]+(?:\\n [^\\n]*)*)\\n> Allow once$");
-            definition["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] =
+            definition["codex"]["profile"]["rules"][0]["extract"]["operation"]["row_margin"] =
                 json!(" ");
             assert_eq!(
                 operation(&definition, &["printf one", " ", " printf two"]),
@@ -4534,13 +4529,7 @@ mod tests {
         }
 
         fn shell_rule() -> Value {
-            let definitions = bundled_definitions();
-            definitions["profiles"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|profile| profile["backend"] == "opencode")
-                .expect("bundled OpenCode profile")["rules"]
+            bundled_files()["opencode"]["profile"]["rules"]
                 .as_array()
                 .unwrap()
                 .iter()

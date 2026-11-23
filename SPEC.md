@@ -276,14 +276,14 @@ Validation is lazy: a site reads and validates a variable only when it resolves 
 
 ##### Asset installation
 
-The binary carries the data files of the `assets/` tree listed below. The native screen fixtures are catalog provenance records: the bundled catalog cites them, and setup installs none of them.
+The binary carries every data file of the `assets/` tree listed below. Setup installs none of the profile files.
 
 | Source tree | Contents | Consumer |
 |---|---|---|
 | `assets/skills/` | One directory per skill, embedded file by file | Skill installation (this section) |
 | `assets/presets/` | One directory per backend with presets | Preset installation (table below) |
 | `assets/extensions/` | One directory per backend with an extension | Extension installation (table below) |
-| `assets/profiles/` | The embedded bundled catalog `bundled.json`, and the native screen fixtures `native/<backend>.json` that it cites | The profile catalog (§6.9 Bundled profiles and native screen fixtures) |
+| `assets/profiles/` | One profile file `<backend>.json` per backend with a bundled profile, holding that backend's profile and the native screen fixtures it cites | The profile catalog (§6.9 Bundled profiles and native screen fixtures) |
 
 Each agent's presets and extensions, where they exist, are static files embedded in the binary next to the skills; their targets resolve per §6.3 Config-dir resolution. Per backend, setup replaces every embedded skill sequentially, then each preset in table order, then each extension target followed by its executable record, then (for `hermes`) runs the plugin enablement:
 
@@ -2353,15 +2353,15 @@ A probe that fails a rule above, cannot start, times out or prints non-UTF-8 out
 
 ##### Bundled profiles and native screen fixtures
 
-The binary embeds the bundled catalog; the native screen fixtures recorded in its fixture registry are its provenance records. A shipped bundled catalog satisfies every provenance rule below. The catalog holds at most one profile per backend, and a catalog with a second profile for one backend fails catalog loading. A bundled profile entry has required `backend`, `rules` and `capabilities`, and no other key; documentation and messages name a profile by its backend, as in "the bundled OpenCode profile". Multiplexer, platform, permission mode and native version select nothing: every run of a backend uses that backend's profile. Each profile's capabilities rest on accepted native captures. Each fixture entry keeps its own `native_version` as the actual capture version, a fact about the capture that bounds nothing. A native change that requires different rules or plans extends the backend's profile in place. A backend with no profile entry launches with `coverage=unknown`, and its ordinary input uses delivery fallback.
+The binary embeds the bundled catalog: one profile file per backend, `assets/profiles/<backend>.json` (§6.3 Asset installation), holding that backend's profile and the native screen fixtures that are its provenance records. A shipped bundled catalog satisfies every provenance rule below. One file per backend means the catalog holds at most one profile per backend. A profile object has required `rules` and `capabilities`, and no other key; its backend is its file's backend, and documentation and messages name a profile by its backend, as in "the bundled OpenCode profile". Multiplexer, platform, permission mode and native version select nothing: every run of a backend uses that backend's profile. Each profile's capabilities rest on accepted native captures. Each screen records its own `native_version` as the actual capture version, a fact about the capture that bounds nothing. A native change that requires different rules or plans extends the backend's profile in place. A backend with no profile file launches with `coverage=unknown`, and its ordinary input uses delivery fallback.
 
 The rules match screen patterns, so a changed native UI fails safe for detection: an older or newer native version that renders a form differently yields the `unknown` or `unknown_interaction` observation and offers no answer plan, and an unverified composer selects delivery fallback for ordinary input. An answer plan writes only after its request rule, choices and gates match the fresh observation.
 
 The runner pins its backend's bundled profile for its lifetime. Fresh creation and observer initialization verify that the recorded backend's bundled profile yields the recorded coverage, whatever the recorded native version, so a `tested` coverage requires a bundled profile that declares detection. Historical run and event reads preserve their recorded identities; recovery reports a recorded `tested` coverage whose backend's profile declares no detection now explicitly rather than attaching another profile. A catalog update affects newly launched runners only.
 
-The fixture registry uses `assets/profiles/native/<backend>.json` (§6.3 Asset installation) for each backend with catalogued native screens. Every catalog pattern this section quotes uses § Pattern syntax. A fixture entry has required `id,kind,backend,native_version,rows,cols,source_ref,sha256` and optional `composer_evidence`; `source_ref` selects `native/<backend>.json`, and `sha256` is the SHA-256 of the canonical JSON (§6.4 JSON encoding) of that entry's screen object. Provenance validation covers every catalog fixture entry, including screens that no profile capability cites. Run-time catalog loading ignores the `fixtures` registry contents and every `fixture_ids` value; only provenance validation reads them. Its rules are unique ids, lowercase 32-byte digests, non-empty citations, citations of known fixtures of the profile's backend and continuations citing native fixtures.
+Every catalog pattern this section quotes uses § Pattern syntax. Each screen key of a profile file is a fixture id that `fixture_ids` values cite. Provenance validation covers every screen, including screens that no profile capability cites. Run-time catalog loading ignores the `screens` contents and every `fixture_ids` value; only provenance validation reads them. Its rules are fixture ids unique across profile files, no repeated object key at any level of a profile file, non-empty citations and citations naming a screen of the same profile file.
 
-`composer_evidence` is a nonempty array of explicit native measurement records. Each record requires `operation` (`prompt` or `exec`), `multiplexer` (`tmux` or `herdr`) and one `kind` from the table below. Provenance validation rejects unknown fields or values and duplicate `(operation,multiplexer,kind)` records on one fixture. The native trial and its captured state establish each record's meaning; fixture naming alone supplies no claim.
+`composer_evidence` is an optional screen field: a nonempty array of explicit native measurement records. Each record requires `operation` (`prompt` or `exec`), `multiplexer` (`tmux` or `herdr`) and one `kind` from the table below. Provenance validation rejects unknown fields or values and duplicate `(operation,multiplexer,kind)` records on one screen. The native trial and its captured state establish each record's meaning; fixture naming alone supplies no claim.
 
 | Kind | Additional required fields | Evidence |
 |---|---|---|
@@ -2787,22 +2787,24 @@ The `herdr` fixtures were captured with herdr's terminal identity (`TERM`, `COLO
 | A command line equal to a choice label, such as `Deny` | The label matchers match twice, so no request matches |
 | The `cafleet` launch mode | Shows no approval form; the profile supplies the composer and submission plans only |
 
-A backend fixture file has exactly these required fields:
+A profile file has exactly these required fields:
 
 | Field | Requirement |
 |---|---|
 | `schema_version` | `1` |
-| `backend` | Equals the backend of every catalog fixture entry referring to this file |
-| `provenance` | `native` |
-| `screens` | An object mapping each catalog fixture `id` to its captured screen object |
+| `backend` | The backend named by the file name (`claude.json` → `claude`) |
+| `profile` | Exactly `rules` and `capabilities`; the profile's backend is the file's `backend` |
+| `screens` | An object mapping each fixture id to its captured screen object; every screen is a native capture |
 
-Screen keys follow their entries' order in `bundled.json` `fixtures[]` for that backend. Backend fixture files use 2-space pretty JSON with one array element per line.
+Profile files use 2-space pretty JSON with one array element per line.
 
-Each screen object has exactly these fields, of which only `cell_backgrounds` and `cell_styles` are optional:
+Each screen object has exactly these fields, of which only `composer_evidence`, `cell_backgrounds` and `cell_styles` are optional:
 
 | Field | Requirement |
 |---|---|
-| `rows`, `cols` | Positive measured geometry, equal to the catalog fixture entry |
+| `native_version` | The capture's native version, parsed with the native version probe's SemVer rule (§ Native version probe); it bounds nothing |
+| `composer_evidence` | Optional nonempty array of composer measurement records (above), with no duplicate `(operation,multiplexer,kind)` on one screen |
+| `rows`, `cols` | Positive measured geometry |
 | `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; `cursor_row` is below `rows`, and `cursor_col` is at most `cols`, where `cursor_col` equal to `cols` records the terminal's pending-wrap position after the last column |
 | `lines` | Exactly `rows` captured row texts, in viewport order |
 | `masked_rows` | Unique zero-based row indices, each `{"row":N,"reason":"reviewed_privacy"}`; the corresponding `lines` entry is the empty string |
@@ -2815,9 +2817,9 @@ A run spans the continuation cell of a wide character together with its leading 
 
 Masking applies only to rows removed by the reviewed capture privacy policy, such as home paths and account, model or plan text. Every other row keeps its captured text exactly, including trailing spaces. The detection region of every rule citing the fixture lies entirely in unmasked rows.
 
-Each fixture file has `schema_version` `1`, `provenance` `native` and its catalog entry's `backend`. It holds a screen for every catalog fixture entry's `id` and no uncited screen, and each screen's canonical digest equals its entry's `sha256` and its `rows` and `cols` equal its entry's.
+Each profile file has `schema_version` `1` and a `backend` equal to its file name, and each of its fixture ids is unique across profile files.
 
-Each file and screen parses with exactly its fields above. Every row declared in `masked_rows` is in range and empty. Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour. Every `cell_styles` run satisfies the same placement rules against the other `cell_styles` runs and carries at least one non-default attribute with a valid colour. JSON formatting leaves the canonical screen digest unchanged.
+Each file and screen parses with exactly its fields above. Every row declared in `masked_rows` is in range and empty. Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour. Every `cell_styles` run satisfies the same placement rules against the other `cell_styles` runs and carries at least one non-default attribute with a valid colour.
 
 Every bundled catalog pattern spells its classes explicitly: it contains no Perl class or boundary (`\s \S \d \D \w \W \b \B`) and no escape outside the syntax (§ Pattern syntax).
 
@@ -2890,7 +2892,7 @@ A stage without a gate is focus-independent; every bundled stage is ungated exce
 - a plan with a focus gate has a focus matcher that declares `focus_style`, and every choice label it compares is captured by a line-scoped matcher;
 - a `permission_continuation` rule declares no operation, choices or answers.
 
-Provenance validity additionally requires every `permission_continuation` rule to cite a native fixture.
+Provenance validity additionally requires every `permission_continuation` rule to cite a fixture.
 
 ###### Focused-choice resolution
 
@@ -2929,7 +2931,7 @@ Validate the complete shape, reference set, hex form and byte/stage bounds befor
 
 ##### Measured submission plans and settle intervals
 
-Measurement establishes each operation plan. For each bundled profile, capture native empty-composer, typed-literal/pre-submit and post-submit behavior for prompt and native shell input on an installed native version. Record the native version, multiplexer, screen geometry, policy, exact stage bytes and times, the observed native result and privacy-reviewed fixture digests. An idle screen capture alone is insufficient evidence that either operation executes.
+Measurement establishes each operation plan. For each bundled profile, capture native empty-composer, typed-literal/pre-submit and post-submit behavior for prompt and native shell input on an installed native version. Record the native version, multiplexer, screen geometry, policy, exact stage bytes and times, the observed native result and privacy-reviewed fixtures. An idle screen capture alone is insufficient evidence that either operation executes.
 
 The runner uses these monotonic bounds within the original attempt deadline:
 

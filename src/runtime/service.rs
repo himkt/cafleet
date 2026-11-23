@@ -2586,11 +2586,12 @@ pub(crate) mod test_support {
                 .create(fixture._dir.path().join(PANIC_DIRECTORY))
                 .unwrap();
             let mut catalog = crate::coding_agent::catalog::test_support::synthetic_definitions();
-            let permission_rule = catalog["profiles"][0]["rules"][0].clone();
-            let mut executable = catalog["fixtures"][0].clone();
-            executable["id"] = json!("synthetic-service-submission");
-            catalog["fixtures"].as_array_mut().unwrap().push(executable);
-            let rule = &mut catalog["profiles"][0]["rules"][0];
+            let permission_rule = catalog["codex"]["profile"]["rules"][0].clone();
+            catalog["codex"]["screens"]["synthetic-service-submission"] =
+                crate::coding_agent::catalog::test_support::fixture_at(
+                    crate::coding_agent::catalog::test_support::VERSION,
+                );
+            let rule = &mut catalog["codex"]["profile"]["rules"][0];
             rule["id"] = json!("synthetic-service-composer");
             rule["observation"] = json!("composer_empty");
             rule["region"]["start_pattern"] = json!("^Synthetic state$");
@@ -2598,20 +2599,20 @@ pub(crate) mod test_support {
             rule["matchers"] = json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
             rule["extract"] = json!({"operation":null,"choices":[]});
             rule["verified_noninteraction"] = json!(true);
-            catalog["profiles"][0]["capabilities"] = json!({"detection":null,"answers":[],"composer":{
-                "rule_ids":["synthetic-service-composer"],"fixture_ids":[catalog["fixtures"][0]["id"]],
+            catalog["codex"]["profile"]["capabilities"] = json!({"detection":null,"answers":[],"composer":{
+                "rule_ids":["synthetic-service-composer"],"fixture_ids":[crate::coding_agent::catalog::test_support::FIXTURE],
                 "submission":{
                     "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]},
                     "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
                 }
             }});
             let coverage = if detecting {
-                let fixture_id = catalog["fixtures"][0]["id"].clone();
-                catalog["profiles"][0]["rules"]
+                let fixture_id = crate::coding_agent::catalog::test_support::FIXTURE;
+                catalog["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
                     .push(permission_rule);
-                catalog["profiles"][0]["capabilities"]["detection"] =
+                catalog["codex"]["profile"]["capabilities"]["detection"] =
                     json!({"rule_ids":["synthetic-permission"],"fixture_ids":[fixture_id]});
                 "tested"
             } else {
@@ -3801,18 +3802,12 @@ pub(crate) mod test_support {
         }
 
         fn native_screen(id: &str) -> NativeScreen {
-            let definitions = crate::coding_agent::catalog::test_support::bundled_definitions();
-            let entry = definitions["fixtures"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|entry| entry["id"] == id)
-                .unwrap_or_else(|| panic!("bundled fixture {id} is registered"))
-                .clone();
-            let dimension = |key: &str| u16::try_from(entry[key].as_u64().unwrap()).unwrap();
+            let (backend, file) = crate::coding_agent::catalog::test_support::bundled_file(id);
+            let screen = &file["screens"][id];
+            let dimension = |key: &str| u16::try_from(screen[key].as_u64().unwrap()).unwrap();
             NativeScreen {
-                backend: serde_json::from_value(entry["backend"].clone()).unwrap(),
-                version: entry["native_version"].as_str().unwrap().into(),
+                backend,
+                version: screen["native_version"].as_str().unwrap().into(),
                 size: TerminalSize {
                     rows: dimension("rows"),
                     cols: dimension("cols"),
@@ -5224,7 +5219,7 @@ mod tests {
         }
 
         fn without_composer_verification(catalog: &mut Value) {
-            catalog["profiles"][0]["capabilities"]["composer"] = Value::Null;
+            catalog["codex"]["profile"]["capabilities"]["composer"] = Value::Null;
         }
 
         #[test]

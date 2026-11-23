@@ -8288,7 +8288,7 @@ mod tests {
 
     fn secret_observation(secret: &str, cols: u16, sequence: u64) -> ScreenObservation {
         let mut definition = definitions();
-        let rule = &mut definition["profiles"][0]["rules"][0];
+        let rule = &mut definition["codex"]["profile"]["rules"][0];
         rule["matchers"][1]["pattern"] =
             json!(format!("^> (?P<label>Allow {})$", regex::escape(secret)));
         rule["matchers"][2]["pattern"] =
@@ -8664,14 +8664,14 @@ mod tests {
             let next = match change {
                 "operation" => sequenced(permission("write other.txt"), 2),
                 "class" => {
-                    definition["profiles"][0]["rules"][0]["observation"] = json!("question");
+                    definition["codex"]["profile"]["rules"][0]["observation"] = json!("question");
                     sequenced(
                         observation(&definition, &terminal(&rows, 80, false).snapshot()),
                         2,
                     )
                 }
                 _ => {
-                    definition["profiles"][0]["rules"][0]["matchers"][1]["pattern"] =
+                    definition["codex"]["profile"]["rules"][0]["matchers"][1]["pattern"] =
                         json!("^> (?P<label>Allow this request)$");
                     rows[2] = "> Allow this request".into();
                     sequenced(
