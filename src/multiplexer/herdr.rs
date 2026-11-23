@@ -1918,10 +1918,17 @@ mod tests {
             .to_string())
         }
 
-        fn director_layouts() -> serde_json::Value {
+        /// A snapshot pane entry with its layout rect and its viewport row count.
+        fn viewport_pane(id: &str, width: i64, viewport_rows: i64) -> serde_json::Value {
+            let mut entry = pane(id, 0, 0, width, viewport_rows);
+            entry["scroll"] = json!({"viewport_rows": viewport_rows});
+            entry
+        }
+
+        fn director_layouts(viewport_rows: i64) -> serde_json::Value {
             json!([
-                {"panes": [pane("w1:p1", 0, 0, 60, 40)]},
-                {"panes": [pane("w2:p1", 0, 0, 120, 40), pane(PANE, 0, 0, 97, 30)]},
+                {"panes": [viewport_pane("w1:p1", 60, 40)]},
+                {"panes": [viewport_pane("w2:p1", 120, 40), viewport_pane(PANE, 97, viewport_rows)]},
             ])
         }
 
@@ -1941,10 +1948,11 @@ mod tests {
         }
 
         #[test]
-        fn capture_screen_takes_the_width_from_the_snapshot_and_the_rows_from_the_visible_read() {
+        fn capture_screen_takes_the_width_and_rows_from_the_snapshot_and_the_body_from_the_visible_read()
+         {
             let body = "› \x1b[2mAsk anything\x1b[0m\r\n\r\nstatus line\r\n";
             let runner = FakeRunner::with_binary("herdr");
-            runner.respond(snapshot_reply(director_layouts()));
+            runner.respond(snapshot_reply(director_layouts(3)));
             runner.respond(Ok(body.to_owned()));
             let capture = on_server(runner.clone()).capture_screen(PANE).unwrap();
             assert_eq!((capture.rows, capture.cols), (3, 97));
@@ -1961,11 +1969,34 @@ mod tests {
         }
 
         #[test]
+        fn capture_screen_keeps_the_viewport_rows_when_the_visible_read_drops_trailing_blank_rows()
+        {
+            let body = "\r\nfirst row\r\n\r\nlast drawn row\r\n";
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(snapshot_reply(director_layouts(30)));
+            runner.respond(Ok(body.to_owned()));
+            let capture = on_server(runner).capture_screen(PANE).unwrap();
+            assert_eq!(
+                (capture.rows, capture.cols),
+                (30, 97),
+                "the viewport keeps its rows below the last drawn row"
+            );
+            assert_eq!(
+                capture.body, body,
+                "leading and interior blank rows keep their positions"
+            );
+        }
+
+        #[test]
         fn capture_screen_fails_for_a_pane_absent_from_the_snapshot_or_an_unreadable_reply() {
             for (name, snapshot) in [
                 (
                     "pane absent",
-                    snapshot_reply(json!([{"panes": [pane("w1:p1", 0, 0, 60, 40)]}])),
+                    snapshot_reply(json!([{"panes": [viewport_pane("w1:p1", 60, 40)]}])),
+                ),
+                (
+                    "no viewport rows",
+                    snapshot_reply(json!([{"panes": [pane(PANE, 0, 0, 97, 30)]}])),
                 ),
                 ("non-JSON snapshot", Ok("not json".to_owned())),
                 (

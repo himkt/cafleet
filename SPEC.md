@@ -1247,7 +1247,10 @@ Director delivery additionally accepts these trade-offs (§6.9 Director delivery
 - While a draft or dialog holds the Director composer, each live member runner captures the Director pane up to once per second.
 - CAFleet does not launch the Director, so it probes no Director native version and selects no rule or fixture by version.
 - herdr reports no terminal column count, so a herdr capture takes the layout width, which can exceed the terminal width by a few columns; a herdr Director pane a few columns narrower than a profile's `W_min` can pass the width check.
+- A Claude composer, member or Director, shows a seven-row window of the pane width minus four columns and scrolls a longer literal. Its 456-scalar limit fills six rows at 80 columns and leaves one row of slack. On a pane narrower than 80 columns, a literal at the limit scrolls inside the composer, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
 - An opencode composer, member or Director, shows six rows of the pane width minus four columns and scrolls a longer literal, and it wraps by word. Its 380-scalar limit fills five rows at 80 columns and leaves one row for word-wrap waste. A literal at the limit whose words waste more than that row, or one on a pane narrower than 80 columns, scrolls inside the composer, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
+- A pi editor, member or Director, shows `floor(0.3 × rows)` rows of the pane width minus one column and scrolls a longer literal, and it wraps by word. Its 474-scalar limit fills six rows at 80 columns, one row fewer than an 80×24 pane's seven, leaving that row for word-wrap waste. A literal at the limit whose words waste more than that row, or one on a pane narrower than 80 columns or shorter than 24 rows, scrolls inside the editor, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
+- A Hermes TUI Director composer shows rows of the pane width minus six columns up to its height and clips a longer literal silently. Its 1480-scalar Director limit fills twenty of the twenty-one rows an 80×24 pane shows, leaving one row of slack. On a pane narrower than 80 columns or shorter than 24 rows, a literal at the limit is clipped, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
 - Director messages committed while no member runner of the fleet is live stay pending until a runner starts or recovers; the Director polls manually after the commands that leave the fleet without one.
 - An unexpected exit of the last member runner is noticed only at the next Director turn, which the user or the Director's own ongoing work starts; an idle Director stays idle with no signal.
 
@@ -2159,13 +2162,13 @@ Each bundled profile's measured plans use these declarations. The native evidenc
 
 | Profile | Native evidence version | Prompt framing | Exec framing | Prompt plain limit | Exec plain limit |
 |---|---|---|---|---|---|
-| `claude` | `2.1.322` | `plain` | `plain` | `{"unit":"scalars","max":800}` | `{"unit":"scalars","max":800}` |
+| `claude` | `2.1.322` | `plain` | `plain` | `{"unit":"scalars","max":456}` | `{"unit":"scalars","max":456}` |
 | `codex` | `0.167.0` | `bracketed_paste` | `bracketed_paste` | `{"unit":"bytes","max":1024}` | `{"unit":"bytes","max":1000}` |
 | `opencode` | `2.2.7` | `plain` | `plain` | `{"unit":"scalars","max":380}` | `{"unit":"scalars","max":380}` |
-| `pi` | `1.5.0` | `plain` | `plain` | `null` | `null` |
-| `hermes` | `2026.9.24` | `bracketed_paste` | `plain` | `{"unit":"scalars","max":1024}` | `{"unit":"scalars","max":1024}` |
+| `pi` | `1.5.0` | `plain` | `plain` | `{"unit":"scalars","max":474}` | `{"unit":"scalars","max":474}` |
+| `hermes` | `2026.9.24` | `bracketed_paste` | `plain` | `{"unit":"scalars","max":558}` | `{"unit":"scalars","max":558}` |
 
-Claude's 800-scalar limit is the largest single plain write that renders intact: Claude Code 2.1.322 collapses any single burst above 800 characters, prompt or exec on tmux and herdr, into a count-less `[Pasted text #N]` placeholder, which pre-submit verification cannot match, so a longer preview takes the pointer form; the exec limit counts the `! ` prefix. opencode 2.3.0 draws its composer as a six-row scrolling viewport of `cols` − 4 columns that wraps by word and consumes the leading `!` of an exec literal as a mode switch; its 380-scalar limit is five such rows at 80 columns, so word-wrap waste up to one row stays visible. Codex's plain prompt boundary is 1024 submitting bytes and 1025 retained bytes on both multiplexers. Its faithful plain native-exec boundary is 1000 bytes: 1001 bytes enters chat instead of executing the command, while the selected bracketed exec remains faithful through the maximum preview. Hermes's 1024-scalar limit is a conservative tested cap: its Enter guard depends on the 50 ms since the last processed text change, so larger inputs can submit and size alone establishes no adjacent deterministic boundary. Maximum plain Japanese input remains retained or unverified, which rules out a null limit. Bracketed Hermes prompts submit, while large bracketed exec input collapses to a paste placeholder that is dispatched instead of the original command; its exec plan therefore uses plain input within the tested cap. Native command output or independently checked output artifacts establish original-literal execution separately from an empty composer.
+Claude's 456-scalar limit is six rows of the composer's seven-row window at 80 columns (`cols` − 4 scalars per row), leaving one row of slack; above 800 characters Claude Code 2.1.322 also collapses a single burst, prompt or exec on tmux and herdr, into a count-less `[Pasted text #N]` placeholder that pre-submit verification cannot match, so a longer preview takes the pointer form; the exec limit counts the `! ` prefix. The Hermes classic CLI shows at most eight input rows and fails extraction for a longer literal; its 558-scalar limit leaves one row of slack at 80 columns, and a longer prompt keeps its bracketed-paste plan. pi 1.5.2 draws its editor with `floor(0.3 × rows)` rows of `cols` − 1 columns that wraps by word; its 474-scalar limit is six such rows at 80 columns, so word-wrap waste up to one row stays visible on an 80×24 pane. opencode 2.3.0 draws its composer as a six-row scrolling viewport of `cols` − 4 columns that wraps by word and consumes the leading `!` of an exec literal as a mode switch; its 380-scalar limit is five such rows at 80 columns, so word-wrap waste up to one row stays visible. Codex keeps 1024: near that length a single burst sometimes renders as `[Pasted Content N chars]`, which its scalars placeholder matches as well as the literal rendering. Codex's plain prompt boundary is 1024 submitting bytes and 1025 retained bytes on both multiplexers. Its faithful plain native-exec boundary is 1000 bytes: 1001 bytes enters chat instead of executing the command, while the selected bracketed exec remains faithful through the maximum preview. Hermes's 558-scalar limit is also a conservative tested cap: its Enter guard depends on the 50 ms since the last processed text change, so larger inputs can submit and size alone establishes no adjacent deterministic boundary. Maximum plain Japanese input remains retained or unverified, which rules out a null limit. Bracketed Hermes prompts submit, while large bracketed exec input collapses to a paste placeholder that is dispatched instead of the original command; its exec plan therefore uses plain input within the tested cap. Native command output or independently checked output artifacts establish original-literal execution separately from an empty composer.
 
 | Composer evidence | Required observation on each multiplexer and operation |
 |---|---|
@@ -2508,8 +2511,8 @@ A Hermes Director runs the TUI client (§6.7 Host evidence and native-input auth
 | Rule | Class | Declaration |
 |---|---|---|
 | `hermes-tui-idle-composer` | Empty composer | Alternate screen, cursor `any`, a one-row region whose start, end and line matcher are the whole composer line <code>^ ❯(?: (?:Ask me anything…&#124;Try "[^"]*"&#124;Ctrl\+C to interrupt…))? *(?:┃ *)?$</code> |
-| The TUI composer-text rule | Composer text | The TUI composer region that `composer.text` bounds for pre-submit verification |
-| `hermes-tui-approval` | Permission request | The TUI approval form, detection only, with no answer plans; the form is answered on the native surface |
+| `hermes-tui-composer-text` | Composer text | Alternate screen, cursor `inside`, a region from `^ ❯ ` to the screen's bottom edge, `text_prefixes` `^ ❯ ` and `^   ` for the TUI's one-column margin |
+| `hermes-tui-approval` | Permission request | Alternate screen, the `╔` to `╚` form with the `⚠ approval required` heading, detection only with no answer plans; the form is answered on the native surface |
 
 The classic-CLI request rules match only the primary-screen `╭` box, so `hermes-tui-approval` keeps a TUI approval form from leaving the composer line verified empty, which would let a preview be typed into the form. The TUI rules rest on Director-pane captures under `approvals.mode: manual`.
 
@@ -2591,14 +2594,15 @@ A profile file has exactly these required fields:
 
 Profile files use 2-space pretty JSON with one array element per line.
 
-Each screen object has exactly these fields, of which only `composer_evidence`, `cell_backgrounds` and `cell_styles` are optional:
+Each screen object has exactly these fields, of which only `composer_evidence`, `cell_backgrounds`, `cell_styles` and `multiplexer` are optional:
 
 | Field | Requirement |
 |---|---|
 | `native_version` | The capture's native version, parsed with the native version probe's SemVer rule (§ Native version probe); it bounds nothing |
 | `composer_evidence` | Optional nonempty array of composer measurement records (above), with no duplicate `(operation,multiplexer,kind)` on one screen |
 | `rows`, `cols` | Positive measured geometry |
-| `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; `cursor_row` is below `rows`, and `cursor_col` is at most `cols`, where `cursor_col` equal to `cols` records the terminal's pending-wrap position after the last column. A screen captured through herdr, whose records name `multiplexer: herdr`, records `null` cursor and alternate-screen fields and replays cursor-free (§ Cursor-free classification); its `cols` is the herdr layout width |
+| `alternate_screen`, `screen_seq`, `cursor_row`, `cursor_col` | Measured screen state; `cursor_row` is below `rows`, and `cursor_col` is at most `cols`, where `cursor_col` equal to `cols` records the terminal's pending-wrap position after the last column. A screen captured through herdr records `null` cursor and alternate-screen fields and replays cursor-free (§ Cursor-free classification); its `cols` is the herdr layout width |
+| `multiplexer` | Present exactly on a screen with `null` cursor and alternate-screen fields, as `herdr` |
 | `lines` | Exactly `rows` captured row texts, in viewport order |
 | `masked_rows` | Unique zero-based row indices, each `{"row":N,"reason":"reviewed_privacy"}`; the corresponding `lines` entry is the empty string |
 | `cell_backgrounds` | Optional runs `{"row":N,"start_col":C,"end_col":E,"bg":COLOUR}`, one per maximal run of cells in an unmasked row that share one non-default background, `end_col` exclusive; `COLOUR` is `{"kind":"indexed","index":I}` or `{"kind":"rgb","r":R,"g":G,"b":B}`. An absent key means every cell has the default background. |
@@ -2640,12 +2644,14 @@ A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts
 | `rule_ids` | Composer rules, empty-composer or `composer_text`, whose region bounds the composer rows; extraction uses the one listed rule that matches exactly one region of the screen |
 | `first_prefix` | Pattern anchored at the first composer row; the matched prefix is stripped |
 | `continuation_prefix` | Pattern stripped from each later composer row, such as a continuation margin; a row that does not match it ends the composer text |
-| `mode_prefix` | Optional. A written literal that begins with it is matched without it, because the native CLI consumes it as a mode switch and draws its own mode prompt or none |
+| `mode_prefix` | Optional. A written literal that begins with it matches with or without it, because the native CLI may consume it as a mode switch, drawing its own mode prompt or none, or keep it as text |
 | `framed` | Optional, default `false`. The region's start row is a frame row, such as an editor border, and composer text begins on the next row |
+
+A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, which replace the `composer.text` prefixes for the regions that rule bounds, so one profile reads composers whose rows carry different margins; only `composer_text` rules declare it.
 | `wrap` | `char`: rows join with nothing. `word`: a row break matches either nothing or exactly one literal space |
 | `placeholders` | Collapsed-paste renderings, each with a named `count` group and a `unit` of `scalars` or `lines` |
 
-Cells drawn in the profile's suggestion style (§6.7 Native suggestions) are excluded before extraction, and trailing blanks are trimmed from each row. A `composer_text` rule's region runs from its start row to the first later row that matches `end_pattern`, so each start row yields one candidate, and that end row is never composer text. Native transcripts echo submitted prompts in the composer's own shape, and the live composer is always below the transcript, so a `composer_text` rule takes the bottom-most candidate that satisfies its matchers instead of requiring a unique one. A wrong pick can only fail the literal comparison, which withholds the submit. `composer_text` rules rank below the empty-composer rules, so a composer that both match classifies empty. No matching rule, several matching rules or a first row that does not match `first_prefix` leave the composer text unextractable.
+Cells drawn in the profile's suggestion style (§6.7 Native suggestions) are excluded before extraction, and trailing blanks are trimmed from each row. A `composer_text` rule's region runs from its start row to the first later row that matches `end_pattern`, so each start row yields one candidate, and that end row is never composer text. A start row with no later `end_pattern` row within `max_rows` is closed by the screen's bottom edge, as a composer drawn on the screen's last rows is, and every row of that region is composer text. Native transcripts echo submitted prompts in the composer's own shape, and the live composer is always below the transcript, so a `composer_text` rule takes the bottom-most candidate that satisfies its matchers instead of requiring a unique one. A wrong pick can only fail the literal comparison, which withholds the submit. `composer_text` rules rank below the empty-composer rules, so a composer that both match classifies empty. No matching rule, several matching rules or a first row that does not match `first_prefix` leave the composer text unextractable.
 
 The extracted text is split left to right into segments: each placeholder match is a placeholder segment, and the text between matches is a text segment. The match walks the written literal, prefix plus rendered preview, prompt or command, in order:
 
@@ -2660,8 +2666,8 @@ The match succeeds only when every segment matches and both the segments and the
 | Native screen | Segments | Literal |
 |---|---|---|
 | codex `› [Pasted Content 1024 chars]a` | placeholder (1024 scalars), text `a` | 1025 scalars |
-| codex `!  true aaaa…` followed by `  aaaa…` continuation rows, with `mode_prefix` `!` | text ` true aaaa…aaaa…` (mode prompt `! ` and margin stripped, char wrap) | `! ` followed by the command, matched without its `!` |
-| Hermes classic CLI `☤ ❯ [Pasted text #5: 1 lines → /root/.hermes/pastes/…]` with `first_prefix` `^☤ ❯ ` | placeholder (1 line) | One one-line paste write |
+| codex `!  true aaaa…` followed by `  aaaa…` continuation rows, with `mode_prefix` `!` | text ` true aaaa…aaaa…` (mode prompt `! ` and margin stripped, word wrap) | `! ` followed by the command, matched without its `!` |
+| Hermes classic CLI `❯ [Pasted text #5: 1 lines → /root/.hermes/pastes/…]` with `first_prefix` `^(?:☤ )?❯ `, whose `☤ ` is drawn only during a working turn | placeholder (1 line) | One one-line paste write |
 
 ###### Director delivery capability
 
@@ -2698,6 +2704,8 @@ A screen observation carries the cursor position and the alternate-screen state,
 | Candidate uniqueness | Checked after the region matchers run, so exactly one candidate region must match its matchers |
 
 A `composer_text` rule keeps its bottom-most-candidate selection (§ Composer-text extraction) in place of the uniqueness check.
+
+On a cursor-free screen a `composer_empty` rule likewise takes its bottom-most candidate that satisfies its matchers, and only the composer matches, of either kind, whose region ends lowest on the screen compete; the live composer is the lowest composer region, and a composer-shaped box above it, such as pi's `Update Available` box, belongs to the transcript. Interaction rules are unaffected.
 
 Every observation that carries both keeps the cursor and screen conditions and the uniqueness check before matching unchanged.
 

@@ -6034,7 +6034,7 @@ mod tests {
                         &crate::coding_agent::detector::test_support::replay_native_fixture(
                             &crate::digest::canonical_json(screen),
                             |_| {},
-                            screen["alternate_screen"].as_bool().unwrap(),
+                            crate::coding_agent::detector::test_support::fixture_alternate(screen),
                             None,
                         ),
                     )
@@ -6043,8 +6043,9 @@ mod tests {
                 };
                 let same_geometry: Vec<(&String, &Value)> = screens
                     .iter()
-                    .filter(|(_, candidate)| {
-                        candidate["native_version"] == fixture["native_version"]
+                    .filter(|(id, candidate)| {
+                        !id.contains("-director-")
+                            && candidate["native_version"] == fixture["native_version"]
                             && candidate["rows"] == fixture["rows"]
                             && candidate["cols"] == fixture["cols"]
                     })
@@ -6068,33 +6069,12 @@ mod tests {
                 };
                 let catalog = ProfileCatalog::bundled().clone();
                 let plan = catalog.composer_plan(backend, operation).unwrap();
-                let prefix = std::str::from_utf8(operation.prefix()).unwrap();
-                let (pre_submit, literal) = same_geometry
-                    .iter()
-                    .filter(|(_, candidate)| candidate.get("lines").is_some())
-                    .flat_map(|(id, candidate)| {
-                        crate::coding_agent::catalog::test_support::pre_submit_records(candidate)
-                            .unwrap()
-                            .into_iter()
-                            .filter(|record| record.operation == operation)
-                            .filter_map(|record| {
-                                record
-                                    .literal
-                                    .strip_prefix(prefix)
-                                    .map(|literal| ((*id).clone(), literal.to_owned()))
-                            })
-                    })
-                    .find(|(_, literal)| plan.plain_literal_allowed(literal))
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "{fixture_id}: its backend/geometry has a plain pre-submit screen for the operation"
-                        )
-                    });
-                let literal = literal.as_str();
-                let [literal_bytes, submit_bytes] =
-                    plan.stages(literal, LiteralFraming::Plain).unwrap();
-                let literal_stage = literal_bytes.len();
-                let expected = [literal_bytes, submit_bytes].concat();
+                let literal = "printf native-verification";
+                assert!(plan.plain_literal_allowed(literal));
+                let expected = plan
+                    .stages(literal, LiteralFraming::Plain)
+                    .unwrap()
+                    .concat();
                 with_profile_host(
                     catalog,
                     expected.clone(),
@@ -6130,8 +6110,6 @@ mod tests {
                             InputControlOperation::SubmitPrompt(input)
                         };
                         assert!(host.handle(request).unwrap().is_none());
-                        until_written(host, literal_stage);
-                        host.child_output(native_fixture_bytes(&bundled_screen(&pre_submit)));
                         until_written(host, expected.len());
                         assert_eq!(host.pty.written, expected, "{fixture_id}");
                         assert!(
@@ -6171,8 +6149,7 @@ mod tests {
                     "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-99",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-100",
-                    "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-herdr-119-49",
-                    "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-tmux-120-50",
+                    "hermes-2026.9.24-composer-prompt-one-literal-tmux-120-1",
                     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
                     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
                     "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",

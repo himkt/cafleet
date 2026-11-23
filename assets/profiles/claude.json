@@ -101,7 +101,11 @@
           "operation": null,
           "choices": []
         },
-        "verified_noninteraction": true
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "claude-2.1.325-director-busy-herdr-120-1",
+          "claude-2.1.325-director-busy-tmux-120-1"
+        ]
       },
       {
         "id": "claude-suggestion-composer",
@@ -130,7 +134,11 @@
           "style": {
             "faint": true
           }
-        }
+        },
+        "fixture_ids": [
+          "claude-2.1.325-director-idle-empty-herdr-120-1",
+          "claude-2.1.325-director-idle-empty-tmux-120-1"
+        ]
       },
       {
         "id": "claude-auto-ask-permission",
@@ -987,7 +995,15 @@
           "operation": null,
           "choices": []
         },
-        "verified_noninteraction": true
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "claude-2.1.325-director-one-herdr-120-1",
+          "claude-2.1.325-director-one-tmux-120-1",
+          "claude-2.1.325-director-wrap-herdr-120-1",
+          "claude-2.1.325-director-wrap-tmux-120-1",
+          "claude-2.1.325-director-plain-456-herdr-81-1",
+          "claude-2.1.325-director-plain-456-tmux-80-1"
+        ]
       }
     ],
     "capabilities": {
@@ -1130,7 +1146,7 @@
           "first_prefix": "^[❯!]\\x{a0}",
           "continuation_prefix": "^  ",
           "mode_prefix": "!",
-          "wrap": "char",
+          "wrap": "word",
           "placeholders": []
         },
         "submission": {
@@ -1145,13 +1161,13 @@
               "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1",
               "claude-2.1.322-composer-prompt-plain-4000-post-submit-herdr-092-1",
               "claude-2.1.322-composer-prompt-wrap-literal-tmux-120-1",
-              "claude-2.1.322-composer-prompt-plain-800-literal-tmux-120-1",
-              "claude-2.1.322-composer-prompt-plain-800-literal-herdr-120-1"
+              "claude-2.1.322-composer-prompt-plain-456-literal-tmux-80-1",
+              "claude-2.1.322-composer-prompt-plain-456-literal-herdr-81-1"
             ],
             "literal_framing": "plain",
             "plain_literal_limit": {
               "unit": "scalars",
-              "max": 800
+              "max": 456
             }
           },
           "exec": {
@@ -1165,13 +1181,13 @@
               "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1",
               "claude-2.1.322-composer-exec-plain-4000-post-submit-herdr-092-1",
               "claude-2.1.322-composer-exec-wrap-literal-tmux-120-1",
-              "claude-2.1.322-composer-exec-plain-800-literal-tmux-120-1",
-              "claude-2.1.322-composer-exec-plain-800-literal-herdr-120-1"
+              "claude-2.1.322-composer-exec-plain-456-literal-tmux-80-1",
+              "claude-2.1.322-composer-exec-plain-456-literal-herdr-81-1"
             ],
             "literal_framing": "plain",
             "plain_literal_limit": {
               "unit": "scalars",
-              "max": 800
+              "max": 456
             }
           }
         }
@@ -1542,7 +1558,7 @@
         ],
         "plain_limit": {
           "unit": "scalars",
-          "max": 800
+          "max": 456
         },
         "fixture_ids": [
           "claude-2.1.325-director-busy-herdr-120-1",
@@ -1551,8 +1567,8 @@
           "claude-2.1.325-director-idle-empty-tmux-120-1",
           "claude-2.1.325-director-one-herdr-120-1",
           "claude-2.1.325-director-one-tmux-120-1",
-          "claude-2.1.325-director-plain-800-herdr-120-1",
-          "claude-2.1.325-director-plain-800-tmux-120-1",
+          "claude-2.1.325-director-plain-456-herdr-81-1",
+          "claude-2.1.325-director-plain-456-tmux-80-1",
           "claude-2.1.325-director-wrap-herdr-120-1",
           "claude-2.1.325-director-wrap-tmux-120-1"
         ]
@@ -37226,7 +37242,8 @@
             "b": 153
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "claude-2.1.325-director-one-herdr-120-1": {
       "native_version": "2.1.325",
@@ -37402,7 +37419,8 @@
             "b": 153
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "claude-2.1.325-director-wrap-herdr-120-1": {
       "native_version": "2.1.325",
@@ -37578,183 +37596,8 @@
             "b": 153
           }
         }
-      ]
-    },
-    "claude-2.1.325-director-plain-800-herdr-120-1": {
-      "native_version": "2.1.325",
-      "composer_evidence": [
-        {
-          "operation": "prompt",
-          "multiplexer": "herdr",
-          "kind": "unsubmitted_literal",
-          "expected_literal": {
-            "repeat": "a",
-            "count": 800,
-            "prefix": ""
-          }
-        }
       ],
-      "rows": 40,
-      "cols": 120,
-      "alternate_screen": null,
-      "screen_seq": 1,
-      "cursor_row": null,
-      "cursor_col": null,
-      "lines": [
-        "",
-        " ▐▛███▛█   Claude Code v2.1.325",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "                                                                           Update available! Run: mise upgrade claude",
-        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "",
-        "  ⏵⏵ auto mode on (shift+tab to cycle)"
-      ],
-      "masked_rows": [
-        {
-          "row": 2,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 3,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 38,
-          "reason": "reviewed_privacy"
-        }
-      ],
-      "cell_backgrounds": [
-        {
-          "row": 1,
-          "start_col": 2,
-          "end_col": 11,
-          "bg": {
-            "kind": "rgb",
-            "r": 0,
-            "g": 0,
-            "b": 0
-          }
-        }
-      ],
-      "cell_styles": [
-        {
-          "row": 1,
-          "start_col": 0,
-          "end_col": 11,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 215,
-            "g": 119,
-            "b": 87
-          }
-        },
-        {
-          "row": 1,
-          "start_col": 23,
-          "end_col": 31,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 153,
-            "g": 153,
-            "b": 153
-          }
-        },
-        {
-          "row": 28,
-          "start_col": 75,
-          "end_col": 117,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 255,
-            "g": 193,
-            "b": 7
-          }
-        },
-        {
-          "row": 29,
-          "start_col": 0,
-          "end_col": 119,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 136,
-            "g": 136,
-            "b": 136
-          }
-        },
-        {
-          "row": 37,
-          "start_col": 0,
-          "end_col": 119,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 136,
-            "g": 136,
-            "b": 136
-          }
-        },
-        {
-          "row": 39,
-          "start_col": 2,
-          "end_col": 17,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 255,
-            "g": 193,
-            "b": 7
-          }
-        },
-        {
-          "row": 39,
-          "start_col": 17,
-          "end_col": 38,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 153,
-            "g": 153,
-            "b": 153
-          }
-        }
-      ]
+      "multiplexer": "herdr"
     },
     "claude-2.1.325-director-busy-herdr-120-1": {
       "native_version": "2.1.325",
@@ -38096,176 +37939,8 @@
             "b": 153
           }
         }
-      ]
-    },
-    "claude-2.1.325-director-plain-800-tmux-120-1": {
-      "native_version": "2.1.325",
-      "composer_evidence": [
-        {
-          "operation": "prompt",
-          "multiplexer": "tmux",
-          "kind": "unsubmitted_literal",
-          "expected_literal": {
-            "repeat": "a",
-            "count": 800,
-            "prefix": ""
-          }
-        }
       ],
-      "rows": 39,
-      "cols": 120,
-      "alternate_screen": true,
-      "screen_seq": 1,
-      "cursor_row": 35,
-      "cursor_col": 106,
-      "lines": [
-        "",
-        " ▐▛███▛█   Claude Code v2.1.325                             ",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf a… · Update available! Run: mise upgrade claude  ",
-        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa              ",
-        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "",
-        "  ⏵⏵ auto mode on (shift+tab to cycle)                      "
-      ],
-      "masked_rows": [
-        {
-          "row": 2,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 3,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 37,
-          "reason": "reviewed_privacy"
-        }
-      ],
-      "cell_backgrounds": [
-        {
-          "row": 1,
-          "start_col": 2,
-          "end_col": 8,
-          "bg": {
-            "kind": "indexed",
-            "index": 16
-          }
-        }
-      ],
-      "cell_styles": [
-        {
-          "row": 1,
-          "start_col": 0,
-          "end_col": 8,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 174
-          }
-        },
-        {
-          "row": 1,
-          "start_col": 23,
-          "end_col": 31,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 246
-          }
-        },
-        {
-          "row": 27,
-          "start_col": 2,
-          "end_col": 75,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 246
-          }
-        },
-        {
-          "row": 27,
-          "start_col": 76,
-          "end_col": 118,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 220
-          }
-        },
-        {
-          "row": 28,
-          "start_col": 0,
-          "end_col": 120,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 244
-          }
-        },
-        {
-          "row": 36,
-          "start_col": 0,
-          "end_col": 120,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 244
-          }
-        },
-        {
-          "row": 38,
-          "start_col": 2,
-          "end_col": 17,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 220
-          }
-        },
-        {
-          "row": 38,
-          "start_col": 17,
-          "end_col": 38,
-          "faint": false,
-          "foreground": {
-            "kind": "indexed",
-            "index": 246
-          }
-        }
-      ]
+      "multiplexer": "herdr"
     },
     "claude-2.1.322-composer-prompt-wrap-literal-tmux-120-1": {
       "native_version": "2.1.322",
@@ -38785,8 +38460,8 @@
         }
       ]
     },
-    "claude-2.1.322-composer-prompt-plain-800-literal-tmux-120-1": {
-      "native_version": "2.1.322",
+    "claude-2.1.325-director-plain-456-tmux-80-1": {
+      "native_version": "2.1.325",
       "composer_evidence": [
         {
           "operation": "prompt",
@@ -38794,29 +38469,22 @@
           "kind": "unsubmitted_literal",
           "expected_literal": {
             "repeat": "a",
-            "count": 800,
+            "count": 456,
             "prefix": ""
-          }
-        },
-        {
-          "operation": "prompt",
-          "multiplexer": "tmux",
-          "kind": "plain_limit",
-          "plain_literal_limit": {
-            "unit": "scalars",
-            "max": 800
           }
         }
       ],
-      "rows": 39,
-      "cols": 120,
+      "rows": 24,
+      "cols": 80,
       "alternate_screen": true,
       "screen_seq": 1,
-      "cursor_row": 35,
-      "cursor_col": 106,
+      "cursor_row": 20,
+      "cursor_col": 78,
       "lines": [
         "",
-        " ▐▛███▛█   Claude Code v2.1.322                             ",
+        " ▐▛███▛█   Claude Code v2.1.322         ",
+        "",
+        " ▝▝   ▝▝   /…/cafleet/design-docs/0000244-director-pane-delivery/.probe/work    ",
         "",
         "",
         "",
@@ -38825,35 +38493,18 @@
         "",
         "",
         "",
+        "                                                                                ",
+        "                                    Update available! Run: mise upgrade claude  ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "────────────────────────────────────────────────────────────────────────────────",
         "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf a… · Update available! Run: mise upgrade claude  ",
-        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa              ",
-        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "",
-        "  ⏵⏵ auto mode on (shift+tab to cycle)                      "
+        "  ⏵⏵ auto mode on (shift+tab to cycle)                                          "
       ],
       "masked_rows": [
         {
@@ -38861,11 +38512,7 @@
           "reason": "reviewed_privacy"
         },
         {
-          "row": 3,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 37,
+          "row": 22,
           "reason": "reviewed_privacy"
         }
       ],
@@ -38902,9 +38549,19 @@
           }
         },
         {
-          "row": 27,
-          "start_col": 2,
-          "end_col": 75,
+          "row": 3,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 174
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 11,
+          "end_col": 76,
           "faint": false,
           "foreground": {
             "kind": "indexed",
@@ -38912,9 +38569,9 @@
           }
         },
         {
-          "row": 27,
-          "start_col": 76,
-          "end_col": 118,
+          "row": 13,
+          "start_col": 36,
+          "end_col": 78,
           "faint": false,
           "foreground": {
             "kind": "indexed",
@@ -38922,9 +38579,9 @@
           }
         },
         {
-          "row": 28,
+          "row": 14,
           "start_col": 0,
-          "end_col": 120,
+          "end_col": 80,
           "faint": false,
           "foreground": {
             "kind": "indexed",
@@ -38932,9 +38589,9 @@
           }
         },
         {
-          "row": 36,
+          "row": 21,
           "start_col": 0,
-          "end_col": 120,
+          "end_col": 80,
           "faint": false,
           "foreground": {
             "kind": "indexed",
@@ -38942,7 +38599,7 @@
           }
         },
         {
-          "row": 38,
+          "row": 23,
           "start_col": 2,
           "end_col": 17,
           "faint": false,
@@ -38952,7 +38609,7 @@
           }
         },
         {
-          "row": 38,
+          "row": 23,
           "start_col": 17,
           "end_col": 38,
           "faint": false,
@@ -38963,38 +38620,31 @@
         }
       ]
     },
-    "claude-2.1.322-composer-exec-plain-800-literal-tmux-120-1": {
-      "native_version": "2.1.322",
+    "claude-2.1.325-director-plain-456-herdr-81-1": {
+      "native_version": "2.1.325",
       "composer_evidence": [
         {
-          "operation": "exec",
-          "multiplexer": "tmux",
+          "operation": "prompt",
+          "multiplexer": "herdr",
           "kind": "unsubmitted_literal",
           "expected_literal": {
             "repeat": "a",
-            "count": 793,
-            "prefix": "! true "
-          }
-        },
-        {
-          "operation": "exec",
-          "multiplexer": "tmux",
-          "kind": "plain_limit",
-          "plain_literal_limit": {
-            "unit": "scalars",
-            "max": 800
+            "count": 456,
+            "prefix": ""
           }
         }
       ],
-      "rows": 39,
-      "cols": 120,
-      "alternate_screen": true,
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
       "screen_seq": 1,
-      "cursor_row": 36,
-      "cursor_col": 105,
+      "cursor_row": null,
+      "cursor_col": null,
       "lines": [
         "",
-        " ▐▛███▛█   Claude Code v2.1.322                             ",
+        " ▐▛███▛█   Claude Code v2.1.325",
+        "",
+        " ▝▝   ▝▝   /…/cafleet/design-docs/0000244-director-pane-delivery/.probe/work",
         "",
         "",
         "",
@@ -39004,34 +38654,17 @@
         "",
         "",
         "",
+        "                                    Update available! Run: mise upgrade claude",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "────────────────────────────────────────────────────────────────────────────────",
         "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "                                                                            Update available! Run: mise upgrade claude  ",
-        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "!  true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa               ",
-        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "  ! for shell mode                                          "
+        "  ⏵⏵ auto mode on (shift+tab to cycle)"
       ],
       "masked_rows": [
         {
@@ -39039,7 +38672,197 @@
           "reason": "reviewed_privacy"
         },
         {
+          "row": 22,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 11,
+          "bg": {
+            "kind": "rgb",
+            "r": 0,
+            "g": 0,
+            "b": 0
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 215,
+            "g": 119,
+            "b": 87
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 23,
+          "end_col": 31,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 153,
+            "g": 153,
+            "b": 153
+          }
+        },
+        {
           "row": 3,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 215,
+            "g": 119,
+            "b": 87
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 11,
+          "end_col": 76,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 153,
+            "g": 153,
+            "b": 153
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 36,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 193,
+            "b": 7
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 136,
+            "g": 136,
+            "b": 136
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 136,
+            "g": 136,
+            "b": 136
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 2,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 193,
+            "b": 7
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 17,
+          "end_col": 38,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 153,
+            "g": 153,
+            "b": 153
+          }
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "claude-2.1.322-composer-prompt-plain-456-literal-tmux-80-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 456,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 456
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 20,
+      "cursor_col": 78,
+      "lines": [
+        "",
+        " ▐▛███▛█   Claude Code v2.1.322         ",
+        "",
+        " ▝▝   ▝▝   /…/cafleet/design-docs/0000244-director-pane-delivery/.probe/work    ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                                                                ",
+        "                                    Update available! Run: mise upgrade claude  ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)                                          "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 22,
           "reason": "reviewed_privacy"
         }
       ],
@@ -39076,9 +38899,29 @@
           }
         },
         {
-          "row": 28,
-          "start_col": 76,
-          "end_col": 118,
+          "row": 3,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 174
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 11,
+          "end_col": 76,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 246
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 36,
+          "end_col": 78,
           "faint": false,
           "foreground": {
             "kind": "indexed",
@@ -39086,9 +38929,364 @@
           }
         },
         {
-          "row": 29,
+          "row": 14,
           "start_col": 0,
-          "end_col": 120,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 244
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 244
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 2,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 17,
+          "end_col": 38,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 246
+          }
+        }
+      ]
+    },
+    "claude-2.1.322-composer-prompt-plain-456-literal-herdr-81-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 456,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 456
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        " ▐▛███▛█   Claude Code v2.1.322",
+        "",
+        " ▝▝   ▝▝   /…/cafleet/design-docs/0000244-director-pane-delivery/.probe/work",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                   ",
+        "                                    Update available! Run: mise upgrade claude",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)"
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 22,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 11,
+          "bg": {
+            "kind": "rgb",
+            "r": 0,
+            "g": 0,
+            "b": 0
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 215,
+            "g": 119,
+            "b": 87
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 23,
+          "end_col": 31,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 153,
+            "g": 153,
+            "b": 153
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 215,
+            "g": 119,
+            "b": 87
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 11,
+          "end_col": 76,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 153,
+            "g": 153,
+            "b": 153
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 36,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 193,
+            "b": 7
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 136,
+            "g": 136,
+            "b": 136
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 136,
+            "g": 136,
+            "b": 136
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 2,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 193,
+            "b": 7
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 17,
+          "end_col": 38,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 153,
+            "g": 153,
+            "b": 153
+          }
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "claude-2.1.322-composer-exec-plain-456-literal-tmux-80-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 449,
+            "prefix": "! true "
+          }
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 456
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 21,
+      "cursor_col": 77,
+      "lines": [
+        "",
+        " ▐▛███▛█   Claude Code v2.1.322         ",
+        "",
+        " ▝▝   ▝▝   /…/cafleet/design-docs/0000244-director-pane-delivery/.probe/work    ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                                                                ",
+        "                                                                                ",
+        "                                    Update available! Run: mise upgrade claude  ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "!  true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "  ! for shell mode                                                              "
+      ],
+      "masked_rows": [
+        {
+          "row": 2,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 8,
+          "bg": {
+            "kind": "indexed",
+            "index": 16
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 174
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 23,
+          "end_col": 31,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 246
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 174
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 11,
+          "end_col": 76,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 246
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 36,
+          "end_col": 78,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 80,
           "faint": false,
           "foreground": {
             "kind": "indexed",
@@ -39096,7 +39294,7 @@
           }
         },
         {
-          "row": 30,
+          "row": 16,
           "start_col": 0,
           "end_col": 2,
           "faint": false,
@@ -39106,9 +39304,9 @@
           }
         },
         {
-          "row": 37,
+          "row": 22,
           "start_col": 0,
-          "end_col": 120,
+          "end_col": 80,
           "faint": false,
           "foreground": {
             "kind": "indexed",
@@ -39116,7 +39314,7 @@
           }
         },
         {
-          "row": 38,
+          "row": 23,
           "start_col": 2,
           "end_col": 18,
           "faint": false,
@@ -39127,192 +39325,7 @@
         }
       ]
     },
-    "claude-2.1.322-composer-prompt-plain-800-literal-herdr-120-1": {
-      "native_version": "2.1.322",
-      "composer_evidence": [
-        {
-          "operation": "prompt",
-          "multiplexer": "herdr",
-          "kind": "unsubmitted_literal",
-          "expected_literal": {
-            "repeat": "a",
-            "count": 800,
-            "prefix": ""
-          }
-        },
-        {
-          "operation": "prompt",
-          "multiplexer": "herdr",
-          "kind": "plain_limit",
-          "plain_literal_limit": {
-            "unit": "scalars",
-            "max": 800
-          }
-        }
-      ],
-      "rows": 40,
-      "cols": 120,
-      "alternate_screen": null,
-      "screen_seq": 1,
-      "cursor_row": null,
-      "cursor_col": null,
-      "lines": [
-        "",
-        " ▐▛███▛█   Claude Code v2.1.322",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "                                                                           Update available! Run: mise upgrade claude",
-        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "",
-        "  ⏵⏵ auto mode on (shift+tab to cycle)"
-      ],
-      "masked_rows": [
-        {
-          "row": 2,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 3,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 38,
-          "reason": "reviewed_privacy"
-        }
-      ],
-      "cell_backgrounds": [
-        {
-          "row": 1,
-          "start_col": 2,
-          "end_col": 11,
-          "bg": {
-            "kind": "rgb",
-            "r": 0,
-            "g": 0,
-            "b": 0
-          }
-        }
-      ],
-      "cell_styles": [
-        {
-          "row": 1,
-          "start_col": 0,
-          "end_col": 11,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 215,
-            "g": 119,
-            "b": 87
-          }
-        },
-        {
-          "row": 1,
-          "start_col": 23,
-          "end_col": 31,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 153,
-            "g": 153,
-            "b": 153
-          }
-        },
-        {
-          "row": 28,
-          "start_col": 75,
-          "end_col": 117,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 255,
-            "g": 193,
-            "b": 7
-          }
-        },
-        {
-          "row": 29,
-          "start_col": 0,
-          "end_col": 119,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 136,
-            "g": 136,
-            "b": 136
-          }
-        },
-        {
-          "row": 37,
-          "start_col": 0,
-          "end_col": 119,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 136,
-            "g": 136,
-            "b": 136
-          }
-        },
-        {
-          "row": 39,
-          "start_col": 2,
-          "end_col": 17,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 255,
-            "g": 193,
-            "b": 7
-          }
-        },
-        {
-          "row": 39,
-          "start_col": 17,
-          "end_col": 38,
-          "faint": false,
-          "foreground": {
-            "kind": "rgb",
-            "r": 153,
-            "g": 153,
-            "b": 153
-          }
-        }
-      ]
-    },
-    "claude-2.1.322-composer-exec-plain-800-literal-herdr-120-1": {
+    "claude-2.1.322-composer-exec-plain-456-literal-herdr-81-1": {
       "native_version": "2.1.322",
       "composer_evidence": [
         {
@@ -39321,7 +39334,7 @@
           "kind": "unsubmitted_literal",
           "expected_literal": {
             "repeat": "a",
-            "count": 793,
+            "count": 449,
             "prefix": "! true "
           }
         },
@@ -39331,12 +39344,12 @@
           "kind": "plain_limit",
           "plain_literal_limit": {
             "unit": "scalars",
-            "max": 800
+            "max": 456
           }
         }
       ],
-      "rows": 40,
-      "cols": 120,
+      "rows": 24,
+      "cols": 81,
       "alternate_screen": null,
       "screen_seq": 1,
       "cursor_row": null,
@@ -39345,6 +39358,7 @@
         "",
         " ▐▛███▛█   Claude Code v2.1.322",
         "",
+        " ▝▝   ▝▝   /…/cafleet/design-docs/0000244-director-pane-delivery/.probe/work",
         "",
         "",
         "",
@@ -39353,43 +39367,22 @@
         "",
         "",
         "",
+        "                                   ",
         "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "                                                                           Update available! Run: mise upgrade claude",
-        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
-        "!  true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                    Update available! Run: mise upgrade claude",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "!  true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "────────────────────────────────────────────────────────────────────────────────",
         "  ! for shell mode"
       ],
       "masked_rows": [
         {
           "row": 2,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 3,
           "reason": "reviewed_privacy"
         }
       ],
@@ -39432,9 +39425,33 @@
           }
         },
         {
-          "row": 29,
-          "start_col": 75,
-          "end_col": 117,
+          "row": 3,
+          "start_col": 0,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 215,
+            "g": 119,
+            "b": 87
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 11,
+          "end_col": 76,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 153,
+            "g": 153,
+            "b": 153
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 36,
+          "end_col": 78,
           "faint": false,
           "foreground": {
             "kind": "rgb",
@@ -39444,9 +39461,9 @@
           }
         },
         {
-          "row": 30,
+          "row": 15,
           "start_col": 0,
-          "end_col": 119,
+          "end_col": 80,
           "faint": false,
           "foreground": {
             "kind": "rgb",
@@ -39456,7 +39473,7 @@
           }
         },
         {
-          "row": 31,
+          "row": 16,
           "start_col": 0,
           "end_col": 3,
           "faint": false,
@@ -39468,9 +39485,9 @@
           }
         },
         {
-          "row": 38,
+          "row": 22,
           "start_col": 0,
-          "end_col": 119,
+          "end_col": 80,
           "faint": false,
           "foreground": {
             "kind": "rgb",
@@ -39480,7 +39497,7 @@
           }
         },
         {
-          "row": 39,
+          "row": 23,
           "start_col": 2,
           "end_col": 18,
           "faint": false,
@@ -39491,7 +39508,8 @@
             "b": 177
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     }
   }
 }

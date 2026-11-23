@@ -10317,7 +10317,10 @@ mod tests {
 
         fn screen(id: &str) -> ScreenSnapshot {
             let document: Value = serde_json::from_str(&bundled_fixture(id)).unwrap();
-            replay(id, document["alternate_screen"].as_bool().unwrap())
+            replay(
+                id,
+                crate::coding_agent::detector::test_support::fixture_alternate(&document),
+            )
         }
 
         fn detector(catalog: &ProfileCatalog) -> Detector {
@@ -10376,7 +10379,7 @@ mod tests {
             let screen = replay_native_fixture(
                 &fixture,
                 |_| {},
-                document["alternate_screen"].as_bool().unwrap(),
+                crate::coding_agent::detector::test_support::fixture_alternate(&document),
                 None,
             );
             Detector::new(
@@ -10490,7 +10493,7 @@ mod tests {
             let screen = replay_native_fixture(
                 &fixture,
                 |_| {},
-                document["alternate_screen"].as_bool().unwrap(),
+                crate::coding_agent::detector::test_support::fixture_alternate(&document),
                 None,
             );
             Detector::new(

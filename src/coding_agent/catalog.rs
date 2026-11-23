@@ -203,6 +203,18 @@ struct RawRule {
     fixture_ids: Option<IgnoredAny>,
     #[serde(default, deserialize_with = "present")]
     suggestion: Option<RawSuggestion>,
+    #[serde(default, deserialize_with = "present")]
+    text_prefixes: Option<TextPrefixes>,
+}
+
+/// The prefixes that open a composer's first and continuation rows.
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct TextPrefixes {
+    #[serde(deserialize_with = "pattern")]
+    first_prefix: Regex,
+    #[serde(deserialize_with = "pattern")]
+    continuation_prefix: Regex,
 }
 
 #[derive(Deserialize)]
@@ -529,6 +541,8 @@ pub(super) struct Rule {
     pub(crate) continuation: Option<Continuation>,
     pub(crate) frame: Option<Frame>,
     pub(crate) suggestion: Option<SuggestionStyle>,
+    /// Prefixes that replace the profile's `composer.text` prefixes in this rule's regions.
+    pub(crate) text_prefixes: Option<TextPrefixes>,
 }
 #[derive(Clone)]
 pub(super) struct Capability {
@@ -638,8 +652,7 @@ struct Placeholder {
 #[derive(Clone)]
 pub(super) struct ComposerTextSpec {
     pub(crate) rule_ids: Vec<String>,
-    first_prefix: Regex,
-    continuation_prefix: Regex,
+    prefixes: TextPrefixes,
     mode_prefix: Option<String>,
     /// The region's start row frames the composer, whose text begins on the next row.
     framed: bool,
@@ -682,20 +695,22 @@ fn anchored_end(regex: &Regex, text: &str) -> Option<usize> {
 }
 
 impl ComposerTextSpec {
-    /// The composer text of the trimmed `rows` of `region`, or `None` when the first row does
-    /// not open with `first_prefix`.
+    /// The composer text of the trimmed `rows` of `region` that `rule` bounds, or `None` when
+    /// the first row does not open with the first-row prefix.
     pub(super) fn read(
         &self,
+        rule: &Rule,
         region: crate::coding_agent::detector::ScreenRegion,
         rows: &[String],
     ) -> Option<ComposerText> {
+        let prefixes = rule.text_prefixes.as_ref().unwrap_or(&self.prefixes);
         let rows = if self.framed { rows.get(1..)? } else { rows };
         let (first, rest) = rows.split_first()?;
-        let mut joined = first[anchored_end(&self.first_prefix, first)?..].to_owned();
+        let mut joined = first[anchored_end(&prefixes.first_prefix, first)?..].to_owned();
         let mut breaks = BTreeSet::new();
         let mut count = 1;
         for row in rest {
-            let Some(end) = anchored_end(&self.continuation_prefix, row) else {
+            let Some(end) = anchored_end(&prefixes.continuation_prefix, row) else {
                 break;
             };
             breaks.insert(joined.len());
@@ -780,18 +795,23 @@ impl ComposerText {
     /// Whether the segments consume exactly the literal written as `chunks`, in order: text
     /// consumes its own characters, a scalars placeholder its count of scalars and a lines
     /// placeholder one whole chunk of its line count. A literal beginning with the mode prefix
-    /// is matched without it.
+    /// matches with or without it, because the native CLI may draw or consume the prefix.
     pub(crate) fn matches(&self, chunks: &[&str]) -> bool {
         let characters = chunks
             .iter()
             .flat_map(|chunk| chunk.chars())
             .collect::<Vec<_>>();
-        let skipped = self
+        let consumed = self
             .mode_prefix
             .as_ref()
             .map(|prefix| prefix.chars().collect::<Vec<_>>())
             .filter(|prefix| characters.starts_with(prefix))
-            .map_or(0, |prefix| prefix.len());
+            .map(|prefix| prefix.len());
+        self.matches_after(chunks, &characters, 0)
+            || consumed.is_some_and(|skipped| self.matches_after(chunks, &characters, skipped))
+    }
+
+    fn matches_after(&self, chunks: &[&str], characters: &[char], skipped: usize) -> bool {
         let literal = &characters[skipped..];
         let mut whole_chunks = std::collections::BTreeMap::new();
         let mut start = 0;
@@ -1020,6 +1040,10 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         suggestion.is_none() || kind == ObservationKind::ComposerEmpty,
         "only composer_empty rules declare a suggestion style",
     )?;
+    require(
+        raw.text_prefixes.is_none() || kind == ObservationKind::ComposerText,
+        "only composer_text rules declare text_prefixes",
+    )?;
     Ok(Rule {
         id: raw.id.0,
         priority: raw.priority,
@@ -1032,6 +1056,7 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         continuation,
         frame: raw.frame,
         suggestion,
+        text_prefixes: raw.text_prefixes,
     })
 }
 fn validate_gates(
@@ -1407,8 +1432,10 @@ fn composer_text_spec(
         .collect::<Result<Vec<_>>>()?;
     Ok(ComposerTextSpec {
         rule_ids: raw.rule_ids.0,
-        first_prefix: raw.first_prefix,
-        continuation_prefix: raw.continuation_prefix,
+        prefixes: TextPrefixes {
+            first_prefix: raw.first_prefix,
+            continuation_prefix: raw.continuation_prefix,
+        },
         mode_prefix: raw.mode_prefix.map(|prefix| prefix.0),
         framed: raw.framed,
         wrap: raw.wrap,
@@ -1969,8 +1996,30 @@ pub(crate) mod test_support {
         found
     }
 
+    /// A herdr capture records neither the cursor nor the screen mode: all three fields are
+    /// null together, and the screen names `multiplexer: herdr`.
+    fn verify_cursor_free_screen(screen: &Map<String, Value>) -> Result<()> {
+        require(
+            ["alternate_screen", "cursor_row", "cursor_col"]
+                .iter()
+                .all(|field| screen[*field].is_null()),
+            "a cursor-free fixture records null cursor and screen mode together",
+        )?;
+        require(
+            screen
+                .get("multiplexer")
+                .is_some_and(|value| value == "herdr"),
+            "a cursor-free fixture is a herdr capture",
+        )
+    }
+
     fn verify_bundled_screen(screen: &Value) -> Result<()> {
-        let optional = ["composer_evidence", "cell_backgrounds", "cell_styles"];
+        let optional = [
+            "composer_evidence",
+            "cell_backgrounds",
+            "cell_styles",
+            "multiplexer",
+        ];
         let fields = ["native_version"]
             .into_iter()
             .chain(SCREEN_FIELDS)
@@ -1985,19 +2034,30 @@ pub(crate) mod test_support {
         let styles = m.contains_key("cell_styles");
         let rows = positive(&m["rows"])?;
         let cols = positive(&m["cols"])?;
-        boolean(&m["alternate_screen"])?;
         m["screen_seq"]
             .as_u64()
             .ok_or_else(|| invalid("fixture screen sequence required"))?;
-        require(
-            m["cursor_row"]
-                .as_u64()
-                .is_some_and(|row| row < u64::from(rows))
-                && m["cursor_col"]
+        if ["alternate_screen", "cursor_row", "cursor_col"]
+            .iter()
+            .any(|field| m[*field].is_null())
+        {
+            verify_cursor_free_screen(m)?;
+        } else {
+            require(
+                !m.contains_key("multiplexer"),
+                "only a cursor-free fixture names its multiplexer",
+            )?;
+            boolean(&m["alternate_screen"])?;
+            require(
+                m["cursor_row"]
                     .as_u64()
-                    .is_some_and(|col| col <= u64::from(cols)),
-            "fixture cursor outside its geometry",
-        )?;
+                    .is_some_and(|row| row < u64::from(rows))
+                    && m["cursor_col"]
+                        .as_u64()
+                        .is_some_and(|col| col <= u64::from(cols)),
+                "fixture cursor outside its geometry",
+            )?;
+        }
         let lines = array(&m["lines"])?;
         require(
             lines.len() == usize::from(rows) && lines.iter().all(Value::is_string),
@@ -2547,7 +2607,7 @@ pub(crate) mod test_support {
                         crate::coding_agent::detector::test_support::replay_native_fixture(
                             &crate::digest::canonical_json(screen),
                             |_| {},
-                            boolean(&screen["alternate_screen"])?,
+                            crate::coding_agent::detector::test_support::fixture_alternate(screen),
                             None,
                         );
                     let composer = detector.composer_text(&snapshot)?.ok_or_else(|| {
@@ -2710,7 +2770,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn synthetic_text_rule() -> Value {
         json!({
-            "id":SYNTHETIC_TEXT_RULE,"priority":100,"observation":"composer_text",
+            "id":SYNTHETIC_TEXT_RULE,"priority":40,"observation":"composer_text",
             "region":{"screen":"either","start_pattern":"^Synthetic input: ","end_pattern":"^State end$","max_rows":8,"cursor":"any"},
             "matchers":[{"id":"input","scope":"line","pattern":"^Synthetic input: "}],
             "extract":{"operation":null,"choices":[]},
@@ -2779,11 +2839,11 @@ pub(crate) mod test_support {
         let (row, _) = snapshot
             .cursor
             .expect("a replayed runner screen has a cursor");
-        let line = snapshot
-            .screen
-            .rows(0, snapshot.cols)
-            .nth(usize::from(row))
-            .expect("the cursor row is on the screen");
+        let lines: Vec<String> = snapshot.screen.rows(0, snapshot.cols).collect();
+        let line = lines
+            .get(usize::from(row))
+            .expect("the cursor row is on the screen")
+            .clone();
         let marker = first_prefix
             .find(&line)
             .map_or_else(String::new, |found| found.as_str().to_owned());
@@ -2813,21 +2873,30 @@ pub(crate) mod test_support {
             let continued_width = width.saturating_sub(continuation.chars().count()).max(1);
             let chars: Vec<char> = rest.chars().collect();
             let (first, mut remaining) = chars.split_at(first_width.min(chars.len()));
-            let mut painted = format!(
-                "\x1b[{};1H\x1b[2K{marker}{}",
-                row + 1,
-                first.iter().collect::<String>()
-            );
-            let mut next_row = row + 2;
+            let mut composer = vec![format!("{marker}{}", first.iter().collect::<String>())];
             while !remaining.is_empty() {
                 let (line, rest) = remaining.split_at(continued_width.min(remaining.len()));
-                painted.push_str(&format!(
-                    "\x1b[{next_row};1H\x1b[2K{continuation}{}",
-                    line.iter().collect::<String>()
-                ));
+                composer.push(format!("{continuation}{}", line.iter().collect::<String>()));
                 remaining = rest;
-                next_row += 1;
             }
+            let row = usize::from(row);
+            if composer.len() == 1 {
+                return format!("\x1b[{};1H\x1b[2K{}", row + 1, composer[0]).into_bytes();
+            }
+            let mut screen: Vec<String> = lines[..row].to_vec();
+            screen.extend(composer.iter().cloned());
+            screen.extend(lines[row + 1..].iter().cloned());
+            let scrolled = screen.len().saturating_sub(lines.len());
+            let shown = &screen[scrolled..];
+            let mut painted = String::from("\x1b[0m\x1b[2J");
+            for (index, text) in shown.iter().enumerate() {
+                painted.push_str(&format!("\x1b[{};1H{text}", index + 1));
+            }
+            let last = row + composer.len() - scrolled;
+            painted.push_str(&format!(
+                "\x1b[{last};{}H",
+                composer.last().expect("a composer row").chars().count() + 1
+            ));
             painted.into_bytes()
         }))
     }
@@ -7519,7 +7588,9 @@ mod tests {
                         let screen = replay_native_fixture(
                             &bundled_screen(id),
                             |_| {},
-                            document["alternate_screen"].as_bool().unwrap(),
+                            crate::coding_agent::detector::test_support::fixture_alternate(
+                                &document,
+                            ),
                             None,
                         );
                         let observed = detector.observe(&screen).unwrap();
@@ -8588,8 +8659,13 @@ mod tests {
         pub(super) const BOX_TEXT: &str = "box-text";
 
         fn box_rule(id: &str, observation: &str, matcher: &str) -> Value {
+            let priority = if observation == "composer_text" {
+                40
+            } else {
+                50
+            };
             json!({
-                "id":id,"priority":50,"observation":observation,
+                "id":id,"priority":priority,"observation":observation,
                 "region":{"screen":"either","start_pattern":"^> ","end_pattern":"^-- footer$","max_rows":6,"cursor":"any"},
                 "matchers":[{"id":"prompt","scope":"line","pattern":matcher}],
                 "extract":{"operation":null,"choices":[]},
@@ -8898,7 +8974,7 @@ mod tests {
         }
 
         #[test]
-        fn a_literal_beginning_with_the_mode_prefix_is_matched_without_it() {
+        fn a_literal_beginning_with_the_mode_prefix_matches_with_or_without_it_rendered() {
             type ModeCase = (
                 &'static str,
                 Option<&'static str>,
@@ -8906,7 +8982,14 @@ mod tests {
                 &'static str,
                 bool,
             );
-            let cases: [ModeCase; 6] = [
+            let cases: [ModeCase; 7] = [
+                (
+                    "a rendered mode prefix still compares the rest",
+                    Some("!"),
+                    "> ! true aab",
+                    "! true aaa",
+                    false,
+                ),
                 (
                     "the mode prompt replaces the prompt marker",
                     Some("!"),
@@ -8929,11 +9012,11 @@ mod tests {
                     true,
                 ),
                 (
-                    "the mode prefix is not composer text",
+                    "the mode prefix rendered as composer text",
                     Some("!"),
                     "> ! true aaa",
                     "! true aaa",
-                    false,
+                    true,
                 ),
                 (
                     "without mode_prefix the switch stays part of the literal",
@@ -8953,6 +9036,180 @@ mod tests {
             for (name, mode_prefix, row, literal, matches) in cases {
                 let composer = detector(&mode_box_definition(mode_prefix))
                     .composer_text(&box_screen(&[row]))
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{name}: the composer text is extractable"));
+                assert_eq!(composer.matches(&[literal]), matches, "{name}");
+            }
+        }
+
+        /// A composer whose `composer_text` rule starts at `start` and ends before the first
+        /// later row matching `end`, with `│ ` margins.
+        fn region_definition(start: &str, end: &str, first_prefix: &str, framed: bool) -> Value {
+            let mut value = box_definition("char");
+            let rule = &mut value["codex"]["profile"]["rules"][1];
+            rule["region"]["start_pattern"] = json!(start);
+            rule["region"]["end_pattern"] = json!(end);
+            rule["matchers"][0]["pattern"] = json!(start);
+            let text = &mut value["codex"]["profile"]["capabilities"]["composer"]["text"];
+            text["first_prefix"] = json!(first_prefix);
+            text["continuation_prefix"] = json!("^│ ");
+            if framed {
+                text["framed"] = json!(true);
+            }
+            value
+        }
+
+        fn rows_screen(rows: &[&str]) -> ScreenSnapshot {
+            screen_of(format!("\x1b[2J\x1b[15;1H{}", rows.join("\r\n")).as_bytes())
+        }
+
+        #[test]
+        fn a_composer_text_region_ends_before_the_first_later_end_row() {
+            let value = region_definition("^> ", "^│ --$", "^> ", false);
+            let screen = rows_screen(&["> abc", "│ def", "│ --", "│ ghi", "│ --"]);
+            let composer = detector(&value)
+                .composer_text(&screen)
+                .unwrap()
+                .expect("the region before the first end row is extractable");
+            for (literal, matches) in [
+                ("abcdef", true),
+                ("abcdef--", false),
+                ("abcdefghi", false),
+                ("abcdef--ghi", false),
+            ] {
+                assert_eq!(composer.matches(&[literal]), matches, "{literal}");
+            }
+        }
+
+        #[test]
+        fn a_framed_composer_text_starts_on_the_row_after_its_frame_row() {
+            let screen = rows_screen(&["┌────", "│ hello", "│ world", "└────"]);
+            let framed = region_definition("^┌─+$", "^└─+$", "^│ ", true);
+            let composer = detector(&framed)
+                .composer_text(&screen)
+                .unwrap()
+                .expect("a framed composer reads the rows below its frame row");
+            assert!(composer.matches(&["helloworld"]));
+            assert!(!composer.matches(&["┌────helloworld"]));
+            let unframed = region_definition("^┌─+$", "^└─+$", "^│ ", false);
+            assert!(
+                detector(&unframed)
+                    .composer_text(&screen)
+                    .unwrap()
+                    .is_none(),
+                "without framed the frame row is the first row, outside first_prefix"
+            );
+        }
+
+        fn cursor_free(mut screen: ScreenSnapshot) -> ScreenSnapshot {
+            screen.cursor = None;
+            screen.alternate_screen = None;
+            screen
+        }
+
+        #[test]
+        fn composer_text_reads_the_bottom_most_candidate_below_a_transcript_echo() {
+            let screen = screen_of(
+                b"\x1b[2J\x1b[5;1H> echoed earlier prompt\r\n-- footer\x1b[18;1H> live draft\r\n-- footer",
+            );
+            for (name, screen) in [
+                ("as captured", screen.clone()),
+                ("cursor-free", cursor_free(screen)),
+            ] {
+                let composer = detector(&box_definition("char"))
+                    .composer_text(&screen)
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{name}: the live composer is extractable"));
+                assert!(composer.matches(&["live draft"]), "{name}");
+                assert!(!composer.matches(&["echoed earlier prompt"]), "{name}");
+            }
+        }
+
+        #[test]
+        fn an_empty_composer_both_rules_match_classifies_empty() {
+            let mut value = box_definition("char");
+            for rule in value["codex"]["profile"]["rules"].as_array_mut().unwrap() {
+                rule["region"]["start_pattern"] = json!("^>");
+            }
+            value["codex"]["profile"]["rules"][1]["matchers"][0]["pattern"] = json!("^>");
+            let observation = detector(&value).observe(&box_screen(&["> "])).unwrap();
+            assert_eq!(observation.kind, ObservationKind::ComposerEmpty);
+            assert_eq!(observation.rule_id, BOX_EMPTY);
+            let drafted = detector(&value).observe(&box_screen(&["> draft"])).unwrap();
+            assert_eq!(drafted.rule_id, BOX_TEXT);
+            assert_ne!(drafted.kind, ObservationKind::ComposerEmpty);
+        }
+
+        #[test]
+        fn a_composer_text_region_without_a_later_end_row_closes_at_the_screen_bottom() {
+            let screen = screen_of(b"\x1b[2J\x1b[23;1H> abc\r\n  def");
+            let composer = detector(&box_definition("char"))
+                .composer_text(&screen)
+                .unwrap()
+                .expect("a region closed by the screen bottom is extractable");
+            assert!(
+                composer.matches(&["abcdef"]),
+                "every row to the bottom is text"
+            );
+            assert!(!composer.matches(&["abc"]));
+            assert_eq!(composer.row_count(), 2);
+        }
+
+        const TUI_TEXT: &str = "tui-text";
+
+        /// The box profile plus a second `composer_text` rule for a one-column-indented box,
+        /// whose own `text_prefixes` replace the profile's `^> ` and `^  `.
+        fn tui_definition() -> Value {
+            let mut value = box_definition("char");
+            let mut tui = box_rule(TUI_TEXT, "composer_text", "^ > [^ ]");
+            tui["region"]["start_pattern"] = json!("^ > ");
+            tui["text_prefixes"] = json!({"first_prefix":"^ > ","continuation_prefix":"^   "});
+            value["codex"]["profile"]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .push(tui);
+            let composer = &mut value["codex"]["profile"]["capabilities"]["composer"];
+            composer["rule_ids"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!(TUI_TEXT));
+            composer["text"]["rule_ids"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!(TUI_TEXT));
+            value
+        }
+
+        #[test]
+        fn a_rule_text_prefixes_replace_the_profile_prefixes_for_its_regions() {
+            for (name, rows, literal, matches) in [
+                (
+                    "the indented box strips its own prefixes",
+                    &[" > hello", "   world"][..],
+                    "helloworld",
+                    true,
+                ),
+                (
+                    "the profile prefixes still read the classic box",
+                    &["> hello", "  world"][..],
+                    "helloworld",
+                    true,
+                ),
+                (
+                    "a classic margin ends the indented box's text",
+                    &[" > hello", "  world"][..],
+                    "helloworld",
+                    false,
+                ),
+                (
+                    "the indented box keeps a space the classic margin would strip",
+                    &[" > hello", "    world"][..],
+                    "hello world",
+                    true,
+                ),
+            ] {
+                let composer = detector(&tui_definition())
+                    .composer_text(&box_screen(rows))
                     .unwrap()
                     .unwrap_or_else(|| panic!("{name}: the composer text is extractable"));
                 assert_eq!(composer.matches(&[literal]), matches, "{name}");
@@ -9338,7 +9595,7 @@ mod tests {
             let snapshot = replay_native_fixture(
                 &crate::digest::canonical_json(screen),
                 |_| {},
-                screen["alternate_screen"].as_bool().unwrap(),
+                crate::coding_agent::detector::test_support::fixture_alternate(screen),
                 None,
             );
             detector_for(backend)
@@ -9518,6 +9775,31 @@ mod tests {
             ]
         }
 
+        /// The rules a hermes Director screen is classified with: the TUI composer rules and,
+        /// through the Director classification, every interaction rule.
+        fn hermes_director_rules() -> Vec<String> {
+            ["hermes-tui-idle-composer", "hermes-tui-composer-text"]
+                .map(String::from)
+                .to_vec()
+        }
+
+        /// The Director classification of a bundled fixture as captured and cursor-free.
+        fn director_observations(
+            backend: CodingAgent,
+            rules: &[String],
+            id: &str,
+            change: impl Fn(&mut Vec<String>),
+        ) -> [ScreenObservation; 2] {
+            let detector = Detector::new(ProfileCatalog::bundled(), backend, None);
+            let captured = replay_as_captured(id, &change, None);
+            [
+                detector.observe_director(&captured, rules).unwrap(),
+                detector
+                    .observe_director(&cursor_free(captured), rules)
+                    .unwrap(),
+            ]
+        }
+
         #[test]
         fn opencode_composer_rules_accept_any_agent_name_in_the_status_line() {
             let (_, file) = bundled_file("opencode-2.1.4-idle-composer-1");
@@ -9564,15 +9846,18 @@ mod tests {
             assert_eq!(rule["region"]["screen"], "alternate");
             assert_eq!(rule["region"]["cursor"], "any");
             assert_eq!(rule["region"]["max_rows"], 1);
+            let rules = hermes_director_rules();
             for id in cited(rule) {
-                for observation in observations(CodingAgent::Hermes, &id, |_| {}) {
+                for observation in director_observations(CodingAgent::Hermes, &rules, &id, |_| {}) {
                     assert_eq!(observation.kind, ObservationKind::ComposerEmpty, "{id}");
                     assert_eq!(observation.rule_id, "hermes-tui-idle-composer", "{id}");
                 }
-                for observation in observations(CodingAgent::Hermes, &id, |lines| {
-                    let row = composer_row(lines);
-                    lines[row] = " ❯ draft text".into();
-                }) {
+                for observation in
+                    director_observations(CodingAgent::Hermes, &rules, &id, |lines| {
+                        let row = composer_row(lines);
+                        lines[row] = " ❯ draft text".into();
+                    })
+                {
                     assert_ne!(
                         observation.kind,
                         ObservationKind::ComposerEmpty,
@@ -9586,16 +9871,11 @@ mod tests {
         fn hermes_tui_approval_form_is_detected_with_no_answer_plan() {
             let file = hermes_file();
             let rule = bundled_rule(&file, "hermes-tui-approval");
-            assert!(
-                file["profile"]["capabilities"]["detection"]["rule_ids"]
-                    .as_array()
-                    .unwrap()
-                    .contains(&json!("hermes-tui-approval"))
-            );
             let expected = ObservationKind::parse(rule["observation"].as_str().unwrap()).unwrap();
             assert!(matches!(expected, ObservationKind::Interaction(_)));
+            let rules = hermes_director_rules();
             for id in cited(rule) {
-                for observation in observations(CodingAgent::Hermes, &id, |_| {}) {
+                for observation in director_observations(CodingAgent::Hermes, &rules, &id, |_| {}) {
                     assert_eq!(observation.kind, expected, "{id}");
                     assert_eq!(observation.rule_id, "hermes-tui-approval", "{id}");
                 }
@@ -9630,6 +9910,138 @@ mod tests {
             for classic in ["hermes-idle-composer", "hermes-working-composer"] {
                 assert!(composer.contains(&json!(classic)), "{classic}");
             }
+        }
+    }
+
+    mod cursor_free_fixtures {
+        use crate::coding_agent::catalog::tests::*;
+
+        /// The id of a bundled codex screen with a recorded cursor whose every composer
+        /// record names `multiplexer`.
+        fn cursor_screen(files: &Value, multiplexer: &str) -> String {
+            files["codex"]["screens"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .find(|(_, screen)| {
+                    !screen["cursor_row"].is_null()
+                        && screen.get("lines").is_some()
+                        && screen["composer_evidence"]
+                            .as_array()
+                            .is_some_and(|records| {
+                                records
+                                    .iter()
+                                    .all(|record| record["multiplexer"] == multiplexer)
+                            })
+                })
+                .map(|(id, _)| id.clone())
+                .unwrap_or_else(|| panic!("a bundled codex {multiplexer} screen with a cursor"))
+        }
+
+        fn guarded(files: &Value) -> std::result::Result<(), String> {
+            ProfileCatalog::from_bundled_files(files)
+                .map(|_| ())
+                .map_err(|error| error.message().into_owned())
+        }
+
+        /// `files` with the `fields` of screen `id` set to null and its screen-level
+        /// `multiplexer` set to `multiplexer` when given.
+        fn nulled(files: &Value, id: &str, fields: &[&str], multiplexer: Option<&str>) -> Value {
+            let mut files = files.clone();
+            let screen = &mut files["codex"]["screens"][id];
+            for field in fields {
+                screen[*field] = Value::Null;
+            }
+            if let Some(multiplexer) = multiplexer {
+                screen["multiplexer"] = json!(multiplexer);
+            }
+            files
+        }
+
+        const CURSOR_FREE: [&str; 3] = ["alternate_screen", "cursor_row", "cursor_col"];
+
+        #[test]
+        fn a_herdr_capture_may_record_a_null_cursor_and_screen_mode() {
+            let files = bundled_files();
+            guarded(&files).unwrap_or_else(|message| panic!("the bundled files: {message}"));
+            for multiplexer in ["tmux", "herdr"] {
+                let id = cursor_screen(&files, multiplexer);
+                guarded(&nulled(&files, &id, &CURSOR_FREE, Some("herdr")))
+                    .unwrap_or_else(|message| panic!("{id}: {message}"));
+            }
+        }
+
+        #[test]
+        fn a_null_cursor_or_screen_mode_is_refused_outside_a_complete_herdr_capture() {
+            let files = bundled_files();
+            let herdr = cursor_screen(&files, "herdr");
+            for (name, fields, multiplexer, expected) in [
+                (
+                    "no screen-level multiplexer",
+                    &CURSOR_FREE[..],
+                    None,
+                    "a cursor-free fixture is a herdr capture",
+                ),
+                (
+                    "a tmux screen",
+                    &CURSOR_FREE[..],
+                    Some("tmux"),
+                    "a cursor-free fixture is a herdr capture",
+                ),
+                (
+                    "a null cursor without a null screen mode",
+                    &CURSOR_FREE[1..],
+                    Some("herdr"),
+                    "a cursor-free fixture records null cursor and screen mode together",
+                ),
+                (
+                    "a null row without a null column",
+                    &CURSOR_FREE[..2],
+                    Some("herdr"),
+                    "a cursor-free fixture records null cursor and screen mode together",
+                ),
+                (
+                    "a multiplexer on a screen with a cursor",
+                    &[][..],
+                    Some("herdr"),
+                    "only a cursor-free fixture names its multiplexer",
+                ),
+            ] {
+                let message = guarded(&nulled(&files, &herdr, fields, multiplexer))
+                    .expect_err(&format!("{name}: the guard refuses the screen"));
+                assert!(message.contains(expected), "{name}: {message}");
+            }
+        }
+
+        #[test]
+        fn a_cursor_free_fixture_replays_without_cursor_or_screen_mode() {
+            let files = bundled_files();
+            let herdr = cursor_screen(&files, "herdr");
+            let mut screen = files["codex"]["screens"][&herdr].clone();
+            let recorded = replay_native_fixture(
+                &crate::digest::canonical_json(&screen),
+                |_| {},
+                fixture_alternate(&screen),
+                None,
+            );
+            assert!(recorded.cursor.is_some());
+            assert!(recorded.alternate_screen.is_some());
+            for field in CURSOR_FREE {
+                screen[field] = Value::Null;
+            }
+            let replayed = replay_native_fixture(
+                &crate::digest::canonical_json(&screen),
+                |_| {},
+                fixture_alternate(&screen),
+                None,
+            );
+            assert_eq!(replayed.cursor, None);
+            assert_eq!(replayed.alternate_screen, None);
+            assert_eq!(
+                replayed.screen.contents(),
+                recorded.screen.contents(),
+                "the rows replay at their positions"
+            );
         }
     }
 }

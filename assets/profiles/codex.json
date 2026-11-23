@@ -128,7 +128,13 @@
           "style": {
             "faint": true
           }
-        }
+        },
+        "fixture_ids": [
+          "codex-0.169.0-director-busy-herdr-120-1",
+          "codex-0.169.0-director-busy-tmux-120-1",
+          "codex-0.169.0-director-idle-empty-herdr-120-1",
+          "codex-0.169.0-director-idle-empty-tmux-120-1"
+        ]
       },
       {
         "id": "codex-composer-text",
@@ -152,7 +158,17 @@
           "operation": null,
           "choices": []
         },
-        "verified_noninteraction": true
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "codex-0.169.0-director-one-herdr-120-1",
+          "codex-0.169.0-director-one-tmux-120-1",
+          "codex-0.169.0-director-plain-1024-herdr-120-1",
+          "codex-0.169.0-director-plain-1024-tmux-120-1",
+          "codex-0.169.0-director-wrap-herdr-120-1",
+          "codex-0.169.0-director-wrap-tmux-120-1",
+          "codex-0.169.0-director-plain-1024-herdr-81-1",
+          "codex-0.169.0-director-plain-1024-tmux-80-1"
+        ]
       }
     ],
     "capabilities": {
@@ -261,7 +277,11 @@
               "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1",
               "codex-0.167.0-composer-prompt-plain-41-post-submit-herdr-092-1",
               "codex-0.167.0-composer-prompt-plain-1024-post-submit-herdr-092-1",
-              "codex-0.167.0-composer-prompt-paste-4000-post-submit-herdr-092-1"
+              "codex-0.167.0-composer-prompt-paste-4000-post-submit-herdr-092-1",
+              "codex-0.169.0-composer-prompt-plain-1024-literal-tmux-80-1",
+              "codex-0.169.0-composer-prompt-paste-placeholder-1024-literal-herdr-81-1",
+              "codex-0.169.0-composer-prompt-wrap-literal-tmux-120-1",
+              "codex-0.169.0-composer-prompt-paste-2000-literal-tmux-120-1"
             ],
             "literal_framing": "bracketed_paste",
             "plain_literal_limit": {
@@ -278,7 +298,11 @@
               "codex-0.167.0-composer-exec-paste-4000-post-submit-tmux-120-1",
               "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1",
               "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1",
-              "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1"
+              "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1",
+              "codex-0.169.0-composer-exec-plain-1000-literal-tmux-80-1",
+              "codex-0.169.0-composer-exec-plain-1000-literal-herdr-81-1",
+              "codex-0.169.0-composer-exec-wrap-literal-tmux-120-1",
+              "codex-0.169.0-composer-exec-paste-2000-literal-tmux-120-1"
             ],
             "literal_framing": "bracketed_paste",
             "plain_literal_limit": {
@@ -351,7 +375,9 @@
           "codex-0.169.0-director-one-herdr-120-1",
           "codex-0.169.0-director-one-tmux-120-1",
           "codex-0.169.0-director-plain-1024-herdr-120-1",
+          "codex-0.169.0-director-plain-1024-herdr-81-1",
           "codex-0.169.0-director-plain-1024-tmux-120-1",
+          "codex-0.169.0-director-plain-1024-tmux-80-1",
           "codex-0.169.0-director-wrap-herdr-120-1",
           "codex-0.169.0-director-wrap-tmux-120-1"
         ]
@@ -14435,7 +14461,8 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "codex-0.169.0-director-one-herdr-120-1": {
       "native_version": "0.169.0",
@@ -14663,7 +14690,8 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "codex-0.169.0-director-wrap-herdr-120-1": {
       "native_version": "0.169.0",
@@ -14891,7 +14919,8 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "codex-0.169.0-director-plain-1024-herdr-120-1": {
       "native_version": "0.169.0",
@@ -15119,7 +15148,8 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "codex-0.169.0-director-busy-herdr-120-1": {
       "native_version": "0.169.0",
@@ -15433,6 +15463,2018 @@
           "end_col": 26,
           "faint": true,
           "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "codex-0.169.0-composer-prompt-plain-1024-literal-tmux-80-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 1024,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 22,
+      "cursor_col": 25,
+      "lines": [
+        "│ https://github.com/openai/codex/releases/latest               │               ",
+        "╰───────────────────────────────────────────────────────────────╯               ",
+        "                                                                                ",
+        "                                                                                ",
+        "  >_ OpenAI Codex (v0.169.0)                                                    ",
+        "",
+        "  permissions: YOLO mode                                                        ",
+        "                    ",
+        "                    ",
+        "› aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaa                                                       ",
+        "                                        "
+      ],
+      "masked_rows": [
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 0,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 0,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-composer-prompt-paste-placeholder-1024-literal-herdr-81-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 1024,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1024
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │",
+        "│ See https://github.com/openai/codex for installation options. │",
+        "│                                                               │",
+        "│ See full release notes:                                       │",
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        " ",
+        "› [Pasted Content 1024 chars]",
+        " ",
+        "",
+        "",
+        "  used"
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 21,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 22,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 2,
+          "end_col": 29,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 2,
+          "end_col": 6,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "codex-0.169.0-composer-exec-plain-1000-literal-tmux-80-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 993,
+            "prefix": "! true "
+          }
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 22,
+      "cursor_col": 71,
+      "lines": [
+        "│ https://github.com/openai/codex/releases/latest               │               ",
+        "╰───────────────────────────────────────────────────────────────╯               ",
+        "                                                                                ",
+        "                                                                                ",
+        "  >_ OpenAI Codex (v0.169.0)                                                    ",
+        "",
+        "  permissions: YOLO mode                                                        ",
+        "                    ",
+        "                    ",
+        "!  true                                                                         ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa         ",
+        "                                        "
+      ],
+      "masked_rows": [
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 0,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 0,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-composer-exec-plain-1000-literal-herdr-81-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 993,
+            "prefix": "! true "
+          }
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "bytes",
+            "max": 1000
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        " ",
+        "!  true",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        " "
+      ],
+      "masked_rows": [
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 0,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 0,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "codex-0.169.0-director-plain-1024-tmux-80-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 1024,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 19,
+      "cursor_col": 29,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮               ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │               ",
+        "│ See https://github.com/openai/codex for installation options. │               ",
+        "│                                                               │               ",
+        "│ See full release notes:                                       │               ",
+        "│ https://github.com/openai/codex/releases/latest               │               ",
+        "╰───────────────────────────────────────────────────────────────╯               ",
+        "                    ",
+        "                    ",
+        "  >_ OpenAI Codex (v0.169.0)            ",
+        "",
+        "  permissions: YOLO mode                ",
+        "                    ",
+        "                    ",
+        "                    ",
+        "                    ",
+        "                    ",
+        "                    ",
+        "                                        ",
+        "› [Pasted Content 1024 chars]           ",
+        "                                                                                ",
+        "",
+        "",
+        "  used                                  "
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 21,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 22,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 2,
+          "end_col": 29,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 2,
+          "end_col": 6,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 242,
+            "g": 181,
+            "b": 144
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-director-plain-1024-herdr-81-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 1024,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "│ https://github.com/openai/codex/releases/latest               │",
+        "╰───────────────────────────────────────────────────────────────╯",
+        " ",
+        " ",
+        "  >_ OpenAI Codex (v0.169.0)",
+        "",
+        "  permissions: YOLO mode",
+        " ",
+        " ",
+        "› aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "  aaaaaaaaaaaaaaaaaaaaaaa",
+        " "
+      ],
+      "masked_rows": [
+        {
+          "row": 5,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 0,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 0,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "codex-0.169.0-composer-prompt-wrap-literal-tmux-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 85,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "                              ",
+        "› Reply OK.                   ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                   ",
+        "                                                                                                                        ",
+        "",
+        ""
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-composer-exec-wrap-literal-tmux-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 195,
+            "prefix": "! true "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 80,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "!  true                                                                                                                 ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                        ",
+        "                                                                                                                        ",
+        "",
+        "",
+        "                                                                                                             Shell mode "
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 109,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-composer-prompt-paste-2000-literal-tmux-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 2000,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 29,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "! [Pasted Content 2000 chars]                                                                                           ",
+        "                                                                                                                        ",
+        "",
+        "",
+        "                                                                                                             Shell mode "
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 29,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 109,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        }
+      ]
+    },
+    "codex-0.169.0-composer-exec-paste-2000-literal-tmux-120-1": {
+      "native_version": "0.169.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 1995,
+            "prefix": "! true "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 29,
+      "lines": [
+        "╭───────────────────────────────────────────────────────────────╮                                                       ",
+        "│ ✨ Update available! 0.169.0 -> 0.171.0                       │                                                       ",
+        "│ See https://github.com/openai/codex for installation options. │                                                       ",
+        "│                                                               │                                                       ",
+        "│ See full release notes:                                       │                                                       ",
+        "│ https://github.com/openai/codex/releases/latest               │                                                       ",
+        "╰───────────────────────────────────────────────────────────────╯                                                       ",
+        "                              ",
+        "                              ",
+        "  >_ OpenAI Codex (v0.169.0)  ",
+        "",
+        "  permissions: YOLO mode                                                                                                ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "                                                                                                                        ",
+        "! [Pasted Content 2002 chars]                                                                                           ",
+        "                                                                                                                        ",
+        "",
+        "",
+        "                                                                                                             Shell mode "
+      ],
+      "masked_rows": [
+        {
+          "row": 10,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 1,
+          "start_col": 2,
+          "end_col": 22,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 41,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 37,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 63,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 25,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 2,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 49,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 65,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 99,
+            "g": 168,
+            "b": 248
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 17,
+          "end_col": 28,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 15,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 15,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 2,
+          "end_col": 29,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 109,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 9
+          }
         }
       ]
     }

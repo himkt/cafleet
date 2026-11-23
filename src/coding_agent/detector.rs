@@ -283,6 +283,47 @@ fn captured(
         .cloned()
 }
 type Candidate = (usize, usize, ScreenRegion);
+/// The row after a composer region's last composer row: a `composer_text` region's end-pattern
+/// row is not composer text.
+fn composer_bottom(rule: &Rule, region: ScreenRegion, screen: &ScreenSnapshot) -> Result<u16> {
+    let last_row = typed_row(screen, region.bottom - 1, &[])?;
+    Ok(
+        if rule.kind == ObservationKind::ComposerText && rule.region.end.is_match(&last_row) {
+            region.bottom - 1
+        } else {
+            region.bottom
+        },
+    )
+}
+/// Without a cursor, the live composer is the composer region whose composer rows end lowest on
+/// the screen; a composer-shaped region above it belongs to the transcript.
+fn retain_live_composer(matched: &mut Vec<Matched<'_>>, screen: &ScreenSnapshot) -> Result<()> {
+    let composer = |m: &Matched<'_>| {
+        matches!(
+            m.rule.kind,
+            ObservationKind::ComposerEmpty | ObservationKind::ComposerText
+        )
+    };
+    let bottoms = matched
+        .iter()
+        .map(|m| {
+            composer(m)
+                .then(|| composer_bottom(m.rule, m.region, screen))
+                .transpose()
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let Some(lowest) = bottoms.iter().flatten().max().copied() else {
+        return Ok(());
+    };
+    let mut bottoms = bottoms.into_iter();
+    matched.retain(|_| {
+        bottoms
+            .next()
+            .flatten()
+            .is_none_or(|bottom| bottom == lowest)
+    });
+    Ok(())
+}
 fn match_rule<'a>(
     rule: &'a Rule,
     screen: &ScreenSnapshot,
@@ -292,11 +333,13 @@ fn match_rule<'a>(
         return None;
     }
     let candidates = qualifying_regions(rule, screen, lines);
-    if rule.kind == ObservationKind::ComposerText {
+    if rule.kind == ObservationKind::ComposerText
+        || (rule.kind == ObservationKind::ComposerEmpty && cursor_free(screen))
+    {
         return candidates
             .into_iter()
-            .filter_map(|candidate| extract(rule, lines, candidate))
-            .last();
+            .rev()
+            .find_map(|candidate| extract(rule, lines, candidate));
     }
     if cursor_free(screen) {
         let mut matched = candidates
@@ -366,12 +409,14 @@ fn region_candidates(
             continue;
         };
         let after_prompt = line.boundaries.get(prompt.end()).copied();
+        let mut closed = false;
         for (end, last) in lines
             .iter()
             .enumerate()
             .skip(start + usize::from(first_later_end))
         {
             if last.end - line.start + 1 > region_rule.max_rows {
+                closed = true;
                 break;
             }
             let mut matches = region_rule.end.find_iter(&last.text);
@@ -381,6 +426,7 @@ fn region_candidates(
             if matches.next().is_some() {
                 continue;
             }
+            closed = true;
             let region = ScreenRegion {
                 top: line.start,
                 bottom: last.end + 1,
@@ -404,8 +450,34 @@ fn region_candidates(
                 break;
             }
         }
+        if first_later_end && !closed {
+            regions.extend(bottom_closed(region_rule, cursor, screen, lines, start));
+        }
     }
     regions
+}
+/// A composer drawn on the screen's last rows has no later end row; the screen's bottom edge
+/// closes its region, and every row of it is composer text.
+fn bottom_closed(
+    region_rule: &Region,
+    cursor: Option<(u16, u16)>,
+    screen: &ScreenSnapshot,
+    lines: &[LogicalLine],
+    start: usize,
+) -> Option<Candidate> {
+    let end = lines.len() - 1;
+    let region = ScreenRegion {
+        top: lines[start].start,
+        bottom: lines[end].end + 1,
+    };
+    let qualified = match (region_rule.cursor, cursor) {
+        (CursorRule::Any, _) | (_, None) => true,
+        (CursorRule::Inside, Some((row, col))) => {
+            row >= region.top && row < region.bottom && col <= screen.cols
+        }
+        (CursorRule::AtEnd | CursorRule::AfterPrompt, Some(_)) => false,
+    };
+    qualified.then_some((start, end, region))
 }
 /// `row`'s text without cells drawn in any of `styles`, trailing blanks trimmed.
 fn typed_row(screen: &ScreenSnapshot, row: u16, styles: &[SuggestionStyle]) -> Result<String> {
@@ -766,17 +838,13 @@ impl Detector {
             })
             .collect::<Vec<_>>();
         let lines = ScreenLines::new(screen, profile)?;
-        let mut regions = rules.iter().filter_map(|rule| {
-            match_rule(rule, screen, lines.of(rule)).map(|m| (rule.kind, m.region))
-        });
-        let (Some((kind, region)), None) = (regions.next(), regions.next()) else {
+        let mut regions = rules
+            .iter()
+            .filter_map(|rule| match_rule(rule, screen, lines.of(rule)).map(|m| (rule, m.region)));
+        let (Some((rule, region)), None) = (regions.next(), regions.next()) else {
             return Ok(None);
         };
-        let text_bottom = if kind == ObservationKind::ComposerText {
-            region.bottom - 1
-        } else {
-            region.bottom
-        };
+        let text_bottom = composer_bottom(rule, region, screen)?;
         let styles = rules
             .iter()
             .filter_map(|rule| rule.suggestion)
@@ -784,7 +852,7 @@ impl Detector {
         let rows = (region.top..text_bottom)
             .map(|row| typed_row(screen, row, &styles))
             .collect::<Result<Vec<_>>>()?;
-        Ok(spec.read(region, &rows))
+        Ok(spec.read(rule, region, &rows))
     }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
         self.observe_where(screen, |profile, rule| {
@@ -833,6 +901,9 @@ impl Detector {
             .filter(|rule| selected(profile, rule))
             .filter_map(|rule| match_rule(rule, screen, lines.of(rule)))
             .collect::<Vec<_>>();
+        if cursor_free(screen) {
+            retain_live_composer(&mut matched, screen)?;
+        }
         let Some(priority) = matched.iter().map(|m| m.rule.priority).max() else {
             return Ok(observation);
         };
@@ -974,8 +1045,33 @@ pub(crate) mod test_support {
         change: impl FnOnce(&mut Vec<String>),
         cursor: Option<(u16, u16)>,
     ) -> ScreenSnapshot {
-        let alternate = document(id)["alternate_screen"].as_bool().unwrap();
+        let alternate = fixture_alternate(&document(id));
         replay_native_fixture(&bundled_screen(id), change, alternate, cursor)
+    }
+
+    /// The screen mode a replay paints a fixture on. A herdr capture records no screen mode
+    /// (`null`); it paints on the primary screen and its replay is observed cursor-free.
+    pub(crate) fn fixture_alternate(screen: &Value) -> bool {
+        match &screen["alternate_screen"] {
+            Value::Bool(alternate) => *alternate,
+            Value::Null => false,
+            other => panic!("a fixture screen mode is a boolean or null: {other}"),
+        }
+    }
+
+    /// The fixture's recorded cursor, or `None` for a herdr capture, which records none.
+    pub(crate) fn fixture_cursor(screen: &Value) -> Option<(u16, u16)> {
+        let coordinate = |key: &str| {
+            let value = &screen[key];
+            (!value.is_null()).then(|| {
+                u16::try_from(value.as_u64().expect("a fixture cursor coordinate")).unwrap()
+            })
+        };
+        match (coordinate("cursor_row"), coordinate("cursor_col")) {
+            (Some(row), Some(col)) => Some((row, col)),
+            (None, None) => None,
+            partial => panic!("a fixture cursor records both coordinates or neither: {partial:?}"),
+        }
     }
 
     /// Claude rules read either screen, so a primary-screen replay is the same live screen.
@@ -1011,13 +1107,18 @@ pub(crate) mod test_support {
         terminal
             .feed(&fixture_bytes(&screen, change, alternate, cursor))
             .unwrap();
-        terminal.snapshot()
+        let mut snapshot = terminal.snapshot();
+        if cursor.is_none() && fixture_cursor(&screen).is_none() {
+            snapshot.cursor = None;
+            snapshot.alternate_screen = None;
+        }
+        snapshot
     }
 
     /// The byte stream that paints a committed native screen, using its own screen mode and cursor.
     pub(crate) fn native_fixture_bytes(fixture: &str) -> Vec<u8> {
         let screen: Value = serde_json::from_str(fixture).unwrap();
-        let alternate = screen["alternate_screen"].as_bool().unwrap();
+        let alternate = fixture_alternate(&screen);
         fixture_bytes(&screen, |_| {}, alternate, None)
     }
 
@@ -1054,11 +1155,9 @@ pub(crate) mod test_support {
         let mut written = TerminalState::new(size_of(screen)).unwrap();
         written.feed(&bytes).unwrap();
         bytes.extend(attribute_rewrite(screen, &written.snapshot()));
-        let (row, col) = cursor.unwrap_or((
-            u16::try_from(screen["cursor_row"].as_u64().unwrap()).unwrap(),
-            u16::try_from(screen["cursor_col"].as_u64().unwrap()).unwrap(),
-        ));
-        bytes.extend(format!("\x1b[{};{}H", row + 1, col + 1).into_bytes());
+        if let Some((row, col)) = cursor.or_else(|| fixture_cursor(screen)) {
+            bytes.extend(format!("\x1b[{};{}H", row + 1, col + 1).into_bytes());
+        }
         bytes
     }
 
@@ -2877,7 +2976,7 @@ mod tests {
                 .take(col)
                 .collect();
             screen["lines"][row] = json!(format!("{marker}{typed}"));
-            let alternate = screen["alternate_screen"].as_bool().unwrap();
+            let alternate = crate::coding_agent::detector::test_support::fixture_alternate(&screen);
             replay_native_fixture(
                 &crate::digest::canonical_json(&screen),
                 |_| {},
@@ -3057,7 +3156,7 @@ mod tests {
             let screen = replay_native_fixture(
                 &fixture,
                 change,
-                document["alternate_screen"].as_bool().unwrap(),
+                crate::coding_agent::detector::test_support::fixture_alternate(&document),
                 cursor,
             );
             Detector::new(
@@ -6044,25 +6143,210 @@ mod tests {
         }
 
         #[test]
-        fn without_a_cursor_exactly_one_candidate_must_satisfy_the_region_matchers() {
+        fn without_a_cursor_a_composer_rule_takes_its_bottom_most_candidate_satisfying_its_matchers()
+         {
             let detector = detector(&prompt_row_definition("at_end"));
-            let observation = detector
-                .observe(&cursor_free(prompt_rows("history entry")))
+            for history in ["history entry", "Idle placeholder"] {
+                let observation = detector
+                    .observe(&cursor_free(prompt_rows(history)))
+                    .unwrap();
+                assert_eq!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{history}"
+                );
+                assert_eq!(observation.rule_id, EMPTY_RULE, "{history}");
+                assert_eq!(
+                    observation.matched_region.map(|region| region.top),
+                    Some(20),
+                    "{history}: the bottom-most satisfying candidate is the region"
+                );
+            }
+        }
+
+        fn two_permission_forms() -> ScreenSnapshot {
+            let form = "Synthetic permission request\r\nOperation: rm -rf build\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ";
+            screen_of(format!("\x1b[2J\x1b[3;1H{form}\x1b[15;1H{form}").as_bytes())
+        }
+
+        #[test]
+        fn without_a_cursor_an_interaction_rule_keeps_its_uniqueness_check() {
+            let detector = detector(&definitions());
+            let one = detector
+                .observe(&cursor_free(screen_of(&inspection_fixture_form(
+                    "rm -rf build",
+                    "synthetic-only",
+                ))))
                 .unwrap();
-            assert_eq!(
+            assert_eq!(one.rule_id, RULE, "one cursor-free form is detected");
+            let two = detector
+                .observe(&cursor_free(two_permission_forms()))
+                .unwrap();
+            assert_ne!(two.rule_id, RULE, "two satisfying forms stay ambiguous");
+        }
+
+        #[test]
+        fn without_a_cursor_only_the_lowest_ending_composer_match_competes() {
+            let detector = detector(&composer_definition("at_end", "either"));
+            let screen = cursor_free(screen_of(
+                b"\x1b[2J\x1b[5;1HSynthetic state\r\nState end\x1b[20;1HSynthetic input: draft\r\nState end",
+            ));
+            let observation = detector.observe(&screen).unwrap();
+            assert_ne!(
                 observation.kind,
                 ObservationKind::ComposerEmpty,
-                "the one candidate satisfying its matchers is the region"
+                "an empty-shaped box above a drafted composer never classifies empty"
             );
-            assert_eq!(observation.rule_id, EMPTY_RULE);
-            assert_ne!(
-                detector
-                    .observe(&cursor_free(prompt_rows("Idle placeholder")))
-                    .unwrap()
-                    .rule_id,
-                EMPTY_RULE,
-                "two candidates satisfying the matchers stay ambiguous"
+            assert_eq!(
+                observation.rule_id,
+                crate::coding_agent::catalog::test_support::SYNTHETIC_TEXT_RULE
             );
+        }
+
+        fn director_detector(backend: CodingAgent) -> (Detector, Vec<String>) {
+            let rules = ProfileCatalog::bundled()
+                .director_delivery(backend)
+                .expect("a Director backend declares Director delivery")
+                .rule_ids()
+                .to_vec();
+            (
+                Detector::new(ProfileCatalog::bundled(), backend, None),
+                rules,
+            )
+        }
+
+        /// The ids of `backend`'s bundled cursor-free herdr screens: those with no composer
+        /// record, and those holding a typed prompt literal.
+        fn herdr_director_screens(backend: CodingAgent) -> (Vec<String>, Vec<String>) {
+            let files = crate::coding_agent::catalog::test_support::bundled_files();
+            let screens = files[backend.name()]["screens"].as_object().unwrap();
+            let cursor_free = screens
+                .iter()
+                .filter(|(_, screen)| screen["multiplexer"] == "herdr");
+            let (mut idle, mut drafted) = (Vec::new(), Vec::new());
+            for (id, screen) in cursor_free {
+                let records =
+                    crate::coding_agent::catalog::test_support::pre_submit_records(screen).unwrap();
+                if screen.get("composer_evidence").is_none() {
+                    idle.push(id.clone());
+                } else if records
+                    .iter()
+                    .any(|record| record.operation == ComposerOperation::Prompt)
+                {
+                    drafted.push(id.clone());
+                }
+            }
+            (idle, drafted)
+        }
+
+        #[test]
+        fn every_director_screen_an_empty_composer_rule_cites_classifies_empty_through_director_rules()
+         {
+            let files = crate::coding_agent::catalog::test_support::bundled_files();
+            let mut misclassified = Vec::new();
+            for &backend in CodingAgent::all() {
+                if ProfileCatalog::bundled()
+                    .director_delivery(backend)
+                    .is_none()
+                {
+                    continue;
+                }
+                let (detector, rules) = director_detector(backend);
+                let profile = &files[backend.name()]["profile"];
+                for rule in profile["rules"].as_array().unwrap() {
+                    let id = rule["id"].as_str().unwrap();
+                    if rule["observation"] != "composer_empty" || !rules.iter().any(|r| r == id) {
+                        continue;
+                    }
+                    for fixture in rule["fixture_ids"].as_array().into_iter().flatten() {
+                        let fixture = fixture.as_str().unwrap();
+                        let screen = replay_as_captured(fixture, |_| {}, None);
+                        let observation = detector.observe_director(&screen, &rules).unwrap();
+                        if observation.kind != ObservationKind::ComposerEmpty {
+                            misclassified.push(format!(
+                                "{fixture} (cited by {id}): {:?} {} {:?}",
+                                observation.kind, observation.rule_id, observation.matched_region
+                            ));
+                        }
+                    }
+                }
+            }
+            assert!(
+                misclassified.is_empty(),
+                "an empty Director composer classifies empty: {misclassified:#?}"
+            );
+        }
+
+        #[test]
+        fn a_drafted_director_composer_below_an_empty_shaped_box_classifies_not_empty() {
+            for &backend in CodingAgent::all() {
+                if ProfileCatalog::bundled()
+                    .director_delivery(backend)
+                    .is_none()
+                {
+                    continue;
+                }
+                let (detector, rules) = director_detector(backend);
+                let (idle, drafted) = herdr_director_screens(backend);
+                let empty_box = idle
+                    .iter()
+                    .find_map(|id| {
+                        let screen = replay_as_captured(id, |_| {}, None);
+                        let observation = detector.observe_director(&screen, &rules).unwrap();
+                        (observation.kind == ObservationKind::ComposerEmpty).then(|| {
+                            let region = observation.matched_region.expect("an empty region");
+                            fixture_lines(id)[usize::from(region.top)..usize::from(region.bottom)]
+                                .to_vec()
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        let observed = idle
+                            .iter()
+                            .map(|id| {
+                                let screen = replay_as_captured(id, |_| {}, None);
+                                let observation =
+                                    detector.observe_director(&screen, &rules).unwrap();
+                                format!(
+                                    "{id}: {:?} {} {:?}",
+                                    observation.kind,
+                                    observation.rule_id,
+                                    observation.matched_region
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        panic!("{backend:?}: a cursor-free idle Director screen classifies empty: {observed:?}")
+                    });
+                assert!(
+                    !drafted.is_empty(),
+                    "{backend:?}: a drafted Director screen"
+                );
+                for id in drafted {
+                    let alone = replay_as_captured(&id, |_| {}, None);
+                    assert_ne!(
+                        detector.observe_director(&alone, &rules).unwrap().kind,
+                        ObservationKind::ComposerEmpty,
+                        "{id}: the drafted composer is not empty"
+                    );
+                    let boxed = replay_as_captured(
+                        &id,
+                        |lines| {
+                            for (row, line) in empty_box.iter().enumerate() {
+                                lines[row + 1] = line.clone();
+                            }
+                        },
+                        None,
+                    );
+                    assert!(
+                        boxed.cursor.is_none(),
+                        "{id}: a herdr screen replays cursor-free"
+                    );
+                    assert_ne!(
+                        detector.observe_director(&boxed, &rules).unwrap().kind,
+                        ObservationKind::ComposerEmpty,
+                        "{id}: an empty-shaped box above the drafted composer"
+                    );
+                }
+            }
         }
 
         #[test]

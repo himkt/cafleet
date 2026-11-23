@@ -263,7 +263,11 @@
           "operation": null,
           "choices": []
         },
-        "verified_noninteraction": true
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "opencode-2.3.0-director-busy-herdr-120-1",
+          "opencode-2.3.0-director-busy-tmux-120-1"
+        ]
       },
       {
         "id": "opencode-suggestion-composer",
@@ -297,7 +301,11 @@
               "b": 128
             }
           }
-        }
+        },
+        "fixture_ids": [
+          "opencode-2.3.0-director-idle-empty-herdr-120-1",
+          "opencode-2.3.0-director-idle-empty-tmux-120-1"
+        ]
       },
       {
         "id": "opencode-composer-text",
@@ -321,7 +329,15 @@
           "operation": null,
           "choices": []
         },
-        "verified_noninteraction": true
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "opencode-2.3.0-director-one-herdr-120-1",
+          "opencode-2.3.0-director-one-tmux-120-1",
+          "opencode-2.3.0-director-plain-380-herdr-82-1",
+          "opencode-2.3.0-director-plain-380-tmux-80-1",
+          "opencode-2.3.0-director-wrap-herdr-120-1",
+          "opencode-2.3.0-director-wrap-tmux-120-1"
+        ]
       }
     ],
     "capabilities": {
@@ -21034,7 +21050,8 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "opencode-2.3.0-director-one-herdr-120-1": {
       "native_version": "2.3.0",
@@ -21180,7 +21197,8 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "opencode-2.3.0-director-wrap-herdr-120-1": {
       "native_version": "2.3.0",
@@ -21400,7 +21418,8 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "opencode-2.3.0-director-busy-herdr-120-1": {
       "native_version": "2.3.0",
@@ -21570,7 +21589,8 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "opencode-2.3.0-composer-prompt-wrap-literal-tmux-120-1": {
       "native_version": "2.3.0",
@@ -22668,7 +22688,8 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "opencode-2.3.0-composer-exec-plain-380-literal-tmux-80-1": {
       "native_version": "2.3.0",
@@ -23303,7 +23324,8 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     },
     "opencode-2.3.0-director-plain-380-tmux-80-1": {
       "native_version": "2.3.0",
@@ -23919,7 +23941,8 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "multiplexer": "herdr"
     }
   }
 }

@@ -1472,6 +1472,19 @@ mod tests {
         }
 
         #[test]
+        fn a_body_without_its_trailing_blank_rows_replays_at_the_viewport_height() {
+            let snapshot = TerminalState::replay(&capture(
+                (5, 20),
+                None,
+                None,
+                "\r\nfirst row\r\n\r\nlast row\r\n",
+            ))
+            .unwrap();
+            assert_eq!((snapshot.rows, snapshot.cols), (5, 20));
+            assert_eq!(rows_of(&snapshot), ["", "first row", "", "last row", ""]);
+        }
+
+        #[test]
         fn every_runner_snapshot_carries_its_cursor_and_screen_mode() {
             let mut terminal = TerminalState::new(TerminalSize { rows: 5, cols: 20 }).unwrap();
             terminal.feed(b"\x1b[2;4Hx").unwrap();
