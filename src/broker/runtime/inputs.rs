@@ -1328,4 +1328,68 @@ mod tests {
             "another run's inputs are never its blocker"
         );
     }
+
+    mod director_preview_stamp {
+        use crate::broker::runtime::test_support::*;
+        use crate::broker::runtime::*;
+
+        fn notified_at(fixture: &Fixture, message_id: i64) -> Option<String> {
+            fixture
+                .conn
+                .query_row(
+                    "SELECT notified_at FROM messages WHERE message_id=?1",
+                    [message_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn to_director(fixture: &mut Fixture, body: &str) -> i64 {
+            crate::broker::send_message(&mut fixture.conn, fixture.member, fixture.director, body)
+                .unwrap()
+                .message_id
+        }
+
+        #[test]
+        fn a_director_preview_stamp_succeeds_only_while_notified_at_is_null() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message = to_director(&mut fixture, "report for the Director");
+            assert_eq!(notified_at(&fixture, message), None);
+            assert!(stamp_director_preview(&mut fixture.conn, &owner, message).unwrap());
+            let stamped =
+                notified_at(&fixture, message).expect("the first stamp records notified_at");
+            assert!(
+                !stamp_director_preview(&mut fixture.conn, &owner, message).unwrap(),
+                "a second stamp finds the column set"
+            );
+            assert_eq!(notified_at(&fixture, message), Some(stamped));
+        }
+
+        #[test]
+        fn a_director_preview_stamp_refuses_a_message_to_another_recipient() {
+            let mut fixture = Fixture::new();
+            let owner = fixture.activate();
+            let message = crate::broker::send_message(
+                &mut fixture.conn,
+                fixture.director,
+                fixture.member,
+                "assignment for the member",
+            )
+            .unwrap()
+            .message_id;
+            assert!(stamp_director_preview(&mut fixture.conn, &owner, message).is_err());
+            assert_eq!(notified_at(&fixture, message), None);
+        }
+
+        #[test]
+        fn a_director_preview_stamp_requires_the_current_run_owner() {
+            let mut fixture = Fixture::new();
+            let stale = fixture.activate();
+            fixture.activate_next_epoch();
+            let message = to_director(&mut fixture, "report after an ownership change");
+            assert!(stamp_director_preview(&mut fixture.conn, &stale, message).is_err());
+            assert_eq!(notified_at(&fixture, message), None);
+        }
+    }
 }

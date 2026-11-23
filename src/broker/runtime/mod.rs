@@ -1467,6 +1467,10 @@ mod tests {
                 "queue_housekeeping",
             ),
             (RunnerDiagnosticSource::PreviewSweep, "preview_sweep"),
+            (
+                RunnerDiagnosticSource::DirectorDelivery,
+                "director_delivery",
+            ),
             (RunnerDiagnosticSource::InputResult, "input_result"),
             (
                 RunnerDiagnosticSource::PermissionAnswer,
