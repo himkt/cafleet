@@ -1362,6 +1362,7 @@ impl DirectorSweepThread {
             let runner = std::rc::Rc::new(ShutdownBoundRunner {
                 inner: runner(),
                 shutdown: shutting_down.clone(),
+                clock: clock.clone(),
             });
             let mut sweep = DirectorSweep::new(run, catalog, runner, clock.clone(), diagnostics);
             let mut conn = None;
@@ -1406,6 +1407,7 @@ impl DirectorSweepThread {
 struct ShutdownBoundRunner {
     inner: std::rc::Rc<dyn crate::multiplexer::CommandRunner>,
     shutdown: Arc<std::sync::Mutex<Option<Instant>>>,
+    clock: Arc<dyn crate::time::Clock>,
 }
 
 impl crate::multiplexer::CommandRunner for ShutdownBoundRunner {
@@ -1440,7 +1442,7 @@ impl ShutdownBoundRunner {
         self.shutdown
             .lock()
             .expect("the shutdown deadline lock is never poisoned")
-            .map(|shutdown| shutdown.saturating_duration_since(Instant::now()))
+            .map(|shutdown| shutdown.saturating_duration_since(self.clock.now()))
     }
 }
 
@@ -5929,7 +5931,7 @@ mod tests {
         fn an_unverified_run_stamps_an_uncertain_preview_before_publishing_it_and_never_retypes_it()
         {
             with_sweeping_input_service_catalog(
-                Duration::from_secs(30),
+                Duration::from_secs(120),
                 true,
                 without_composer_verification,
                 |fixture, until| {
@@ -7690,19 +7692,23 @@ mod tests {
                     .expect("the sweep thread stops and joins");
             }
 
-            #[test]
-            fn stop_and_join_returns_by_the_shutdown_deadline_with_the_in_flight_attempt_clipped() {
-                let mut run = DirectorRun::new();
-                let message = run.report("in flight at shutdown");
+            /// The capture timeout and join instant of a sweep handed the shutdown deadline
+            /// `shutdown` builds while its first capture is in flight: the pane's first metadata
+            /// read blocks until after the handoff, then its capture hangs for its timeout.
+            fn shutdown_mid_capture(
+                run: &DirectorRun,
+                clock: Arc<dyn Clock>,
+                shutdown: impl FnOnce() -> Instant,
+            ) -> (Duration, Instant) {
                 let (entered_tx, entered) = mpsc::channel();
                 let (release, release_rx) = mpsc::channel();
                 let timeouts = Arc::new(Mutex::new(Vec::new()));
                 let recorded = timeouts.clone();
                 let thread = DirectorSweepThread::start_with_runner(
-                    format!("sqlite:///{}", database_path(&run)),
+                    format!("sqlite:///{}", database_path(run)),
                     run.fixture.run.clone(),
                     delivering(),
-                    Arc::new(crate::time::SystemClock) as Arc<dyn Clock>,
+                    clock,
                     run.diagnostics.clone(),
                     move || {
                         Rc::new(HungPane {
@@ -7716,7 +7722,7 @@ mod tests {
                 entered
                     .recv_timeout(Duration::from_secs(10))
                     .expect("the attempt reaches its first capture");
-                let shutdown = Instant::now() + Duration::from_millis(600);
+                let shutdown = shutdown();
                 let (joined, done) = mpsc::channel();
                 std::thread::spawn(move || {
                     thread.stop_and_join(shutdown);
@@ -7727,11 +7733,6 @@ mod tests {
                 let joined_at = done
                     .recv_timeout(Duration::from_secs(10))
                     .expect("the sweep thread stops and joins");
-                assert!(
-                    joined_at <= shutdown + Duration::from_millis(250),
-                    "joined {:?} after the shutdown deadline",
-                    joined_at.saturating_duration_since(shutdown)
-                );
                 let capture = timeouts
                     .lock()
                     .unwrap()
@@ -7739,9 +7740,44 @@ mod tests {
                     .find(|(command, _)| command == "capture-pane")
                     .map(|(_, timeout)| *timeout)
                     .expect("the in-flight capture ran");
+                (capture, joined_at)
+            }
+
+            #[test]
+            fn stop_and_join_returns_by_the_shutdown_deadline_with_the_in_flight_attempt_clipped() {
+                let mut run = DirectorRun::new();
+                let message = run.report("in flight at shutdown");
+                let shutdown = Instant::now() + Duration::from_millis(600);
+                let (capture, joined_at) = shutdown_mid_capture(
+                    &run,
+                    Arc::new(crate::time::SystemClock) as Arc<dyn Clock>,
+                    || shutdown,
+                );
+                assert!(
+                    joined_at <= shutdown + Duration::from_millis(250),
+                    "joined {:?} after the shutdown deadline",
+                    joined_at.saturating_duration_since(shutdown)
+                );
                 assert!(
                     capture <= Duration::from_millis(500),
                     "the in-flight capture runs under the clipped deadline: {capture:?}"
+                );
+                assert!(!run.notified(message.message_id));
+            }
+
+            #[test]
+            fn the_subprocess_clip_measures_the_shutdown_deadline_on_the_injected_clock() {
+                let mut run = DirectorRun::new();
+                let message = run.report("in flight at a virtual shutdown");
+                let clock = run.clock.clone();
+                let (capture, _) =
+                    shutdown_mid_capture(&run, run.clock.clone() as Arc<dyn Clock>, move || {
+                        clock.now() + Duration::from_millis(600)
+                    });
+                assert!(
+                    !capture.is_zero() && capture <= Duration::from_millis(600),
+                    "the capture timeout is the virtual time left before the shutdown deadline: \
+                     {capture:?}"
                 );
                 assert!(!run.notified(message.message_id));
             }
