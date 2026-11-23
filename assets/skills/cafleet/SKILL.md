@@ -29,7 +29,7 @@ Resolve the overlay read above by the subject of the action:
 
 1. **Select the subject.** Your own instructions use your executing backend's Runtime bindings. Before a spawn, follow [model selection](roles/director.md#model-selection), read the selected backend's Model catalog and Role defaults, confirm its Member eligibility and validate effort/launch capabilities, keeping your own tools and decision surface.
 2. **Materialize values.** Resolve runtime placeholders from Runtime bindings and the role's model/effort from the selected spawn backend's Role defaults.
-3. **Apply notes.** Follow each Note → applies at caveat at its named consuming instruction. Ordinary members resolve their own runtime section and take on no model-selection duties.
+3. **Apply notes.** Follow each Note → applies at caveat at its named consuming instruction.
 4. **Self-check at emission.** Resolve every runtime `{token}` before emitting a concrete command or message.
 
 ### Documented defaults
@@ -59,7 +59,7 @@ Pass full database-assigned integers literally; literal IDs preserve host permis
 | `--from-member-id` on a Director-only command | The caller, which must be the subject fleet's root Director |
 | `--fleet-id` | Fleet joined by `member create`; Director derives from the fleet |
 
-Members read their literal `FLEET ID:`, `DIRECTOR MEMBER ID:`, `YOUR MEMBER ID:` and `DATABASE URL:` spawn lines; Directors use IDs returned by creation. Spawn prompts contain exactly the CLI placeholders `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}`: the CLI fills the new member ID, renders `CODING AGENT:` to the selected backend and `DATABASE URL:` as `default` or `sqlite:///<path>`, and `member create` refuses a prompt without `{database_url}` for a non-default database. Supply exactly one positional `PROMPT` or `--file PATH`.
+Members read their literal `FLEET ID:`, `DIRECTOR MEMBER ID:`, `YOUR MEMBER ID:` and `DATABASE URL:` spawn lines; Directors use IDs returned by creation and fill spawn prompts through the [`member create`](reference/cli.md#member-create) placeholders.
 
 CAFleet reads no `CAFLEET_*` environment variable. When `DATABASE URL:` names a URL rather than `default`, pass `--database-url <url>` on every `cafleet` command, broker commands and the ready signal included (`cafleet message poll 7 --json --database-url <url>`); omitted, the default database applies ([database selection](reference/cli.md#database-selection)).
 
@@ -81,9 +81,9 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <target-memb
 
 Supply one positional body or `--file PATH`, using file input for long/multiline text. Text output truncates bodies at a fixed 200 codepoints; `--json` returns them complete.
 
-A send stores the message and returns; an ordinary recipient's own runner types its preview later. Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a pointer to the recipient's `message poll` command; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input.
+A send stores the message and returns; an ordinary recipient's own runner types its preview later and retries it on its own. Previews carry one `[cafleet msg ID from SENDER TIMESTAMP]` line with the full body or a pointer to the recipient's `message poll` command; [wrapped delivery methods](reference/cli.md#wrapped-delivery-methods) owns profile/fallback behavior. The root Director uses native reception or manual broker reads without automatic pane input.
 
-Retain the committed message ID. Send each body once; the recipient's runner delivers and retries the preview on its own. Recipients record deferred actions when their poll consumes the message. Fan out one send per recipient and report each failed recipient; [send outcomes](reference/cli.md#message-send) owns exact diagnostics.
+Retain the committed message ID and send each body once. Fan out one send per recipient and report each failed recipient; [send outcomes](reference/cli.md#message-send) owns exact diagnostics.
 
 ## Poll
 
@@ -91,8 +91,8 @@ Retain the committed message ID. Send each body once; the recipient's runner del
 cafleet message poll <my-member-id> [--json]
 ```
 
-Poll returns every `input_required` delivery newest first, with complete bodies under `--json`, and consumes them in the same command: each returned record is `completed`, and no later poll returns it. Record each returned message's sender, required action and artifact pointers in host-owned state before running any other command; your role file sets when to poll. The printed delivery ID differs from any host task-list ID. `message show MESSAGE_ID --json` reads a consumed message again.
+Poll returns every `input_required` delivery newest first, with complete bodies under `--json`, and consumes them in the same command ([`message poll`](reference/cli.md#message-poll)). Record each returned message's sender, required action and artifact pointers in host-owned state before running any other command; your role file sets when to poll. The printed delivery ID differs from any host task-list ID. `message show MESSAGE_ID --json` reads a consumed message again.
 
 ## Command index
 
-Use [cli.md](reference/cli.md) for invocation forms, flags, outputs and errors; its [subcommand summary](reference/cli.md#subcommand-summary) is the command registry, and per-command sections follow beside the shared output-shape, pane-input and setup/doctor sections. Backend notes in [coding-agents.md](reference/coding-agents.md) own host continuation and evidence. Members retain Send/Poll/show authority; Director actions follow their role.
+Use [cli.md](reference/cli.md) for invocation forms, flags, outputs and errors; its [subcommand summary](reference/cli.md#subcommand-summary) is the command registry. Backend notes in [coding-agents.md](reference/coding-agents.md) own host continuation and evidence. Members retain Send/Poll/show authority; Director actions follow their role.

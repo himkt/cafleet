@@ -28,17 +28,15 @@ Send the bare status phrase `ready`, not the `ready (<pointer>)` verb, optionall
 cafleet message poll <my-member-id> --json
 ```
 
-Poll after ready, on every wake (a preview arriving is a wake) and before completion reports. The poll consumes every message it returns, so record each message's actionable content and deferred work before any other work; `message show MESSAGE_ID --json` reads a consumed message again. Handle queued assignments before becoming idle; end the turn when none remain.
+Poll after ready, on every wake (a preview arriving is a wake) and before completion reports, recording each returned message under the core [Poll](../SKILL.md#poll) rule. Handle queued assignments before becoming idle; end the turn when none remain.
 
-A `[cafleet msg ID from SENDER TIMESTAMP]` preview line carries the body inline or a pointer to your `poll --json`; still run `poll --json` on that wake, which consumes that message and any others in one command. When that poll returns `[]`, an earlier poll consumed the message; read it with `message show MESSAGE_ID --json`. Deduplicate repeated preview lines by message ID.
-
-A send needs no follow-up: the recipient's runner delivers and retries the preview.
+A `[cafleet msg ID from SENDER TIMESTAMP]` preview carrying its body inline still needs the wake's `poll --json`, which consumes that message and any others in one command. When that poll returns `[]`, an earlier poll consumed the message; read it with `message show MESSAGE_ID --json`. Deduplicate repeated preview lines by message ID.
 
 ## BASE
 
 The Director resolves `BASE:`. Root scratch, audit and figure writes at the supplied absolute `BASE:`, used literally, or at an explicit consumer-supplied absolute output target, with agent-only artifacts in hidden folders and user deliverables in visible folders.
 
-When `BASE:` is omitted, disable audits, send `audit-disabled no BASE in spawn prompt` once to the Director as a parens-free anchorless status, and use explicit consumer output targets when supplied. Preserve that disabled state and every explicit output target; anchorless status follows the shared [coordination convention](../../cafleet-design-doc/reference/coordination.md). Resolution and spawn-audit procedures belong to the Director.
+When `BASE:` is omitted, keep audits disabled for the whole run, send `audit-disabled no BASE in spawn prompt` once to the Director as an [anchorless status](../../cafleet-design-doc/reference/coordination.md#anchorless-status), and use every explicit consumer output target supplied. Spawn-audit procedures belong to the Director.
 
 ## Command execution
 
@@ -66,7 +64,7 @@ Leave a native permission prompt open in your pane for the Director or user to a
 
 ## Identity and authority
 
-Pass the literal IDs and any `--database-url` from your spawn lines explicitly ([IDs](../SKILL.md#ids)); CLI validation surfaces missing identity. Use Send, Poll and `message show` on your own inbox; every other `cafleet` command is Director-owned. The [guarded subset](../reference/cli.md#director-only-command-guard) — explicit pane input, permission answers, input reconciliation and run recovery — requires the Director's `--from-member-id` and refuses your own ID with a `Director-only command` error. The rest carry no guard refusal and remain the Director's; `permission inspect` still requires the Director's `--from-member-id`. Route a need for any Director-owned command, naming the command and its purpose, with the message in [Reconsider, then route](#reconsider-then-route).
+Pass the literal IDs and any `--database-url` from your spawn lines explicitly ([IDs](../SKILL.md#ids)); CLI validation surfaces missing identity. Use Send, Poll and `message show` on your own inbox; every other `cafleet` command is Director-owned, and the [guarded subset](../reference/cli.md#director-only-command-guard) refuses your own ID with a `Director-only command` error. Route a need for any Director-owned command, naming the command and its purpose, with the message in [Reconsider, then route](#reconsider-then-route).
 
 ## Shutdown
 

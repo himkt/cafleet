@@ -68,7 +68,7 @@
 
 - **Overview**: Always include. Max 3 sentences.
 - **Success Criteria**: Always include. Measurable and verifiable.
-- **Background**: Only when the reader lacks context. Skip for obvious changes.
+- **Background**: Only when the reader lacks context.
 - **Specification**: Include when there are design decisions to record. Use code examples over prose when possible.
 - **Implementation**: Always include. Each step has a clear name and checkbox tasks.
 - **Changelog**: Optional. Use only for spec-level revisions, not implementation progress.
@@ -84,7 +84,7 @@ Design documents live at `design-docs/NNNNNNN-<slug>/design-doc.md` in every rep
 Use this resolver when a consumer operates on a task folder. The Director or consumer resolves BASE; members inherit the supplied absolute BASE or follow the [missing-line disabled-audit state](../../cafleet/roles/member.md#base).
 
 1. Run `git rev-parse --show-toplevel` from CWD. A non-zero exit or empty output means no Git ancestor: stop and tell the user to change to the repository root and retry.
-2. Normalize the consumer's argument to its actual task folder — a relative or absolute folder, not a child filename — before containment resolution: design-doc workflows use the normalization above, and other consumers own their bucket conventions.
+2. Normalize the consumer's argument to its task folder (a relative or absolute folder, not a child filename): design-doc workflows use the normalization above, and other consumers own their bucket conventions.
 3. Resolve the folder against the repository root when relative. Reject a relative path that equals the root (`the repo root is not a task folder`) or escapes it (`refusing to create a task folder outside the repo`). Resolve an absolute path directly: if it equals the root or is not strictly below it, return `<unset>` and create nothing.
 4. For a folder strictly below the repository root, return its absolute path as BASE. Create the selected folder lazily on the first consumer write, with audits under the task folder.
 

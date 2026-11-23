@@ -22,9 +22,9 @@ When the operator names a model rather than a backend ("please create a member w
 | 4 | Any other bare name whose key equals the key of exactly one OpenCode candidate ID (normalization step 1) — `glm-5.3`, `kimi-k3.1-pro` | `opencode` | `--coding-agent opencode --model <token>`, token from OpenCode token selection |
 | 5 | Anything else — no key-equal ID, or more than one (e.g. `o3-mini`, `gemini`) | none | Request an explicit backend/model pair through Model routing failures |
 
-Apply these rows only when the operator names no backend. Inference never selects `hermes` or `pi`: a Hermes or pi member requires an operator-named backend or a fleet backend of that name ([backend-resolution](../roles/director.md#model-selection) steps 1 and 3), and a provider-prefixed model for a Hermes- or pi-named member follows that backend's explicit mapping.
+Apply these rows only when the operator names no backend. Inference never selects `hermes` or `pi`, which require an operator-named backend or a fleet backend of that name ([backend-resolution](../roles/director.md#model-selection) steps 1 and 3).
 
-Row 1 wins over row 2 for `anthropic/claude-sonnet-4-6`, which contains both `claude` and a `/`: a provider-prefixed token is itself an explicit OpenCode request. A bare name infers `opencode` only through row 4; Claude and GPT names select their native backends even when either OpenCode table lists the model.
+A bare name infers `opencode` only through row 4; Claude and GPT names select their native backends even when either OpenCode table lists the model.
 
 Match candidate ID keys by equality: `glm-5.3` matches only the ID `glm-5.3`, never `glm-5.3-flash` or `glm-5.3-flash-free`.
 
@@ -66,7 +66,7 @@ When [backend-resolution](../roles/director.md#model-selection) step 1 selects a
 | Claude alias (`fable`, `opus`, `sonnet`, `haiku`) | The `claude` catalog Model the alias names, as an ID through OpenCode token selection |
 | Any other model name | The OpenCode candidate ID whose key equals the reference's key, through OpenCode token selection |
 
-The last row uses only Model-name normalization step 1, including the leading-`claude` strip, against the OpenCode candidate IDs. It requires exactly one key-equal ID, so "sonnet 4.6 with OpenCode" resolves to the ID `claude-sonnet-4-6` before provider choice; normalization steps 2–4 apply only to native-backend resolution.
+The last row uses only Model-name normalization step 1, including the leading-`claude` strip, against the OpenCode candidate IDs and requires exactly one key-equal ID: "sonnet 4.6 with OpenCode" resolves to the ID `claude-sonnet-4-6` before provider choice.
 
 Require each Role-default and family-word token to exist in the Console table, and each resolved bare ID in the OpenCode candidate set. A verbatim provider-prefixed reference is exempt; route missing or ambiguous matches through Model routing failures.
 
@@ -96,7 +96,7 @@ Require each Role-default and family-word token to exist in the Console table, a
 
 ## OpenCode token selection
 
-Use this owner for provider choice and cost ranking. Complete provider-prefixed tokens from explicit references, defaults or family-word mapping remain verbatim and skip provider choice. A bare resolved ID has `opencode-go/<id>` and/or `opencode/<id>` candidates only where its catalog tables list them.
+Complete provider-prefixed tokens from explicit references, defaults or family-word mapping remain verbatim and skip provider choice. A bare resolved ID has `opencode-go/<id>` and/or `opencode/<id>` candidates only where its catalog tables list them.
 
 1. Run `opencode models` once per spawn as your own command. Parse one exact `provider/model` token per line and ignore unrelated providers; route a failed/empty result through Model routing failures.
 2. For a resolved bare ID, choose its listed Go candidate first, otherwise its listed Console candidate. Route neither-listed through Model routing failures.

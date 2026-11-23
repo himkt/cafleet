@@ -10,11 +10,11 @@ Preserve BASE/output paths and role boundaries.
 
 ## Director responsibilities
 
-Preserve the user's scope, answers and existing annotations. Assign explicit owned paths, and report evidence instead of inferring completion from idle time. Read full durable messages, record each one as its poll consumes it, and keep reception and supervision under the shared [Director procedure](../../cafleet/roles/director.md#supervision).
+Preserve the user's scope, answers and existing annotations. Assign explicit owned paths, and report evidence instead of inferring completion from idle time. Keep reception, message recording and supervision under the shared [Director procedure](../../cafleet/roles/director.md#supervision).
 
 ### Step 0: Path Resolution & Resume Detection (Director)
 
-Normalize the argument per the guidelines and resolve the selected folder through BASE before writing. Preserve explicit targets; a newly chosen folder takes the next available seven-digit prefix. Set the document's absolute output path and guard audit writes through BASE.
+Resolve the document folder and its absolute output path through [File Layout](../reference/guidelines.md#file-layout) and [Numbering](../reference/guidelines.md#numbering) before writing.
 
 An existing document keeps its content: existing user-relay markers enter resume mode; otherwise resolve whether the user wants quality review or a fresh draft before replacing content.
 
@@ -22,8 +22,8 @@ An existing document keeps its content: existing user-relay markers enter resume
 
 1. Diagnose actual prerequisites with `cafleet doctor`, register the calling Director and retain returned literal IDs.
 2. Follow [Director wake](../../cafleet/roles/director.md#director-wake).
-3. Spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) with their role paths, required skills, concrete document/BASE paths and scoped assignments.
-4. Receive and record ready before depending on a member. Dispatch each assignment when its inputs exist; inspect actual placement when launch evidence is uncertain.
+3. Spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) from the prompts below.
+4. Receive each ready and dispatch assignments per [Spawn Protocol](../../cafleet/roles/director.md#spawn-protocol) step 6; inspect actual placement when launch evidence is uncertain.
 
 Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>`, TEAM `design document creation`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this per-role delta.
 
@@ -37,12 +37,12 @@ Render the IMPORTANT / ROLE-CONSTRAINT lines verbatim, one prompt line each, in 
 
 ### Step 2: Clarification Phase (Director)
 
-For fresh work, the Drafter inspects relevant source and sends one clarification round before drafting: questions on consequential unanswered requirements and confirmation of the requirements it understood. Relay it through the executing backend's user-decision surface, preserve the answers and route them back faithfully. Resume and review-only work start from existing content and annotations.
+For fresh work, relay each Drafter clarification round through the executing backend's user-decision surface and route the answers back faithfully. Resume and review-only work start from existing content and annotations.
 
 ### Step 3: Internal Quality Loop (Director)
 
 1. Assign the draft against the guidelines: intended behavior, scope, compatibility, failure handling, measurable success criteria and implementable tasks.
-2. Route the complete revision to the Reviewer. Findings use coordination pointers/markers and explain the concrete problem.
+2. Route the complete revision to the Reviewer.
 3. Send actionable findings to the Drafter, arbitrate specification decisions and obtain another review of the revised document.
 4. Continue until the Reviewer approves. Report blockers immediately; preserve explicit halt/abort requests and pending decisions.
 
@@ -52,7 +52,7 @@ Present the reviewed document, its location and the decisions needing approval, 
 
 ### Step 5: User Feedback Loop (Director)
 
-Route ordinary-language feedback and existing user markers to the Drafter without losing their meaning. Ask only about consequential ambiguity. After revisions, repeat independent review before presenting the new revision. Retain previous answers and publication authority.
+Route ordinary-language feedback and existing user markers to the Drafter through [COMMENT(role) markers](../reference/coordination.md#commentrole-marker). After revisions, repeat independent review before presenting the new revision. Retain previous answers and publication authority.
 
 ### Step 6: Finalize & Clean Up (Director)
 

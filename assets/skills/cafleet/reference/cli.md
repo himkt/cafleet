@@ -35,7 +35,7 @@ Place the complete DB-assigned integer subject immediately after its subcommand.
 
 The Director-only commands are exactly `member prompt`, `member exec`, `member press`, `permission respond` and `input reconcile`. Each requires `--from-member-id <director-member-id>`, a positive integer (missing: parse error, exit 2); `permission respond` takes it as its pinned Director. After parsing and the schema-version guard, and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet (a member's fleet, or the fleet of the run owning an input or interaction) and requires it live with that ID as its root Director. An unknown subject keeps its not-found error, which comes first. Otherwise it exits 1, prints nothing on stdout and writes `Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.` to stderr.
 
-Every other command, including `permission inspect`, `input show`, `event show`, `member list`, `member capture` and the lifecycle commands, carries no guard refusal; `permission inspect` still requires `--from-member-id` as its pinned Director (§ `permission inspect`). The guard is cooperative, not a security boundary: it stops a member that passes its own `YOUR MEMBER ID:`, and a member that copies `DIRECTOR MEMBER ID:` passes it. A Director-only command the Director dispatches into a member pane with `member exec` is checked by the ID it carries.
+Every other command carries no guard refusal; among them, `permission inspect` still requires `--from-member-id` as its pinned Director (§ `permission inspect`). The guard is cooperative, not a security boundary: it stops a member that passes its own `YOUR MEMBER ID:`, and a member that copies `DIRECTOR MEMBER ID:` passes it. A Director-only command the Director dispatches into a member pane with `member exec` is checked by the ID it carries.
 
 ## Database selection
 
@@ -55,7 +55,7 @@ Fleet creation returns `fleet_id`, `name`, `created_at` and `director` identity/
 
 Roster records contain `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_consumed`, `idle`; `last_consumed` is when the member's poll last consumed an incoming message. Fleet-reference matches have kind `director`; others `member`. Missing activity may be null and pane placement pending.
 
-Every JSON `placement` has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id`, `mux_window_name` and `mux_pane_id` are null together while creation is pending. New fleets name windows `cafleet-<fleet_id>-<ordinal>`: `window_ordinal` is `0` for the Director window and `1` or greater for overflow windows; `column_side` is `left` or `right`. Members using an existing window copy its recorded name, including names from existing registrations.
+Every JSON `placement` has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id`, `mux_window_name` and `mux_pane_id` are null together while creation is pending. New fleets name windows `cafleet-<fleet_id>-<ordinal>`: `window_ordinal` is `0` for the Director window and `1` or greater for overflow windows; `column_side` is `left` or `right`. Members using an existing window copy its recorded name.
 
 Text rows list `member_id`, `name`, `kind`, `backend`, `window` (the window name) and `pane_id`, then `idle`; a pending window or pane prints `(pending)` and absent activity `-`:
 
@@ -72,9 +72,9 @@ Place `--json` before any `--` literal-key separator. JSON is compact UTF-8. Com
 
 ## `permissions.allow` coverage
 
-Broker prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Literal IDs preserve matching. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each of the Director's explicit pane-input dispatches; ask outranks allow. Director permission responses remain subject to effective native/managed rules.
+Broker prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Literal IDs preserve matching. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each of the Director's explicit pane-input dispatches; ask outranks allow.
 
-Claude receives `Bash(cafleet message *)` at spawn, and setup installs the Codex and OpenCode allow rules (§ `setup` and `doctor`); the Director-only commands refuse a member's own ID (§ Director-only command guard). Members retain broker reception/evidence-routing authority.
+Claude receives `Bash(cafleet message *)` at spawn, and setup installs the Codex and OpenCode allow rules (§ `setup` and `doctor`); the Director-only commands refuse a member's own ID (§ Director-only command guard).
 
 ## Text bodies
 
@@ -82,7 +82,7 @@ Send/create require exactly one positional body or `--file PATH`; `--file -` rea
 
 ## Fleet commands
 
-`cafleet fleet create --name NAME --coding-agent AGENT [--pane PANE_ID [--mux-server SERVER]] [--json]` registers the Director's pane and its multiplexer server as the root Director's placement without spawning. It and doctor's `multiplexer` and `multiplexer.caller_pane` rows are the only readers of the caller's multiplexer environment; every later command targets the recorded server (`tmux -S <socket>` or `herdr --session <name>`) and placement. Without `--pane`, it first refuses a caller whose process ancestry includes a shared server (`codex app-server`, `hermes gateway run`), before any multiplexer command, and then registers `TMUX_PANE` / `HERDR_PANE_ID` only when that pane's process is an ancestor of the `cafleet` process. A failed `TMUX`/`HERDR_ENV` detection gives `cafleet fleet create must be run inside a tmux or herdr session`. Director messages use broker reception.
+`cafleet fleet create --name NAME --coding-agent AGENT [--pane PANE_ID [--mux-server SERVER]] [--json]` registers the Director's pane and its multiplexer server as the root Director's placement without spawning. It and doctor's `multiplexer` and `multiplexer.caller_pane` rows are the only readers of the caller's multiplexer environment; every later command targets the recorded server (`tmux -S <socket>` or `herdr --session <name>`) and placement. Without `--pane`, it first refuses a caller whose process ancestry includes a shared server (`codex app-server`, `hermes gateway run`), before any multiplexer command, and then registers `TMUX_PANE` / `HERDR_PANE_ID` only when that pane's process is an ancestor of the `cafleet` process. A failed `TMUX`/`HERDR_ENV` detection gives `cafleet fleet create must be run inside a tmux or herdr session`.
 
 | Input | Source, first match wins |
 |---|---|
@@ -104,7 +104,7 @@ Target resolution and the initial read of the pane's concrete session, window an
 
 After allocating the fleet ID inside the registration transaction, `fleet create` overwrites the resolved window/tab name with `cafleet-<fleet_id>-0`: `tmux -S <server> rename-window -t <window_id> <name>` or `herdr --session <server> tab rename <tab_id> <name>`. It reads the name back, requires exact equality and rechecks the original session, window and pane IDs before recording the canonical `mux_window_name` and committing. The tmux reader removes exactly the final LF and validates the echoed window ID; the herdr reader validates `result.tab.tab_id` and requires a string `label`. Every fallible registration read precedes commit, and success output follows confirmed commit.
 
-Naming, verification and registration failures exit 1 with no success payload, including under `--json`, and roll back active uncommitted registration. A failed commit reports an unconfirmed registry outcome if SQLite already ended the transaction, and a rollback failure accompanies the original cause. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, state that the terminal name may have changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. Rolled-back IDs can be reused. Applied names remain after failure, crash or fleet deletion, while the Director pane keeps running. An output failure after confirmed commit preserves registration. Existing fleets retain their recorded names; subsequent user renames leave snapshots unchanged. Ordinary pane titles/labels retain their current behavior.
+Naming, verification and registration failures exit 1 with no success payload, including under `--json`, and roll back active uncommitted registration. A failed commit reports an unconfirmed registry outcome if SQLite already ended the transaction, and a rollback failure accompanies the original cause. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, state that the terminal name may have changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. Rolled-back IDs can be reused. Applied names remain after failure, crash or fleet deletion, while the Director pane keeps running. An output failure after confirmed commit preserves registration. Existing fleets retain their recorded names; subsequent user renames leave snapshots unchanged.
 
 Each caller-verification refusal ends `then run cafleet fleet create with --pane <pane-id> --mux-server <server>`. `<cause>` is one of `the pane does not exist on the <backend> server <server>`, `this command runs in a nested PID namespace`, `the process ancestry could not be read: <read error>`, `the process ancestry stopped at pid <pid> before reaching pid 1` or `the pane's process <pane_pid> is not an ancestor of this command`. The guidance names what the user, not the agent, runs in the Director pane:
 
@@ -123,7 +123,7 @@ With `--pane`, `fleet create` reads no process ancestry, and an environment nami
 |---|---|
 | Lock contention until the deadline | Exit 1 with `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.`; every pane and registry row is unchanged |
 | Fleet layout lock busy for 60 seconds, after the pane locks | Exit 1 with `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.`; every member is unchanged |
-| A member cannot be ended | Exit 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`; earlier members stay deregistered, and a rerun resumes |
+| A member cannot be ended | Exit 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`; earlier members stay deregistered |
 | Placement set changed after cleanup began | Exit 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` |
 
 ## Messages
@@ -154,7 +154,7 @@ A `pending` notice is a wake signal, never a payload: `next` is the exact consum
 
 **Hold.** After a notice is delivered, the listener holds later notices while any message pending at that notice stays unpolled. Any poll consumes the whole pending set and so releases the hold; the next snapshot with pending messages emits one notice announcing only messages committed after that poll. A hold lasting 300 s with messages committed after the held notice re-sends one bulk notice covering every unpolled message, held and fresh, and restarts the 300 s; held messages alone never trigger a re-notice.
 
-**Notice bound.** A listener emits at most 1 notice, plus one per poll that consumed held messages, plus one per 300 s ceiling firing, so a burst of any size adds no notice beyond the outstanding one. Within one listener, two notices announce the same message only through a ceiling re-notice. A turn with k mid-turn polls can queue at most k + 1 notices behind it; each announces only messages those polls already consumed, so its poll returns `[]` unless messages arrived since. A restarted listener emits one notice covering every unpolled message right after `ready`. Messages you poll before any notice announces them are never notified.
+**Notice bound.** A listener emits at most 1 notice, plus one per poll that consumed held messages, plus one per 300 s ceiling firing, so a burst of any size adds no notice beyond the outstanding one. Within one listener, two notices announce the same message only through a ceiling re-notice. A turn with k mid-turn polls can queue at most k + 1 notices behind it. A restarted listener emits one notice covering every unpolled message right after `ready`. Messages you poll before any notice announces them are never notified.
 
 Listening changes no consumption/notification state and retries no pane delivery; concurrent listeners are independent. Preserve incomplete JSONL across native reads.
 
@@ -183,7 +183,7 @@ For sandbox startup failures, confirm exit and follow the [Codex native receptio
 
 ## Push notifications
 
-Ordinary concrete panes receive previews from their own runner's sweep; Directors and self-sends use broker reception. Profile previews are `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.` Delivery fallback leads with Escape and appends ` [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.`
+Profile previews are `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.` Delivery fallback leads with Escape and appends ` [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.`
 
 Stored text stays exact. Previews fold newlines to `⏎`, tabs to `␉`, other C0/DEL controls to `\xNN`. At most 4000 Unicode scalars appear inline; longer text becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.` independently of the 200-codepoint text-output limit. `RECIPIENT_ID` is the recipient; the pointer never carries `--database-url`. Delivery method selects the clause before writing. Preview leaves consumption `input_required`.
 
@@ -213,9 +213,9 @@ Degraded/recovering/lost observation, unavailable ownership/storage, uncertain r
 
 ### Accepted trade-offs
 
-Delivery fallback can interrupt work, dismiss undetected prompts or combine unsent drafts. A host may need multiple Escapes; submission remains valid when the host queues instead of interrupting. Resume and dismissal clauses are conditional.
+Delivery fallback can interrupt work, dismiss undetected prompts or combine unsent drafts. A host may need multiple Escapes; submission remains valid when the host queues instead of interrupting.
 
-Prompt/exec carry no clause, so inspect open prompts first. Repeated previews are consumed by ID; concurrent sends may interrupt earlier turns, and interruption can end shell tools. The CLI defers termination during pane input. OpenCode captures may show only a status bar; inspect retained sessions for omitted output and a message's `completed` state (`message show`) for its consumption.
+Prompt/exec carry no clause, so inspect open prompts first. Repeated previews are consumed by ID; concurrent sends may interrupt earlier turns, and interruption can end shell tools. The CLI defers termination during pane input.
 
 ## Member commands
 
@@ -239,11 +239,9 @@ Effort validation precedes side effects. An unlisted level exits 2 with `Error: 
 | hermes | none, minimal, low, medium, high, xhigh, max, ultra |
 | pi | off, minimal, low, medium, high, xhigh, max |
 
-Hermes forwards the level as `--reasoning`, and pi as `--thinking`.
-
 Invalid OpenCode model: `Error: --model for the opencode backend must be '<provider-id>/<model-id>' (got '<value>').`, exit 2. A pi model whose text after its last `:` is a thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`): `Error: --model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '<value>').`, exit 2; other text after a `:`, such as `:free`, passes through.
 
-A pi prompt body beginning with `@` exits 2 before registration with `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).`; start the prompt with text.
+A pi prompt body beginning with `@` exits 2 before registration with `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).`
 
 After prompt validation, creation waits up to 60 seconds for the fleet's pane layout lock, which serializes every member creation and deletion in the fleet, and holds it until creation returns. Under it the member takes the first free slot: the Director window's right column, then each overflow window's left and right columns, each holding one member per 15 rows of window height up to 8 (an overflow column at least one). When every column is full, creation opens an overflow window `cafleet-<fleet_id>-<ordinal>` in the Director's session without taking focus; ordinals only increase. Existing members never move. The multiplexer server comes from the Director's recorded placement, and the new placement copies it.
 
@@ -252,7 +250,7 @@ Text output is `ID NAME backend=AGENT pane=PANE window=WINDOW` plus the runtime 
 | Outcome | Result |
 |---|---|
 | Fleet layout lock busy for 60 seconds | Exit 1, nothing registered: `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` |
-| An overflow window cannot be read (closed by hand, or every member pane in it died) | Exit 1, nothing registered: `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.`; delete each listed member, then retry |
+| An overflow window cannot be read (closed by hand, or every member pane in it died) | Exit 1, nothing registered: `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.` |
 | The fleet's window ordinal changed under the lock | Exit 1, registration rolled back: `Error: fleet <fleet-id> window ordinal changed under the layout lock` |
 | A malformed tmux `new-window` or herdr `tab create` reply | Exit 1 with `Error: unexpected tmux new-window output: <quoted>` or `Error: herdr tab create missing '<key>' field`, followed by `pane ID unknown; pane cleanup unconfirmed` |
 | A herdr re-parenting move failed | Creation continues; stderr shows `layout re-parenting incomplete: <cause>` |
@@ -264,9 +262,7 @@ Hermes availability preflight runs `hermes config path` under the member's `HERM
 | `hermes config path` fails or times out | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
 | `hermes config path` prints no absolute file path | `Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
 
-The member environment forwards a set `HERMES_HOME`.
-
-A pi spawn requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts` in every launch mode: `Error: cannot read the CAFleet pi extension at <path>: <cause>; run 'cafleet setup --coding-agent pi' first`, exit 1 before registration. The member environment forwards a set `PI_CODING_AGENT_DIR`. A gated member whose extension cannot register `--cafleet-gate` exits at startup with `Error: Unknown option: --cafleet-gate`, reported as `runner_exited`.
+A pi spawn requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts` in every launch mode: `Error: cannot read the CAFleet pi extension at <path>: <cause>; run 'cafleet setup --coding-agent pi' first`, exit 1 before registration. A gated member whose extension cannot register `--cafleet-gate` exits at startup with `Error: Unknown option: --cafleet-gate`, reported as `runner_exited`.
 
 Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}` into literal lines; `{database_url}` renders `default` for the default database and `sqlite:///<canonical path>` otherwise. A non-default database with a prompt lacking `{database_url}` exits 1 before registration: `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url`. Double literal braces `{{`/`}}`; malformed/unknown placeholders exit 2 before registration (§ Error messages).
 
@@ -325,9 +321,9 @@ The runner submits `! ` plus command through profile/fallback/queue. The host ow
 | Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
 | Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
 
-Uncertain errors include `input_id=INPUT_ID`. The pre-write over-limit CAUSE strings are shared with [member prompt](#member-prompt); queued over-limit refusals settle `not_submitted/plain_limit_exceeded` and publish a result. An uncertain prompt/exec requires a deliberate retry.
+Uncertain errors include `input_id=INPUT_ID`. The pre-write over-limit CAUSE strings are shared with [member prompt](#member-prompt); queued over-limit refusals settle `not_submitted/plain_limit_exceeded` and publish a result.
 
-A failing first write may partially type; failure after Enter may have executed. Inspect native output and reconcile receipts before a newly authorized retry. Receipts retain operation key/digest/state, without command text. After completion, explicitly prompt continuation if the host has not resumed.
+A failing first write may partially type; failure after Enter may have executed. Inspect native output and reconcile receipts before a newly authorized retry. After completion, explicitly prompt continuation if the host has not resumed.
 
 ### `member press`
 
@@ -384,7 +380,7 @@ Member show alone appends, after `child_start_identity`:
 
 `eligibility` is `composer_empty` or `hold:<reason>` (`candidate`, `interaction`, `unknown`, `observer_unavailable`, `gap`). `degraded` true means the runner cannot store its events and holds generated input; `writer_diagnostic` then names the storage failure, and `gap_open_since` is the RFC 3339 start of the open observation gap (null for a gap recorded after the child exited). Member show's text runtime line appends ` observation=STATE`, then ` degraded` when degraded; `STATE` is the eligibility, `pending` when answered without an observation, `unavailable` when failed and `-` when skipped, as in `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`.
 
-Uncertain prompt/exec errors exit 1 with known receipt/context, including `native command delivery to member 110 is uncertain: write_failed (method=profile)` and `input_id=INPUT_ID`.
+Example uncertain exec error: `native command delivery to member 110 is uncertain: write_failed (method=profile)`, then `input_id=INPUT_ID`.
 
 ### Delivery reporting
 
@@ -488,7 +484,7 @@ When the `database` check is `ok`, one `member.<member_id>.runtime` row follows 
 | Otherwise degraded | `warn` | `run=<run_id> observation=<eligibility> diagnostic=<code>` |
 | Otherwise | `ok` | `run=<run_id> observation=<eligibility>` |
 
-`<hint>` is exactly `inspect with 'cafleet member show <member_id> --json'; if it does not recover, run 'cafleet member delete <member_id>' and create a replacement member`, each quoted command appending ` --database-url URL` for a non-default database. An `error` member row makes doctor exit 1.
+`<hint>` is exactly `inspect with 'cafleet member show <member_id> --json'; if it does not recover, run 'cafleet member delete <member_id>' and create a replacement member`, each quoted command appending ` --database-url URL` for a non-default database.
 
 The `multiplexer` check reports the backend and server (`ok` `<backend> server=<server>`), and the `multiplexer.caller_pane` check that follows it reports the `fleet create` pane verification without `--pane` (§ Fleet commands):
 
@@ -500,7 +496,7 @@ The `multiplexer` check reports the backend and server (`ok` `<backend> server=<
 | Verification or verified-pane context read errored | `ok` | `error` with the error |
 | Detection, server or availability failed | `error` with the cause | `info` `unavailable: the multiplexer is unavailable` |
 
-The refusal body is the `fleet create` refusal without its `cafleet fleet create ` prefix, and a `warn` keeps the exit code at 0.
+The refusal body is the `fleet create` refusal without its `cafleet fleet create ` prefix.
 
 Each backend reports `<agent>.configuration`, `<agent>.executable`, its preset and extension checks, then `<agent>.skills`. An absent executable is `info` `<binary> is optional and absent from PATH`, and that backend's preset, extension and skills checks are `info` `unavailable: executable is absent`. `<agent>.skills` byte-compares every embedded skill file with its installed copy, as the extension checks do: missing skills are `warn` `skills not installed at <skills dir>; run 'cafleet setup --coding-agent <agent>'`, and a differing or unreadable file is `error` `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'`.
 

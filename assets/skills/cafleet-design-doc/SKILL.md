@@ -14,7 +14,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch, WebFetch, AskUser
 
 # Design Document Skill (CAFleet Edition)
 
-This skill is the umbrella for the design-document lifecycle: the standardized **format spec** plus the CAFleet-native **orchestration workflows** in Dispatch. Consult a reference page for the format, or route a main-session user request through Dispatch to run a team. **Assigned teammates** continue their existing workflow ([Member startup](#member-startup)); loading this umbrella as a member creates no second team.
+This skill is the umbrella for the design-document lifecycle: the standardized **format spec** plus the CAFleet-native **orchestration workflows** in Dispatch. **Assigned teammates** continue their existing workflow ([Member startup](#member-startup)) without starting a second team.
 
 ## Required reading
 
@@ -33,7 +33,7 @@ Each workflow body in Dispatch gates BASE resolution, supervision and coordinati
 
 For a main-session user request matching a scenario below, invoke this skill and run the linked workflow as a full CAFleet team — proactively, the moment the request matches, without waiting for the user to say "use cafleet".
 
-**Routing into a workflow means executing its entire orchestration.** The Director registers its current session with `cafleet fleet create`, spawns the role team, receives each ready and drives the workflow’s review/revision rounds through approval, keeping reception under [Director wake](../cafleet/roles/director.md#director-wake) until fleet deletion; the linked workflow body owns its phase gates.
+**Routing into a workflow means executing its entire orchestration.** The Director registers its current session with `cafleet fleet create`, spawns the role team and drives review/revision rounds through approval, keeping [Director wake](../cafleet/roles/director.md#director-wake) reception until fleet deletion; the linked workflow body owns its phase gates.
 
 | When the user wants to… | Invoke this skill and run |
 |---|---|
@@ -51,5 +51,3 @@ Every design-doc team member opens its authoritative role first, follows the CAF
 | 3 | [BASE](../cafleet/roles/member.md#base) | Before task work: inherited BASE, guarded writes and missing-line status. |
 | 4 | This core and [guidelines](reference/guidelines.md) | Load the assigned workflow's format and role references before document work; retain your role's scope. |
 | 5 | [Coordination](reference/coordination.md) | Before payloads, markers and work/status messages. |
-
-Read [command routing](../cafleet/roles/member.md#reconsider-then-route) before routing a command your harness denied. Apply supplied host-rule equivalents where optional files are absent; route an essential unknown prerequisite to the Director before dependent work.

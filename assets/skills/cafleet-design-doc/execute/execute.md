@@ -10,7 +10,7 @@ Preserve host permissions, user scope, prior decisions and stop requests through
 
 ## Director responsibilities
 
-Own correctness against the approved specification. Assign bounded paths, shared interfaces, checks and evidence locations. Retrieve complete durable messages, record each one as its poll consumes it and facilitate ready work. Inspect broker, pane and artifact evidence before treating a member as stalled; disclose a replacement and preserve its handoff.
+Own correctness against the approved specification. Assign bounded paths, shared interfaces, checks and evidence locations, and dispatch ready work. Disclose a member replacement and preserve its handoff.
 
 ### Step 1: Resolve Design Document Path (Director)
 
@@ -33,14 +33,13 @@ Inspect the default/current branch: on the default branch, propose a feature bra
 | External behavior or explicit live acceptance | Add Verifier for the required observations |
 | Completed implementation | Add a fresh Reviewer after implementation and verification gates pass |
 
-Read the assigned [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md) role files before spawning; each owns its role's responsibilities. A Programmer-only team receives the documentation/configuration composition explicitly.
+Read the assigned [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md) role files before spawning. A Programmer-only team receives the documentation/configuration composition explicitly.
 
 ### Step 3: Register & Spawn Members (Director)
 
-1. Diagnose prerequisites, register the calling Director atomically and retain literal fleet/member IDs.
-2. Follow [Director wake](../../cafleet/roles/director.md#director-wake).
-3. Render compact role-by-path prompts with the delta table below, supplying BASE, owned paths and checks.
-4. Receive and record ready, then dispatch each member when inputs exist. Resolve uncertain launch/input by inspecting actual evidence before another submission.
+1. Follow the Director [Spawn Protocol](../../cafleet/roles/director.md#spawn-protocol) and [Director wake](../../cafleet/roles/director.md#director-wake).
+2. Render compact role-by-path prompts with the delta table below, supplying BASE, owned paths and checks.
+3. Dispatch each member once its ready is recorded and its inputs exist. Resolve uncertain launch/input by inspecting actual evidence before another submission.
 
 Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>` (the column heading), TEAM `design document execution`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this per-role delta. Every role's CONTEXT LINES start with `DESIGN DOCUMENT: [INSERT absolute design-doc path]`. Spawn the Reviewer only at Step 5.
 
@@ -57,7 +56,7 @@ Render the IMPORTANT / ROLE-CONSTRAINT lines verbatim, one prompt line each, in 
 
 For a code step, the Tester writes behavior-focused tests; the Director reviews them against the design and commits eligible tests. The Programmer implements within its source ownership and runs the relevant checks. Suspected test defects return to the Director and Tester for arbitration; a Programmer-only team routes findings directly to the Programmer.
 
-Review the final change for correctness, scope and maintainability; request fixes and affected checks until the step passes. Keep tests and implementation commits separate in TDD teams, applying host rules to mixed files. Verify the Programmer's checkbox, timestamp and Progress update for each completed task. Preserve completed work when resuming.
+Review the final change for correctness, scope and maintainability; request fixes and affected checks until the step passes. Keep tests and implementation commits separate in TDD teams, applying host rules to mixed files. Verify the Programmer's checkbox, timestamp and Progress update for each completed task.
 
 ### Verification (Director) — conditional
 
@@ -67,7 +66,7 @@ Have the Verifier discover available tools and perform applicable real-product a
 
 Verify every implementation task and Success Criterion, including required checks and manual acceptance, before the fresh Reviewer starts. Give it the complete design, full branch diff and actual evidence. Its work is independent read-only implementation review, not self-review by an implementing member.
 
-Route actionable findings to their source/test owners, arbitrate disputes against evidence and rerun affected checks. Repeat fresh review until approval; the loop has no round cap. Honor a user halt immediately and retain the pending work. User revisions return through this review before another approval presentation.
+Route actionable findings to their source/test owners, arbitrate disputes against evidence and rerun affected checks. Repeat fresh review until approval; the loop has no round cap. Honor a user halt immediately and retain the pending work.
 
 ### Step 6: User Approval (Director)
 
@@ -83,6 +82,6 @@ Authentication/precondition failure leaves the result local. Report exact push/P
 
 ### Step 8: Finalize & Clean Up (Director)
 
-Verify final progress and marker resolution, set Status to Complete only when the required work and user gate are satisfied, and preserve existing historical artifacts. Commit only files allowed by host rules. Apply the recorded publication scope to any eligible final push.
+Verify final progress and marker resolution, set Status to Complete only when the required work and user gate are satisfied, and preserve existing historical artifacts. Apply the recorded publication scope to any eligible final push.
 
 Then end the team under the Director [Shutdown](../../cafleet/roles/director.md#shutdown), limiting cleanup to owned resources.

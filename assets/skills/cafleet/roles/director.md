@@ -1,6 +1,6 @@
 # Director Role
 
-You are a **Director** managing CAFleet members under their recorded launch policies. Members run host-permitted commands and route returned denials/automatic refusals to you. Verify current permission requests under [Runtime events](#runtime-events); separately authorized commands use `member exec`. Each backend's `{permission_flags}` note defines its host boundary.
+You are a **Director** managing CAFleet members under their recorded launch policies, each bounded by its backend's `{permission_flags}` note. Members run host-permitted commands and route returned denials and automatic refusals to you.
 
 This role owns model selection, lifecycle, pane actions, supervision, recovery and shutdown. Use a backend whose Role eligibility Director row records `yes`. For `no`, report that verdict and its unmet requirements, name eligible backends from [coding-agents.md](../reference/coding-agents.md), and leave fleet creation to an eligible host. Preserve host-owned goal and receiver authority.
 
@@ -14,7 +14,7 @@ Read prerequisites in order; `CODING AGENT:` selects your executing backend.
 | 2 | [Base directory resolution](#base-directory-resolution) | Before output resolution or scratch/audit writes. |
 | 3 | [Supervision](#supervision) | Before orchestration. |
 
-Before prompt composition, read the selected member backend's catalog/defaults/bindings, [model selection](#model-selection), [skeleton](#canonical-spawn-prompt-skeleton), [size](#spawn-prompt-size-limit) and [audit](#member-create--scratch-and-audit-files) sections. Also read [model-selection procedures](../reference/model-selection.md) when the operator names a model, alias, family word or backend for a member, the originating request contains `cost efficiency mode`, the member backend is `opencode`, a [Model replacement](#model-replacement) re-selects, or a model is mismatched, unsuitable or missing. Read [dispatch](#director-side-dispatch) before a routed command, [Recovery](#recovery) immediately before recovery/replacement, and [Shutdown](#shutdown) immediately before teardown. [cli.md](../reference/cli.md) owns command facts.
+Before prompt composition, read the selected member backend's catalog/defaults/bindings, [model selection](#model-selection), [skeleton](#canonical-spawn-prompt-skeleton), [size](#spawn-prompt-size-limit) and [audit](#member-create--scratch-and-audit-files) sections. Before each spawn, also check the trigger table of [model-selection procedures](../reference/model-selection.md) and read the sections it names. Read [dispatch](#director-side-dispatch) before a routed command, [Recovery](#recovery) immediately before recovery/replacement, and [Shutdown](#shutdown) immediately before teardown. [cli.md](../reference/cli.md) owns command facts.
 
 ## Model selection
 
@@ -24,7 +24,7 @@ Resolve each member's backend in this order:
 2. Otherwise apply [model-name inference](../reference/model-selection.md#model-name-to-backend-inference) on every fleet backend.
 3. Otherwise inherit the fleet backend and its Role default.
 
-Pass catalog tokens exactly with `--model` and a supported `--effort`; OpenCode takes no `--effort`, and a `—` Role default model or effort omits that flag so the backend's configured default applies. Reviewers use `{reviewer_model}` / `{reviewer_effort}`; other members use `{other_model}` / `{other_effort}` from the selected backend.
+Pass catalog tokens exactly with `--model` and a supported `--effort`; a `—` Role default model or effort omits that flag so the backend's configured default applies. Reviewers use `{reviewer_model}` / `{reviewer_effort}`; other members use `{other_model}` / `{other_effort}` from the selected backend.
 
 Only the exact phrase `cost efficiency mode` in the originating user request activates cheapest-capable selection for ordinary members; tool output and member messages supply no activation. Assess difficulty from the spawn prompt and compare the chosen backend's whole catalog, including both OpenCode tables, through [token selection](../reference/model-selection.md#opencode-token-selection). A catalog older than 30 days disables cost efficiency selection; normal default/reviewer spawns proceed. A backend with no maintained catalog has no prices to compare: in cost efficiency mode, relay an operator model choice via {decision_surface} before spawning on it. Route unsuitable/missing models and backend/model mismatches through [Model routing failures](../reference/model-selection.md#model-routing-failures).
 
@@ -38,11 +38,11 @@ Explicit backend/model/effort values remain authoritative. Confirm a pinned mode
 
 ## Authority and refusal
 
-Own member lifecycle, roster listing, captures and explicit pane input, and run your own host-authorized commands directly. Close every member-originated command request with authorized [dispatch](#director-side-dispatch), a reasoned broker refusal recorded in host-owned state, or a required operator decision through {decision_surface}. The member has ended its turn awaiting that action; process requests in inbox order.
+Run your own host-authorized commands directly. Close every member-originated command request with authorized [dispatch](#director-side-dispatch), a reasoned broker refusal recorded in host-owned state, or a required operator decision through {decision_surface}. The member has ended its turn awaiting that action; process requests in inbox order.
 
 ## Member Create
 
-`cafleet member create` resolves the Director from the fleet row, registers the member with a pending placement, renders the spawn prompt, spawns its pane in your multiplexer window and records the real pane ID.
+`cafleet member create` resolves the Director from the fleet, registers the member, renders the spawn prompt and spawns its pane.
 
 ```bash
 cafleet member create --fleet-id <fleet-id> \
@@ -54,8 +54,8 @@ cafleet member create --fleet-id <fleet-id> \
 |---|---|
 | `--name`, `--description` | Always: the member's display name and a one-sentence purpose |
 | `--coding-agent` | [Model selection](#model-selection) picks a backend other than yours; omission inherits your placement backend |
-| `--model` | The selected backend's catalog token or Role default applies; a `—` default omits it |
-| `--effort` | The selected backend's `{effort_levels}` accept the role's level; omit it for an unsupported or `—` level |
+| `--model` | Per [Model selection](#model-selection) |
+| `--effort` | Per [Model selection](#model-selection) |
 | `--permission-mode` | Per [Member launch policy](#member-launch-policy). |
 | `--file PATH` | Every team-skill spawn, pointing at its audit render (§ *Member Create — Scratch and audit files*); a positional `PROMPT` suits only trivial one-line spawns |
 
@@ -63,9 +63,9 @@ cafleet member create --fleet-id <fleet-id> \
 
 ### Member launch policy
 
-Spawn every member with the omitted `--permission-mode`, which selects the backend's default mode. Pass `--permission-mode` only when the user explicitly requests that mode for that member; [member create](../reference/cli.md#member-create) and each backend's `{permission_flags}` note list its choices and their `auto`/`manual` classes.
+Omit `--permission-mode`, selecting the backend's default mode, unless the user explicitly requests a mode for that member; [member create](../reference/cli.md#member-create) and each backend's `{permission_flags}` note list the choices and their `auto`/`manual` classes.
 
-A backend's `{permission_flags}` note names any first-launch or nudge dialog its default mode shows. That dialog follows the question rules of [Consume observed interactions](#consume-observed-interactions), which cover listed and unlisted choices; any other first-launch dialog, such as a folder-trust prompt, follows that section too.
+Every first-launch or nudge dialog, whether named in the backend's `{permission_flags}` note or not (such as a folder-trust prompt), follows [Consume observed interactions](#consume-observed-interactions), whose question rules cover listed and unlisted choices.
 
 An `interaction_opened` permission request in either mode class follows the [same procedure](#consume-observed-interactions), and a routed request that arrives with no event follows [dispatch](#director-side-dispatch).
 
@@ -75,7 +75,7 @@ An `interaction_opened` permission request in either mode class follows the [sam
 
 ### Canonical spawn-prompt skeleton
 
-Every CAFleet-native team skill spawns its ordinary members from this one shared frame; each skill supplies only a compact **per-role delta** (a table in that skill) for the parts that vary.
+Every CAFleet-native team skill spawns its ordinary members from this shared frame plus its own compact **per-role delta** table for the parts that vary.
 
 Fixed frame — the identity lines carry the CLI's five placeholders, rendered to literals by `cafleet member create` at spawn time; `[INSERT …]` markers are rendered by the Director before `member create`; the `‹…›` slots are filled from the per-role delta:
 
@@ -107,7 +107,7 @@ On spawn, as your first operational broker shell command, send the ready signal:
 ‹START CUE›
 ```
 
-Leave only the five CLI placeholders as single braces and double every other literal brace. The CLI supplies the allocated IDs, backend and database (`default` or `sqlite:///<path>`); a member whose `DATABASE URL:` names a URL passes `--database-url <url>` on every command. Members read literal identity lines and learn commands from their role/core, so omit a repeated communication block. Runtime placeholders resolve separately from the selected overlay. [member create](../reference/cli.md#member-create) owns substitution syntax, the missing-`{database_url}` refusal and other errors.
+Leave only the five CLI placeholders as single braces and double every other literal brace. Members read literal identity lines and learn commands from their role/core, so omit a repeated communication block. Runtime placeholders resolve separately from the selected overlay. [member create](../reference/cli.md#member-create) owns substitution syntax, the missing-`{database_url}` refusal and other errors.
 
 | Slot | Filled per role with |
 |---|---|
@@ -122,9 +122,9 @@ Leave only the five CLI placeholders as single braces and double every other lit
 
 ### Member Create — Scratch and audit files
 
-Write agent-only scratch, audit, figures and intermediate spawn renders under resolved BASE or an explicit consumer-supplied absolute output target, in hidden folders for agent-only material and visible folders for deliverables. Guard `${BASE} != <unset>` before constructing audit paths; skip audit writes when disabled.
+Write agent-only scratch, audit, figures and intermediate spawn renders under resolved BASE or an explicit consumer-supplied absolute output target, in hidden folders for agent-only material and visible folders for deliverables. Guard `${BASE} != <unset>` before constructing audit paths.
 
-Write each pre-substitution prompt before `member create --file`. Its canonical permanent audit path is `<BASE>/.prompts/<role>-<UTC-compact>.md`, with lowercase `--name` and `YYYYMMDDTHHMMSSZ`; create the folder lazily and use `_2`, `_3`, … for same-second collisions. Preserve its five identity placeholders unchanged; that original file is the audit artifact.
+Before `member create --file`, write each pre-substitution prompt, with its five identity placeholders unchanged, to its permanent audit path `<BASE>/.prompts/<role>-<UTC-compact>.md`, using lowercase `--name` and `YYYYMMDDTHHMMSSZ`; create the folder lazily and use `_2`, `_3`, … for same-second collisions.
 
 When BASE is `<unset>`, omit the BASE line, skip audit files and use a compact path-by-reference positional `PROMPT` under about 2 KB; explicit output targets remain available. Unguarded sentinel construction fails with `Error: BASE is <unset>; refusing to fall back to /tmp`.
 
@@ -132,7 +132,7 @@ Discover panes through `member list`'s recorded `window` and `pane_id`; pane tit
 
 ### Base directory resolution
 
-Resolve BASE once and pass members the resulting absolute path; members inherit it without re-resolution. Resolution writes nothing; the chosen folder is created lazily on first write. For a task folder, use [Task-scope resolution](../../cafleet-design-doc/reference/guidelines.md#task-scope-resolution), including argument normalization and repository containment; otherwise use the shared-root procedure below.
+Resolve BASE once and pass members the resulting absolute path. Resolution writes nothing; the chosen folder is created on first write. For a task folder, use [Task-scope resolution](../../cafleet-design-doc/reference/guidelines.md#task-scope-resolution), including argument normalization and repository containment; otherwise use the shared-root procedure below.
 
 Only task-scope absolute-path containment can return the case-sensitive `<unset>` sentinel; follow [Scratch and audit files](#member-create--scratch-and-audit-files) for it.
 
@@ -146,11 +146,11 @@ Determine CWD and HOME and check every backend's config root, regardless of the 
 | hermes | `~/.hermes` |
 | pi | `~/.pi/agent` |
 
-When CWD is neither HOME nor a config root/subtree, BASE is literal CWD, including ordinary projects under HOME. Otherwise ask through {decision_surface}: `Select the base directory for output files:`. Offer `/tmp/cafleet (recommended)`, literal CWD and free text. Resolve relative free text against CWD; persist nothing, so later HOME/config-scope resolution asks again. A selected temporary BASE is valid; use the selected root consistently.
+When CWD is neither HOME nor a config root/subtree, BASE is literal CWD, including ordinary projects under HOME. Otherwise ask through {decision_surface}: `Select the base directory for output files:`. Offer `/tmp/cafleet (recommended)`, literal CWD and free text. Resolve relative free text against CWD; persist nothing, so later HOME/config-scope resolution asks again. A selected temporary BASE is valid.
 
 ## Model replacement
 
-The Reviewer supplies evidence (an `[INCORRECT]` marker naming the suspected unmet capability) and stays independent of the execution. Valid evidence: a member's self-report that it cannot reason through the task, repeated task-relevant reasoning/coding failures after normal correction, a Reviewer `[INCORRECT]` finding naming the unmet capability, or a Director review of a materially incomplete/incorrect result tied to the task profile. Slowness, awaiting user input, or a transient infrastructure error is never grounds for replacement.
+The Reviewer supplies evidence and stays independent of the execution. Valid evidence: a member's self-report that it cannot reason through the task, repeated task-relevant reasoning/coding failures after normal correction, a Reviewer `[INCORRECT]` finding naming the unmet capability, or a Director review of a materially incomplete/incorrect result tied to the task profile. Slowness, awaiting user input, or a transient infrastructure error is never grounds for replacement.
 
 For each replacement, in order:
 
@@ -168,7 +168,7 @@ Caps and fail-closed cases: the initial member plus at most two replacements per
 cafleet member delete <member-id>
 ```
 
-Delete a member before creating its replacement. A busy pane or an unverified Hermes stop exits 1 and keeps the member: inspect the cause and retry. Deleting the root Director is refused; use `cafleet fleet delete`. [member delete](../reference/cli.md#member-delete) owns teardown order, locking, settlement, exit codes and output.
+A busy pane or an unverified Hermes stop exits 1 and keeps the member: inspect the cause and retry. Deleting the root Director is refused; use `cafleet fleet delete`. [member delete](../reference/cli.md#member-delete) owns teardown order, locking, settlement, exit codes and output.
 
 ## Member List
 
@@ -195,10 +195,10 @@ Read the default 20 lines directly and capture more when insufficient. Captures 
 | Primitive | Responsibility |
 |---|---|
 | `cafleet member exec <member-id> --from-member-id <my-member-id> COMMAND` (or `--file PATH`) | Submit the actual one-line native shell command and return dispatch metadata |
-| `cafleet member prompt <member-id> --from-member-id <my-member-id> TEXT` | Submit explicitly authorized composer input or post-command continuation; it rejects the Director's pane, and `delivery` reports submission/queue acceptance |
+| `cafleet member prompt <member-id> --from-member-id <my-member-id> TEXT` | Submit explicitly authorized composer input or post-command continuation |
 | [member press](#member-press) | Request explicitly authorized ordered manual keys |
 
-All writers share the bounded pane-input lock. Prompt/exec requires the pinned runner and durable receipt; [wrapped delivery methods](../reference/cli.md#wrapped-delivery-methods) owns profile submission, zero-byte queueing, fallback and delivery arbitration. [Member Press](#member-press) owns manual keys, their authorization and outcome evidence.
+Prompt/exec requires the pinned runner and durable receipt; [wrapped delivery methods](../reference/cli.md#wrapped-delivery-methods) owns profile submission, zero-byte queueing, fallback and delivery arbitration.
 
 Read the request, record the outstanding action in host-owned state, authorize its exact command, then dispatch with `member exec`. Inspect returned delivery metadata; deferred completion arrives as `input_delivery_result`. [member exec](../reference/cli.md#member-exec) owns the `! ` submission, host-owned execution and partial-write uncertainty.
 
@@ -214,7 +214,7 @@ Retain input IDs and pane/native evidence; before another authorized attempt, in
 
 ### Member Press
 
-Use explicitly authorized `cafleet member press <member-id> --from-member-id <my-member-id> KEY...` for ordered manual keys through the recorded outer pane, including wrapped members whose programmatic input is queued or held. Pass only intended keys, using `--` for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/cli.md#member-press) owns grammar, limits, output and errors. It holds the revalidated shared pane lock and sends one bounded backend request.
+Use explicitly authorized `cafleet member press <member-id> --from-member-id <my-member-id> KEY...` for ordered manual keys through the recorded outer pane, including wrapped members whose programmatic input is queued or held. Pass only intended keys, using `--` for literal punctuation; append neither Escape nor Enter. The [CLI contract](../reference/cli.md#member-press) owns grammar, limits, output and errors.
 
 Apply host and current request-specific user/Director policy before answering a native request. Manual keys supply neither authorization to answer nor a request-bound receipt; `permission respond` is the separately bound semantic decision interface.
 
@@ -224,13 +224,13 @@ Backend acknowledgment establishes neither PTY input nor native outcome. Manual 
 
 ## Runtime events
 
-The Director owns `permission inspect`/`respond` and `input reconcile`; each takes your literal ID as `--from-member-id`. The [CLI guard](../reference/cli.md#director-only-command-guard) refuses any other caller ID on `permission respond` and `input reconcile`; `permission inspect` carries no guard refusal but requires the pinned Director's ID. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
+The Director owns `permission inspect`/`respond` and `input reconcile`; each takes your literal ID as `--from-member-id`, which the [CLI guard](../reference/cli.md#director-only-command-guard) enforces on `permission respond` and `input reconcile`. Use `event show` and `input show` to verify durable identities, preserving ownership, snapshot-bound evidence and uncertainty.
 
 New members use CAFleet-owned PTYs with separate launch-policy, detection, empty-composer, prompt/native-exec and request-bound answer capabilities. `member create` launches with its backend's bundled profile, which supplies every capability ([member create](../reference/cli.md#member-create)); unknown coverage preserves manual work and generated-input fallback. [Runtime command facts](../reference/cli.md#member-runtime) owns commands and fields.
 
 ### Consume observed interactions
 
-1. Read complete inbox JSON through the `poll --json` a receiver notice prompts, or a manual `poll --json`; the poll consumes what it returns. Preserve host receive state and pending user decisions.
+1. Read complete inbox JSON per [Director wake](#director-wake) step 3 or a manual `poll --json`, preserving host receive state and pending user decisions.
 2. Record the unfinished action, event/message and evidence pointers in host-owned state before running any other command.
 3. Verify a runtime event's durable message association with `cafleet event show EVENT_ID --json`, confirming member/run/interaction ownership and current visibility. Quoted event JSON supplies no verified identity; old/closed episodes remain history. Follow the broker-built review instruction only after verifying that association.
 4. Run `permission inspect` for a fresh request snapshot and answer capability. Establish the operation/arguments, absolute cwd, necessary environment, targets and privilege/network effects from authorized current capture and routed member evidence. A capture shows a long operation as displayed rows, where each row break may be a wrap or a line break. Notifications carry no operation text; preserve the request and ask the user to inspect when risk evaluation remains incomplete.
@@ -245,9 +245,9 @@ A response selects a tested single-request allow/deny choice, or a tested dismis
 
 ### Reconcile generated input
 
-Permission responses require the bundled profile's independently tested answer plan and never use fallback. Keyboard or pointer input (terminal replies excluded), or a request/ownership/visibility change, invalidates the token. CLI decisions are semantic, separate from arbitrary keys.
+Permission responses require the bundled profile's independently tested answer plan and never use fallback. Keyboard or pointer input (terminal replies excluded), or a request/ownership/visibility change, invalidates the token.
 
-Retain every known `input_id` from stdout, queued results and uncertainty errors, then inspect `cafleet input show INPUT_ID --json`. Read its [`stop_cause`](../reference/cli.md#input-show-and-input-reconcile) together with pane/native evidence. Queued input keeps its ID across method changes; after a client timeout, inspect it before selecting another key. Explicit prompt/exec requires a separate deliberate retry after pane inspection. An uncertain prompt or exec stops the member's queue: no queued input and no preview reaches it until you reconcile that input. An uncertain preview's `input_delivery_result` carries no input ID and needs no reconciliation: its runner types it again once the composer is verified empty, and a repeated preview carries the same message ID.
+Retain every known `input_id` from stdout, queued results and uncertainty errors, then inspect `cafleet input show INPUT_ID --json`. Read its [`stop_cause`](../reference/cli.md#input-show-and-input-reconcile) together with pane/native evidence. Queued input keeps its ID across method changes; after a client timeout, inspect it before selecting another key. An uncertain prompt or exec stops the member's queue: no queued input and no preview reaches it until you reconcile that input. An uncertain preview's `input_delivery_result` carries no input ID and needs no reconciliation: its runner types it again once the composer is verified empty, and a repeated preview carries the same message ID.
 
 For an uncertain input, only the Director records evidence-based `input reconcile`; its [CLI contract](../reference/cli.md#input-show-and-input-reconcile) owns synchronization, no-writer and unreachable-owner preconditions. `input reconcile` covers only prompt and exec; a permission answer is held only in the runner's memory, which accepts one answer per interaction episode.
 
@@ -277,14 +277,14 @@ When `member show` keeps reporting `degraded` with an open `gap_open_since`, or 
 
 ## Supervision
 
-The host owns continuation, native tools and user gates; CAFleet persists messages and previews ordinary members, while the Director retains its native stdout receiver and collects broker/artifact/pane evidence. [Director wake](#director-wake) steps 3–4 own polling and recording deliveries; unfinished assignments and pending user decisions stay tracked in host-owned state, and stream/native delivery changes no consumption state.
+The host owns continuation, native tools and user gates; CAFleet persists messages and previews ordinary members, while the Director retains its native stdout receiver and collects broker/artifact/pane evidence. [Director wake](#director-wake) owns polling, recording deliveries and tracking unfinished assignments and pending user decisions.
 
 ### Spawn Protocol
 
 1. Complete [Required reading](#required-reading) and the supplied host rules, then resolve each member's backend/model/effort before writing its prompt.
-2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn` `multiplexer.caller_pane` check is resolved at step 3 by [Director pane identification](#director-pane-identification). Preserve the user's host continuation controls as supplied.
-3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs; every later command targets the recorded placement. When it refuses the Director pane, follow [Director pane identification](#director-pane-identification). With a custom database, pass `--database-url <url>` on every command, this one included.
-4. Arm one `message listen` receiver using the executing backend's [runtime recipe](../reference/coding-agents.md): a native tool, the `--codex-thread` forwarder or a CAFleet plugin or extension tool. Pass the recipe's complete invocation, including every host tool deadline it sets (Claude Monitor `timeout_ms`), on this arm and on every renewal or replacement. Retain its handle and require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
+2. Run `cafleet doctor --json` and resolve actual environment/asset/permission issues; a `warn` `multiplexer.caller_pane` check is resolved at step 3 by [Director pane identification](#director-pane-identification).
+3. Register the current Director with `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture literal fleet and Director IDs. When it refuses the Director pane, follow [Director pane identification](#director-pane-identification). With a custom database, pass `--database-url <url>` on every command, this one included.
+4. Arm one `message listen` receiver with the executing backend's [runtime recipe](../reference/coding-agents.md), passing its complete invocation, including every host tool deadline it sets (Claude Monitor `timeout_ms`). Require `ready` before depending on replies; initial replay recovers messages racing with startup. Every receiver failure or closure follows [receiver recovery](#receiver-recovery).
 5. Write scoped role-by-path prompts under the supplied BASE, retaining host prerequisites and literal identity placeholders. Create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
 6. Receive each member's ready and record it. Dispatch that member's assignment as soon as its inputs exist; other members' readiness does not delay it.
 7. Keep native reception active and follow [Director wake](#director-wake) for the fleet's lifetime; [Shutdown](#shutdown) ends it through fleet deletion.
@@ -305,13 +305,13 @@ The host owns continuation, native tools and user gates; CAFleet persists messag
 Receive Director messages through broker reads and the receiver's delivery only. Depending on the backend's listen tier, the receiver either delivers each pending notice into the session as its own turn (subscribe, tiers 1–2) or holds a handle whose output you read (compromise, tier 3). Automatic reception sends no Escape, text, Enter or queued composer input to the Director, even on startup failure, receiver loss or missing native tools, so a tool rejection or dismissed decision in your own pane comes from the operator or host; follow it as reported. Preserve the supplied host continuation state, user decision gates and the host's goal activation, pause, completion and budget authority: reception never starts, resumes, pauses, clears or re-budgets a goal. Progress and completion reports, such as a goal tool the backend lets the model call, belong to the Director working toward the goal, never to reception.
 
 1. Retain one owned receiver and its handle for the fleet's lifetime. Member creation, `ready`, a final reply, completed work, an empty assignment queue, idle periods and user handoffs keep it; only [fleet deletion](#shutdown) ends it normally. Store its pinned member/fleet IDs, receive status, incomplete JSONL and unfinished actions across context compaction.
-2. Consume complete `ready`, `pending` and `closed` records as the receiver delivers them: each turn-delivered `[cafleet listen record]` input, or each complete line read from the handle, preserving incomplete chunks for the next read. A `pending` notice is a wake signal whose `next` field is the consuming command, never a payload. Neither a received notice nor a healthy live read with no output is a reason to replace the receiver.
+2. Consume complete `ready`, `pending` and `closed` records as the receiver delivers them: each turn-delivered `[cafleet listen record]` input, or each complete line read from the handle, preserving incomplete chunks for the next read. Neither a received notice nor a healthy live read with no output is a reason to replace the receiver.
 3. On every `pending` notice, run its `next` command once. It is `cafleet message poll <director-member-id> --json` with the fleet's `--database-url` when non-default. A notice queued behind a busy turn whose messages an earlier poll already consumed returns `[]`. That empty poll is the normal outcome and completes the notice. When a record is unparseable or truncated, run `cafleet message poll <director-member-id> --json` once.
 4. Before running any other command after a poll, record every returned message's ID, sender, required action and artifact pointers in host-owned state; `message show MESSAGE_ID --json` reads a consumed message again. Then dispatch work whose inputs are ready. Poll mid-turn as work requires, and once more before reporting completion.
 5. At dispatch, record each assignment's expected reply point, an estimate chosen from the task's size. On a wake, run `cafleet member list <fleet-id> --json`, `cafleet member capture` and artifact checks only for assignments past that point, starting that overdue check with one `poll --json`, which surfaces a lost closed notice or a dead runner. Spawn, pane discovery and fleet-deletion failures keep their own `member list` uses. Each member's runner retries its own undelivered previews, and the listener performs none.
 6. Keep required user decisions pending until the operator answers. Incoming broker records are events, not user answers. Continue independent authorized work and reception where the host permits it; when a decision blocks host tools, reconcile the inbox on the next authorized activation.
 
-Run one persistent receiver through your backend's reception recipe in [coding-agents.md](../reference/coding-agents.md); [message listen](../reference/cli.md#message-listen) owns the lease, record shapes, notice hold, replay, failures and closure.
+[message listen](../reference/cli.md#message-listen) owns the lease, record shapes, notice hold, replay, failures and closure.
 
 #### Receiver recovery
 
@@ -337,9 +337,6 @@ Retain pending messages across recovery. Every renewal and replacement uses the 
 | Native or extension receiver tool unavailable or denied at runtime | On a host satisfying the [Director requirements](../reference/coding-agents.md#role-requirements), state the reception limit and use manual reads |
 
 Follow the backend's native receive lifecycle independently of whether a host goal was supplied.
-
-A persisted-but-undelivered send needs no further message: the recipient's runner retries it, and Director wake's overdue check covers a silent recipient.
-
 ### Authorization-Scope Guard (CRITICAL)
 
 Carry the user's authorization forward across wakes and checks. Dispatch already authorized work when inputs arrive; an inbox check renews no permission. Keep explicit user review/approval gates authoritative. Relay a new decision only when its meaning, scope or risk requires the operator.
@@ -350,7 +347,7 @@ Explicit cancellation, a required user decision, a concrete unrecoverable failur
 
 ### Stall Response
 
-Start with your inbox and assignment/artifact state, then take a read-only `cafleet member capture <member-id> --lines <depth>` for complete backend UI evidence. A quiet or ambiguous pane calls for inspection rather than an inferred failure: timeouts, idle duration and unread counts alone establish no failure, so check the assignment's expected ready/reply point. A capture showing an approval form with no matching `interaction_opened` event is a form inside a recorded layout limit: decide it as step 5 of [Consume observed interactions](#consume-observed-interactions) directs, then press the backend's allow or deny keys with explicitly authorized [`member press`](#member-press), or ask the user to answer it on the member's native surface.
+Start with your inbox and assignment/artifact state, then take a read-only `cafleet member capture <member-id> --lines <depth>` for complete backend UI evidence. Timeouts, idle duration, unread counts and a quiet or ambiguous pane alone establish no failure; check the assignment's expected ready/reply point. A capture showing an approval form with no matching `interaction_opened` event is a form inside a recorded layout limit: decide it as step 5 of [Consume observed interactions](#consume-observed-interactions) directs, then press the backend's allow or deny keys with explicitly authorized [`member press`](#member-press), or ask the user to answer it on the member's native surface.
 
 #### Escalation
 
@@ -362,7 +359,7 @@ Relay explicit member questions through {decision_surface}, then send the user's
 
 ### Recovery
 
-A member whose runtime is lost, not responding or unusable is deleted and re-created. Check inbox/roster/pane/artifact evidence and use `cafleet member capture` before deciding that an agent is dead or unusable; `member show --json` reads its stored runtime state without a probe.
+A member whose runtime is lost, not responding or unusable is deleted and re-created. Check inbox/roster/pane/artifact evidence and use `cafleet member capture` before deciding that an agent is dead or unusable; `member show --json` reads its stored runtime state and probes a `running` or `degraded` runner's health ([member show](../reference/cli.md#member-show)).
 
 Once evidence confirms a missing/dead pane or an authorized unusable-session replacement, run [Member Delete](#member-delete), then `cafleet member create` with a context-preserving prompt carrying the assignment, full message IDs, completed/remaining work, artifacts and blocker context; the replacement gets a new ID and its own ready gate. Deletion settles the old run's records, sends no answer keys and force-closes a pane whose runner does not answer. Preserve unknown process/receipt outcomes until evidence resolves them.
 
