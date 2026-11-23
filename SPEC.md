@@ -10,7 +10,7 @@ Reproduce the documented command/option/exit surface, configuration defaults, cu
 
 ## 2. Architecture stance
 
-The core is synchronous. A send previews pending ordinary-member messages within its budget, and each ordinary member's runner retries its own still-pending previews (§6.9 Runner pending-preview sweep). A persistent read-only listener notifies pending messages through JSONL without pane operations. Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools own receiver handles and collect native results; a poll consumes every delivery it returns, and deferred actions and native handles remain in host-owned state. Automatic Director reception sends no Escape, text, Enter or queued composer input.
+The core is synchronous. A send previews pending ordinary-member messages within its budget, and each ordinary member's runner retries its own still-pending previews (§6.9 Runner pending-preview sweep). Every live member runner also types the root Director's pending previews into the Director's pane, only into a composer its bundled profile verifies empty (§6.9 Director delivery sweep). Separate processes coordinate SQLite changes through transactions and complete pane submissions through process-shared file locks. Host-native tools collect native results; a poll consumes every delivery it returns, and deferred actions and native handles remain in host-owned state. Director delivery sends no Escape and no bracketed paste.
 
 ## 3. Module layout
 
@@ -23,7 +23,7 @@ The core is synchronous. A send previews pending ordinary-member messages within
 | Multiplexer | Discovery, pane creation/capture/input/kill and layout compensation |
 | Pane input | Stable OS locks, runner-state gating and durable receipt settlement |
 | Member runtime | Owned PTY transport, typed observations, durable event/inbox transactions and identity-pinned recovery |
-| Notification / receiving | Ordinary-member draining delivery and read-only persistent inbox streams, optionally forwarded to a Codex thread |
+| Notification / receiving | Runner-owned preview delivery into ordinary-member panes and the root Director's pane |
 | Coding-agent backends | Registry, availability, model/effort validation and spawn argv |
 | CLI | Parse/guard/compose these contracts and emit results |
 
@@ -104,7 +104,7 @@ Send requires active sender/recipient in the same live fleet and persists exact 
 
 Message ID order is commit order. `messages.message_id` is `AUTOINCREMENT`, allocated inside the inserting write transaction, and SQLite serializes writers, so a message with a larger ID always commits after every message with a smaller ID.
 
-Pending preview selection chooses the oldest eligible row by `(created_at, message_id)` for an active ordinary recipient with a concrete pane; root Directors and self-sends are ineligible. Revalidate ordinary-member kind, fleet, placement, message status and null notification stamp while holding pane input ownership. Stamp success conditionally only after complete submission; delivery leaves `status_state` unchanged until the recipient's poll consumes the message. Listening selects every pending record independently of notification fields, including stamped pending self-sends, without changing broker state.
+Pending preview selection chooses the oldest eligible row by `(created_at, message_id)` for an active ordinary recipient with a concrete pane; root Directors and self-sends are ineligible. Revalidate ordinary-member kind, fleet, placement, message status and null notification stamp while holding pane input ownership. Stamp success conditionally only after complete submission; delivery leaves `status_state` unchanged until the recipient's poll consumes the message. Director preview selection uses the same predicate for the fleet's root Director with a concrete placement, revalidates the message and Director placement under the Director pane's input lock and stamps only while `notified_at` is still null (§6.9 Director delivery sweep).
 
 #### Broker errors
 
@@ -132,7 +132,6 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message for the recipient's runner to preview | Sender/recipient flags | yes |
 | `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
-| `message listen` | Notify pending messages through stdout | `MEMBER_ID` | JSONL only |
 | `message show` | Read one message | `MESSAGE_ID` | yes |
 
 #### Database selection
@@ -170,7 +169,6 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `message send` | `Message sent.` then envelope | `{message}` |
 | `message poll` | Envelopes, or `No messages found.` | Full record array |
 | `message show` | Envelope | `{message}` |
-| `message listen` | — | Tagged `ready`, `pending`, `closed` JSONL records; no `--json` flag |
 | `member create` | `ID NAME backend=AGENT pane=PANE window=WINDOW` plus runtime line | Member with placement and runtime |
 | `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
 | `member show` | `ID NAME STATUS window=WINDOW` plus wrapped runtime line | Detail including kind, placement and runtime |
@@ -234,7 +232,7 @@ The guard is cooperative, not a security boundary: it stops a member that passes
 
 #### `permissions.allow` coverage
 
-Prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message listen ID --timeout 300`. Native Monitor authorization is separate: a Bash-rule check establishes no Monitor permission. Literal IDs and trailing JSON flags preserve prefix matching.
+Prefix rules such as `Bash(cafleet message *)` cover broker operations, including `cafleet message poll ID --json`. Literal IDs and trailing JSON flags preserve prefix matching.
 
 Ask entries for the Director's pane-input prefixes follow §6.7 Claude permission posture, which states the permission-profile contract.
 `cafleet permission respond` runs under the Director host's effective policy after its request-specific decision and bypasses no ask, deny or managed rule. Ordinary member role authority covers broker reception and evidence routing, while the Director owns permission responses.
@@ -265,7 +263,7 @@ Every surface that installs to or checks a backend's user-level config directory
 | codex | `$CODEX_HOME`, else `~/.codex` | `<base>/skills` | `<base>/rules/cafleet.rules` |
 | opencode (skills) | `~/.config/opencode` (fixed discovery path) | `<base>/skills` | — |
 | opencode (preset) | `$OPENCODE_CONFIG_DIR`, else `~/.config/opencode` | — | `<base>/agents/cafleet.md`, `<base>/agents/cafleet-ask.md` |
-| hermes | `$HERMES_HOME`, else `~/.hermes` | `<base>/skills` | — (setup installs the `cafleet` plugin under `<hermes home>` and enables it in the Hermes configuration; § Asset installation) |
+| hermes | `$HERMES_HOME`, else `~/.hermes` | `<base>/skills` | — |
 | pi | `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` | `<base>/skills` | — (setup installs the CAFleet pi extension under `<base>/extensions`; § Asset installation) |
 
 OpenCode discovers skills only at the fixed path but loads agent definitions from `OPENCODE_CONFIG_DIR`, so only its presets follow the variable.
@@ -285,25 +283,25 @@ The binary carries every data file of the `assets/` tree listed below. Setup ins
 | `assets/extensions/` | One directory per backend with an extension | Extension installation (table below) |
 | `assets/profiles/` | One profile file `<backend>.json` per backend with a bundled profile, holding that backend's profile and the native screen fixtures it cites | The profile catalog (§6.9 Bundled profiles and native screen fixtures) |
 
-Each agent's presets and extensions, where they exist, are static files embedded in the binary next to the skills; their targets resolve per §6.3 Config-dir resolution. Per backend, setup replaces every embedded skill sequentially, then each preset in table order, then each extension target followed by its executable record, then (for `hermes`) runs the plugin enablement:
+Each agent's presets and extensions, where they exist, are static files embedded in the binary next to the skills; their targets resolve per §6.3 Config-dir resolution. Per backend, setup replaces every embedded skill sequentially, then each preset in table order, then each extension target followed by its executable record:
 
 | Agent | Bundled presets → install target | Bundled extension → install target | Executable record |
 |---|---|---|---|
 | claude | — | — | — |
 | codex | `assets/presets/codex/cafleet.rules` → `<codex base>/rules/cafleet.rules` | — | — |
 | opencode | `assets/presets/opencode/cafleet.md` → `<preset base>/agents/cafleet.md`; `assets/presets/opencode/cafleet-ask.md` → `<preset base>/agents/cafleet-ask.md` | `assets/extensions/opencode/cafleet.ts` → `<preset base>/plugins/cafleet.ts` | `<preset base>/plugins/cafleet.executable` |
-| hermes | — | `assets/extensions/hermes/cafleet/` (every file) → `<hermes home>/plugins/cafleet/` | `<hermes home>/plugins/cafleet/executable` |
+| hermes | — | — | — |
 | pi | — | `assets/extensions/pi/cafleet.ts` → `<pi base>/extensions/cafleet.ts` | `<pi base>/extensions/cafleet.executable` |
 
 Existing targets are deleted before their replacements are written; a symlink target is unlinked as an entry, keeping its referent. Unrelated skills and plugins remain untouched.
 
-`<preset base>` is the opencode preset base (`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`). `<hermes home>` is the parent directory of the `<config path>` that `hermes config path` prints (§ Hermes plugin enablement step 1); Hermes discovers user plugins under its home, and a sticky `<base>/active_profile` re-homes both that directory and `hermes config path` to the profile directory. Setup for `hermes` runs `hermes config path` once, in the read batch before the extension install, so installing the Hermes extension requires `hermes` on `PATH`. `<pi base>` is the pi base (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`); setup for `pi` runs no `pi` command, so it needs no `pi` on `PATH`. Extension files are embedded verbatim, so the embedded bytes equal the installed bytes.
+`<preset base>` is the opencode preset base (`$OPENCODE_CONFIG_DIR`, else `~/.config/opencode`). `<pi base>` is the pi base (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`). Setup runs no backend command, so it needs no backend executable on `PATH`. Extension files are embedded verbatim, so the embedded bytes equal the installed bytes.
 
 The *executable record* is a one-line file holding the absolute path of the running `cafleet` executable as the OS reports it (Linux: the target of `/proc/self/exe`; macOS: the kernel-reported image path), with every symbolic link resolved, written after the extension files. It is neither an embedded asset nor byte-compared; OpenCode plugin discovery loads only `.ts`/`.js` files and directories, and pi extension discovery loads only `*.ts`, `*.js`, `*/index.ts` and `*/package.json` entries, so both ignore the record. The plugins and extensions execute only the recorded path.
 
-Skills-operation errors retain `failed to install skills into <skills_dir>: <error>`, preset-operation errors `failed to install preset into <target>: <error>`, and extension-operation errors, including the executable record, `failed to install extension into <target>: <error>`. A failure on any preset, extension or plugin enablement step fails setup.
+Skills-operation errors retain `failed to install skills into <skills_dir>: <error>`, preset-operation errors `failed to install preset into <target>: <error>`, and extension-operation errors, including the executable record, `failed to install extension into <target>: <error>`. A failure on any preset or extension step fails setup.
 
-Setup prints each success line after its operation completes: the skills line, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written; a directory extension prints its directory once. Claude prints only the skills line; pi prints the skills line and the extension line; Hermes prints the skills line, the extension line and a plugin enablement line (§ Hermes plugin enablement):
+Setup prints each success line after its operation completes: the skills line, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written. Claude and Hermes print only the skills line; pi prints the skills line and the extension line:
 
 ```
 <agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
@@ -311,47 +309,11 @@ Setup prints each success line after its operation completes: the skills line, o
 <agent>: installed extension (v<version>) -> <target>
 ```
 
-`cafleet setup --coding-agent hermes` on a home whose plugin is already enabled prints:
-
-```
-hermes: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
-hermes: installed extension (v<version>) -> <hermes home>/plugins/cafleet
-hermes: plugin cafleet already enabled -> <config path>
-```
-
 `cafleet setup --coding-agent pi` prints:
 
 ```
 pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
 pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
-```
-
-###### Hermes plugin enablement
-
-Setup for `hermes` runs every Hermes command through the local `hermes` binary, with `HERMES_HOME` set to the resolved base on every call, and parses no `config.yaml` itself. Under the Hermes home it touches exactly the skills, `<hermes home>/plugins/cafleet/`, `plugins.enabled`, `plugins.disabled` (read only) and `plugins.entries.cafleet.allow_gateway_injection`.
-
-A key is *not set* when its `hermes config get` exits 1 and one trimmed stderr line equals exactly `Config key not set: <key>`; the rule matches a line, not the whole stream, because Hermes prints unrelated stderr lines, such as an install out-of-sync warning, on every command. Any other non-zero exit is a failed command whose cause is its stderr text.
-
-`hermes config get --json plugins` prints the resolved `plugins` subtree as a JSON object. A missing `disabled`, `enabled` or `entries.cafleet.allow_gateway_injection` member is that key's *not set* state, and a *not set* `plugins` key means all three are *not set*. A present `disabled` or `enabled` member must be a JSON array of strings.
-
-After installing the skills, setup for `hermes` runs:
-
-1. One concurrent read batch under one ten-second deadline: `hermes config path` and `hermes config get --json plugins`. `<config path>` is the trimmed stdout of `config path`. Hermes applies a sticky `<base>/active_profile` to every command, so this path, the extension's `<hermes home>`, the plugin keys, the member's `hermes config path` (§6.7 Hermes availability preflight) and the member's own `hermes chat` name the same file and home. A `config path` failure, evaluated before the `plugins` result, fails setup with `failed to install extension into <resolved Hermes base>: <cause>`, `<resolved Hermes base>` being `$HERMES_HOME`, else `~/.hermes`.
-2. Install the extension into `<hermes home>/plugins/cafleet/` (§ Asset installation) and print the extension line.
-3. Evaluate `plugins`. When `disabled` lists `cafleet`, setup fails with the cause `plugins.disabled lists cafleet; remove it from plugins.disabled, then rerun 'cafleet setup --coding-agent hermes'`: the deny-list wins over `plugins.enabled`, preserving the operator's explicit disable. A *not set* `enabled` is an empty list. When `cafleet` is missing from `enabled`, run `hermes config set plugins.enabled '<existing entries in order, then "cafleet", as compact JSON>'`. When `allow_gateway_injection` is *not set* or not `true`, run `hermes config set plugins.entries.cafleet.allow_gateway_injection true`. The writes run serially, each under its own ten-second deadline, because each rewrites `config.yaml`.
-4. Only when step 3 wrote, re-read `hermes config get --json plugins` once under its own ten-second deadline and require `cafleet` in `enabled` and `true` for `allow_gateway_injection`, because a `config set` can exit 0 without the value sticking under a managed scope.
-5. Print `hermes: plugin cafleet already enabled -> <config path>` when step 3 wrote nothing, otherwise `hermes: enabled plugin cafleet -> <config path>`.
-
-Any failed command, a timeout, an unexpected value or a listed `plugins.disabled` entry after step 1 fails setup with `failed to enable hermes plugin cafleet in <config path>: <cause>`; Hermes's writer refusing a key pinned by its managed scope is such a cause.
-
-Hermes's ruamel round-trip writer replaces the file atomically, writing through a symlinked `config.yaml` to its target and preserving comments, key order, quoting and untouched nodes. A rerun after a successful enablement writes nothing.
-
-A missing `plugins.enabled` enables no user plugin, and Hermes grandfathers installed user plugins only while the key is missing; after setup writes it, other installed but not enabled user plugins stay disabled until the operator enables them. Setup never runs `hermes plugins enable`, whose dependency admission re-syncs the Hermes environment, which the plugin does not need and which fails on installs without `uv.lock`.
-
-Setup runs only the local binary and stays offline. `cafleet setup --coding-agent hermes` requires `hermes` on `PATH`; its absence fails with the cause `binary hermes not found on PATH`. Plain `cafleet setup` with `hermes` absent from `PATH` installs the Hermes skills, skips the extension and the plugin enablement and prints:
-
-```
-hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes
 ```
 
 #### Schema-version guard
@@ -399,7 +361,7 @@ Any naming, verification, insertion or result-construction failure exits 1 and r
 
 Applied names remain after a failure, crash or fleet deletion, and the Director pane keeps running. The rename and database commit are separate operations: a crash can leave a changed name without registration, or committed registration without delivered output. An output error after confirmed commit preserves registration and the name. Existing fleets keep their recorded names, and subsequent user renames leave placement snapshots unchanged.
 
-Run `fleet create` from the coding-agent session declared by `--coding-agent`; root-Director reception follows §6.3 `message listen` and §6.5 Push notifications.
+Run `fleet create` from the coding-agent session declared by `--coding-agent`; the registered Director pane receives previews from the fleet's member runners (§6.5 Push notifications; §6.9 Director delivery sweep).
 
 ##### Caller pane verification
 
@@ -443,8 +405,6 @@ A walk that records 4096 entries stops at the last recorded pid.
 | Other entry | `ps` cannot start | `cannot run ps: <io error>` |
 | Other entry | The first field is absent or not an integer | `ps printed no parent for <pid>: <line>` |
 | Other entry | No field follows the parent | `ps printed no command for <pid>: <line>` |
-
-The §6.3 Codex forwarding session pin reads entries through the same reader and propagates its errors.
 
 ###### Verification rows
 
@@ -570,7 +530,7 @@ Each check has a stable `name`, a `status` and a one-line `detail`. Checks run i
 | `<agent>.configuration` | The resolved config path (§ Config-dir resolution) | — | — | The config-path validation error, or `HOME is not set` |
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
-| `opencode.extension`, `hermes.extension`, `hermes.plugin_enabled`, `pi.extension` | § Extension checks | § Extension checks | — | § Extension checks |
+| `opencode.extension`, `pi.extension` | § Extension checks | § Extension checks | — | § Extension checks |
 | `<agent>.skills` | The skills dir, when every embedded skill file equals its installed copy | `unavailable: configuration failed: <cause>`; `unavailable: executable is absent` | `skills not installed at <skills dir>; run 'cafleet setup --coding-agent <agent>'` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` |
 
 The multiplexer rows follow the `fleet create` steps without `--pane` (§ Caller pane verification), and `<VAR>` is the verified pane variable:
@@ -586,7 +546,7 @@ The multiplexer rows follow the `fleet create` steps without `--pane` (§ Caller
 
 ###### Member runtime checks
 
-When the `database` row is `ok`, doctor adds one `member.<member_id>.runtime` row right after it for each active ordinary member whose run status is not terminal (`exited`, `failed` or `lost`), in member-ID order. A `running` or `degraded` run is probed through the runner's control socket health request; the probes run concurrently, each under a one-second deadline, and the batch overlaps the other checks the way the Hermes batch does, with the rows keeping their check order. `<eligibility>` and `<code>` are the observation's eligibility rendering and diagnostic code (§6.3 Runtime presentation). The first matching row applies:
+When the `database` row is `ok`, doctor adds one `member.<member_id>.runtime` row right after it for each active ordinary member whose run status is not terminal (`exited`, `failed` or `lost`), in member-ID order. A `running` or `degraded` run is probed through the runner's control socket health request; the probes run concurrently, each under a one-second deadline, and the batch overlaps the other checks, with the rows keeping their check order. `<eligibility>` and `<code>` are the observation's eligibility rendering and diagnostic code (§6.3 Runtime presentation). The first matching row applies:
 
 | Situation | Status | Detail |
 |---|---|---|
@@ -607,9 +567,7 @@ OpenCode presets installed only at another base are not the resolved installatio
 
 ###### Extension checks
 
-Each extension check is read-only. An executable record is usable when it names an existing executable file. `opencode.extension` checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`; `hermes.extension` checks `<hermes home>/plugins/cafleet/`, located by the batch's `hermes config path`; `hermes.plugin_enabled` reads `disabled`, `enabled` and `entries.cafleet.allow_gateway_injection` from the batch's one bounded `hermes config get --json plugins` call under the *not set* and subtree rules (§ Hermes plugin enablement); `pi.extension` follows `pi.executable`, precedes `pi.skills` and checks `<pi base>/extensions/cafleet.ts` and `<pi base>/extensions/cafleet.executable`.
-
-`hermes.extension` and `hermes.plugin_enabled` share one concurrent read batch, `hermes config path` and `hermes config get --json plugins`, run with null stdin and `HERMES_HOME` set to the resolved base under one two-second deadline. The batch starts before the multiplexer, database and OpenCode checks and overlaps them; the rows keep their check order. A `hermes` call against a missing home makes Hermes create one, so when the resolved Hermes base does not exist doctor runs no `hermes` process.
+Each extension check is read-only. An executable record is usable when it names an existing executable file. `opencode.extension` checks `<preset base>/plugins/cafleet.ts` and `<preset base>/plugins/cafleet.executable`; `pi.extension` follows `pi.executable`, precedes `pi.skills` and checks `<pi base>/extensions/cafleet.ts` and `<pi base>/extensions/cafleet.executable`.
 
 A preset or extension check reports the first matching state:
 
@@ -617,15 +575,9 @@ A preset or extension check reports the first matching state:
 |---|---|---|---|
 | Every preset, extension and skills check | The backend configuration failed | `info` | `unavailable: configuration failed: <cause>` |
 | Every preset, extension and skills check | The backend executable is absent from `PATH` | `info` | `unavailable: executable is absent` |
-| `hermes.extension`, `hermes.plugin_enabled` | The resolved Hermes base does not exist | `info` | `unavailable: no Hermes home at <base>` |
-| `hermes.extension` | `hermes config path` fails or times out | `error` | `cannot read hermes configuration through 'hermes config path': <cause>` |
-| `opencode.extension`, `hermes.extension`, `pi.extension` | An embedded file's installed copy is missing, unreadable or differs | `error` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` |
-| `opencode.extension`, `hermes.extension`, `pi.extension` | The executable record is missing, unreadable or names no executable file | `error` | `<record path>: <cause>; run 'cafleet setup --coding-agent <agent>'` |
-| `opencode.extension`, `hermes.extension`, `pi.extension` | Otherwise | `ok` | The plugin path; for Hermes, the plugin directory; for pi, the extension path |
-| `hermes.plugin_enabled` | The call fails other than *not set*, times out or prints a member of the wrong JSON type | `error` | `cannot read hermes configuration through 'hermes config get': <cause>` |
-| `hermes.plugin_enabled` | `plugins.disabled` lists `cafleet` | `error` | `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'` |
-| `hermes.plugin_enabled` | `plugins.enabled` lacks `cafleet`, or `allow_gateway_injection` is not `true` | `error` | `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'` |
-| `hermes.plugin_enabled` | Otherwise | `ok` | `cafleet enabled with gateway injection` |
+| `opencode.extension`, `pi.extension` | An embedded file's installed copy is missing, unreadable or differs | `error` | `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` |
+| `opencode.extension`, `pi.extension` | The executable record is missing, unreadable or names no executable file | `error` | `<record path>: <cause>; run 'cafleet setup --coding-agent <agent>'` |
+| `opencode.extension`, `pi.extension` | Otherwise | `ok` | The plugin path; for pi, the extension path |
 
 #### `cafleet message` — Message Broker
 
@@ -633,7 +585,7 @@ A preset or extension check reports the first matching state:
 
 `cafleet message send --from-member-id ID --to-member-id ID (TEXT | --file PATH) [--json]`
 
-Resolve the complete text body, including a `--file -` stdin wait, before starting the five-second persistence budget. Persist one point-to-point delivery and return; the send writes no pane input and waits for no delivery. An ordinary member's runner types the pending message at its next preview sweep (§6.5 Push notifications; §6.9 Runner pending-preview sweep), and the recipient's poll reads it whether or not a preview reached its pane. A self-send is committed with its notification stamp set, so no runner types it; a message to a root Director reaches it through its own reception (§6.5 Push notifications).
+Resolve the complete text body, including a `--file -` stdin wait, before starting the five-second persistence budget. Persist one point-to-point delivery and return; the send writes no pane input and waits for no delivery. An ordinary member's runner types the pending message at its next preview sweep (§6.5 Push notifications; §6.9 Runner pending-preview sweep), and the recipient's poll reads it whether or not a preview reached its pane. A self-send is committed with its notification stamp set, so no runner types it; a message to a root Director is typed into the Director pane by a live member runner of its fleet (§6.5 Push notifications; §6.9 Director delivery sweep).
 
 JSON is `{message}`. Storage failure before commit exits 1 with its cause.
 
@@ -647,117 +599,7 @@ JSON is `{message}`. Storage failure before commit exits 1 with its cause.
 4. Update exactly the selected IDs to `status_state='completed'` with one `status_timestamp` (now), and re-read them in the step-3 order.
 5. Commit, then print. JSON is the array of post-consumption records, each with `status_state` `completed`. Text keeps its 200-codepoint body truncation (§ Message Body Truncation), and `message show MESSAGE_ID --json` recovers a full body.
 
-Writers serialize on the transaction, so two concurrent polls of one member return disjoint sets whose union is the pending set. An empty inbox prints `[]` (text: `No messages found.`), commits a no-op and exits 0. A failure before commit rolls back and consumes nothing. A stdout failure after commit leaves the returned messages consumed; no later poll returns them and no later listener notice's pending set includes them, and `message show` still reads each one. Consumption is independent of the assignment's progress (§6.4 Persisted shape).
-
-##### `message listen`
-
-`cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
-
-Notify any active member's pending messages as UTF-8 JSONL. Derive and pin its fleet at startup through the configured database and the ordinary schema-version guard. Require a live root Director with a concrete registered placement, without resolving a multiplexer or checking its executable/physical pane; the subject's own placement may be absent. Unknown/inactive startup subjects use `Member ID not found`, exit 1.
-
-| Surface | Contract |
-|---|---|
-| Lease | Optional integer from 1 through 1800 inclusive; absence runs until closure, cancellation or failure |
-| Expiry | One monotonic lease from startup; activity leaves expiry unchanged |
-| Output | Compact tagged JSON object plus LF, flushed per record; JSON strings escape controls/newlines |
-| Startup | Validate/pin identity, then emit and flush `ready` before replay |
-| Idle | Check immediately, then wait one second after a snapshot that emits nothing or whose notice is refused, shortened by the lease |
-| Completion | Flush `closed`, then exit 0 for expiry or normal subject/fleet closure |
-| Failure | Diagnostic on stderr and exit 1; a parse error (§6.3 Error Messages) exits 2 |
-
-The command always emits JSONL; text mode and `--json` are absent. Stdout contains protocol records only:
-
-```json
-{"event":"ready","member_id":1,"fleet_id":1}
-{"event":"pending","next":"cafleet message poll 1 --json"}
-{"event":"closed","member_id":1,"reason":"timeout"}
-```
-
-A `pending` record is a wake notice: it carries no message ID or body, only the consuming command in `next`, and the receiver consumes full records by running that command:
-
-| Field | Type | Contract |
-|---|---|---|
-| `event` | string | `"pending"` |
-| `next` | string | The consuming command for the listened subject, identical for every notice of one listener process |
-
-A notice's *pending set* is `P` of the snapshot that produced it (§ Notice hold). The listener keeps it internally for the hold; the record does not carry it. `pending(P)` denotes a `pending` notice whose pending set is `P`.
-
-`next` is built once at startup:
-
-1. Start with `cafleet message poll <MEMBER_ID> --json`, where `<MEMBER_ID>` is the listener's positional `MEMBER_ID` as an integer.
-2. When the listener process was invoked with `--database-url <url>`, append ` --database-url ` and the shell word for `<url>`, verbatim as supplied, even when it names the default database file. When `--database-url` was omitted, append nothing.
-
-**Shell word.** A value whose every character is in `[A-Za-z0-9_./:~@%+=,-]` is used as is. Any other value is POSIX single-quoted: `'`, then the value with each `'` replaced by `'\''`, then `'`. An empty URL never reaches emission, because startup fails opening the database before `ready`.
-
-```json
-{"event":"pending","next":"cafleet message poll 7 --json --database-url sqlite:///tmp/fleet.db"}
-{"event":"pending","next":"cafleet message poll 7 --json --database-url 'sqlite:///tmp/my fleet.db'"}
-```
-
-Key order is `event`, `next`. A `pending` record is never emitted for an empty pending set. `closed.reason` is `timeout`, `member_inactive`, `fleet_deleted` or, only in forwarding mode (§ Codex forwarding), `session_exited`; fleet deletion takes precedence when both lifecycle closures are observed. Check normal closures before revalidating a continuing live fleet. Missing persisted rows, changed fleet identity, invalid stored enums/root relationships or missing root placement are fatal errors.
-
-Each short read transaction validates identity and selects every `input_required` record for the pinned subject ordered by `(created_at ASC, message_id ASC)`, committing before output or sleep; a later commit with an earlier timestamp joins the pending set when first observed.
-
-**Notice hold.** The listener's only emission state is the *hold*. A hold exists exactly while some ID in the last delivered notice's pending set is still pending; it carries the *held set* `H` (those IDs, never empty) and `held_at`, the monotonic instant that notice was delivered. The listener starts with no hold. The hold ceiling is 300 s. On every successful snapshot with ordered pending set `P`, in order:
-
-1. **Reconcile:** `H ← H ∩ P`. Consumed IDs leave the hold; when `H` becomes empty, the hold and its `held_at` end.
-2. **Fresh IDs:** `F ← P \ H`.
-3. **Decide** by the table below.
-4. **Commit:** when the output reports the notice delivered (stdout: the complete record plus LF flushed; forwarding: § Codex forwarding), the hold becomes `H ← P` with `held_at` set to now. A refused notice leaves the hold exactly as step 1 left it, and the next snapshot decides again. An output failure ends the listener with exit 1.
-
-| Condition | Action |
-|---|---|
-| `P` empty | Emit nothing |
-| No hold and `P` non-empty (hold released) | Emit `pending(P)` |
-| A hold, `F` non-empty and at least the hold ceiling since `held_at` | Emit `pending(P)`, the ceiling re-notice: one bulk notice whose pending set is every unpolled ID |
-| Otherwise (a hold with `F` empty, or the ceiling not reached) | Emit nothing |
-
-Every notice's pending set is the full pending set, so every pending ID in an earlier notice's pending set is in `H`; that one set separates notified from fresh IDs, and the listener keeps no per-ID history. A failed snapshot leaves the hold unchanged. A snapshot that emits nothing, or whose notice is refused, waits one second (shortened by the lease) before the next snapshot; one whose notice is delivered rechecks immediately.
-
-**Re-listing.** An ID leaves `P` only through a consuming `message poll`, which consumes the subject's whole pending set atomically, so a snapshot sees either all held IDs pending or none of them, and any poll by the receiver releases the hold. The next ordinary notice's pending set holds only IDs committed after that poll. Within one listener process an ID is in two notices' pending sets only through a ceiling re-notice, which fires only when no poll has run for the hold ceiling since the held notice was delivered, so every ID in its pending set, held or fresh, is unpolled. The only other re-listing is a new listener's startup replay of still-unpolled IDs. The ceiling is the liveness backstop for a delivered notice that no receiver turn acted on; without it, every later message would stay held.
-
-**Notice bound.** Each ordinary notice after the first requires a hold release, and each release requires a poll that consumed held IDs. Each ceiling firing emits at most one notice and restarts the ceiling. A listener therefore emits at most 1 notice, plus one per poll that consumed held IDs, plus one per ceiling firing (at most one per hold ceiling period, and only while held IDs stay unpolled with fresh IDs present). A receiver turn with k mid-turn polls can queue at most k + 1 notices behind it, each whose pending set holds only IDs that turn already consumed, so the poll it prompts returns `[]` unless messages arrived since. A burst of any size adds no notice beyond the one outstanding.
-
-| Situation | Behavior |
-|---|---|
-| A delivered notice whose pending set is never polled, and a new message arrives | One ceiling re-notice whose pending set holds the held and fresh IDs, at least the hold ceiling after `held_at` |
-| A delivered notice whose pending set is never polled, and nothing new arrives | No re-notice; the ceiling fires only when fresh IDs exist |
-| The receiver polls before any notice's pending set includes an ID | That ID is never notified |
-| A message, including a runtime event such as `interaction_opened`, arrives while a notice is held | No notice until the receiver polls or the ceiling re-notice fires; any `poll` returns the ID immediately |
-| The receiver polls mid-turn, then a queued notice is delivered | The queued notice's pending set holds only IDs that poll consumed; the poll it prompts returns `[]` unless messages arrived since |
-| Listener restart | The new process emits `ready`, then one notice whose pending set is every pending (unpolled) ID, including IDs a previous listener notified |
-
-Listening leaves consumption and `notified_at` unchanged and performs no pane retry, lock or dispatch; stamped pending self-sends remain notice-eligible. Concurrent listeners are independent read-only observers with no consumer lock, each with its own hold.
-
-Each snapshot has a fresh database deadline at most five seconds away, shortened by the remaining lease. Lock waits and statement execution stay within that deadline: a running statement is interrupted once the deadline passes, and the deadline is checked before and after each statement, each decoded row and the commit. Expiry discards a partial snapshot; interrupted SQL maps to deadline exceeded only when that deadline expired. These cooperative boundaries cover row collection but give no hard real-time preemption of one allocation or SQL operation.
-
-Output writes one serialized record at a time and applies backpressure before selecting more messages. Nonblocking filesystem/poll output preserves/restores descriptor flags on normal return, resumes partial writes at their byte offset and checks every write/flush, under a five-second deadline shortened by the lease. Broken pipe, write-zero, flush failure or output-deadline exhaustion exits 1 visibly, even after partial records; normal lease expiry between records writes `closed` with a separate bounded final write. Complete records survive a later error; an incomplete final line stays unconsumed and recovers through broker replay. Listener memory holds only the current snapshot, one record and the held IDs.
-
-Database contention retries stay inside the snapshot budget; exhaustion or another fatal error ends the stream. The listener keeps its connection/PID across healthy events and ordinary signal behavior outside pane termination deferral; host cancellation may end it without `closed`. Native owners retain one handle, reconcile durable state after failure and establish old-process termination before replacement. Installed backend instructions own concrete native tool recipes and their evidence limits.
-
-###### Codex forwarding
-
-`--codex-thread THREAD` selects forwarding mode, which keeps the record, notice-hold, replay, lease and idle contracts and changes the output:
-
-- **Stdout** carries only the `ready` record and the final `closed` record, so an unread PTY never stalls the five-second output deadline. Writing that `closed` record, with any reason including `session_exited`, is the listener's last action before exit; a write failure leaves the exit status unchanged.
-- **Forwarded events.** Each `pending` notice, and each `closed` record whose reason is `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in emission order. `ready` and `closed` `session_exited` are never forwarded.
-- **Forwarding command:** `codex queue --thread THREAD --message <text>`, where the text is `[cafleet listen record] <compact record JSON>`, for example `[cafleet listen record] {"event":"pending","next":"cafleet message poll 7 --json"}`.
-- **One at a time.** Each `codex queue` runs to exit, with a 10 s deadline, before the next record is forwarded. Exit 0 delivers the record and commits a `pending` notice's hold.
-- **Non-zero exit.** Any non-zero `codex queue` exit ends forwarding, including Codex's refusal of a submission while the thread's queue holds 100 (`queue cannot contain more than 100 submissions`). The listener checks the pinned session first (§ Liveness), then exits as the table below states; it forwards nothing more and retries nothing.
-- **Binary resolution.** `codex` resolves through the listener's `PATH` with the absolute-entry search of §6.9 Native executable resolution.
-
-| Condition | Behavior |
-|---|---|
-| `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
-| No Codex session ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| `codex queue` exits non-zero while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, exit 1 |
-| `codex queue` exceeds 10 s while the pinned session is alive | kill it; stderr `codex queue for thread <THREAD> did not finish within 10 s`, exit 1 |
-| Any other failure after `ready` (database, schema guard, deadline) | its existing stderr diagnostic, exit 1 |
-| The pinned Codex process exits, including when the listener checks it first after a `codex queue` exits non-zero or exceeds 10 s | stdout `closed` with reason `session_exited`, exit 0; no diagnostic and nothing forwarded |
-
-**Session pinning.** At startup the listener walks its ancestors, starting from its parent, through the process-entry reader of §6.3 Caller pane verification (`/proc/<pid>/stat` and `/proc/<pid>/cmdline` on Linux, `ps -o ppid= -o args= -p <pid>` elsewhere), propagating its read errors. It pins the nearest ancestor whose argv[0] basename is exactly `codex`; shells, `bwrap`, node launchers and the sandbox helper (the same binary, run with argv[0] `codex-linux-sandbox`) are skipped. The executable path is not compared, because the helper shares it. A sandbox that unshares the PID namespace hides the ancestor, and startup fails with the missing-ancestor error.
-
-**Liveness.** Each idle tick (at most 1 s) checks the pinned pid with `kill(pid, 0)`. On Linux it also compares the pinned process's start time from `/proc/<pid>/stat`, so a reused pid counts as exited. The pinned process's exit ends the listener with `session_exited`. The listener sets no `PR_SET_PDEATHSIG`, which fires when the forking thread exits rather than the multi-threaded Codex process.
+Writers serialize on the transaction, so two concurrent polls of one member return disjoint sets whose union is the pending set. An empty inbox prints `[]` (text: `No messages found.`), commits a no-op and exits 0. A failure before commit rolls back and consumes nothing. A stdout failure after commit leaves the returned messages consumed; no later poll returns them, and `message show` still reads each one. Consumption is independent of the assignment's progress (§6.4 Persisted shape).
 
 ##### `message show`
 
@@ -1105,9 +947,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member create` | The tmux `new-window` reply is malformed; the cleanup diagnostic follows (§6.5 Member pane creation) | `Error: unexpected tmux new-window output: <quoted>` | 1 |
 | `member create` | The herdr `tab create` reply lacks `result.root_pane.pane_id` or `result.tab.tab_id`; the cleanup diagnostic follows | `Error: herdr tab create missing '<key>' field` | 1 |
 | `member create` | A herdr re-parenting move failed; a stderr diagnostic while the spawn continues (§6.5 herdr re-parenting) | `layout re-parenting incomplete: <cause>` | The command's own result |
-| `setup` | An extension file or its executable record cannot be installed, or the Hermes `config path` read fails (§6.3 Asset installation, Hermes plugin enablement) | `failed to install extension into <target>: <error>` | 1 |
-| `setup` | The Hermes plugin enablement fails (§6.3 Hermes plugin enablement) | `failed to enable hermes plugin cafleet in <config path>: <cause>` | 1 |
-| `message listen --codex-thread` | `codex` is not on `PATH`, or no Codex ancestor process exists; before `ready` | §6.3 Codex forwarding | 1 |
+| `setup` | An extension file or its executable record cannot be installed (§6.3 Asset installation) | `failed to install extension into <target>: <error>` | 1 |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path, before registration or multiplexer effects. `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
 | (any command-line argument) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is non-normative. | 2 |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID; for `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution | `Error: fleet '<fleet-id>' not found.` | 1 |
@@ -1161,7 +1001,7 @@ The ordered public record is:
 
 #### Rendered shape
 
-§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records it consumed; show wraps one record as `message`; send wraps the stored record as `message`; listen carries message IDs, not the full record, in tagged `pending` notices, with separate `ready`/`closed` lifecycle records, and leaves consumption to the poll the notice prompts. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
+§6.3 Output shapes owns each command's wrapper. Poll returns an array of full records it consumed; show wraps one record as `message`; send wraps the stored record as `message`. Capture timestamping, hashing, mode selection and text output follow §6.3 `member capture`, and its JSON key order §6.3 Output shapes.
 
 ##### Text-mode projection
 
@@ -1198,7 +1038,7 @@ Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eig
 
 #### JSON encoding
 
-Every JSON document the `cafleet` binary writes — `--json` output, JSONL listener records, stored JSON columns and inbox payloads — is compact: no whitespace between tokens, object members in the order this specification lists, arrays in order. Strings escape `"` as `\"`, `\` as `\\`, U+0008 as `\b`, U+000C as `\f`, U+000A as `\n`, U+000D as `\r`, U+0009 as `\t`, and every other code point below U+0020 as `\u00` followed by two lowercase hex digits; every other scalar, including `/`, U+007F, non-ASCII text, U+2028 and U+2029, is written raw as UTF-8. Numbers in these documents are integers, written in decimal with a leading `-` when negative.
+Every JSON document the `cafleet` binary writes — `--json` output, stored JSON columns and inbox payloads — is compact: no whitespace between tokens, object members in the order this specification lists, arrays in order. Strings escape `"` as `\"`, `\` as `\\`, U+0008 as `\b`, U+000C as `\f`, U+000A as `\n`, U+000D as `\r`, U+0009 as `\t`, and every other code point below U+0020 as `\u00` followed by two lowercase hex digits; every other scalar, including `/`, U+007F, non-ASCII text, U+2028 and U+2029, is written raw as UTF-8. Numbers in these documents are integers, written in decimal with a leading `-` when negative.
 
 Canonical JSON is this encoding with every object's members sorted by the UTF-8 bytes of their keys, recursively. A digest named "SHA-256 of the canonical JSON of X" is the lowercase hex SHA-256 of those bytes.
 
@@ -1268,7 +1108,7 @@ Deletion closes the pane (tmux `kill-pane`, herdr `pane close`), then, after reg
 
 #### Pane input lock
 
-Every operation that writes pane input uses one process-shared OS file lock. Acquire the lock before placement revalidation. For wrapped prompt/exec/preview submissions the runner owns the lock: wrapped clients validate and submit without holding it while awaiting the runner, and the runner acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and retains it across an active staged write through durable receipt/stamp settlement (§6.9 Runner-owned deferred delivery). A merely queued request holds no lock. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. Hold the lock through exactly one open file descriptor and close it on every exit path; no duplicate of that descriptor outlives the operation.
+Every operation that writes pane input uses one process-shared OS file lock. Acquire the lock before placement revalidation. For wrapped prompt/exec/preview submissions the runner owns the lock: wrapped clients validate and submit without holding it while awaiting the runner, and the runner acquires it nonblockingly from its event loop under the attempt deadline, revalidates the concrete placement and retains it across an active staged write through durable receipt/stamp settlement (§6.9 Runner-owned deferred delivery). A merely queued request holds no lock. Explicit key requests hold it through their outer-pane dispatch and bounded cleanup. A member runner's Director delivery sweep takes the root Director pane's lock, keyed over the Director placement, nonblockingly and holds it through one attempt and its stamp; it takes no other pane lock (§6.9 Director delivery sweep). Hold the lock through exactly one open file descriptor and close it on every exit path; no duplicate of that descriptor outlives the operation.
 
 | Property | Contract |
 |---|---|
@@ -1285,6 +1125,7 @@ No database statement runs while a writer waits for the lock.
 |---|---|
 | `member prompt`, `member exec` | Exit 1 with the runner input failure and recorded runtime context (§6.3 Runtime presentation) |
 | `member press` | Exit 1 with the primary and zero-dispatch diagnostics (§6.3 `member press`) |
+| Director delivery sweep | No wait: a busy lock ends the tick with no backoff, because another runner is delivering |
 
 Process exit releases ownership. Read-only capture needs no input lock. Deletion locking follows §6.3 `member delete` and `fleet delete`.
 
@@ -1343,7 +1184,7 @@ Both writing adapters acknowledge only successful process completion with empty/
 
 Every ordinary member uses a pinned, healthy control socket and its runner's owned child PTY (§6.9 Input arbitration and the original native answer). The runner selects profile delivery without Escape, zero-byte queueing or Escape-first delivery fallback by §6.9 Delivery method and interaction priority. Uncertain reachability preserves manual terminal use while holding generated input.
 
-Validate a nonblank literal line without CR/LF or C0/DEL controls before starting any process. No input path captures the pane or consults its state. Native shell input starts with `! ` followed by the actual validated command; composer controls begin the submitted input.
+Validate a nonblank literal line without CR/LF or C0/DEL controls before starting any process. No member input path captures the pane or consults its state; outside `member capture`, the only multiplexer pane capture is the Director delivery sweep's capture of the root Director's pane (§6.9 Director delivery sweep). Native shell input starts with `! ` followed by the actual validated command; composer controls begin the submitted input.
 
 An OpenCode member (`opencode mini`, §6.7 Per-backend spawn argv) receives pushed notifications and direct prompts as submitted user turns. Native `! ` input executes a shell command.
 
@@ -1353,7 +1194,7 @@ A started write with an ambiguous result retains uncertainty; failure after subm
 
 #### Push notifications
 
-Active ordinary recipients with concrete panes receive previews from their own runner: `message send` only stores the message (§6.3 `message send`), and the recipient's runner types each pending message at its next preview sweep (§6.9 Runner pending-preview sweep). The root Director receives through native `message listen` (§6.3) or manual broker reads, with zero automatic pane input. Self-sends persist without pane input. A member with no live runner keeps its messages pending.
+Active ordinary recipients with concrete panes receive previews from their own runner: `message send` only stores the message (§6.3 `message send`), and the recipient's runner types each pending message at its next preview sweep (§6.9 Runner pending-preview sweep). The root Director receives previews from its fleet's member runners: every live member runner sweeps the Director's pending messages oldest first across senders and types each into the Director's pane only while the Director-screen profile verifies the composer empty with no open or candidate interaction (§6.9 Director delivery sweep). Director delivery is profile delivery with a plain literal only, never delivery fallback or bracketed paste. A Director whose backend or multiplexer has no Director-screen coverage (`director_delivery`, §6.9 Bundled profiles and native screen fixtures) gets nothing typed into its pane and reads with manual `message poll`. Self-sends persist without pane input. A member with no live runner keeps its messages pending, and Director messages stay pending while no member runner of the fleet is live.
 
 Profile delivery submits unchanged the canonical wrapped preview, this exact line ending with the resume clause:
 
@@ -1367,15 +1208,17 @@ Delivery fallback (§6.9 Delivery method and interaction priority), whose submis
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, where N counts stored text and `RECIPIENT_ID` is the message's `to_member_id`. The pointer is identical for every database and never carries `--database-url`. A preview above its run's profile's measured plain-input limit uses bracketed paste when declared and enabled, otherwise this same pointer form (§6.9 Measured submission plans and settle intervals). This limit is independent of the 200-codepoint text-output limit (§6.4 Text-mode projection). The runner renders the form from the selected delivery method before its first byte.
+Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, where N counts stored text and `RECIPIENT_ID` is the message's `to_member_id`. The pointer is identical for every database and never carries `--database-url`. A preview above its run's profile's measured plain-input limit uses bracketed paste when declared and enabled, otherwise this same pointer form (§6.9 Measured submission plans and settle intervals). A Director preview above its profile's `director_delivery.plain_limit` uses the pointer form (§6.9 Director delivery sweep). This limit is independent of the 200-codepoint text-output limit (§6.4 Text-mode projection). The runner renders the form from the selected delivery method before its first byte.
 
-The runner stamps `notified_at` once a preview is submitted: confirmed by post-submit verification on a verified-composer run, or with every stage written on a run without composer verification, where an uncertain preview is also stamped before its result is published (§6.9 Runner pending-preview sweep).
+The runner stamps `notified_at` once a preview is submitted: confirmed by post-submit verification on a verified-composer run, or with every stage written on a run without composer verification, where an uncertain preview is also stamped before its result is published (§6.9 Runner pending-preview sweep). A Director preview is stamped only after confirmed post-submit verification, while the Director pane lock is still held (§6.9 Director delivery sweep).
 
 Delivery leaves `status_state` unchanged: an inline or pointer preview stays `input_required` until its recipient polls, and the consuming poll identifies consumption independently of input delivery.
 
 ##### Held delivery
 
 A preview stays pending, with `notified_at` unset, while the recipient's composer is not verified empty on a verified-composer run, an interaction is open, the runner's FIFO holds prompt or exec input or is stopped, the observer is degraded, ownership or storage is unavailable, the pane is not yet placed or the pane input lock is busy; the runner's sweep retries it with no caller command. Pending delivery creates no permission event and grants no native answer.
+
+A Director preview stays pending while the Director composer is not verified empty (a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min`), an interaction is open or a candidate, the Director pane capture or its multiplexer fails, storage is unavailable, the Director pane input lock is busy, an older Director message is held, or no member runner of the fleet is live. It publishes no runtime event; the delivering runner records a `director_delivery` diagnostic (§6.9 Director delivery sweep).
 
 ##### Accepted trade-offs
 
@@ -1395,7 +1238,16 @@ Verified-composer delivery additionally accepts these trade-offs (§6.9 Durable 
 - A human draft blocks previews until it is cleared or submitted.
 - After a prompt or exec records `uncertain`, no preview and no queued input reaches the member until `input reconcile` settles it (§6.9 Runner-owned deferred delivery).
 - A composer rule that never verifies empty after clearing keeps previews and queued input waiting. `input_delivery_stalled` signals the Director after 3 minutes; recovery inspects the whole literal and presses Enter when appropriate, sends other keys the capture shows are needed, or asks the user to clear or submit the composer, and reconciles uncertain input from that evidence. A composer that never verifies empty after clearing is a profile defect reported for correction.
-- Human typing during the write can mix with the typed literal, and a human key during the post-submit verification window can make the composer nonempty; the result is then `submit_unconfirmed` and a preview can be delivered twice.
+- A human key typed during the write or the settle interval fails the pre-submit comparison, which records `literal_mismatch` and writes no submit key (§6.9 Measured submission plans and settle intervals). A key typed between the pre-submit observation and the submit key can still join the submission. A human key during the post-submit verification window can make the composer nonempty; the result is then `submit_unconfirmed` and a preview can be delivered twice.
+
+Director delivery additionally accepts these trade-offs (§6.9 Director delivery sweep):
+
+- A held or stalled Director preview publishes no runtime event, because an event addressed to the Director would wait behind the held preview; only a `director_delivery` runner diagnostic records it.
+- Delivery is strictly oldest first across senders, so a held head blocks every newer Director message.
+- While a draft or dialog holds the Director composer, each live member runner captures the Director pane up to once per second.
+- CAFleet does not launch the Director, so it probes no Director native version and selects no rule or fixture by version.
+- Director messages committed while no member runner of the fleet is live stay pending until a runner starts or recovers; the Director polls manually after the commands that leave the fleet without one.
+- An unexpected exit of the last member runner is noticed only at the next Director turn, which the user or the Director's own ongoing work starts; an idle Director stays idle with no signal.
 
 #### Multiplexer context
 
@@ -1490,7 +1342,7 @@ A fleet-scoped OS file lock serializes every operation that creates or closes a 
 | `member delete` | After its pane lock, before any cleanup step | Deregistration and layout restoration |
 | `fleet delete` | Once, after all its pane locks and before the first member's cleanup | The last member's layout restoration |
 
-A deletion's operation deadline moves later by the layout-lock wait. Expiry exits 1 with the holder's busy error (§6.3 Error Messages) and changes no state. Lock order is always pane lock → layout lock; `member create` takes no pane lock and a runner's own delivery takes only its pane lock, so no cycle exists.
+A deletion's operation deadline moves later by the layout-lock wait. Expiry exits 1 with the holder's busy error (§6.3 Error Messages) and changes no state. Lock order is always pane lock → layout lock; `member create` takes no pane lock, a runner's own delivery takes only its pane lock, and a runner's Director delivery sweep takes only the Director pane lock and never the layout lock, so no cycle exists.
 
 Creation holds the lock until it completes because before publication its new pane is invisible to other creations: occupancy counts only concrete placements, and the pane ID is published only after the `prepared` handshake (§6.9 Runner boundary and creation transaction). After publication, `start` can still fail, and its compensation closes the published pane, which a concurrent creation could otherwise already target as a split anchor, bottom pane or re-parenting move. A creation holds the lock for at most its ten-second deadline plus compensation, so the 60-second wait admits several queued creations.
 
@@ -1506,7 +1358,8 @@ Both backends run their CLI as an argv subprocess without a shell. Opaque pane I
 passed verbatim. Every argv below starts with the recorded server selector,
 `tmux -S <mux_server>` or `herdr --session <mux_server>` (§ Multiplexer
 context), shown as plain `tmux` and `herdr`. Prompt and key operations use the
-argv in § Prompt dispatch and § Explicit key dispatch.
+argv in § Prompt dispatch and § Explicit key dispatch. The three Director operations serve only the
+Director delivery sweep (§6.9 Director delivery sweep).
 
 | Operation | tmux argv | herdr argv | Failure handling |
 |---|---|---|---|
@@ -1518,6 +1371,9 @@ argv in § Prompt dispatch and § Explicit key dispatch.
 | Window height (`member create`) | `tmux display-message -p -t <window_id> "#{window_height}"`; the anchors are ignored | `herdr pane layout --pane <anchor>` for each anchor in order; the first successful `result.layout.area.height` is the height | tmux: output that is not a positive integer, including the empty line of a missing window, fails with `unexpected tmux display-message output: <quoted>`; herdr: a reply without the area fails with `herdr pane layout missing 'area' field`, any failure moves to the next anchor, and the read fails with the last anchor's error only when no anchor answers |
 | Spawn member pane | Per pane target, § Member pane creation | Per pane target, § Member pane creation | A failed or malformed creation response is an unknown pane-cleanup outcome (§ Pane ownership during creation); naming, equalization and re-parenting failures never fail the spawn |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
+| Director screen capture | `tmux display-message -p -t <pane> '#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}'`, `tmux capture-pane -p -e -N -t <pane>`, then the same `display-message` again; a changed metadata line retries every 50 ms within the attempt deadline | `herdr api snapshot` for the pane's `rect.width`, then `herdr pane read <pane> --source visible --format ansi`, whose line count is the row count | A malformed metadata line or a pane absent from the snapshot is a capture failure. tmux captures carry the cursor and alternate-screen state; herdr captures carry neither |
+| Director literal write | `tmux send-keys -t <pane> -l -- <chunk>` for each chunk of at most 256 characters, in order | `herdr pane send-text <pane> <literal>` | Acknowledged like § Explicit key dispatch; a failure after the first process started has possibly partial effects (§6.9 Director delivery sweep) |
+| Director submit key | `tmux send-keys -t <pane> -H <hex bytes>` | `herdr pane send-keys <pane> <key>` through the explicit-key mapping (`0d` → `enter`) | Acknowledged like § Explicit key dispatch; a failure after its process started is possibly submitted (§6.9 Director delivery sweep) |
 | Close | `tmux kill-pane -t <pane>`, then the restoration of the caller-supplied window | `herdr pane close <pane>`, then the delete-time restoration of the caller-supplied tab | Close tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`); restoration is best effort (§ Delete-time pane layout) |
 
 `pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`. `<quoted>` follows §6.4 Quoted text.
@@ -1606,9 +1462,9 @@ spawn or a delete.
 
 ### 6.6 Receiving and pane input
 
-An ordinary member's still-pending previews are retried by that member's own runner (§6.9 Runner pending-preview sweep), with no caller command; submission budgets and pane input locking follow §6.5 Multiplexer. Director reception is the persistent listener plus the consuming `message poll` each notice prompts (§6.3 `message listen`, §6.3 `message poll`).
+An ordinary member's still-pending previews are retried by that member's own runner (§6.9 Runner pending-preview sweep), with no caller command; submission budgets and pane input locking follow §6.5 Multiplexer. Director reception is the Director delivery sweep of every live member runner plus the consuming `message poll` each preview prompts (§6.9 Director delivery sweep, §6.3 `message poll`).
 
-The persistent listener follows §6.3 `message listen` and performs no preview retry, pane lock, multiplexer resolution or termination-deferral span. Goal activation/pause/budget and pending decisions retain host authority.
+The Director runs that poll once per preview wake and at the manual poll points that cover a fleet with no live member runner (§6.9 Director delivery sweep). Goal activation/pause/budget and pending decisions retain host authority.
 
 ### 6.7 Coding-agent backends
 
@@ -1618,7 +1474,7 @@ Every member pane runs a coding-agent binary selected from the backend registry 
 
 | Role | Tier | Required backend capability |
 |---|---|---|
-| Director | Eligible | A goal requirement (§ Goal requirement) and a listen requirement (§ Listen requirement), evaluated independently. Both are required. |
+| Director | Eligible | A goal requirement (§ Goal requirement) and a pane delivery requirement (§ Pane delivery requirement), evaluated independently. Both are required. |
 | Member | Eligible | A runner-compatible PTY lifecycle, an explicit detection-coverage declaration and a classified default launch mode, `auto` or `manual`, with approval-prompt coverage: the backend's bundled profile detects every approval form the default mode renders and declares request-bound allow and deny answers for it, at every pane geometry outside its recorded layout limits. A default mode that renders no approval form meets this without request rules. |
 | Member | Bundled support | The backend's bundled profile, which declares detection, composer plans and request-bound answers independently from native evidence. Capabilities beyond approval-prompt coverage are optional, and an undeclared one is `unknown` coverage or unsupported. |
 
@@ -1626,64 +1482,37 @@ An *approval form* is a native permission request that blocks the member until a
 
 Evaluate each role independently; a backend ships for the roles it meets. A verdict is `yes` only when recorded evidence establishes every Eligible-tier requirement of that role; otherwise it is `no` with "not established" or the observed failure as evidence, and a Director `no` names each unmet requirement. Default-mode approval-prompt coverage counts toward the Member verdict; other bundled-support capabilities never change a verdict. Each requirement group's evidence holds for its own recorded native version; a newer installed version carries the verdict forward until the next re-check, which follows any change to the backend's bundled profile or recorded evidence. A Member-eligible backend with no bundled profile still launches: it records `coverage=unknown`, and any approval form it shows is answered manually on the native surface. A backend with unknown detector/composer coverage, including such a run, permits manual terminal work and delivers ordinary generated input through delivery fallback. § Role eligibility records each backend's verdicts.
 
-Every non-default launch mode is an explicit `--permission-mode` choice under §6.9 Launch policy and capability registry, which records each mode's `auto`/`manual` class. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. The decision surface and native receive support are evaluated independently of Director eligibility: a Director meeting both requirements may use manual `poll` when its reception mechanism is unavailable, and a tier-3 listen establishes no unsolicited wake of an idle session.
+Every non-default launch mode is an explicit `--permission-mode` choice under §6.9 Launch policy and capability registry, which records each mode's `auto`/`manual` class. Preserve native guards, managed policy, explicit denies, sandbox boundaries and the host's activation, pause, completion and budget authority. The decision surface is evaluated independently of Director eligibility. Manual `poll` is the reception path of an eligible Director whose delivery is held or unavailable at runtime (§6.9 Director delivery sweep), not a substitute for eligibility.
 
 The bundled backend policy catalog owns launch-mode choices and defaults, exact argv mapping, version eligibility and detection/composer profiles. The omitted native argv is specified below; an explicit native mode changes only its permission argument and preserves the remaining argv and literal assignment.
 
-##### Listen requirement
+##### Pane delivery requirement
 
-A *subscribe-style* listen delivers each record the running `cafleet message listen` emits into the session as model-visible input that the host pushes; the model neither polls nor reads the process. Its semantics:
+A backend meets the pane delivery requirement when its bundled profile declares `director_delivery` with coverage `tested` and both `tmux` and `herdr` in its `multiplexers` (§6.9 Bundled profiles and native screen fixtures), and the Director delivery probe passes on both multiplexers for the installed native version.
 
-- An idle session starts a new turn.
-- A busy session receives the record no later than the end of the running turn, never interrupting it; earlier delivery between tool calls inside the turn also passes.
-- No record waits for an unrelated future turn. A record queued behind earlier undelivered records is delivered after their turns; that wait passes, because each of those turns consumes an earlier record.
-- Records keep their emission order.
-
-| Tier | Name | Definition | Standing |
-|---|---|---|---|
-| 1 | Native subscribe | The push facility is part of the backend as installed; CAFleet contributes only CLI invocations: `cafleet message listen` and its forwarding options. | Preferred |
-| 2 | Extension subscribe | Delivery through a CAFleet-vendored extension or plugin that `cafleet setup` installs (§6.3 Asset installation). | Accepted |
-| 3 | Built-in compromise | Built-in tools, where the model reads the running process's output or receives periodic batches; it must pass the stream probe below. | Degraded fallback |
-
-Tiers rank 1 > 2 >> 3: tier 3 spends model turns on reads, delays records to read or batch points, and needs heartbeat-style wake and log reconciliation.
-
-A backend records the highest tier its evidence establishes, and tier 3 only together with negative evidence for tiers 1 and 2 on that version:
-
-- **Tier 1 negative evidence:** the installed version's built-in tools and CLI expose no facility that pushes externally produced text into a running session as model-visible input that starts a turn when the session is idle, checked in built-in tool docs, `--help` of the binary and its subcommands, and the native source or official documentation for that version.
-- **Tier 2 negative evidence:** no extension surface (plugins, hooks, extensions, MCP notifications, any client/server protocol an extension can call) lets an extension do the same, checked in the native source at that version's tag or the official extension documentation.
-- **Recording:** each source is named with its version, plus `checked YYYY-MM-DD`.
-
-Both probes are stated in message-ID terms. A probe message ID is *observed through a notice* when the one `poll` that a delivered `pending` record (§6.3 `message listen`) prompts returns it, the record having reached the session from the listener's output through the mechanism under test.
-
-| Probe | Pass condition | Invalidation rule |
-|---|---|---|
-| Subscribe | Each probe message ID is first returned by a notice-prompted poll | A `poll` or `show` that first reveals a probe ID without a preceding notice turn invalidates the run; a notice-prompted `poll` is part of consumption |
-| Stream | Each probe message ID is first returned by a poll that a notice in the running listener's output prompted, while the same listener process still runs | Any other `poll` or `show` invalidates the run |
-
-**Subscribe probe** (tier 1 or 2, on an installed native version). The candidate Director starts the receiver through its tier's mechanism while another member sends broker messages. After it consumes the probe member's ready, the Director runs under this instruction:
-
-> Consume broker messages only through your receiver. On each `[cafleet listen record]` turn, run the command in the record's `next` field once. Run no other `poll` or `show` unless a step below directs it. When I say `hold`, end only the next notice turn without running its command, then apply the rule above to every later notice turn, including the ceiling re-notice.
+**Director delivery probe**, per backend and multiplexer, on the shipped build, with a Director registered through `fleet create` and one probe member:
 
 | Step | Procedure | Pass condition |
 |---|---|---|
-| Idle | Send one message to the idle Director | A notice starts a turn without input; the poll it prompts returns the message |
-| Busy | During a foreground command of at least 60 s, send two messages | The command is not interrupted; a notice arrives no later than the end of that turn, and the poll it prompts returns both IDs |
-| Burst | During a foreground command of at least 60 s and under 300 s, send 150 messages back to back | At most two notice turns arrive for the burst, and every ID is returned by a notice-prompted poll. On Codex the forwarder stays alive and no `codex queue` refusal occurs. |
-| Consumed notice | Direct one turn: a 30 s foreground command while m1 is sent, one poll, a second 30 s command while m2 is sent, one poll, then end the turn | Every notice turn delivered after the directed turn runs one poll, which returns `[]` |
-| Hold ceiling | Say `hold`; send `hold-probe 1` to the idle Director and record t1, the time its notice turn starts (the Director ends it without polling). After that turn ends and 60 s have passed since t1, send `hold-probe 2`. | No notice arrives before t1 + 285 s. One notice arrives between t1 + 285 s and t1 + 315 s, and the poll it prompts returns both IDs |
-| Owner exit | End the Director session | No `cafleet message listen` survives (`ps`) |
+| Idle | Send one message to the idle Director | The preview starts a turn without other input, and the Director's poll returns the message |
+| Busy | During a foreground command of at least 60 s, send two messages | The command is not interrupted; both previews are read no later than the end of that turn |
+| Draft hold | Type a draft into the Director composer, send one message, wait 10 s, then clear the draft | Nothing is typed while the draft exists and the draft stays intact; after clearing, the preview is delivered |
+| Interaction hold | Open a native approval dialog with the setup below, send one message, then answer the dialog | Nothing is typed into the dialog; the preview is delivered after it closes |
+| Burst | During a foreground command, send 10 messages | Every preview is accepted, and polls return every ID |
+| Long preview | Send a body whose preview reaches `director_delivery.plain_limit` (the 4000-scalar inline limit when null) and one above it | Inline preview intact; above the limit, the pointer form arrives |
+| Settle race | Type a key during the settle window of a delivery | The attempt records `literal_mismatch` and no submit key is written; after the composer is cleared, the preview is delivered |
 
-t1 observes the held notice's delivery from the session side. The listener sets `held_at` when delivery succeeds, which precedes t1 by the receiver latency, and checks the ceiling once per one-second idle interval; the ±15 s tolerance around t1 + 300 s covers both.
-
-**Stream probe** (tier 3, on an installed native version). The candidate Director starts `cafleet message listen` through its native background-execution facility and continues unrelated work in the same session under the task prompt "Learn about broker messages only from that listener's output; run no other `poll` or `show`. When a `pending` record appears there, run the command in its `next` field once and continue." The facility must deliver each record the running listener emits without waiting for the process to exit, at the latest at the session's next turn boundary, whether the host pushes records into the session or the model reads the running process's accumulated output on demand. Another member sends probe messages at separate times during that work. Output that reaches the session only when the process exits, including a completion notification for a finished background process, does not count as observation. Mid-turn delivery and waking an idle session are not required.
-
-| Stream-probe run | Classification |
+| Backend | Interaction-hold setup that opens a native approval dialog |
 |---|---|
-| A probe ID first revealed outside a notice-prompted poll, or any `poll` or `show` other than one notice-prompted poll | Invalid |
-| Every probe ID first returned by a notice-prompted poll before the listener exited | Pass |
-| A probe ID first returned only after the listener exited, or never returned by a notice-prompted poll | Fail |
+| claude | Launch the Director with `--permission-mode default`; ask it to run a Bash command outside its allow rules |
+| codex | Launch with `-s read-only -a on-request -c approvals_reviewer="user"`; ask it to run a command that writes a file |
+| opencode | A project `opencode.json` with `"permission": {"bash": "ask"}` (`OPENCODE_PERMISSION` has no effect); ask it to run a shell command |
+| hermes | A probe Hermes home with `approvals.mode: manual`; ask it to run a command matching Hermes's dangerous-command patterns, such as recursively deleting a temporary directory |
+| pi | — : pi has no native approval dialog (the CAFleet pi gate is member-only) |
 
-Each run records the mechanism, native version and check date.
+The interaction-hold step records `—` only for a backend with no native approval dialog; a dialog that cannot be reproduced fails the step. Each run records backend, native version, multiplexer and its version, pane geometry, message IDs and the check date in § Role eligibility.
+
+A failed step on the shipped build removes that multiplexer from the backend's `director_delivery.multiplexers`, and the whole capability when none remains. The `pane delivery` row is then `no`, naming the failed step, multiplexer and version, and the verdict row names `pane delivery`. Director delivery still runs on each listed multiplexer of a backend that is not Director-eligible, and `fleet create` registers any backend.
 
 ##### Goal requirement
 
@@ -1701,36 +1530,35 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 
 #### Role eligibility
 
-| Backend | Role | Requirement | Source | Delivery | Eligible | Evidence |
-|---|---|---|---|---|---|---|
-| `claude` | Director | `goal` | `native` | — | `yes` | [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. |
-| `claude` | Director | `listen` | `native` | `subscribe` | `yes` | One Monitor task running `cafleet message listen`: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices delivered between tool calls of the directed turn, the 300 s hold ceiling and owner exit ending the listener), 2.1.319, checked 2026-11-17. The run isolated the binary and database but used the shared Claude config root, from which Monitor reception reads no CAFleet asset. |
-| `claude` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
-| `claude` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the bundled Claude profile. |
-| `codex` | Director | `goal` | `native` | — | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through the 200-record burst, idle and forced-failure steps, 0.165.0, checked 2026-11-06. |
-| `codex` | Director | `listen` | `native` | `subscribe` | `yes` | `cafleet message listen --codex-thread` forwarding through `codex queue` on the escalated path: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice with the forwarder alive and no queue refusal, queued consumed notices drained one per turn, the 300 s hold ceiling and owner exit ending the forwarder), 0.167.0, checked 2026-11-17. The sandboxed path is unverified, and the run answered escalations through the `user` reviewer because automatic review refused them in an untrusted working directory. |
-| `codex` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
-| `codex` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the bundled Codex profile. |
-| `opencode` | Director | `goal` | `extension` | — | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
-| `opencode` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with queued `session.synthetic` delivery under `opencode mini --standalone`: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices delivered as separate turns, the 300 s hold ceiling and client exit ending the child), 2.2.6, checked 2026-11-17. The supported minimum is 2.2.0. |
-| `opencode` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
-| `opencode` | Member | — | — | — | `yes` | PTY lifecycle and coverage declaration: live runner acceptance on herdr only (`coverage=tested`), 2.1.4, checked 2026-10-29. Default-mode approval-prompt coverage: the omitted `cafleet-ask` preset's shell permission form, whose detection and allow and deny answers the bundled OpenCode profile declares `tested` (§6.9 Bundled profiles and native screen fixtures). Bundled support: the bundled OpenCode profile. |
-| `hermes` | Director | `goal` | `native` | — | `yes` | Native `/goal` set, status, pause, resume and clear on the TUI client, 2026.9.24, checked 2026-11-06. |
-| `hermes` | Director | `listen` | `extension` | `subscribe` | `yes` | `cafleet` plugin `cafleet_listen` with ordered gateway injection on the TUI client: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices delivered as separate turns, the 300 s hold ceiling and `/exit` ending the child as the session finalized), 2026.9.24, checked 2026-11-17. |
-| `hermes` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
-| `hermes` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the bundled Hermes profile. |
-| `pi` | Director | `goal` | `extension` | — | `yes` | CAFleet pi extension `/cafleet-goal` and goal tools under plain `pi`: set, status, pause, resume, clear, complete, automatic continuation, the no-progress stop, an interrupt pausing, manual `/compact` and `/quit` then `pi --continue` on the same session, 1.5.0 (minimum), checked 2026-11-08. A threshold compaction inside a continuation chain and a continuation by the re-arm turn after restart were not separately observed. |
-| `pi` | Director | `listen` | `extension` | `subscribe` | `yes` | CAFleet pi extension `cafleet_listen` with `followUp` delivery under plain `pi`: subscribe probe in message-ID terms (idle wake, a notice after a 90 s foreground command, a 150-message burst consumed through one notice, consumed notices delivered as separate turns, the 300 s hold ceiling and `/quit` ending the child), 1.5.0 (minimum), checked 2026-11-17. The kimi-k2.6 Director model applied `hold` to the ceiling re-notice as well and polled both IDs after an explicit release; a pane kill ending the child and `/reload` delivering the runtime-replaced notice were checked 2026-11-08. |
-| `pi` | Director | `verdict` | — | — | `yes` | `goal and listen rows` |
-| `pi` | Member | — | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet-ask` gate mode's approval form: live runner acceptance on tmux and herdr (protected directories, routed command and `member exec`, busy delivery, and `cafleet-ask` allow and deny answers), 1.5.0, checked 2026-11-08. Bundled support: the bundled pi profile. |
+| Backend | Role | Requirement | Source | Eligible | Evidence |
+|---|---|---|---|---|---|
+| `claude` | Director | `goal` | `native` | `yes` | [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. |
+| `claude` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
+| `claude` | Director | `verdict` | — | `no` | `pane delivery` |
+| `claude` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the bundled Claude profile. |
+| `codex` | Director | `goal` | `native` | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through a 200-message burst, idle and forced-failure steps, 0.165.0, checked 2026-11-06. |
+| `codex` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
+| `codex` | Director | `verdict` | — | `no` | `pane delivery` |
+| `codex` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the bundled Codex profile. |
+| `opencode` | Director | `goal` | `extension` | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
+| `opencode` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
+| `opencode` | Director | `verdict` | — | `no` | `pane delivery` |
+| `opencode` | Member | — | — | `yes` | PTY lifecycle and coverage declaration: live runner acceptance on herdr only (`coverage=tested`), 2.1.4, checked 2026-10-29. Default-mode approval-prompt coverage: the omitted `cafleet-ask` preset's shell permission form, whose detection and allow and deny answers the bundled OpenCode profile declares `tested` (§6.9 Bundled profiles and native screen fixtures). Bundled support: the bundled OpenCode profile. |
+| `hermes` | Director | `goal` | `native` | `yes` | Native `/goal` set, status, pause, resume and clear on the TUI client, 2026.9.24, checked 2026-11-06. |
+| `hermes` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
+| `hermes` | Director | `verdict` | — | `no` | `pane delivery` |
+| `hermes` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the bundled Hermes profile. |
+| `pi` | Director | `goal` | `extension` | `yes` | CAFleet pi extension `/cafleet-goal` and goal tools under plain `pi`: set, status, pause, resume, clear, complete, automatic continuation, the no-progress stop, an interrupt pausing, manual `/compact` and `/quit` then `pi --continue` on the same session, 1.5.0 (minimum), checked 2026-11-08. A threshold compaction inside a continuation chain and a continuation by the first turn after restart were not separately observed. |
+| `pi` | Director | `pane delivery` | — | `no` | Not established: the Director delivery probe has not run on the shipped build. |
+| `pi` | Director | `verdict` | — | `no` | `pane delivery` |
+| `pi` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet-ask` gate mode's approval form: live runner acceptance on tmux and herdr (protected directories, routed command and `member exec`, busy delivery, and `cafleet-ask` allow and deny answers), 1.5.0, checked 2026-11-08. Bundled support: the bundled pi profile. |
 
 | Column | Values |
 |---|---|
-| Requirement | `goal`, `listen` or `verdict` for Director rows; — for the Member row |
-| Source | `native` or `extension` for `goal` and `listen` rows; — otherwise |
-| Delivery | `subscribe` or `compromise` for `listen` rows; — otherwise |
+| Requirement | `goal`, `pane delivery` or `verdict` for Director rows; — for the Member row |
+| Source | `native` or `extension` for `goal` rows; — otherwise |
 | Eligible | `yes` or `no` per § Role requirements |
-| Evidence | Requirement rows: mechanism, native version and `checked YYYY-MM-DD`, in at most two sentences. A `verdict` row: `goal and listen rows` for `yes`, or the unmet requirement names for `no`. |
+| Evidence | Requirement rows: mechanism, native version and `checked YYYY-MM-DD`, in at most two sentences. A `verdict` row: `goal and pane delivery rows` for `yes`, or the unmet requirement names for `no`. |
 
 #### Interface
 
@@ -1770,7 +1598,7 @@ The blocks below are the child argv with omitted permission selection. The leadi
   (+ <prompt>)                                       # bare trailing positional
 ```
 
-The `--allowedTools` values are the claude member's **spawn-time allow rules**, one argv token per rule, so the member depends on no `Bash(cafleet ...)` rule in the user's `settings.json`. Every claude member receives exactly `Bash(cafleet message *)`, covering its broker commands including `message listen`. `--allowedTools` takes several values, so it precedes `--name`, which ends the list and keeps the prompt positional. The rules are fixed at spawn: a later loss of allow rules in the user's settings does not affect a running member. These cases stay with the host:
+The `--allowedTools` values are the claude member's **spawn-time allow rules**, one argv token per rule, so the member depends on no `Bash(cafleet ...)` rule in the user's `settings.json`. Every claude member receives exactly `Bash(cafleet message *)`, covering its broker commands `message send`, `message poll` and `message show`. `--allowedTools` takes several values, so it precedes `--name`, which ends the list and keeps the prompt positional. The rules are fixed at spawn: a later loss of allow rules in the user's settings does not affect a running member. These cases stay with the host:
 
 - A `deny` or `ask` rule at any settings level, including managed policy, still blocks the command.
 - The managed setting `allowManagedPermissionRulesOnly` makes Claude Code ignore `--allowedTools`.
@@ -2132,79 +1960,38 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 
 #### Host evidence and native-input authorization
 
-**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. Director pending notices arrive through one native Monitor task (§ Role eligibility); the installed CAFleet skill's [Claude native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#claude-native-director-reception) owns discovery, invocation, renewal and evidence limits. Monitor stops its command at `timeout_ms` (default 300,000 ms, cap 1,800,000 ms), so every start and renewal passes `timeout_ms` 1,800,000 with the 1,770-second `message listen` lease, and manual `poll` reception remains available when Monitor is unavailable or denied.
+**claude**: A separate evaluator checks the session condition against the transcript; native background work defers evaluation and returns a host result. A Claude Director receives `[cafleet msg …]` previews typed into its pane (§6.9 Director delivery sweep); a preview typed during a running turn is queued behind that turn without interrupting it.
 
 Native shell probes displayed command/stdout/stderr followed by a model turn; the trigger and any second permission check were not established. The Director authorizes each routed command under its host rules.
 
-CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, which receives no automatic pane input, or a detected one in a runner-managed member's pane, where input queues while the interaction is open (§6.9 Delivery method and interaction priority). A runner-managed member's Escape-first input (delivery fallback for previews, `member prompt` and `member exec`) can cancel an open prompt the runner did not detect, and Claude Code then reports a user rejection before the input arrives. A rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause is delivery-caused: the member re-asks the question or re-issues the call. A profile-delivered preview ends with the resume clause only and sends no Escape, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch.
+CAFleet input cancels no Claude tool approval or `AskUserQuestion` in the root Director's pane, where Director delivery holds while either is open (§6.9 Director delivery sweep), or a detected one in a runner-managed member's pane, where input queues while the interaction is open (§6.9 Delivery method and interaction priority). A runner-managed member's Escape-first input (delivery fallback for previews, `member prompt` and `member exec`) can cancel an open prompt the runner did not detect, and Claude Code then reports a user rejection before the input arrives. A rejection followed by a `[cafleet msg …]` line ending with the Escape-dismissal clause is delivery-caused: the member re-asks the question or re-issues the call. A profile-delivered preview ends with the resume clause only and sends no Escape, so a rejection before it stands. A rejection followed by Director prompt or native-command input follows that input, and the Director checks the pane for an open prompt before such dispatch.
 
-**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. Director reception is `cafleet message listen <director-id> --codex-thread "$CODEX_THREAD_ID"`, started once through native `exec_command` (§6.3 Codex forwarding); Codex injects `CODEX_THREAD_ID` into every exec shell. Each forwarded `pending` notice arrives as a queued user turn: it starts a turn on an idle session, waits for the end of a running turn otherwise, and interleaves with native goal continuation turns at turn boundaries. Where the sandbox cannot start the forwarder, for example when bwrap cannot create namespaces, it runs on the escalated path under the host's approval rules. The installed CAFleet skill's [Codex native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#codex-native-director-reception) owns the tool call, consumption and recovery.
+**codex**: The objective belongs to the thread, with model-callable lifecycle tools and optional token-budget accounting. A Codex Director receives `[cafleet msg …]` previews typed into its pane (§6.9 Director delivery sweep): a preview starts a turn on an idle session, and Codex inserts a preview typed during a running turn into that turn without interrupting it.
 
-Codex 0.167.0 and later start or reuse the shared `codex app-server` daemon (openai/codex#58940 retired `daemon_auto_start`), and Director reception through `codex queue` needs that daemon, so a Codex Director cannot launch with `--no-daemon`. Its tool commands then run under the daemon, and its `fleet create` without `--pane` usually refuses at the shared-server check (§6.3 Caller pane verification).
+Codex 0.167.0 and later start or reuse the shared `codex app-server` daemon (openai/codex#58940 retired `daemon_auto_start`). A Codex Director's tool commands then run under the daemon, and its `fleet create` without `--pane` usually refuses at the shared-server check (§6.3 Caller pane verification).
 
 A native shell probe displayed the actual command, exit code, duration and output. Installed protocol metadata describes unsandboxed dispatch while public CLI guidance describes current approval/sandbox settings; the TUI's effective boundary and protocol path were not established. Native input is a Director-authorized action, with no second member-tool permission check assumed.
 
-**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication; the Director coordinates next steps and routed native shell commands and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`; its effective permission boundary and any second member-tool permission check remain unestablished, so the preset's member-tool permissions and the Director's command authorization stay in force. An OpenCode Director runs OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory with the default agent, so plugins load in its private server with the launcher's environment; the shared background service passes no client environment to plugins and is not a supported Director launch. The `cafleet` plugin supplies reception and the goal extension (§ Director extensions). OpenCode 2.2.0 gives every agent a base policy whose first rule allows every action, so the plugin's `cafleet` action resolves to allow on a default Director; a configuration whose broad `ask` or `deny` rule overrides that base allow restores it with `{ "action": "cafleet", "resource": "*", "effect": "allow" }`.
+**opencode**: OpenCode members perform supplied assignments with their selected provider/model, workspace reads/edits, permitted tools and broker communication; the Director coordinates next steps and routed native shell commands and owns explicit pane input dispatch. Leading-`!` input runs a native shell command in `mini`; its effective permission boundary and any second member-tool permission check remain unestablished, so the preset's member-tool permissions and the Director's command authorization stay in force. An OpenCode Director runs OpenCode 2.2.0 or later as `opencode mini --standalone` from the project directory with the default agent, so plugins load in its private server with the launcher's environment; the shared background service passes no client environment to plugins and is not a supported Director launch. The `cafleet` plugin supplies the goal extension (§ Director extensions). OpenCode 2.2.0 gives every agent a base policy whose first rule allows every action, so the plugin's `cafleet` action resolves to allow on a default Director; a configuration whose broad `ask` or `deny` rule overrides that base allow restores it with `{ "action": "cafleet", "resource": "*", "effect": "allow" }`.
 
-**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), because turns injected through the gateway run without rendering in the classic CLI; members keep `--cli`. The Director receives pending notices through the `cafleet` plugin's `cafleet_listen` tool, which runs the listener inside the per-home gateway (§ Director extensions): each notice becomes its own turn, and a notice injected during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. A Hermes Director's terminal tools run in the per-home gateway (`hermes gateway run`), so its `fleet create` without `--pane` always refuses at the shared-server check (§6.3 Caller pane verification). CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
+**hermes**: Hermes 2026.9.24 ships a user-operated `/goal` command with `status`, `show`, `pause`, `resume`, `clear`, `wait <pid>`, `unwait` and `gate` subcommands. A Hermes Director runs the TUI client (`hermes chat --tui`, or `display.interface: tui`), whose screen the Hermes profile's TUI rules classify for Director delivery (§6.9 Bundled profiles and native screen fixtures); members keep `--cli`. A preview typed into the Director pane during a busy turn runs after that turn ends without interrupting it. Native `/goal` set, status, pause, resume and clear work in the TUI client, and continuation turns already queued before `/goal clear` still run after it. In the classic REPL and the TUI client, leading-`!` input runs a native shell command locally; the Director authorizes each routed command under its host rules. A Hermes Director's terminal tools run in the per-home gateway (`hermes gateway run`), so its `fleet create` without `--pane` always refuses at the shared-server check (§6.3 Caller pane verification). CAFleet makes no goal lifecycle calls and preserves activation, pause, completion and gate/wait authority.
 
-**pi**: pi 1.5.0 has no native goal, no native facility that pushes external text into a session and no per-tool approval; the CAFleet pi extension supplies reception, the goal extension and the `cafleet_ask` decision surface (§ Director extensions), and the member gate (§ pi member gate). A pi Director runs plain `pi` (the fullscreen TUI) from the project directory, so the extension auto-loads; pi's bash tool runs under the pane's `pi` process, so `fleet create` verifies and registers the pane without `--pane`. A pi Director runs its own tool calls without approval, and the member gate is inert in its session. The installed CAFleet skill's [pi native recipe](https://github.com/himkt/cafleet/blob/main/assets/skills/cafleet/reference/coding-agents.md#pi-native-director-reception) owns the tool calls, consumption and recovery. Leading-`!` input runs a shell command as `user_bash` outside the member gate, stores its output for the next prompt and starts no turn, so after `member exec` the Director sends an explicit continuation; the Director authorizes each routed command under its host rules. Enter while a member works queues the text as a steering message.
+**pi**: pi 1.5.0 has no native goal and no per-tool approval; the CAFleet pi extension supplies the goal extension and the `cafleet_ask` decision surface (§ Director extensions), and the member gate (§ pi member gate). A pi Director runs plain `pi` (the fullscreen TUI) from the project directory, so the extension auto-loads; pi's bash tool runs under the pane's `pi` process, so `fleet create` verifies and registers the pane without `--pane`. A pi Director runs its own tool calls without approval, and the member gate is inert in its session. A preview typed into the Director pane during a running turn is queued behind that turn without interrupting it. Leading-`!` input runs a shell command as `user_bash` outside the member gate, stores its output for the next prompt and starts no turn, so after `member exec` the Director sends an explicit continuation; the Director authorizes each routed command under its host rules. Enter while a member works queues the text as a steering message.
 
 #### Director extensions
 
-The extensions §6.3 Asset installation installs supply Director reception for `hermes`, `opencode` and `pi`, and the `opencode` and `pi` goal extensions. Each runs only the `cafleet` executable its executable record names, never a path from a tool argument, as `<recorded cafleet> message listen <director_id>` without `--timeout`, adding `--database-url <url>` when the tool received a `database_url` (§6.3 Database selection). The plugins replace no receiver automatically; every replacement belongs to the Director's receiver recovery.
+The extensions §6.3 Asset installation installs supply the `opencode` and `pi` goal extensions and the pi `cafleet_ask` decision surface. Each runs only the `cafleet` executable its executable record names, never a path from a tool argument, adding `--database-url <url>` when the tool received a `database_url` (§6.3 Database selection).
 
-**Pass-through.** Each receiver delivers every listener stdout line verbatim as `[cafleet listen record] <line>`, so each `pending` notice (§6.3 `message listen`) reaches the session as one delivery; the receivers inspect only the `{"event":"closed"` prefix, which ends the receiver. Each `cafleet_listen` tool carries this model-facing description:
+**Director verification.** Each Director-only tool verifies its `director_id` itself: it runs `<recorded cafleet> member show <director_id> --json`, adding `--database-url <url>` when given, and requires exit 0 with `"kind": "director"`; any other outcome returns the tool's member-refusal error with the CLI's stderr appended. Like the Director-only command guard (§6.3 Director-only command guard), the check is cooperative: it stops a member that passes its own ID.
 
-| Extension | `cafleet_listen` description |
-|---|---|
-| Hermes plugin | `Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' carries a pending notice; run the command in its 'next' field once, which consumes and returns every unpolled message, and an empty [] result means an earlier poll already consumed them.` |
-| OpenCode plugin | The Hermes text |
-| pi extension | The Hermes text with `each turn beginning` replaced by `each message beginning` |
+| Surface | OpenCode plugin | pi extension |
+|---|---|---|
+| Verified tools | `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`, each with a required `director_id` and an optional `database_url` | `cafleet_ask`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`, each with a required `director_id` and an optional `database_url` |
+| Member refusal | A failed Director verification refuses the tool with `cafleet tools run only in a Director session: <stderr>` | A failed Director verification returns `{"ok": false, "error": "cafleet tools run only in a Director session: <stderr>"}` with `isError: true`. An active member gate blocks every `cafleet_*` tool first (§ pi member gate) |
+| Executable record error | `ok: false` with the record path and `run 'cafleet setup --coding-agent opencode'` | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent pi'"}` |
+| Verification child environment | The server's environment | The pi process's environment |
 
-**Director verification.** `message listen` accepts any active member, so each Director-only tool verifies its `director_id` itself: it runs `<recorded cafleet> member show <director_id> --json`, adding `--database-url <url>` when given, and requires exit 0 with `"kind": "director"`; any other outcome returns the tool's member-refusal error with the CLI's stderr appended. Like the Director-only command guard (§6.3 Director-only command guard), the check is cooperative: it stops a member that passes its own ID.
-
-| Surface | Hermes plugin | OpenCode plugin | pi extension |
-|---|---|---|---|
-| Receiver tool | `cafleet_listen(director_id: integer, database_url?: string)` in toolset `cafleet` | `cafleet_listen(director_id: integer, database_url?: string)` | `cafleet_listen(director_id: integer, database_url?: string)` |
-| Verified tools | `cafleet_listen` | `cafleet_listen`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`, each with a required `director_id` and an optional `database_url` | `cafleet_listen`, `cafleet_ask`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`, each with a required `director_id` and an optional `database_url` |
-| Session scope | One receiver per calling session key | One receiver per calling `sessionID` | One receiver per extension runtime |
-| Success result | `{"ok": true, "pid": <pid>, "session_key": <key>}`, plus `"existing": true` for a live receiver | `{ ok, pid, sessionID }`, plus `existing: true` for a live receiver | `{"ok": true, "pid": <pid>, "sessionId": <id>}`, plus `"existing": true` for a live receiver |
-| Delivery per stdout line | Ordered injection of `[cafleet listen record] <line>` into session `<key>`'s durable input queue, each committed before the next line | `session.synthetic({ sessionID, text: "[cafleet listen record] <line>", delivery: "queue" })` | `pi.sendMessage({customType: "cafleet-listen", content: "[cafleet listen record] <line>", display: true}, {triggerTurn: true, deliverAs: "followUp"})`, in line order |
-| Member refusal | A failed Director verification returns `{"ok": false, "error": "cafleet_listen runs only in a Director session: <stderr>"}` | A failed Director verification refuses the tool with `cafleet tools run only in a Director session: <stderr>` | A failed Director verification returns `{"ok": false, "error": "cafleet tools run only in a Director session: <stderr>"}` with `isError: true`. An active member gate blocks every `cafleet_*` tool first (§ pi member gate) |
-| Executable record error | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent hermes'"}` | `ok: false` with the record path and `run 'cafleet setup --coding-agent opencode'` | `{"ok": false, "error": "executable record <path>: <cause>; run 'cafleet setup --coding-agent pi'"}` |
-| Child environment | The gateway's environment | The server's environment | The pi process's environment |
-| Receiver end | Session finalize, plugin unload, 30 s with no client subscriber, a raising or overdue injection, or 600 s of refusals for one record kills the child | Plugin cleanup kills every child when the server ends | `session_shutdown`, for every reason, kills the child with `SIGTERM` |
-
-A rejected `synthetic` call kills the child. A Hermes injection that raises or exceeds its 10 s deadline, or one record refused for 600 s, kills the child, logs the cause and attempts the closed notice below once through ordered injection. A child that exits unexpectedly, without a `closed` record and without the plugin stopping it, queues `[cafleet listen closed] exit <code>: <last stderr line>` into the owning session. A Hermes plugin unload for a still-attached session injects `[cafleet listen closed] the plugin unloaded: exit <code>: <last stderr line>` once through ordered injection after the child exits; a draining gateway refuses it, without retry. A child the plugin stops through session finalize, client detach, plugin cleanup or a Hermes unload for a detached session queues no closed notice, and each receiver attempts at most one. The OpenCode plugin decides the notice on the child's `close` event, after its stdio drains, so a final `closed` record is read first; a child `error` event, such as an asynchronous spawn failure, removes the receiver and queues the notice. An OpenCode child exiting by `SIGTERM` is an intentional stop by plugin cleanup or host shutdown (which can signal the child before cleanup runs) and queues no closed notice; a non-zero exit code or any other signal queues it. A `closed` record is delivered as a record and ends the receiver.
-
-**Downstream delivery queues.** Every Director receiver, native or extension, hands notices to a host queue that drains at turn boundaries. Installed upstream source, checked 2026-11-15, records the limits of every row below except `codex`, whose provenance follows the table:
-
-| Backend | Queue | Version | Cap and refusal | Drain |
-|---|---|---|---|---|
-| `claude` | Monitor stdout line events, each queued as a task notification | 2.1.316 | No cap. A token bucket of 10 events, refilled one per 2 s, suppresses (drops) events above that rate and later reports `[N events suppressed — …]`; suppression sustained past 30 s stops the monitor. | Lines within 200 ms join one event |
-| `codex` | Thread submission queue (`codex queue`) | 0.165.0 (measured), 0.166.0 (source) | 100 submissions; a further submission exits non-zero with `queue cannot contain more than 100 submissions` | One submission per turn boundary; no list or retract |
-| `opencode` | Session inbox rows from `session.synthetic` with `delivery: "queue"` | 2.2.5 | No cap and no refusal; each call inserts one persisted inbox row | One `queue` row per turn boundary |
-| `hermes` | Gateway busy queue for ordered injection | 2026.9.24 | 32 pending rows; a further injection returns `False` (§ Ordered injection) | One row per turn |
-| `pi` | In-memory follow-up queue from `deliverAs: "followUp"` | 1.5.0 | No cap and no refusal | One message per agent stop under the default `followUpMode` `one-at-a-time` |
-
-The `codex` 100-submission cap was measured live on Codex 0.165.0, checked 2026-11-06, and its refusal string is present in the installed Codex 0.166.0 source, checked 2026-11-15. The 2026-11-17 subscribe probe on Codex 0.167.0 observed no queue refusal.
-
-Claude Code Monitor also truncates each line at 500 characters and each event at 3,000. Its official documentation states no batching window, rate limit or truncation; those values come from the installed source. Under the §6.3 `message listen` notice bound, a notice stays far below the Monitor rate.
-
-**Hermes plugin.** The plugin declares tool `cafleet_listen` and hook `on_session_finalize`. It depends on three private Hermes core seams outside the plugin API, which the tool resolves on every call:
-
-| Seam | Use |
-|---|---|
-| `hermes_cli.plugin_session.session_key()` | Calling session key |
-| `gateway.session_authorities.authority_for_home(...)` → `authority.sessions[...].subscribers` | Client attachment |
-| The published gateway runner (`ctx._manager._gateway_message_injector[0]`), its `_gateway_loop` and `_dispatch_plugin_message_injection(session_key=, content=, plugin_id=, plugin_home=)` | Ordered injection |
-
-`hermes plugins validate` flags the first two seams' imports as private core imports. A failed import, lookup or attachment read returns `{"ok": false, "error": "<seam>: <exception>"}` and starts no receiver; an empty session key returns `{"ok": false, "error": "cafleet_listen must be called from a session turn"}`. Ordered injection bypasses the consent check of `ctx.inject_message`, so before spawning the child the tool requires `ctx._gateway_injection_allowed()`, which holds when `plugins.entries.cafleet.allow_gateway_injection` is `true` (§6.3 Hermes plugin enablement), and otherwise returns `{"ok": false, "error": "plugins.entries.cafleet.allow_gateway_injection is not true; run 'cafleet setup --coding-agent hermes'"}`; it then verifies `director_id`. The child selects its database only through `--database-url`, so an omitted `database_url` selects the default database exactly as in the Director's shell. The plugin decodes child output as UTF-8, replacing invalid bytes, and treats a stdout read failure as the end of output. A watchdog checks every 5 s that the session has at least one subscriber; a read error kills the child. `on_session_finalize` resolves the finalized session's route through the session authority and stops the receiver with that session key, so a session id rotated by context compression still matches. The unload callback stops every receiver and confirms its exit, so plugin re-discovery leaves no untracked receiver; re-discovery leaves the gateway and its sessions running, so the unload closed notice, sent outside the callback after the receiver's delivery ends, tells a still-attached Director to re-arm reception.
-
-**Ordered injection.** `ctx.inject_message` returns `True` once it schedules its dispatch coroutine on the gateway loop, before the record is committed, so consecutive calls can commit out of order. The plugin instead submits each record's `_dispatch_plugin_message_injection(...)` coroutine to the runner's `_gateway_loop` with `asyncio.run_coroutine_threadsafe` and waits up to 10 s for its result before reading the next line. A `False` result is a refused injection, treated as transient (for example the session authority's 32-row admission queue cap, a draining gateway or a briefly detached client): the plugin keeps the record, waits 1 s and retries it, and later records wait behind it. The retry checks no attachment, so a detached session keeps the 30 s detach grace and the watchdog alone ends its receiver. Under the §6.3 `message listen` notice bound, listen alone fills the 32-row queue only when more than 32 consuming polls or ceiling firings queue notices behind one busy turn; otherwise the refusal path is reached when other injections fill the queue.
-
-**OpenCode plugin.** One V2 plugin file defines `Plugin.define({ id: "cafleet", setup })`. Each tool calls `ctx.permission.assert({ sessionID, agent, source, action: "cafleet", resources: [<tool name>] })` before any work, then verifies its `director_id` (Director verification above). The `context` hook registers in every session; it and the event loop act only on a session holding a goal stored by the operator-typed `/cafleet-goal` command or by a goal tool whose `director_id` verified. `cafleet_listen` returns `ok: false` when the spawned child has no pid. Its goal extension stores `{objective, status, generation, continuations, idle_streak}` under storage key `goal/<sessionID>` and mirrors it in the session instruction entry `cafleet-goal`, which first appears in 2.2.0:
+**OpenCode plugin.** One V2 plugin file defines `Plugin.define({ id: "cafleet", setup })`. Each tool calls `ctx.permission.assert({ sessionID, agent, source, action: "cafleet", resources: [<tool name>] })` before any work, then verifies its `director_id` (Director verification above). The `context` hook registers in every session; it and the event loop act only on a session holding a goal stored by the operator-typed `/cafleet-goal` command or by a goal tool whose `director_id` verified. Its goal extension stores `{objective, status, generation, continuations, idle_streak}` under storage key `goal/<sessionID>` and mirrors it in the session instruction entry `cafleet-goal`, which first appears in 2.2.0:
 
 | Operation | Surface | Effect |
 |---|---|---|
@@ -2222,21 +2009,9 @@ Claude Code Monitor also truncates each line at 500 characters and each event at
 - **Stale continuations.** The `context` session hook removes each `[cafleet goal]` continuation after the last assistant message, the undelivered tail, whose generation differs from the stored one or whose goal is not `active`, so a continuation queued just before `pause`, `clear` or `complete` never reaches the model; earlier history stays intact.
 - **Event failures.** A failure while handling one event is logged and leaves the event loop running. Any such failure while the session's goal is `active`, a transient storage or `synthetic` error included, pauses the goal and queues `[cafleet goal] paused: the goal cannot continue (<cause>); the operator resumes it with /cafleet-goal resume` with `resume: false`.
 - **No-progress stop.** A continuation turn that ends without a `cafleet_goal_progress` or `cafleet_goal_complete` call increments `idle_streak`. At 3 the goal pauses and the plugin queues `[cafleet goal] paused: no progress in 3 consecutive continuation turns; the operator resumes it with /cafleet-goal resume` with `resume: false`. The 50-continuation cap also pauses the goal and queues `[cafleet goal] paused: reached 50 continuations; the operator resumes it with /cafleet-goal resume` with `resume: false`; resume starts a fresh budget of 50.
-- **Persistence.** The instruction entry carries the goal across compaction. A stored `active` goal for a `sessionID` is restored on the server's first event, tool call or command for that `sessionID`, so after a restart the Director's re-arming `cafleet_listen` turn restores it and the next `session.execution.succeeded` queues the continuation. Storage is shared by every server on the same OpenCode data directory, while restoration stays scoped to the sessions a server serves; setup scans no storage, so a member server or any other server sharing the config directory never restores the Director's goal.
+- **Persistence.** The instruction entry carries the goal across compaction. A stored `active` goal for a `sessionID` is restored on the server's first event, tool call or command for that `sessionID`, so after a restart the session's next event restores it and the next `session.execution.succeeded` queues the continuation. Storage is shared by every server on the same OpenCode data directory, while restoration stays scoped to the sessions a server serves; setup scans no storage, so a member server or any other server sharing the config directory never restores the Director's goal.
 
 **pi extension.** One file loads in every pi session, members included, and holds the member gate (§ pi member gate) beside the Director tools. Each tool reads the executable record at `new URL("./cafleet.executable", import.meta.url)` and runs Director verification through `node:child_process` `execFile` before any work; its result text is its JSON object. The goal hooks act only on a session holding a goal set by the operator-typed `/cafleet-goal` command or by a goal tool whose `director_id` verified, so they stay inert in members.
-
-**pi receiver.** `cafleet_listen` spawns the listener with `node:child_process` `spawn` and returns `{"ok": false, "error": "cafleet message listen did not start"}` when `child.pid` is undefined; the asynchronous spawn error is not reported, because the receiver is already marked stopped. `followUp` delivery starts a turn on an idle session; on a busy session it waits until the agent has no more tool calls, so a record never interrupts a running turn and arrives no later than its end, and records that arrive while a run is starting join that run.
-
-| Event | Extension action |
-|---|---|
-| The child closes (`close` event, after its stdio drains) without a `closed` record, and the extension did not stop it | Sends `[cafleet listen closed] exit <code>: <last stderr line>` the same way |
-| A child `error` event, such as an asynchronous spawn failure | Removes the receiver and sends the same closed notice |
-| A `sendMessage` call throws | Kills the child and sends the closed notice once |
-| A `closed` record | Delivered as a record; the receiver ends |
-| `session_shutdown`, for every reason | Marks the receiver stopped and kills the child with `SIGTERM`; a stopped receiver sends no closed notice |
-
-For a `session_shutdown` reason of `reload`, `new`, `resume` or `fork`, the pi process keeps running and loads a replacement runtime. When that shutdown stopped a live receiver, the old runtime stores `{reason}` under `globalThis[Symbol.for("cafleet.pi.receiver-stopped")]`; a runtime with no live receiver stores nothing and the new runtime sends no notice. The new runtime's `session_start` reads and clears it, then sends `[cafleet listen closed] the extension runtime was replaced (<reason>); re-arm with cafleet_listen` with `triggerTurn: true`. The reason `quit` (Ctrl+C, Ctrl+D, `SIGHUP`, `SIGTERM`) stores nothing, because the process exits, and a `SIGKILL` of the pi process runs no handler.
 
 **pi goal extension.** The state `{objective, status, generation, continuations, idle_streak}` is persisted with `pi.appendEntry("cafleet-goal", state)` after every change, outside LLM context, and restored on `session_start` from the last `cafleet-goal` entry on `ctx.sessionManager.getBranch()`. `status` is `active`, `paused`, `complete` or `cleared`.
 
@@ -2257,7 +2032,7 @@ For a `session_shutdown` reason of `reload`, `new`, `resume` or `fork`, the pi p
 - **Interrupt.** `agent_settled` with `event.aborted` on an `active` goal pauses it and shows `[cafleet goal] paused: the run was interrupted; the operator resumes it with /cafleet-goal resume` through `ctx.ui.notify`.
 - **Stale continuations.** The `context` hook removes each `cafleet-goal` continuation after the last assistant message whose generation differs from the stored one or whose goal is not `active`; earlier history stays intact.
 - **Goal context.** The `context` hook runs before every model request, inside a continuation chain too. While the goal is `active`, it appends one transient user-role message, `[cafleet goal] Active CAFleet goal: <objective>`, after the last message of `event.messages`; the message is never persisted and is rebuilt on every request, so it survives manual and threshold compaction and keeps the provider's cached prefix intact. A `paused`, `complete` or `cleared` goal appends nothing, so a paused goal gives the model no standing instruction; resume sends the objective again in its continuation message.
-- **Restart.** `pi --continue` (or `--session <id>`) on the same session restores the state at `session_start`; the Director's re-arming `cafleet_listen` turn then ends at `agent_before_settle`, which continues an active goal without further input.
+- **Restart.** `pi --continue` (or `--session <id>`) on the same session restores the state at `session_start`; the session's next turn then ends at `agent_before_settle`, which continues an active goal without further input.
 - **Failures.** Each handler is wrapped in `try`/`catch` and logs a failure's cause. While the goal is `active`, a failure also pauses the goal and shows `[cafleet goal] paused: the goal cannot continue (<cause>); the operator resumes it with /cafleet-goal resume`.
 
 **pi decision surface.** `cafleet_ask(director_id, question, choices, database_url?)` registers with `executionMode: "sequential"`. After Director verification it requires `ctx.hasUI`, otherwise returning `{"ok": false, "error": "cafleet_ask needs the interactive pi TUI"}`, and requires `choices` to be 1–9 non-empty, distinct strings, none equal to `Other`, otherwise returning `ok: false` naming the violated rule. It calls `ctx.ui.select(question, [...choices, "Other"])`, and for `Other` then `ctx.ui.input(question, "")`:
@@ -2365,10 +2140,14 @@ Every catalog pattern this section quotes uses § Pattern syntax. Each screen ke
 
 | Kind | Additional required fields | Evidence |
 |---|---|---|
-| `framing` | `literal_framing` | The operation's selected measured framing |
+| `framing` | `literal_framing`, `expected_literal` | The operation's selected measured framing |
 | `plain_limit` | `plain_literal_limit`, including explicit `null` | The measured plain boundary, conservative tested cap or maximum plain success |
 | `post_submit` | None | A verified empty composer after submission |
-| `unsubmitted_literal` | None | A retained literal distinguishable from an empty composer |
+| `unsubmitted_literal` | `expected_literal` | A retained literal distinguishable from an empty composer |
+
+A *pre-submit fixture* is a screen with a `framing` or `unsubmitted_literal` record: the literal is typed and the submit key is not. `expected_literal` is the exact literal written before the screen was captured, including the operation prefix such as `! `, as a JSON string; fixture literals are synthetic measurement text. The object `{"repeat": "<unit>", "count": N, "prefix": "<text>"}` stands for a long literal: `prefix` followed by `unit` repeated `count` times. Provenance validation rejects a pre-submit record without `expected_literal`, an `expected_literal` on a `plain_limit` or `post_submit` record, a malformed repeat object, and a pre-submit fixture whose composer region (the rows its `composer.text` rule bounds, § Composer-text extraction) overlaps a masked row. Every pre-submit fixture's extracted composer text matches its `expected_literal` under § Composer-text extraction.
+
+Per operation plan, each profile with composer verification cites a one-row, a wrapped and a maximum-length pre-submit fixture, the last at the plan's plain limit or at the 4000-scalar inline limit when the limit is null; a `bracketed_paste` plan also cites one paste fixture.
 
 Each executable operation's cited fixtures must cover every kind on both multiplexers. Framing and limit records must equal that operation's declared `literal_framing` and `plain_literal_limit`. Generic valid citations supplement this evidence; they supply no missing category. A fixture can carry several records when its original native measurement establishes each claim.
 
@@ -2621,6 +2400,8 @@ The bundled OpenCode profile applies to OpenCode `mini` under either OpenCode la
 | Prompt submission | `tested` | Composer plan `prompt` (§ Executable native plans) |
 | Native-exec submission | `tested` | Composer plan `exec` (§ Executable native plans) |
 
+The empty-composer rules `opencode-idle-composer` and `opencode-suggestion-composer` end at the composer's status line, which names the session's agent; their end patterns accept any agent name (`[^·]+ · `), so a Director running its own default agent matches like a member running a CAFleet preset.
+
 The form offers no focus-independent key: `h`/`l` cycle the focus, Enter selects the focused option and Escape rejects. Focus starts on `Allow once`, and `h` from there wraps to the last option, `Reject`, in both the three-option (`Allow once` / `Always allow` / `Reject`) and the two-option layout. The form marks the focused option by cell background only, so the `focus` matcher uses `focus_style: "background"` (§ Focused-choice resolution). In the captures the focused label sits on rgb(250,178,131) and the other labels on the row background rgb(30,30,30), but the rule compares backgrounds rather than these colours. `Always allow` approves persistently and has no choice entry.
 
 `mini` lays out the form itself, so its row breaks are hard rows rather than terminal soft wraps, and the layout depends on the pane width:
@@ -2719,6 +2500,16 @@ A digit selects and confirms its choice whatever the focus, so the answer stages
 The idle rule keeps its classic REPL prefix and rotating placeholder. The working rule has priority 50, uses a primary-screen single-row region with `cursor=at_end`, starts at `^☤ ❯ type to redirect this turn · Tab queues it for after *$` and ends at the prefix pattern `^☤ ❯ `; its line matcher `prompt` requires the same full placeholder as the start pattern. This binds the cursor to prefix column 4 while requiring the measured working placeholder, independently of submitted `❯ ...` history above it. A typed suffix, paste token, arbitrary working literal, cursor away from the prefix or multi-row retained draft supplies no empty-composer observation. Both operations cite native working/idle post-submit and unsubmitted-literal fixtures under § Bundled profiles and native screen fixtures.
 
 The Director answers single-request choices only: allow once or deny, on both the ESCALATE and the override prompt. The session and always choices have no choice entry. When the guardian model is unavailable, Hermes shows the same human prompt, detected by the same rule. An unanswered prompt fails closed after `approvals.timeout` (default 300 seconds): Hermes prints its timeout notice and returns a BLOCKED result to the model, the form disappears, and the runner closes the episode with the `not_visible` close reason. A later bound response then fails request-token revalidation.
+
+A Hermes Director runs the TUI client (§6.7 Host evidence and native-input authorization), whose screen differs from the classic CLI that members run. Members keep the classic CLI rules; the TUI rules serve Director delivery (§ Director delivery capability):
+
+| Rule | Class | Declaration |
+|---|---|---|
+| `hermes-tui-idle-composer` | Empty composer | Alternate screen, cursor `any`, a one-row region whose start, end and line matcher are the whole composer line <code>^ ❯(?: (?:Ask me anything…&#124;Try "[^"]*"&#124;Ctrl\+C to interrupt…))? *(?:┃ *)?$</code> |
+| The TUI composer-text rule | Composer text | The TUI composer region that `composer.text` bounds for pre-submit verification |
+| `hermes-tui-approval` | Permission request | The TUI approval form, detection only, with no answer plans; the form is answered on the native surface |
+
+The classic-CLI request rules match only the primary-screen `╭` box, so `hermes-tui-approval` keeps a TUI approval form from leaving the composer line verified empty, which would let a preview be typed into the form. The TUI rules rest on Director-pane captures under `approvals.mode: manual`.
 
 The bundled pi profile applies to pi under every pi launch mode; only `cafleet-ask` shows an approval form, the CAFleet member gate's form (§6.7 pi member gate), and the argv pins `--tui-mode fullscreen`:
 
@@ -2824,6 +2615,84 @@ Each file and screen parses with exactly its fields above. Every row declared in
 Every bundled catalog pattern spells its classes explicitly: it contains no Perl class or boundary (`\s \S \d \D \w \W \b \B`) and no escape outside the syntax (§ Pattern syntax).
 
 A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts) as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
+
+###### Composer-text extraction
+
+`capabilities.composer.text` is required whenever the composer object declares an executable submission plan, and declares how the composer's typed text is read back for pre-submit verification (§ Measured submission plans and settle intervals):
+
+```json
+{
+  "rule_ids": ["codex-idle-composer", "codex-composer-text"],
+  "first_prefix": "^› ",
+  "continuation_prefix": "^  ",
+  "wrap": "char",
+  "placeholders": [
+    {"pattern": "\\[Pasted Content (?P<count>[0-9]+) chars\\]", "unit": "scalars"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `rule_ids` | Composer rules, empty-composer or `composer_text`, whose region bounds the composer rows; extraction uses the one listed rule that matches exactly one region of the screen |
+| `first_prefix` | Pattern anchored at the first composer row; the matched prefix is stripped |
+| `continuation_prefix` | Pattern stripped from each later composer row, such as a continuation margin; a row that does not match it ends the composer text |
+| `wrap` | `char`: rows join with nothing. `word`: a row break matches either nothing or exactly one literal space |
+| `placeholders` | Collapsed-paste renderings, each with a named `count` group and a `unit` of `scalars` or `lines` |
+
+Cells drawn in the profile's suggestion style (§6.7 Native suggestions) are excluded before extraction, and trailing blanks are trimmed from each row. No matching rule, several matching rules or a first row that does not match `first_prefix` leave the composer text unextractable.
+
+The extracted text is split left to right into segments: each placeholder match is a placeholder segment, and the text between matches is a text segment. The match walks the written literal, prefix plus rendered preview, prompt or command, in order:
+
+| Segment | Consumes from the literal |
+|---|---|
+| Text | Exactly its own characters, with the `wrap` rule at each row join |
+| Placeholder, unit `scalars` | Exactly `count` Unicode scalar values |
+| Placeholder, unit `lines` | Exactly one whole written literal chunk (one bracketed-paste write), whose line count equals `count` |
+
+The match succeeds only when every segment matches and both the segments and the literal are fully consumed. Examples from the bundled native screens:
+
+| Native screen | Segments | Literal |
+|---|---|---|
+| codex `› [Pasted Content 1024 chars]a` | placeholder (1024 scalars), text `a` | 1025 scalars |
+| codex `› ! true` followed by `  aaaa…` continuation rows | text `! trueaaaa…` (char wrap, margin stripped) | `! ` followed by the command |
+| Hermes classic CLI `☤ ❯ [Pasted text #5: 1 lines → /root/.hermes/pastes/…]` with `first_prefix` `^☤ ❯ ` | placeholder (1 line) | One one-line paste write |
+
+###### Director delivery capability
+
+`capabilities.director_delivery` declares that the Director delivery sweep (§ Director delivery sweep) may type into a Director pane of the backend. Absent, the backend's Director pane receives no Director delivery.
+
+| Field | Requirement |
+|---|---|
+| `coverage` | `tested` |
+| `multiplexers` | Each multiplexer, `tmux` or `herdr`, whose Director delivery probe passed (§6.7 Pane delivery requirement) |
+| `rule_ids` | The composer rules, empty-composer and `composer_text`, that classify the backend's Director screen |
+| `plain_limit` | Required: the largest plain literal, `{unit, max}` with unit `bytes` or `scalars`, that the Director screen renders intact on every listed multiplexer, or `null` when the 4000-scalar inline limit rendered intact |
+| `fixture_ids` | The Director-pane fixtures: on each listed multiplexer a one-row, a wrapped and a maximum-length prompt pre-submit fixture, the last at `plain_limit` |
+
+The sweep classifies a Director capture over the rules `rule_ids` names plus every interaction rule of the profile. Each Director fixture is a native screen captured from a Director pane by `tmux capture-pane` or `herdr pane read`, with the backend version and capture date in its provenance.
+
+Catalog loading rejects a profile file that:
+
+| Condition | Rejection |
+|---|---|
+| Has an executable composer plan and no `composer.text`, or a `composer.text` rule ID that names a missing or non-composer rule | `composer plan for <backend> requires composer text extraction` |
+| Has a `director_delivery.rule_ids` entry naming a missing rule or a rule that is not a composer rule | `director delivery rule <id> of <backend> is not a composer rule` |
+| Lists in `director_delivery.multiplexers` a multiplexer whose prompt plan's submit bytes have no key mapping there (§6.5 Explicit key dispatch) | `director delivery for <backend> on <multiplexer> has no submit key mapping` |
+| Has a `director_delivery` without `plain_limit`, or with no Director pre-submit fixture at that limit on a listed multiplexer | `director delivery for <backend> requires a measured plain_limit` |
+| Has a placeholder pattern without a `count` group or with a unit other than `scalars` or `lines` | `composer placeholder of <backend> must capture count in scalars or lines` |
+
+###### Cursor-free classification
+
+A screen observation carries the cursor position and the alternate-screen state, each of which a capture source can leave absent. Runner PTY observations and tmux Director captures carry both; a herdr Director capture carries neither (§6.5 Backend operations). When either is absent, the detector applies:
+
+| Rule element | Cursor-free behavior |
+|---|---|
+| Region `cursor` condition (`at_end`, `after_prompt`, `inside`) | Treated as `any` |
+| Region `screen` selector | Ignored |
+| Candidate uniqueness | Checked after the region matchers run, so exactly one candidate region must match its matchers |
+
+Every observation that carries both keeps the cursor and screen conditions and the uniqueness check before matching unchanged.
 
 ###### Pattern syntax
 
@@ -2961,10 +2830,11 @@ A verified-composer run is one whose recorded backend's bundled profile supplies
 2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to the pre-write wait without settling; each further chunk needs a fresh write authorization after fresh ordinary draining and an interaction check.
 3. Start the 500 ms settle only after the last literal chunk, including any closing paste marker. Service child output, outer input and control traffic throughout it.
 4. Revalidate identity and interaction state; keyboard and pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget records `uncertain/deadline_expired`, stage `partial`.
-5. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
-6. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `uncertain/submit_unconfirmed`, stage `submitted`.
+5. On a run whose profile declares `composer.text`, observe the composer, extract its text and match it against the written literal (§ Composer-text extraction). A complete match continues to the submit key. A mismatch, or a composer whose text cannot be extracted, writes no submit key, erases nothing and records `uncertain/literal_mismatch`, stage `partial`.
+6. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
+7. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `uncertain/submit_unconfirmed`, stage `submitted`.
 
-Keyboard input during verification reaches the child; a resulting nonempty composer can cause `submit_unconfirmed` and duplicate preview delivery (§6.5 Accepted trade-offs). A run without composer verification records `accepted` after the complete submit key, records every staged stop as `uncertain`, automatically re-delivers nothing and keeps the FIFO stopped until reconciliation. Chunk continuation and zero-byte selection still apply.
+A key typed before the pre-submit observation fails the comparison; a key typed between that observation and the submit key joins the submission (§6.5 Accepted trade-offs). Keyboard input during verification reaches the child; a resulting nonempty composer can cause `submit_unconfirmed` and duplicate preview delivery (§6.5 Accepted trade-offs). A run without composer verification records `accepted` after the complete submit key, records every staged stop as `uncertain`, automatically re-delivers nothing and keeps the FIFO stopped until reconciliation. Chunk continuation and zero-byte selection still apply.
 
 The literal chunk loop stops 250 ms before the attempt deadline. A complete prefix ends on a UTF-8 scalar boundary and outside paste markers. If a stop follows a complete opening marker but precedes the closing marker, a mandatory close stage writes `1b5b3230317e` within the reserve, even if the literal ends inside a scalar; the latter then records `uncertain/short_write`. A prefix inside the opening marker writes no close and records `uncertain/short_write`; a failed or short close records `uncertain/write_failed`. Outcome recording follows the close stage and § Stop cause.
 
@@ -2977,10 +2847,13 @@ tmux/herdr pane <--> CAFleet runner <--> child PTY <--> native agent CLI
                          |
                          +--> terminal state --> detector --> event writer
                          +<-> local control socket                 |
-                                                                 v
-                                                      SQLite event + inbox message
-                                                                 |
-                                                      Director stdout receiver
+                         |                                         v
+                         |                            SQLite event + inbox message
+                         |                                         |
+                         +--> Director delivery sweep <------------+
+                                        |
+                                        v
+                               Director multiplexer pane
 ```
 
 The runner owns the child PTY and reconstructs terminal state independently of the multiplexer.
@@ -3025,7 +2898,7 @@ Forward outer-terminal input so a burst spanning several reads reaches the child
 
 The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens, OSC title and a monotonic output sequence. Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and the screen model never answers a terminal query itself; every reply comes from the outer terminal.
 
-Terminal transport, classification and event storage are separate: database waits, Director receiver loss and event-commit retries never stop draining child output or accepting a human's native answer. Use bounded byte buffers and ordinary terminal backpressure for a slow outer display; a broken outer terminal triggers owned-child cleanup. Classification may coalesce intermediate working-screen snapshots, but it processes every potential interaction transition from the ordered parser stream before such coalescing. This is an observation contract for output actually rendered/read, not a guarantee to capture a dialog opened and closed between observable states.
+Terminal transport, classification and event storage are separate: database waits, a held Director delivery and event-commit retries never stop draining child output or accepting a human's native answer. Use bounded byte buffers and ordinary terminal backpressure for a slow outer display; a broken outer terminal triggers owned-child cleanup. Classification may coalesce intermediate working-screen snapshots, but it processes every potential interaction transition from the ordered parser stream before such coalescing. This is an observation contract for output actually rendered/read, not a guarantee to capture a dialog opened and closed between observable states.
 
 | Condition | Required lifecycle behavior |
 |---|---|
@@ -3241,7 +3114,7 @@ Persist a transition, its event and a normal `input_required` inbox message to t
 
 An observed transition carries nullable `episode_seq`, kind, original observation time and immutable evidence. Its commit transaction allocates `event_seq` and allocates or resolves interaction/event/message IDs and produces the final public payload. Idempotence compares these original transition fields, excluding generated IDs and commit timestamps.
 
-The runner writes events and inbox messages through its own database transactions and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence or listener restart. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may commit its recovery events as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`, retaining the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
+The runner writes events and inbox messages through its own database transactions and never depends on its child invoking `cafleet message send`. A persisted notification remains pending through Director absence, a held Director delivery or a fleet with no live member runner. Live events use `notification_state=inbox`; active ownership and the sender/recipient fleet checks remain mandatory. After closure, ordinary observation stops. Exclusive recovery may commit its recovery events as `notification_state=archived`, `message_id=null`, with `archive_reason=member_inactive|fleet_deleted|director_inactive`, retaining the event/interaction history without inserting a message from an inactive sender or claiming Director notification.
 
 The live runner fills every `event_seq` it materializes; persistence never leaves a slot empty, because a later transition requires the next sequence value. Two delivery records commit as silent archived rows (`notification_state=archived`, `message_id=null`, no inbox message) at their own `event_seq`, with the normal payload built from the record so an idempotent retry compares equal. Both apply only when historical ownership supplies no archive reason, and `duplicate_delivery` takes precedence over `head_not_ready`:
 
@@ -3371,6 +3244,7 @@ Durability begins at a successful SQLite commit, and notification is claimed onl
 | `deferred_input` | `deferred input: …` |
 | `queue_housekeeping` | `queue housekeeping: …` |
 | `preview_sweep` | `preview sweep: …` |
+| `director_delivery` | `director delivery: message <id> held: <reason>`, `director delivery: message <id> uncertain: <cause>` and `director delivery: pane <pane-id> unavailable: <cause>` (§ Director delivery sweep) |
 | `input_result` | `input <input_id> result is pending storage: …` and `input <input_id> result is pending recovery: …` |
 | `permission_answer` | `permission answer for interaction <interaction_id> is uncertain: …` |
 | `shutdown` | Each shutdown outcome diagnostic |
@@ -3605,6 +3479,72 @@ Stamped self-sends are excluded by `notified_at`, and a consumed message is neve
 
 **Lifecycle.** Orderly shutdown and runner loss stop the sweep. A recovered or new run sweeps under its own run key. A member with no live runner keeps its messages pending.
 
+##### Director delivery sweep
+
+Every member runner also delivers the root Director's unnotified pending messages into the Director's multiplexer pane, beside its own pending-preview sweep. The sweep runs on its own runner thread with its own database connection and its own multiplexer adapter built from the Director placement (`mux_backend`, `mux_server`). It never touches the member's owned PTY, control FIFO, observation or input receipts, so a held Director preview never delays the member's own input, and the reverse.
+
+| Property | Contract |
+|---|---|
+| Lifetime | Starts after the run's `started` transition; stops when the runner begins orderly shutdown or detects runner loss, and the runner joins it within the shutdown deadline |
+| Cadence | At most once per Director sweep interval (1 s), and not before the Director sweep backoff expires |
+| Eligibility | One short read transaction confirms that the run's member is active with this run recorded, that the fleet's root Director is active with a concrete placement, and that the bundled profile of the Director placement's `coding_agent` declares `director_delivery` listing the placement's multiplexer (§ Director delivery capability). Otherwise the tick does nothing |
+| Selection | In the same transaction, the oldest `to_member_id=<director> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
+| Lock | The Director pane's input lock (§6.5 Pane input lock), acquired nonblockingly; a busy lock ends the tick with no backoff, because another runner is delivering |
+| Re-check | Under the lock, re-read the selected message and the Director placement; a stamped, consumed or missing message, or a changed placement, releases the lock and ends the tick |
+| Attempt | Capture, classify, write the plain literal, settle 500 ms, pre-submit verification, submit key and post-submit verification (2 s), all under the lock, within a 5 s attempt deadline that starts when the lock is acquired |
+| Stamp | `notified_at` is set in one write transaction after confirmed post-submit verification, while the lock is still held, and only while that column is still null |
+| Order | Strictly oldest first across every sender; a held head blocks newer Director messages |
+
+Every runner selects the same head and only the lock holder types, so each message is typed at most once per confirmed submission. Captures continue while delivery is held: up to one per live runner per second while a draft or dialog holds the composer.
+
+**Literal.** The literal is the canonical profile-delivery preview of §6.5 Push notifications, written with the profile's `prompt` plan prefix and submit bytes. The plan's `bracketed_paste` framing and its `plain_literal_limit` do not apply: a capture cannot observe whether the Director's application enabled mode 2004, so the Director path writes no bracketed paste and measures its limit on Director screens. A preview whose rendered line exceeds `director_delivery.plain_limit` is rendered in the pointer form.
+
+**Capture replay.** A capture (§6.5 Backend operations) replays into a fresh terminal state of the capture's size: replay enters the alternate screen when the capture reports it on, writes each row at its row position, then places the cursor when known. Classification follows § Cursor-free classification for a capture without cursor or alternate-screen data. A malformed metadata line or a pane absent from the herdr snapshot is a capture failure. CAFleet does not launch the Director, so it probes no Director native version: profile and rule selection depend only on the backend, and each Director observation's `raw_evidence.native_version` is null.
+
+**Classification and hold.** The sweep classifies the capture with the Director placement's bundled profile over the rules its `director_delivery` names plus every interaction rule. A hold leaves the message unnotified for a later tick:
+
+| Classification | Action | Backoff |
+|---|---|---|
+| Composer verified empty, no open or candidate interaction | Deliver | Reset on confirmed submission |
+| Composer not verified empty: a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min` | Hold | None (retry next interval) |
+| Open or candidate interaction: a permission request, a question or an unknown interaction | Hold | None |
+| Capture failure, missing pane, multiplexer server error or geometry still changing after retries | Hold | 1 s doubling, capped at 30 s |
+| Storage busy or unavailable | Hold | 1 s doubling, capped at 30 s |
+
+**Writes.** Both Director writes are acknowledged writes (§6.5 Backend operations):
+
+| Failure | Bytes written | Outcome |
+|---|---|---|
+| A spawn failure, a missing binary or an expired deadline before the first literal-write process | Zero | Hold with the capture-failure backoff |
+| Any literal-write failure after its first process started, or an unreadable acknowledgment | Possibly partial | Uncertain `write_failed`, stage `partial` |
+| A submit-key failure after its process started | Possibly submitted | Uncertain `write_failed`, stage `submitted` |
+
+herdr `pane send-text` takes literal text with no paste option; § Composer-text extraction matches the literal whether the Director screen renders it as typed text or as a collapsed paste placeholder.
+
+**Stop and deadlines.** The attempt deadline is the earlier of the 5 s attempt deadline and the run's shutdown deadline. The thread checks its stop signal before each stage: capture, literal chunk, settle end, pre-submit capture, submit key and each verification capture. A stopped thread starts no new writing stage and releases the lock. A stop after the first literal byte and before confirmed submission is an uncertain Director preview: the text stays in the Director composer and the message stays unnotified. Every subprocess runs through the bounded subprocess runner (§6.5 Subprocess output and deadlines) under the remaining clipped deadline, so the join completes within the shutdown deadline.
+
+**Outcomes and diagnostics.** A Director preview creates no durable input receipt and publishes no runtime event, because an event addressed to the Director would wait behind the held preview. Each non-confirmed outcome is a `director_delivery` runner diagnostic (§ Storage pressure and durability boundary), visible through `member show <member-id> --json` of the delivering member. Its message is stable text without timestamps or durations, so the diagnostic buffer deduplicates repeats and counts them:
+
+| Outcome | Message state | Stored `message` | Emitted |
+|---|---|---|---|
+| Confirmed submission | `notified_at` stamped | — | — |
+| Held for 3 minutes | Unnotified | `director delivery: message <id> held: <reason>` | Once per runner when its continuous hold of that message reaches 3 minutes |
+| `literal_mismatch`, `submit_unconfirmed`, `write_failed`, or `runner_stopped` after the first byte | Unnotified; typed again once the composer verifies empty | `director delivery: message <id> uncertain: <cause>` | Each occurrence |
+| Capture or multiplexer failure | Unnotified | `director delivery: pane <pane-id> unavailable: <cause>` | Each occurrence |
+
+`<reason>` is `composer_busy`, `interaction_open`, `interaction_candidate`, `pane_unavailable` or `storage_unavailable`. `<cause>` is the stop cause, or the multiplexer or storage error text, truncated at a scalar boundary so the stored message stays within the 512-byte bound.
+
+A mismatch leaves the written literal, plus whatever else was typed, in the Director composer, which then holds every later Director preview until the user clears or submits it. A submitted leftover literal leaves the message unnotified, so the sweep later types its preview again, and the Director deduplicates by message ID.
+
+**No live runner.** Delivery needs at least one live member runner in the fleet. Messages committed while none is live stay pending and unnotified, and the first runner to start or recover delivers them oldest first. An exiting runner makes no final Director sweep: its shutdown deadline is reserved for its own cleanup, and a sweep could hold the Director lock for its full attempt deadline. The Director runs a manual `cafleet message poll <director-id> --json` at these points:
+
+| Point | Reason |
+|---|---|
+| After a `member delete` that leaves the fleet with no active member | The deleted member's last report and exit event have no runner to deliver them |
+| Before `fleet delete` | Final inbox consumption |
+| At each wake's overdue-assignment check | Catches an unexpected exit of the last runner at the next Director turn |
+| After a Director session restart or context loss | Previews typed before the restart may be absent from the new context |
+
 ##### Delivery reporting
 
 `member prompt` and `member exec` JSON append a `delivery` object with ordered `status,method,reason` (§6.3 Runtime presentation). `method` is `profile`, `fallback`, or null before selection. The shared projection is:
@@ -3648,7 +3588,7 @@ The stage vocabulary is `zero_bytes,partial,submitted,unknown`. A stopped or in-
 
 ###### Stop cause
 
-A staged ordinary write starts only when no interaction is open or a candidate, the composer is verified empty on a verified-composer run, and the input drain is quiescent. It then writes the literal, settles, writes the submit key and, on a verified-composer run, verifies the submission (§ Measured submission plans and settle intervals). Only an interaction that appears during these stages, one that opens or becomes a candidate, stops the remaining stages. Keyboard and pointer input, terminal replies and observer changes leave the write running, and post-submit verification detects a literal that was not submitted.
+A staged ordinary write starts only when no interaction is open or a candidate, the composer is verified empty on a verified-composer run, and the input drain is quiescent. It then writes the literal, settles, writes the submit key and, on a verified-composer run, verifies the submission (§ Measured submission plans and settle intervals). Only an interaction that appears during these stages, one that opens or becomes a candidate, stops the remaining stages. Keyboard and pointer input, terminal replies and observer changes leave the write running; the pre-submit comparison detects a composer that differs from the written literal, and post-submit verification detects a literal that was not submitted.
 
 An attempt that ends after its first byte without confirmed submission records `uncertain` with one `stop_cause` in the same transaction; storage refuses the transition without it. Selection metadata remains separate.
 
@@ -3656,6 +3596,7 @@ An attempt that ends after its first byte without confirmed submission records `
 |---|---|
 | `interaction_open` | A visible or obscured interaction, an interaction hold or a retained transition appears during the write |
 | `interaction_candidate` | An interaction whose eligibility is held as a candidate appears during the write |
+| `literal_mismatch` | The pre-submit composer text does not match the written literal or cannot be extracted; no submit key is written, stage `partial` |
 | `submit_unconfirmed` | The 2 s post-submit verification window ends without confirmation; stage `submitted` |
 | `deadline_expired` | The chunk bound is reached, or too little budget remains for the full verification window plus the stage write margin (250 ms) before the submit key |
 | `short_write` | A stop leaves a prefix inside a UTF-8 scalar or paste marker, or a permission answer stage writes short |
@@ -3712,7 +3653,7 @@ Answer-profile capability belongs to the run's bundled profile, rests on native 
 
 #### Director consumption and continuation
 
-The Director consumes runtime events through the `poll --json` each `message listen` notice prompts, or through manual `poll --json` when no receiver is available. Runtime events reach the Director's stdout receiver and durable inbox; they provide no composer injection, Escape-first wake, goal activation or host interrupt guarantee (latency targets: § Coverage and latency). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
+The Director consumes runtime events through the `poll --json` each Director preview prompts (§ Director delivery sweep), or through manual `poll --json` at the sweep's manual poll points and while delivery is held or unavailable. Runtime events reach the Director's durable inbox, and a member runner types their preview only into a Director composer verified empty; they provide no Escape-first wake, goal activation or host interrupt guarantee (latency targets: § Coverage and latency). Native model consumption latency remains controlled by the Director host and may be unbounded while the host is blocked or paused.
 
 The poll consumes the message. Before running any other command after it, the Director records the unfinished action in host-owned state; it then reads the complete event, verifies its durable event/message link with `event show` and reconciles the current run/interaction. An ordinary member can quote event JSON; a claimed event identity is verified against stored ownership, never trusted from message text alone. Old/closed events remain readable but are not a new request to answer.
 
@@ -3742,7 +3683,7 @@ A routed request that arrives with no event follows the refusal route above.
 
 A run whose backend has no bundled profile, and a capability its bundled profile does not declare, retain explicit `unknown` coverage and manual operation; fixed-policy launch modes use the backend's bundled profile like every other mode.
 
-With a live receiver and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while no notice is held (§6.3 `message listen`), another two seconds from commit to receiver output; while a notice is held, the next notice announces the committed message, after the receiver's poll releases the hold or the ceiling fires.
+With a live member runner and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while the Director composer is verified empty and no older Director message is held, another two seconds from commit to the start of a Director delivery attempt (§ Director delivery sweep); while delivery is held, the preview waits until the hold clears.
 
 ## 7. Cross-cutting concerns
 
@@ -3752,7 +3693,7 @@ The database URL resolves per §6.3 Database selection, and config directories r
 
 ### 7.2 Error handling & exit-code policy
 
-Usage errors, parse errors (§6.3 Error Messages) and model/effort/line-validation errors exit 2. Application, database and transport errors exit 1 and print per §6.3 Error Messages. A successful finite timeout exits 0. Preserve primary causes alongside explicit cleanup failures. Missing required state or unknown enum/column values propagate instead of substituting meaningless defaults.
+Usage errors, parse errors (§6.3 Error Messages) and model/effort/line-validation errors exit 2. Application, database and transport errors exit 1 and print per §6.3 Error Messages. Preserve primary causes alongside explicit cleanup failures. Missing required state or unknown enum/column values propagate instead of substituting meaningless defaults.
 
 ### 7.3 Output / JSON / truncation
 
@@ -3943,8 +3884,9 @@ CREATE TABLE member_input_operations (
         OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
             AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
-        OR (stop_cause IN ('interaction_open','interaction_candidate','submit_unconfirmed',
-                          'deadline_expired','short_write','write_failed','runner_stopped')
+        OR (stop_cause IN ('interaction_open','interaction_candidate','literal_mismatch',
+                          'submit_unconfirmed','deadline_expired','short_write','write_failed',
+                          'runner_stopped')
             AND state IN ('uncertain','settled'))),
     UNIQUE(run_id, operation_key),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
@@ -3953,7 +3895,7 @@ CREATE TABLE member_input_operations (
 CREATE TABLE member_runner_diagnostics (
     diagnostic_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
-    source TEXT NOT NULL CHECK(source IN ('event_writer','observation','deferred_input','queue_housekeeping','preview_sweep','input_result','permission_answer','shutdown')),
+    source TEXT NOT NULL CHECK(source IN ('event_writer','observation','deferred_input','queue_housekeeping','preview_sweep','director_delivery','input_result','permission_answer','shutdown')),
     message TEXT NOT NULL CHECK(length(trim(message)) > 0 AND length(CAST(message AS BLOB)) <= 512),
     first_at TEXT NOT NULL,
     last_at TEXT NOT NULL,
@@ -3981,7 +3923,7 @@ Window layout columns follow §6.5 Fleet window layout:
 | `member_placements.window_ordinal` | Chosen at registration; `0` for the Director and Director-window members |
 | `member_placements.column_side` | Chosen at registration; `left` for the Director row and `right` for every Director-window member. A stored value outside `left` / `right` fails decoding |
 
-A concrete placement selects the shared pane input lock, and duplicate entries targeting the same backend/session/pane share it. Inbox streaming ignores `notified_at`, and native handles and emitted-ID tracking belong to the receiver process with no durable consumer state.
+A concrete placement selects the shared pane input lock, and duplicate entries targeting the same backend/session/pane share it. `messages.notified_at` is the preview stamp for ordinary members and the root Director alike (§6.5 Push notifications), and consumption is recorded only by `status_state`.
 
 Runtime records keep their run/member/fleet/Director references after soft deregistration, so history survives member and fleet closure.
 
