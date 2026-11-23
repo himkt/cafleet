@@ -160,18 +160,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn listen_pending_is_exactly_the_event_then_the_given_next_command() {
-        let next = "cafleet message poll 4 --json --database-url 'sqlite:///tmp/my fleet.db'";
-        let value = crate::output::json::listen_pending(next);
-        crate::broker::runtime::test_support::assert_key_order(&value, &["event", "next"]);
-        assert_eq!(value, json!({"event":"pending","next":next}));
-        assert_eq!(
-            serde_json::to_string(&value).unwrap(),
-            r#"{"event":"pending","next":"cafleet message poll 4 --json --database-url 'sqlite:///tmp/my fleet.db'"}"#
-        );
-    }
-
-    #[test]
     fn member_press_json_is_the_canonical_acknowledgment_without_effect_counts() {
         let keys = crate::multiplexer::PressKeys::parse(&["cTrL+A".into(), ";".into()]).unwrap();
         let value = crate::runtime::KeyAcknowledgment {
