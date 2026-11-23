@@ -1220,7 +1220,7 @@ mod tests {
             let conn = crate::db::connect(&settings.database_url).unwrap();
             conn.execute_batch("PRAGMA journal_mode=WAL").unwrap();
             conn.execute_batch(mutation).unwrap();
-            conn.execute_batch("BEGIN; SELECT * FROM refinery_schema_history")
+            conn.execute_batch("BEGIN; SELECT * FROM cafleet_database")
                 .unwrap();
             let path = crate::db::database_path(&settings.database_url).unwrap();
             let before = crate::db::test_support::wal_snapshot(Path::new(path));
@@ -2016,7 +2016,7 @@ mod tests {
             }
 
             fn connect(&mut self) -> Connection {
-                let conn = crate::db::test_support::migrated_conn(&self.home);
+                let conn = crate::db::test_support::initialized_file_conn(&self.home);
                 self.database = PathBuf::from(conn.path().unwrap());
                 conn
             }
@@ -2315,7 +2315,7 @@ mod tests {
         /// A home where every backend is ready, with its database and the backend stubs.
         fn healthy_home() -> (tempfile::TempDir, PathBuf, Vec<(&'static str, String)>) {
             let home = crate::runtime::test_support::short_tempdir();
-            let conn = crate::db::test_support::migrated_conn(&home);
+            let conn = crate::db::test_support::initialized_file_conn(&home);
             let database = PathBuf::from(conn.path().unwrap());
             let profile = home.path().join("hermes-profile");
             std::fs::create_dir_all(home.path().join("hermes")).unwrap();

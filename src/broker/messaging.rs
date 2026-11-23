@@ -316,7 +316,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn broker_fixture() -> (tempfile::TempDir, Connection, i64, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = crate::db::test_support::migrated_conn(&dir);
+        let mut conn = crate::db::test_support::initialized_file_conn(&dir);
         let (fleet, director) =
             crate::broker::fleets::test_support::create_fleet_fixture(&mut conn, "listen");
         let worker = crate::broker::members::test_support::register_member(
@@ -338,7 +338,7 @@ mod tests {
     use crate::broker::fleets::test_support::create_fleet_fixture;
     use crate::broker::members::test_support::register;
     use crate::broker::messaging::*;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
     use tempfile::TempDir;
 
     fn status_state(conn: &rusqlite::Connection, message_id: i64) -> String {
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn send_poll_and_show_preserve_the_complete_body_and_poll_consumes_what_it_returns() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "messages");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let text = format!("Unicode 世界\n{}\n\"quoted\" \u{1b}", "界".repeat(4096));
@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn polling_an_unknown_or_inactive_member_fails_and_consumes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "unknown");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let message = send_message(&mut conn, director, worker, "held").unwrap();
@@ -431,7 +431,7 @@ mod tests {
     #[test]
     fn a_poll_that_fails_before_commit_rolls_back_and_consumes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "rollback");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let first = send_message(&mut conn, director, worker, "first").unwrap();
@@ -469,7 +469,7 @@ mod tests {
         use std::sync::Mutex;
 
         let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "poll-race");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let message = send_message(&mut conn, director, worker, "only once").unwrap();
@@ -512,7 +512,7 @@ mod tests {
     #[test]
     fn concurrent_polls_on_separate_connections_return_disjoint_sets_covering_the_pending_set() {
         let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "concurrent");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         for round in 0..20 {
@@ -562,7 +562,7 @@ mod tests {
         use std::sync::atomic::AtomicU64;
 
         let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "commit-order");
         let worker = register(&mut conn, fleet, "worker", Some("%2"));
         let commits = Arc::new(AtomicU64::new(0));
@@ -614,7 +614,7 @@ mod tests {
     #[test]
     fn self_and_pending_placement_messages_have_distinct_preview_states() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "preview");
         let pending = register(&mut conn, fleet, "pending", None);
         let own = send_message(&mut conn, director, director, "self").unwrap();
@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn sending_requires_active_same_fleet_members_and_a_live_root() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         let worker = register(&mut conn, fleet, "worker", None);
         let (_, other) = create_fleet_fixture(&mut conn, "other");
@@ -668,7 +668,7 @@ mod tests {
     #[test]
     fn corrupt_required_message_values_surface_their_decode_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (_, director) = create_fleet_fixture(&mut conn, "corrupt");
         let message = send_message(&mut conn, director, director, "body").unwrap();
         conn.execute(
@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn poll_scopes_by_recipient_and_orders_by_status_timestamp_then_descending_id() {
         let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "ordering");
         let worker = register(&mut conn, fleet, "worker", None);
         let peer = register(&mut conn, fleet, "peer", None);
@@ -743,7 +743,7 @@ mod tests {
     #[test]
     fn send_failure_rolls_back_the_message_without_leaving_an_identifier_gap() {
         let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "atomic");
         let worker = register(&mut conn, fleet, "worker", None);
         conn.execute_batch(
@@ -770,7 +770,7 @@ mod tests {
     #[test]
     fn oldest_pending_preview_uses_creation_order_and_skips_consumed_and_notified_rows() {
         let dir = TempDir::new().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "preview");
         let worker = register(&mut conn, fleet, "worker", None);
         let mut ids = vec![

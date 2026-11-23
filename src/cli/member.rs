@@ -1281,7 +1281,7 @@ mod tests {
         #[test]
         fn hermes_member_deletion_waits_for_busy_pane_input_only_within_the_command_deadline() {
             let _dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&_dir);
+            let mut conn = initialized_file_conn(&_dir);
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "hermes-busy");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
@@ -1390,7 +1390,7 @@ mod tests {
             let scenario = std::env::var("CAFLEET_TEST_MEMBER_RECOVERY_CASE").unwrap();
             assert!(matches!(scenario.as_str(), "terminal" | "epoch"));
             let _dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&_dir);
+            let mut conn = initialized_file_conn(&_dir);
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "member-recovery");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));
@@ -1502,7 +1502,7 @@ mod tests {
     use crate::broker::runtime::DeliveryMethod;
     use crate::broker::runtime::DeliveryStatus;
     use crate::cli::member::*;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
     use crate::multiplexer::CommandRunner;
     use crate::multiplexer::RunError;
     use crate::multiplexer::TmuxMultiplexer;
@@ -1527,7 +1527,7 @@ mod tests {
             ),
         ] {
             let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "hermes-home");
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let members = |conn: &Connection| {
@@ -1577,7 +1577,7 @@ mod tests {
     #[test]
     fn member_create_renders_identity_and_database_into_the_prompt_and_the_runner_argv() {
         let dir = crate::runtime::test_support::short_tempdir();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, _) = create_fleet_fixture(&mut conn, "member-environment");
         let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
         let config = dir.path().join("claude config");
@@ -2379,7 +2379,7 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, Connection, Settings, i64, i64, i64) {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
         let (fleet, director) = create_fleet_fixture(&mut conn, "deletion");
         let worker = register(&mut conn, fleet, "worker", None);
@@ -2608,7 +2608,7 @@ mod tests {
         use crate::cli::member;
         use crate::cli::member::tests::*;
         use crate::coding_agent::CodingAgent;
-        use crate::db::test_support::migrated_conn;
+        use crate::db::test_support::initialized_file_conn;
         use crate::db::test_support::table_snapshot;
 
         fn invalid_creation(backend: CodingAgent, extra: &[String]) -> CafleetError {
@@ -2619,7 +2619,7 @@ mod tests {
 
         fn invalid_creation_with_body(backend: CodingAgent, extra: &[String]) -> CafleetError {
             let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = crate::broker::fleets::test_support::create_fleet_fixture(
                 &mut conn,
                 "invalid-launch-fixture",
@@ -2743,7 +2743,7 @@ mod tests {
         #[test]
         fn unknown_fleet_fails_like_other_fleet_commands_before_multiplexer_resolution() {
             let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let mut arguments = create_arguments()
                 .into_iter()
                 .map(String::from)
@@ -3003,7 +3003,7 @@ mod tests {
         #[test]
         fn a_busy_layout_lock_fails_member_create_and_registers_nothing() {
             let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "layout-busy");
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let _held = LayoutLock::try_acquire(&settings.database_url, fleet)
@@ -3030,7 +3030,7 @@ mod tests {
         #[test]
         fn the_unreadable_window_error_renders_a_multi_line_cause_on_one_line() {
             let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "layout-one-line");
             let window = format!("cafleet-{fleet}-1");
             let first = register_in_slot(
@@ -3074,7 +3074,7 @@ mod tests {
         #[test]
         fn an_unreadable_overflow_window_fails_member_create_naming_its_members() {
             let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let (fleet, _) = create_fleet_fixture(&mut conn, "layout-unreadable");
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             conn.execute(
@@ -3148,7 +3148,7 @@ mod tests {
         #[test]
         fn a_busy_layout_lock_fails_member_delete_and_leaves_run_pane_and_row_unchanged() {
             let dir = crate::runtime::test_support::short_tempdir();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
             let (fleet, director) = create_fleet_fixture(&mut conn, "layout-delete-busy");
             let worker = register(&mut conn, fleet, "worker", Some("%9"));

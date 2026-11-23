@@ -218,7 +218,7 @@ mod tests {
     use crate::broker::fleets::*;
     use crate::broker::members::test_support::director_new_placement;
     use crate::broker::members::test_support::register;
-    use crate::db::test_support::migrated_conn;
+    use crate::db::test_support::initialized_file_conn;
     use crate::multiplexer::layout::ColumnSide;
 
     fn row_count(conn: &Connection, table: &str) -> i64 {
@@ -237,7 +237,7 @@ mod tests {
             "BEFORE UPDATE OF director_member_id ON fleets",
         ] {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             conn.execute_batch(&format!("CREATE TRIGGER fail_registration {trigger} BEGIN SELECT RAISE(ABORT, 'registration failure'); END;")).unwrap();
             let calls = std::cell::Cell::new(0);
             let error = create_fleet_with(&mut conn, "alpha", |fleet_id| {
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn placement_factory_receives_the_allocated_id_once_and_preserves_existing_names() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (legacy, _) = create_fleet_fixture(&mut conn, "legacy");
         let seen = std::cell::RefCell::new(Vec::new());
         let created = create_fleet_with(&mut conn, "alpha", |fleet_id| {
@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn placement_factory_failure_rolls_back_registration_and_allows_id_reuse() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let calls = std::cell::Cell::new(0);
         let error = create_fleet_with(&mut conn, "alpha", |fleet_id| {
             assert_eq!(fleet_id, 1);
@@ -326,7 +326,7 @@ mod tests {
         for factory in [false, true] {
             for invalid in 0..3 {
                 let dir = tempfile::tempdir().unwrap();
-                let mut conn = migrated_conn(&dir);
+                let mut conn = initialized_file_conn(&dir);
                 let mut placement = director_new_placement("%0");
                 match invalid {
                     0 => placement.pane = None,
@@ -355,7 +355,7 @@ mod tests {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
 
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         conn.authorizer(Some(|context: AuthContext<'_>| {
             if matches!(
                 context.action,
@@ -387,7 +387,7 @@ mod tests {
         use rusqlite::hooks::{AuthAction, AuthContext, Authorization, TransactionOperation};
 
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         conn.authorizer(Some(|context: AuthContext<'_>| {
             if matches!(
                 context.action,
@@ -429,7 +429,7 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let commits = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&commits);
         conn.commit_hook(Some(move || {
@@ -471,7 +471,7 @@ mod tests {
 
         for deny_rollback in [false, true] {
             let dir = tempfile::tempdir().unwrap();
-            let mut conn = migrated_conn(&dir);
+            let mut conn = initialized_file_conn(&dir);
             let attempts = Arc::new(Mutex::new(Vec::new()));
             let observed = Arc::clone(&attempts);
             conn.authorizer(Some(move |context: AuthContext<'_>| match context.action {
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn a_failed_commit_with_an_ended_transaction_reports_an_unconfirmed_outcome() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         conn.commit_hook(Some(|| true)).unwrap();
         let result = create_fleet_with(&mut conn, "alpha", |_| Ok(director_new_placement("%0")));
         conn.commit_hook(None::<fn() -> bool>).unwrap();
@@ -544,7 +544,7 @@ mod tests {
     #[test]
     fn fleet_listing_uses_time_then_id_and_counts_only_active_members() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (first, _) = create_fleet_fixture(&mut conn, "first");
         let (second, _) = create_fleet_fixture(&mut conn, "second");
         let (third, _) = create_fleet_fixture(&mut conn, "third");
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn require_live_fleet_refuses_a_deleted_fleet_or_an_inactive_root_director() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, director) = create_fleet_fixture(&mut conn, "alpha");
         assert_eq!(require_live_fleet(&conn, fleet).unwrap().fleet_id, fleet);
         for (damage, expected) in [
@@ -607,7 +607,7 @@ mod tests {
     #[test]
     fn director_placement_reads_the_recorded_director_pane_and_server() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let (fleet, _) = create_fleet_fixture(&mut conn, "alpha");
         register(&mut conn, fleet, "worker", Some("%5"));
         let expected = director_new_placement("%0");
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn bootstrap_records_the_director_window_as_ordinal_zero_left_and_starts_the_ordinal_at_zero() {
         let dir = tempfile::tempdir().unwrap();
-        let mut conn = migrated_conn(&dir);
+        let mut conn = initialized_file_conn(&dir);
         let director = NewPlacement::director(
             "herdr".into(),
             "w4".into(),

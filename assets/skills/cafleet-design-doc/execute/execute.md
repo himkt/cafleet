@@ -1,48 +1,30 @@
 # Design Doc Execute (CAFleet Edition)
 
-Implement an approved design through scoped CAFleet members, suitable verification and fresh independent review. The Director owns specification decisions, Git, user communication and lifecycle; members own their assigned source/test regions.
+Implement an approved design through scoped CAFleet members, verification and fresh review.
 
 ## Required reading
 
-Read and resolve your [backend](../../cafleet/reference/coding-agents.md), then the [Director role](../../cafleet/roles/director.md), [file layout](../reference/guidelines.md#file-layout), [BASE write protocol](../../cafleet/roles/director.md#base-directory-resolution), [supervision](../../cafleet/roles/director.md#supervision), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md). They own model selection, the spawn frame, path guards, native reception and message rules.
-
-Preserve host permissions, user scope, prior decisions and stop requests throughout execution.
+Resolve your [backend](../../cafleet/reference/coding-agents.md), then read the [Director role](../../cafleet/roles/director.md), [coordination](../reference/coordination.md) and [guidelines](../reference/guidelines.md).
 
 ## Director responsibilities
 
-Own correctness against the approved specification. Assign bounded paths, shared interfaces, checks and evidence locations. Retrieve complete durable messages, record each one as its poll consumes it and facilitate ready work. Inspect broker, pane and artifact evidence before treating a member as stalled; disclose a replacement and preserve its handoff.
+Own correctness against the specification, specification decisions, Git, user communication and lifecycle, preserving host permissions, user scope, prior decisions and stop requests; members own their assigned source/test regions. Assign bounded paths, shared interfaces, checks and evidence locations, and disclose a member replacement with its handoff.
 
-### Step 1: Resolve Design Document Path (Director)
+### Step 1: Resolve the design document
 
-Accept an explicit document, a task folder containing `design-doc.md`, or discovery under the repository's design-doc root; preserve an explicit target, and normalize and resolve BASE before task/audit writes.
+Use an explicit document, a task folder containing `design-doc.md`, or the only Approved document under the design-doc root; ask the user when several match and report an error when none do. Resolve BASE before writes. To resume, verify checked tasks and progress metadata and continue from the next incomplete task.
 
-Discovery considers documents whose Status is Approved: select the only match, ask the user when several match, and report an actionable error when none match. For resumed work, verify checked tasks and progress metadata, then continue from the next incomplete task.
+### Step 2: Validate and branch
 
-### Step 2: Validate Design Document & Create Branch (Director)
-
-Read the complete design and its existing annotations. Resolve clear requests and route consequential ambiguity before dependent work. Identify implementation order, protected behavior and existing `FIXME(agent)` findings.
-
-Inspect the default/current branch: on the default branch, propose a feature branch and create it only after the user approves; preserve an existing feature branch. Host rules govern eligible files and commits.
+Read the complete design, its annotations and `FIXME(agent)` findings; identify implementation order and protected behavior, and route consequential ambiguity first. On the default branch, propose a feature branch and create it once the user approves; keep an existing feature branch.
 
 ### Team composition
 
-| Work | Composition |
-|---|---|
-| Code implementation | Programmer and Tester with separate source/test ownership |
-| Documentation/configuration only | Programmer with suitable checks and Director review |
-| External behavior or explicit live acceptance | Add Verifier for the required observations |
-| Completed implementation | Add a fresh Reviewer after implementation and verification gates pass |
+Code implementation uses a Programmer and Tester with separate source/test ownership; documentation/configuration-only work uses a Programmer under suitable checks and Director review, stated in its prompt. Add a Verifier for external behavior or explicit live acceptance, and a fresh Reviewer once implementation and verification gates pass. Read each assigned [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md) role file before spawning.
 
-Read the assigned [Programmer](roles/programmer.md), [Tester](roles/tester.md), [Verifier](roles/verifier.md) and [Reviewer](roles/reviewer.md) role files before spawning; each owns its role's responsibilities. A Programmer-only team receives the documentation/configuration composition explicitly.
+### Step 3: Spawn members
 
-### Step 3: Register & Spawn Members (Director)
-
-1. Diagnose prerequisites, register the calling Director atomically and retain literal fleet/member IDs.
-2. Follow [Director wake](../../cafleet/roles/director.md#director-wake).
-3. Render compact role-by-path prompts with the delta table below, supplying BASE, owned paths and checks.
-4. Receive and record ready, then dispatch each member when inputs exist. Resolve uncertain launch/input by inspecting actual evidence before another submission.
-
-Render each member prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>` (the column heading), TEAM `design document execution`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this per-role delta. Every role's CONTEXT LINES start with `DESIGN DOCUMENT: [INSERT absolute design-doc path]`. Spawn the Reviewer only at Step 5.
+Follow the Director [Spawn Protocol](../../cafleet/roles/director.md#spawn-protocol) and [Director wake](../../cafleet/roles/director.md#director-wake). Render each prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>` (the column heading), TEAM `design document execution`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc`, BASE, owned paths, checks and this delta. Every role's CONTEXT LINES start with `DESIGN DOCUMENT: [INSERT absolute design-doc path]`.
 
 | Slot | Programmer | Tester | Verifier | Reviewer |
 |---|---|---|---|---|
@@ -51,38 +33,28 @@ Render each member prompt from the [canonical spawn skeleton](../../cafleet/role
 | Blocked line | yes | yes | yes | no |
 | START CUE (verbatim) | `Read the design document and wait for the Director to assign your first step.` | `Read the design document and wait for the Director to assign your first step.` | `Read the design document, perform tool discovery and send your tool inventory to the Director.` | `Wait for the Director's ready (doc) to start the review.` |
 
-Render the IMPORTANT / ROLE-CONSTRAINT lines verbatim, one prompt line each, in this order: the role constraint lines; `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` where Blocked line is `yes`; `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md, including Reconsider, then route), which you load at startup.`; `When you see cafleet message poll output with a message from the Director, act on those instructions.`
+Render these lines verbatim, one prompt line each, in order: the role constraint lines; `IMPORTANT: If blocked, send a message to the Director immediately instead of assuming.` where Blocked line is `yes`; `IMPORTANT: For every Bash command, follow the member Bash protocol in the cafleet skill (its roles/member.md, including Reconsider, then route), which you load at startup.`; `When you see cafleet message poll output with a message from the Director, act on those instructions.`
 
-### Step 4: Execute Steps with Per-Step TDD Cycle (Director)
+### Step 4: Per-step TDD cycle
 
-For a code step, the Tester writes behavior-focused tests; the Director reviews them against the design and commits eligible tests. The Programmer implements within its source ownership and runs the relevant checks. Suspected test defects return to the Director and Tester for arbitration; a Programmer-only team routes findings directly to the Programmer.
+Review the Tester's behavior-focused tests against the design and commit eligible ones; the Programmer then implements and runs checks. Arbitrate suspected test defects; a Programmer-only team routes findings to the Programmer. Review each change for correctness, scope and maintainability until the step passes with its checkbox, timestamp and Progress updated; commit tests and implementation separately, applying host rules to mixed files.
 
-Review the final change for correctness, scope and maintainability; request fixes and affected checks until the step passes. Keep tests and implementation commits separate in TDD teams, applying host rules to mixed files. Verify the Programmer's checkbox, timestamp and Progress update for each completed task. Preserve completed work when resuming.
+### Verification — conditional
 
-### Verification (Director) — conditional
+The Verifier performs applicable real-product acceptance on isolated, owned resources, reporting exact commands and observations, including changed safety boundaries; work lacking required evidence stays incomplete. Resolve failures with the owner and re-verify.
 
-Have the Verifier discover available tools and perform applicable real-product acceptance with isolated, owned resources. Require exact commands/results and concrete observations for changed safety boundaries. Record actual limitations; missing required evidence remains incomplete. Resolve failures with the owning member and repeat affected verification.
+### Step 5: Review loop
 
-### Step 5: Reviewer Review Loop (Director)
+Once every task, Success Criterion, required check and manual acceptance passes, give the fresh Reviewer the design, full branch diff and evidence. Route findings to their owners, arbitrate disputes against evidence, rerun affected checks and repeat fresh review until approval, with no round cap. Honor a user halt immediately, retaining pending work.
 
-Verify every implementation task and Success Criterion, including required checks and manual acceptance, before the fresh Reviewer starts. Give it the complete design, full branch diff and actual evidence. Its work is independent read-only implementation review, not self-review by an implementing member.
+### Step 6: User approval
 
-Route actionable findings to their source/test owners, arbitrate disputes against evidence and rerun affected checks. Repeat fresh review until approval; the loop has no round cap. Honor a user halt immediately and retain the pending work. User revisions return through this review before another approval presentation.
+Present the diff command, behavior changes, checks and limitations through {decision_surface}; answer questions and route revisions through implementation, checks and review. Local approval finalizes locally; remote approval authorizes push and PR creation.
 
-### Step 6: User Approval (Director)
+### Step 7: Push and PR
 
-Present the reviewed result with the diff command, behavior changes, checks and actual limitations, requesting approval through the executing backend's decision surface. Interpret feedback by meaning: a question stays a question, and revisions route through implementation, checks and review.
+For remote approval, verify authentication, the feature branch and commits beyond the base, push without force and create the PR from a prepared description file under host Git rules. A failed precondition leaves the result local; report exact push/PR failures, keeping a successful push when PR creation fails and reporting the manual PR-creation details. Tracking alone supplies no publication authority.
 
-Record publication scope explicitly: local approval finalizes locally; remote approval authorizes push and PR creation. Carry earlier answers forward and resolve only a genuinely new decision.
+### Step 8: Finalize
 
-### Step 7: Push & Create PR (Director)
-
-For remote approval, verify authentication, the feature branch and commits beyond the base. Apply host Git rules before staging or publishing. Push without force and create the PR from a prepared description file under the applicable GitHub workflow.
-
-Authentication/precondition failure leaves the result local. Report exact push/PR failures; preserve a successful push if PR creation fails and retain its manual recovery information. Tracking alone supplies no publication authority.
-
-### Step 8: Finalize & Clean Up (Director)
-
-Verify final progress and marker resolution, set Status to Complete only when the required work and user gate are satisfied, and preserve existing historical artifacts. Commit only files allowed by host rules. Apply the recorded publication scope to any eligible final push.
-
-Then end the team under the Director [Shutdown](../../cafleet/roles/director.md#shutdown), limiting cleanup to owned resources.
+Verify progress and marker resolution, set Status to Complete once the work and user gate are satisfied, preserve existing historical artifacts, apply the approved publication scope to any final push, and end the team under the Director [Shutdown](../../cafleet/roles/director.md#shutdown), cleaning up only owned resources.
