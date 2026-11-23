@@ -1,9 +1,1493 @@
 {
   "schema_version": 1,
   "backend": "claude",
-  "provenance": "native",
+  "profile": {
+    "rules": [
+      {
+        "id": "claude-bash-permission",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+          },
+          {
+            "id": "approval",
+            "scope": "line",
+            "pattern": "^ This command requires approval[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 4\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_margin": " "
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-idle-composer",
+        "priority": 50,
+        "observation": "composer_empty",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^❯\\x{a0}",
+          "end_pattern": "^❯\\x{a0}",
+          "max_rows": 1,
+          "cursor": "at_end"
+        },
+        "matchers": [
+          {
+            "id": "prompt",
+            "scope": "line",
+            "pattern": "^❯\\x{a0} *$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
+      },
+      {
+        "id": "claude-suggestion-composer",
+        "priority": 50,
+        "observation": "composer_empty",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^❯\\x{a0}",
+          "end_pattern": "^❯\\x{a0}",
+          "max_rows": 1,
+          "cursor": "after_prompt"
+        },
+        "matchers": [
+          {
+            "id": "prompt",
+            "scope": "line",
+            "pattern": "^❯\\x{a0}"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true,
+        "suggestion": {
+          "style": {
+            "faint": true
+          }
+        }
+      },
+      {
+        "id": "claude-auto-ask-permission",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+          },
+          {
+            "id": "ask_rule",
+            "scope": "line",
+            "pattern": "^ │ Ask rule [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
+          },
+          {
+            "id": "auto_hint",
+            "scope": "line",
+            "pattern": "^ /permissions to let auto mode decide[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 2\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_margin": " "
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-bash-permission-auto-tip",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "access",
+            "scope": "line",
+            "pattern": "^ [❯ ] 2\\. Yes, and always allow access to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* from this project[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "switch",
+            "scope": "line",
+            "pattern": "^ [❯ ] 3\\. Yes, and switch to auto mode · auto mode handles these prompts for you[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 4\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_margin": " "
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-read-outside-permission",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Read outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Read outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Allow this read outside the working directories\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "keep_allowing",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. Yes, and keep allowing any reads outside the working directories[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "block_from_now",
+            "scope": "line",
+            "pattern": "^ [❯ ] 2\\. No, and block reads outside the working directories from now on[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 3\\. (?P<label>No, and ask again next time)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 4\\. (?P<label>Yes, but ask again next time)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_margin": " "
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-bash-permission-no-tip",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Bash command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "remember",
+            "scope": "line",
+            "pattern": "^ [❯ ] 2\\. Yes, and (?:always allow access to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].* from this project|don’t ask again for: [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_margin": " "
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-read-file-permission",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Read file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Read file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^╌{3,}\\n(?P<operation> [^\\n]+(?:\\n [^\\n]+)*)\\n╌{3,}$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Do you want to proceed\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "remember",
+            "scope": "line",
+            "pattern": "^ [❯ ] 2\\. Yes, allow reading from [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_margin": " "
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-edit-file-permission",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^ Edit file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n╌{3,}$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Do you want to make this edit to [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "remember",
+            "scope": "line",
+            "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation"
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-create-file-permission",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^ Esc to cancel · Tab to amend[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^ Create file(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+[0-9]+ of [0-9]+)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n (?P<operation>[^\\n]*[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}])[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*\\n╌{3,}$"
+          },
+          {
+            "id": "question",
+            "scope": "line",
+            "pattern": "^ Do you want to create [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ ❯ [1-9]\\. "
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ [❯ ] 1\\. (?P<label>Yes)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "remember",
+            "scope": "line",
+            "pattern": "^ [❯ ] 2\\. Yes, and switch to accept edits [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ [❯ ] 3\\. (?P<label>No)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation"
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-auto-startup",
+        "priority": 100,
+        "observation": "question",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^  Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^  Enter to confirm · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 14,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^  Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^  ❯ [1-9]\\. "
+          },
+          {
+            "id": "yes",
+            "scope": "line",
+            "pattern": "^  [❯ ] 1\\. Yes[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "not_now",
+            "scope": "line",
+            "pattern": "^  [❯ ] 2\\. (?P<label>Not now)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "dont_show",
+            "scope": "line",
+            "pattern": "^  [❯ ] 3\\. (?P<label>Don't show again)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "footer",
+            "scope": "line",
+            "pattern": "^  Enter to confirm · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": [
+            {
+              "id": "not-now",
+              "label": {
+                "matcher_id": "not_now",
+                "capture": "label"
+              },
+              "scope": "persistent"
+            },
+            {
+              "id": "dont-show-again",
+              "label": {
+                "matcher_id": "dont_show",
+                "capture": "label"
+              },
+              "scope": "persistent"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-auto-env-setup-wizard",
+        "priority": 100,
+        "observation": "question",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^   Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^   ←/→ to change · Enter to continue · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 14,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^   Teach auto mode about your environment\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^   ❯ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
+          },
+          {
+            "id": "footer",
+            "scope": "line",
+            "pattern": "^   ←/→ to change · Enter to continue · Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "claude-auto-default-nudge",
+        "priority": 100,
+        "observation": "question",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^ Make auto mode your default permission mode\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^   (?:❯ |  )No, keep [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*$",
+          "max_rows": 10,
+          "cursor": "inside",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ Make auto mode your default permission mode\\?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^   ❯ [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]",
+            "focus_style": "marker"
+          },
+          {
+            "id": "accept",
+            "scope": "line",
+            "pattern": "^   (?:❯ |  )(?P<label>Yes, set auto mode as my default permission mode)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "decline",
+            "scope": "line",
+            "pattern": "^   (?:❯ |  )(?P<label>No, keep [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}].*?)[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": [
+            {
+              "id": "accept",
+              "label": {
+                "matcher_id": "accept",
+                "capture": "label"
+              },
+              "scope": "persistent"
+            },
+            {
+              "id": "decline",
+              "label": {
+                "matcher_id": "decline",
+                "capture": "label"
+              },
+              "scope": "persistent"
+            }
+          ]
+        },
+        "verified_noninteraction": false,
+        "frame": {
+          "require_patterns": [],
+          "reject_patterns": [
+            "^❯\\x{a0}"
+          ]
+        }
+      },
+      {
+        "id": "claude-question-pending-notice",
+        "priority": 100,
+        "observation": "question",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 1,
+          "cursor": "any",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "notice",
+            "scope": "line",
+            "pattern": "^Claude has a question for you — it shows once you send or clear what you're typing\\.[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": false,
+        "frame": {
+          "require_patterns": [
+            "^❯\\x{a0}"
+          ],
+          "reject_patterns": [
+            "^  Showing detailed transcript · ctrl\\+o to toggle"
+          ]
+        }
+      },
+      {
+        "id": "claude-ask-user-question",
+        "priority": 100,
+        "observation": "question",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^(?: |←[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+)[☐☒✔][\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]",
+          "end_pattern": "^Enter to select · (?:[^·]+ · )+Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 60,
+          "cursor": "any",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^(?: |←[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+)[☐☒✔][\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
+          },
+          {
+            "id": "chat",
+            "scope": "line",
+            "pattern": "^(?:❯ |  )[1-9]\\. Chat about this[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "footer",
+            "scope": "line",
+            "pattern": "^Enter to select · (?:[^·]+ · )+Esc to cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": false,
+        "frame": {
+          "require_patterns": [],
+          "reject_patterns": [
+            "^❯\\x{a0}",
+            "^  Showing detailed transcript · ctrl\\+o to toggle"
+          ]
+        }
+      },
+      {
+        "id": "claude-ask-user-question-review",
+        "priority": 100,
+        "observation": "question",
+        "region": {
+          "screen": "either",
+          "start_pattern": "^(?: |←[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+)[☐☒✔][\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]",
+          "end_pattern": "^(?:❯ |  )[1-9]\\. Cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 60,
+          "cursor": "any",
+          "panel_separator": "│"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^(?: |←[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+)[☐☒✔][\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]"
+          },
+          {
+            "id": "review",
+            "scope": "line",
+            "pattern": "^Review your answers[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "submit",
+            "scope": "line",
+            "pattern": "^(?:❯ |  )[1-9]\\. Submit answers[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "cancel",
+            "scope": "line",
+            "pattern": "^(?:❯ |  )[1-9]\\. Cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": false,
+        "frame": {
+          "require_patterns": [],
+          "reject_patterns": [
+            "^❯\\x{a0}",
+            "^  Showing detailed transcript · ctrl\\+o to toggle"
+          ]
+        }
+      }
+    ],
+    "capabilities": {
+      "detection": {
+        "rule_ids": [
+          "claude-bash-permission",
+          "claude-auto-ask-permission",
+          "claude-bash-permission-auto-tip",
+          "claude-read-outside-permission",
+          "claude-auto-startup",
+          "claude-bash-permission-no-tip",
+          "claude-read-file-permission",
+          "claude-edit-file-permission",
+          "claude-create-file-permission",
+          "claude-auto-env-setup-wizard",
+          "claude-auto-default-nudge",
+          "claude-question-pending-notice",
+          "claude-ask-user-question",
+          "claude-ask-user-question-review"
+        ],
+        "fixture_ids": [
+          "claude-2.1.302-access-permission-1",
+          "claude-2.1.302-access-allow-pre-stage-1",
+          "claude-2.1.302-access-deny-pre-stage-1",
+          "claude-2.1.302-auto-env-setup-offer-1",
+          "claude-2.1.302-auto-env-setup-wizard-1",
+          "claude-2.1.302-default-permission-1",
+          "claude-2.1.302-wrapped-permission-1",
+          "claude-2.1.302-boxed-permission-1",
+          "claude-2.1.302-boxed-single-row-permission-1",
+          "claude-2.1.302-auto-ask-permission-1",
+          "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+          "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1",
+          "claude-2.1.302-auto-verbose-refusal-above-form-1",
+          "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1",
+          "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1",
+          "claude-2.1.308-auto-tip-padded-question-1",
+          "claude-2.1.309-read-outside-permission-1",
+          "claude-2.1.309-read-outside-long-path-1",
+          "claude-2.1.309-edit-outside-permission-1",
+          "claude-2.1.312-auto-default-nudge-1",
+          "claude-2.1.312-auto-default-accept-edits-nudge-1",
+          "claude-2.1.312-question-pending-notice-1",
+          "claude-2.1.312-auto-env-setup-offer-1",
+          "claude-2.1.312-primary-auto-default-nudge-1",
+          "claude-2.1.312-primary-default-permission-1",
+          "claude-2.1.312-read-file-permission-1",
+          "claude-2.1.312-edit-file-permission-1",
+          "claude-2.1.312-create-file-permission-1",
+          "claude-2.1.312-bash-no-tip-permission-1",
+          "claude-2.1.312-bash-no-tip-access-permission-1",
+          "claude-2.1.312-panel-default-permission-1",
+          "claude-2.1.312-panel-default-permission-144-1",
+          "claude-2.1.322-bash-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-bash-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-no-tip-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-no-tip-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-tip-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-tip-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-ask-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-ask-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-read-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-read-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-readout-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-readout-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-edit-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-edit-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-create-deny-pre-stage-tmux-120-1",
+          "claude-2.1.322-create-allow-pre-stage-tmux-120-1",
+          "claude-2.1.322-nudge-decline-pre-stage-tmux-120-1",
+          "claude-2.1.322-env-not-now-pre-stage-tmux-120-1",
+          "claude-2.1.322-env-dont-show-pre-stage-tmux-120-1",
+          "claude-2.1.302-auto-model-switch-question-1",
+          "claude-2.1.322-ask-single-tmux-120-1",
+          "claude-2.1.322-ask-tabs-tmux-120-1",
+          "claude-2.1.322-ask-tabs-tmux-120-2",
+          "claude-2.1.322-ask-multi-tmux-120-1",
+          "claude-2.1.322-ask-multi-tmux-120-2",
+          "claude-2.1.322-ask-multi-tmux-120-3",
+          "claude-2.1.322-ask-review-tmux-120-1",
+          "claude-2.1.322-ask-review-narrow-tmux-060-1",
+          "claude-2.1.322-ask-typing-tmux-120-1",
+          "claude-2.1.322-ask-typing-tmux-120-2",
+          "claude-2.1.322-ask-narrow-tmux-060-1",
+          "claude-2.1.322-ask-pending-tmux-120-1",
+          "claude-2.1.322-ask-single-herdr-359-1",
+          "claude-2.1.322-ask-tabs-herdr-359-1",
+          "claude-2.1.322-ask-tabs-herdr-359-2",
+          "claude-2.1.322-ask-multi-herdr-359-1",
+          "claude-2.1.322-ask-multi-herdr-359-2",
+          "claude-2.1.322-ask-multi-herdr-359-3",
+          "claude-2.1.322-ask-review-herdr-359-1",
+          "claude-2.1.322-ask-review-tmux-120-2",
+          "claude-2.1.322-ask-review-narrow-tmux-060-2",
+          "claude-2.1.322-ask-review-narrow-tmux-040-2",
+          "claude-2.1.322-ask-review-herdr-359-2"
+        ]
+      },
+      "composer": {
+        "rule_ids": [
+          "claude-idle-composer",
+          "claude-suggestion-composer"
+        ],
+        "fixture_ids": [
+          "claude-2.1.322-suggestion-herdr-094-1",
+          "claude-2.1.322-bash-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-bash-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-no-tip-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-no-tip-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-tip-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-tip-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-ask-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-ask-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-read-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-read-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-readout-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-readout-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-edit-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-edit-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-create-deny-post-stage-tmux-120-1",
+          "claude-2.1.322-create-allow-post-stage-tmux-120-1",
+          "claude-2.1.322-queued-hint-tmux-120-1",
+          "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1",
+          "claude-2.1.322-composer-prompt-plain-41-post-submit-tmux-120-1",
+          "claude-2.1.322-composer-prompt-plain-4000-post-submit-tmux-120-1",
+          "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1",
+          "claude-2.1.322-composer-exec-plain-41-post-submit-tmux-120-1",
+          "claude-2.1.322-composer-exec-plain-4000-post-submit-tmux-120-1",
+          "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1",
+          "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1",
+          "claude-2.1.322-composer-prompt-plain-4000-post-submit-herdr-092-1",
+          "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1",
+          "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1",
+          "claude-2.1.322-composer-exec-plain-4000-post-submit-herdr-092-1"
+        ],
+        "submission": {
+          "prompt": {
+            "prefix_hex": "",
+            "submit_hex": "0d",
+            "fixture_ids": [
+              "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1",
+              "claude-2.1.322-composer-prompt-plain-41-post-submit-tmux-120-1",
+              "claude-2.1.322-composer-prompt-plain-4000-post-submit-tmux-120-1",
+              "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1",
+              "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1",
+              "claude-2.1.322-composer-prompt-plain-4000-post-submit-herdr-092-1"
+            ],
+            "literal_framing": "plain",
+            "plain_literal_limit": null
+          },
+          "exec": {
+            "prefix_hex": "2120",
+            "submit_hex": "0d",
+            "fixture_ids": [
+              "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1",
+              "claude-2.1.322-composer-exec-plain-41-post-submit-tmux-120-1",
+              "claude-2.1.322-composer-exec-plain-4000-post-submit-tmux-120-1",
+              "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1",
+              "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1",
+              "claude-2.1.322-composer-exec-plain-4000-post-submit-herdr-092-1"
+            ],
+            "literal_framing": "plain",
+            "plain_literal_limit": null
+          }
+        }
+      },
+      "answers": [
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-bash-permission",
+          "answer_rule_id": "claude-bash-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "31",
+              "required_rule_id": "claude-bash-permission",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-allow-pre-stage-1",
+            "claude-2.1.302-wrapped-allow-pre-stage-1",
+            "claude-2.1.322-bash-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-bash-permission",
+          "answer_rule_id": "claude-bash-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "34",
+              "required_rule_id": "claude-bash-permission",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-deny-pre-stage-1",
+            "claude-2.1.302-wrapped-deny-pre-stage-1",
+            "claude-2.1.322-bash-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-auto-ask-permission",
+          "answer_rule_id": "claude-auto-ask-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "31",
+              "required_rule_id": "claude-auto-ask-permission",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-auto-ask-permission-1",
+            "claude-2.1.322-ask-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-auto-ask-permission",
+          "answer_rule_id": "claude-auto-ask-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "32",
+              "required_rule_id": "claude-auto-ask-permission",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-auto-ask-hiding-refusal-notice-1",
+            "claude-2.1.302-auto-verbose-refusal-above-form-1",
+            "claude-2.1.322-ask-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-bash-permission-auto-tip",
+          "answer_rule_id": "claude-bash-auto-tip-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "31",
+              "required_rule_id": "claude-bash-permission-auto-tip",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-access-allow-pre-stage-1",
+            "claude-2.1.322-tip-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-bash-permission-auto-tip",
+          "answer_rule_id": "claude-bash-auto-tip-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "34",
+              "required_rule_id": "claude-bash-permission-auto-tip",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.302-access-deny-pre-stage-1",
+            "claude-2.1.322-tip-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-read-outside-permission",
+          "answer_rule_id": "claude-read-outside-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "34",
+              "required_rule_id": "claude-read-outside-permission",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.309-read-outside-allow-pre-stage-1",
+            "claude-2.1.322-readout-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-read-outside-permission",
+          "answer_rule_id": "claude-read-outside-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "33",
+              "required_rule_id": "claude-read-outside-permission",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.309-read-outside-deny-pre-stage-1",
+            "claude-2.1.322-readout-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-read-file-permission",
+          "answer_rule_id": "claude-read-file-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "31",
+              "required_rule_id": "claude-read-file-permission",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-read-file-allow-pre-stage-1",
+            "claude-2.1.322-read-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-read-file-permission",
+          "answer_rule_id": "claude-read-file-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "33",
+              "required_rule_id": "claude-read-file-permission",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-read-file-deny-pre-stage-1",
+            "claude-2.1.322-read-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-edit-file-permission",
+          "answer_rule_id": "claude-edit-file-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "31",
+              "required_rule_id": "claude-edit-file-permission",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-edit-file-allow-pre-stage-1",
+            "claude-2.1.322-edit-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-edit-file-permission",
+          "answer_rule_id": "claude-edit-file-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "33",
+              "required_rule_id": "claude-edit-file-permission",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-edit-file-deny-pre-stage-1",
+            "claude-2.1.322-edit-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-create-file-permission",
+          "answer_rule_id": "claude-create-file-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "31",
+              "required_rule_id": "claude-create-file-permission",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-create-file-allow-pre-stage-1",
+            "claude-2.1.322-create-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-create-file-permission",
+          "answer_rule_id": "claude-create-file-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "33",
+              "required_rule_id": "claude-create-file-permission",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-create-file-deny-pre-stage-1",
+            "claude-2.1.322-create-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "claude-bash-permission-no-tip",
+          "answer_rule_id": "claude-bash-no-tip-allow-digit",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "31",
+              "required_rule_id": "claude-bash-permission-no-tip",
+              "required_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-bash-no-tip-allow-pre-stage-1",
+            "claude-2.1.322-no-tip-allow-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "claude-bash-permission-no-tip",
+          "answer_rule_id": "claude-bash-no-tip-deny-digit",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "33",
+              "required_rule_id": "claude-bash-permission-no-tip",
+              "required_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-bash-no-tip-deny-pre-stage-1",
+            "claude-2.1.322-no-tip-deny-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "request_rule_id": "claude-auto-default-nudge",
+          "answer_rule_id": "claude-auto-default-decline",
+          "choice_id": "decline",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "0e",
+              "required_rule_id": "claude-auto-default-nudge",
+              "required_choice_id": "decline",
+              "required_focus_choice_id": "accept"
+            },
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "claude-auto-default-nudge",
+              "required_choice_id": "decline",
+              "required_focus_choice_id": "decline"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-auto-default-decline-pre-stage-1",
+            "claude-2.1.312-auto-default-decline-post-stage-1-1",
+            "claude-2.1.322-nudge-decline-pre-stage-tmux-120-1",
+            "claude-2.1.322-nudge-decline-post-stage-tmux-120-1"
+          ]
+        },
+        {
+          "request_rule_id": "claude-auto-startup",
+          "answer_rule_id": "claude-auto-env-setup-not-now-digit",
+          "choice_id": "not-now",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "32",
+              "required_rule_id": "claude-auto-startup",
+              "required_choice_id": "not-now"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-auto-env-setup-not-now-pre-stage-1",
+            "claude-2.1.322-env-not-now-pre-stage-tmux-120-1"
+          ]
+        },
+        {
+          "request_rule_id": "claude-auto-startup",
+          "answer_rule_id": "claude-auto-env-setup-dont-show-again-digit",
+          "choice_id": "dont-show-again",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "33",
+              "required_rule_id": "claude-auto-startup",
+              "required_choice_id": "dont-show-again"
+            }
+          ],
+          "fixture_ids": [
+            "claude-2.1.312-auto-env-setup-dont-show-again-pre-stage-1",
+            "claude-2.1.322-env-dont-show-pre-stage-tmux-120-1"
+          ]
+        }
+      ]
+    }
+  },
   "screens": {
     "claude-2.1.302-default-permission-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -100,6 +1584,7 @@
       ]
     },
     "claude-2.1.302-allow-pre-stage-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -196,6 +1681,7 @@
       ]
     },
     "claude-2.1.302-deny-pre-stage-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -292,6 +1778,7 @@
       ]
     },
     "claude-2.1.302-idle-composer-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -396,6 +1883,7 @@
       ]
     },
     "claude-2.1.302-wrapped-permission-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 52,
       "alternate_screen": true,
@@ -492,6 +1980,7 @@
       ]
     },
     "claude-2.1.302-wrapped-allow-pre-stage-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 52,
       "alternate_screen": true,
@@ -588,6 +2077,7 @@
       ]
     },
     "claude-2.1.302-wrapped-deny-pre-stage-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 52,
       "alternate_screen": true,
@@ -684,6 +2174,7 @@
       ]
     },
     "claude-2.1.302-boxed-permission-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 89,
       "alternate_screen": true,
@@ -780,6 +2271,7 @@
       ]
     },
     "claude-2.1.302-boxed-single-row-permission-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -876,6 +2368,7 @@
       ]
     },
     "claude-2.1.302-auto-approved-done-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -940,6 +2433,7 @@
       ]
     },
     "claude-2.1.302-auto-approved-running-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1004,6 +2498,7 @@
       ]
     },
     "claude-2.1.302-auto-ask-allow-continuation-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1051,6 +2546,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-ask-deny-continuation-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 90,
       "alternate_screen": true,
@@ -1098,6 +2594,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-ask-hiding-refusal-notice-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1145,6 +2642,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-ask-hiding-refusal-notice-resized-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 90,
       "alternate_screen": true,
@@ -1192,6 +2690,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-ask-permission-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1239,6 +2738,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-fresh-first-launch-notice-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -1303,6 +2803,7 @@
       ]
     },
     "claude-2.1.302-auto-fresh-onboarding-theme-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -1350,6 +2851,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-idle-composer-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1414,6 +2916,7 @@
       ]
     },
     "claude-2.1.302-auto-model-switch-question-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1482,6 +2985,7 @@
       ]
     },
     "claude-2.1.302-auto-quote-false-positive-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1529,6 +3033,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-refusal-notice-expired-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1576,6 +3081,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-refusal-notice-idle-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1623,6 +3129,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-refusal-notice-working-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1670,6 +3177,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-transcript-viewer-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1726,6 +3234,7 @@
       ]
     },
     "claude-2.1.302-auto-two-refusals-notice-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1773,6 +3282,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-unavailable-manual-footer-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1833,6 +3343,7 @@
       ]
     },
     "claude-2.1.302-auto-unavailable-notice-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1893,6 +3404,7 @@
       ]
     },
     "claude-2.1.302-auto-verbose-quote-false-positive-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1940,6 +3452,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-verbose-refusal-above-form-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1987,6 +3500,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-verbose-refusal-hidden-by-form-1": {
+      "native_version": "2.1.302",
       "rows": 20,
       "cols": 60,
       "alternate_screen": true,
@@ -2018,6 +3532,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-verbose-refusal-restored-idle-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2065,6 +3580,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-verbose-refusal-rewrapped-form-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 60,
       "alternate_screen": true,
@@ -2112,6 +3628,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-verbose-refusal-rewrapped-idle-1": {
+      "native_version": "2.1.302",
       "rows": 20,
       "cols": 60,
       "alternate_screen": true,
@@ -2143,6 +3660,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-verbose-transcript-viewer-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2190,6 +3708,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-verbose-two-refusals-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2237,6 +3756,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-trust-dialog-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -2284,6 +3804,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-access-allow-continuation-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2331,6 +3852,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-access-allow-pre-stage-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2378,6 +3900,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-access-allow-running-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2425,6 +3948,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-access-deny-continuation-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2472,6 +3996,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-access-deny-pre-stage-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2519,6 +4044,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-access-permission-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2566,6 +4092,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-auto-env-setup-cancelled-idle-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2626,6 +4153,7 @@
       ]
     },
     "claude-2.1.302-auto-env-setup-offer-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2686,6 +4214,7 @@
       ]
     },
     "claude-2.1.302-auto-env-setup-wizard-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2733,6 +4262,7 @@
       "masked_rows": []
     },
     "claude-2.1.302-default-manual-idle-1": {
+      "native_version": "2.1.302",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2793,6 +4323,7 @@
       ]
     },
     "claude-2.1.308-auto-tip-padded-question-1": {
+      "native_version": "2.1.308",
       "rows": 35,
       "cols": 200,
       "alternate_screen": true,
@@ -2848,6 +4379,7 @@
       ]
     },
     "claude-2.1.309-read-outside-permission-1": {
+      "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -2944,6 +4476,7 @@
       ]
     },
     "claude-2.1.309-read-outside-long-path-1": {
+      "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3040,6 +4573,7 @@
       ]
     },
     "claude-2.1.309-read-outside-allow-pre-stage-1": {
+      "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3136,6 +4670,7 @@
       ]
     },
     "claude-2.1.309-read-outside-deny-pre-stage-1": {
+      "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3232,6 +4767,7 @@
       ]
     },
     "claude-2.1.309-read-outside-allow-continuation-1": {
+      "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3328,6 +4864,7 @@
       ]
     },
     "claude-2.1.309-read-outside-deny-continuation-1": {
+      "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3424,6 +4961,7 @@
       ]
     },
     "claude-2.1.309-edit-outside-permission-1": {
+      "native_version": "2.1.309",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3520,6 +5058,7 @@
       ]
     },
     "claude-2.1.312-auto-default-nudge-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3616,6 +5155,7 @@
       ]
     },
     "claude-2.1.312-auto-default-accept-edits-nudge-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3712,6 +5252,7 @@
       ]
     },
     "claude-2.1.312-auto-default-decline-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3808,6 +5349,7 @@
       ]
     },
     "claude-2.1.312-auto-default-decline-post-stage-1-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3904,6 +5446,7 @@
       ]
     },
     "claude-2.1.312-auto-default-decline-continuation-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4000,6 +5543,7 @@
       ]
     },
     "claude-2.1.312-question-pending-notice-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4096,6 +5640,7 @@
       ]
     },
     "claude-2.1.312-question-pending-after-clear-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4192,6 +5737,7 @@
       ]
     },
     "claude-2.1.312-question-pending-send-notice-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4288,6 +5834,7 @@
       ]
     },
     "claude-2.1.312-question-pending-after-send-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4384,6 +5931,7 @@
       ]
     },
     "claude-2.1.312-question-pending-after-send-idle-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4480,6 +6028,7 @@
       ]
     },
     "claude-2.1.312-auto-env-setup-offer-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4576,6 +6125,7 @@
       ]
     },
     "claude-2.1.312-auto-env-setup-not-now-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4672,6 +6222,7 @@
       ]
     },
     "claude-2.1.312-auto-env-setup-not-now-continuation-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4768,6 +6319,7 @@
       ]
     },
     "claude-2.1.312-auto-env-setup-dont-show-again-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4864,6 +6416,7 @@
       ]
     },
     "claude-2.1.312-auto-env-setup-dont-show-again-continuation-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4960,6 +6513,7 @@
       ]
     },
     "claude-2.1.312-primary-auto-default-nudge-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -5024,6 +6578,7 @@
       ]
     },
     "claude-2.1.312-primary-default-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -5088,6 +6643,7 @@
       ]
     },
     "claude-2.1.312-primary-closed-form-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -5152,6 +6708,7 @@
       ]
     },
     "claude-2.1.312-primary-idle-composer-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -5216,6 +6773,7 @@
       ]
     },
     "claude-2.1.312-primary-resized-narrow-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 100,
       "alternate_screen": false,
@@ -5280,6 +6838,7 @@
       ]
     },
     "claude-2.1.312-primary-resized-idle-composer-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -5344,6 +6903,7 @@
       ]
     },
     "claude-2.1.312-read-file-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -5440,6 +7000,7 @@
       ]
     },
     "claude-2.1.312-read-file-allow-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -5536,6 +7097,7 @@
       ]
     },
     "claude-2.1.312-read-file-deny-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -5632,6 +7194,7 @@
       ]
     },
     "claude-2.1.312-edit-file-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -5728,6 +7291,7 @@
       ]
     },
     "claude-2.1.312-edit-file-allow-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -5824,6 +7388,7 @@
       ]
     },
     "claude-2.1.312-edit-file-deny-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -5920,6 +7485,7 @@
       ]
     },
     "claude-2.1.312-create-file-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -6016,6 +7582,7 @@
       ]
     },
     "claude-2.1.312-create-file-allow-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -6112,6 +7679,7 @@
       ]
     },
     "claude-2.1.312-create-file-deny-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -6208,6 +7776,7 @@
       ]
     },
     "claude-2.1.312-bash-no-tip-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -6304,6 +7873,7 @@
       ]
     },
     "claude-2.1.312-bash-no-tip-allow-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -6400,6 +7970,7 @@
       ]
     },
     "claude-2.1.312-bash-no-tip-deny-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -6496,6 +8067,7 @@
       ]
     },
     "claude-2.1.312-bash-no-tip-access-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -6592,6 +8164,7 @@
       ]
     },
     "claude-2.1.312-panel-default-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 166,
       "alternate_screen": true,
@@ -6915,6 +8488,7 @@
       ]
     },
     "claude-2.1.312-panel-default-permission-144-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 144,
       "alternate_screen": true,
@@ -7229,6 +8803,7 @@
       ]
     },
     "claude-2.1.312-panel-default-allow-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 166,
       "alternate_screen": true,
@@ -7552,6 +9127,7 @@
       ]
     },
     "claude-2.1.312-read-file-batched-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -7648,6 +9224,7 @@
       ]
     },
     "claude-2.1.312-read-file-batched-allow-post-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -7744,6 +9321,7 @@
       ]
     },
     "claude-2.1.312-read-file-batched-deny-pre-stage-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -7840,6 +9418,7 @@
       ]
     },
     "claude-2.1.312-bash-batched-permission-1": {
+      "native_version": "2.1.312",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -7936,6 +9515,7 @@
       ]
     },
     "claude-2.1.319-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-42": {
+      "native_version": "2.1.319",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7991,6 +9571,7 @@
       ]
     },
     "claude-2.1.319-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1": {
+      "native_version": "2.1.319",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8047,6 +9628,14 @@
       ]
     },
     "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68": {
+      "native_version": "2.1.319",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8098,6 +9687,14 @@
       "masked_rows": []
     },
     "claude-2.1.319-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68": {
+      "native_version": "2.1.319",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8148,6 +9745,14 @@
       "masked_rows": []
     },
     "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33": {
+      "native_version": "2.1.319",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8204,6 +9809,14 @@
       ]
     },
     "claude-2.1.319-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33": {
+      "native_version": "2.1.319",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8259,6 +9872,7 @@
       ]
     },
     "claude-2.1.322-suggestion-herdr-094-1": {
+      "native_version": "2.1.322",
       "rows": 38,
       "cols": 94,
       "alternate_screen": true,
@@ -8462,6 +10076,7 @@
       ]
     },
     "claude-2.1.322-bash-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -8763,6 +10378,7 @@
       ]
     },
     "claude-2.1.322-bash-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -9004,6 +10620,7 @@
       ]
     },
     "claude-2.1.322-bash-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -9305,6 +10922,7 @@
       ]
     },
     "claude-2.1.322-bash-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -9556,6 +11174,7 @@
       ]
     },
     "claude-2.1.322-no-tip-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -9837,6 +11456,7 @@
       ]
     },
     "claude-2.1.322-no-tip-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -10078,6 +11698,7 @@
       ]
     },
     "claude-2.1.322-no-tip-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -10359,6 +11980,7 @@
       ]
     },
     "claude-2.1.322-no-tip-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -10610,6 +12232,7 @@
       ]
     },
     "claude-2.1.322-tip-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -10911,6 +12534,7 @@
       ]
     },
     "claude-2.1.322-tip-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -11152,6 +12776,7 @@
       ]
     },
     "claude-2.1.322-tip-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -11453,6 +13078,7 @@
       ]
     },
     "claude-2.1.322-tip-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -11714,6 +13340,7 @@
       ]
     },
     "claude-2.1.322-ask-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -12002,6 +13629,7 @@
       ]
     },
     "claude-2.1.322-ask-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -12253,6 +13881,7 @@
       ]
     },
     "claude-2.1.322-ask-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -12541,6 +14170,7 @@
       ]
     },
     "claude-2.1.322-ask-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -12802,6 +14432,7 @@
       ]
     },
     "claude-2.1.322-read-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -13073,6 +14704,7 @@
       ]
     },
     "claude-2.1.322-read-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -13314,6 +14946,7 @@
       ]
     },
     "claude-2.1.322-read-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -13585,6 +15218,7 @@
       ]
     },
     "claude-2.1.322-read-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -13836,6 +15470,7 @@
       ]
     },
     "claude-2.1.322-readout-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -14177,6 +15812,7 @@
       ]
     },
     "claude-2.1.322-readout-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -14448,6 +16084,7 @@
       ]
     },
     "claude-2.1.322-readout-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -14789,6 +16426,7 @@
       ]
     },
     "claude-2.1.322-readout-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -15060,6 +16698,7 @@
       ]
     },
     "claude-2.1.322-edit-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -15485,6 +17124,7 @@
       ]
     },
     "claude-2.1.322-edit-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -15864,6 +17504,7 @@
       ]
     },
     "claude-2.1.322-edit-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -16243,6 +17884,7 @@
       ]
     },
     "claude-2.1.322-edit-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -16642,6 +18284,7 @@
       ]
     },
     "claude-2.1.322-create-deny-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -16933,6 +18576,7 @@
       ]
     },
     "claude-2.1.322-create-deny-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -17184,6 +18828,7 @@
       ]
     },
     "claude-2.1.322-create-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -17475,6 +19120,7 @@
       ]
     },
     "claude-2.1.322-create-allow-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -17766,6 +19412,7 @@
       ]
     },
     "claude-2.1.322-nudge-decline-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -17888,6 +19535,7 @@
       ]
     },
     "claude-2.1.322-nudge-decline-post-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -18037,6 +19685,7 @@
       ]
     },
     "claude-2.1.322-env-not-now-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -18300,6 +19949,7 @@
       ]
     },
     "claude-2.1.322-env-dont-show-pre-stage-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -18563,6 +20213,7 @@
       ]
     },
     "claude-2.1.322-queued-hint-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -18710,6 +20361,14 @@
       ]
     },
     "claude-2.1.322-composer-prompt-plain-41-literal-tmux-120-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -18944,6 +20603,14 @@
       ]
     },
     "claude-2.1.322-composer-prompt-plain-41-post-submit-tmux-120-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -19257,6 +20924,26 @@
       ]
     },
     "claude-2.1.322-composer-prompt-plain-4000-post-submit-tmux-120-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -19980,6 +21667,14 @@
       ]
     },
     "claude-2.1.322-composer-exec-plain-41-literal-tmux-120-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -20684,6 +22379,14 @@
       ]
     },
     "claude-2.1.322-composer-exec-plain-41-post-submit-tmux-120-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -21370,6 +23073,26 @@
       ]
     },
     "claude-2.1.322-composer-exec-plain-4000-post-submit-tmux-120-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -22111,6 +23834,14 @@
       ]
     },
     "claude-2.1.322-composer-prompt-plain-41-literal-herdr-092-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 36,
       "cols": 92,
       "alternate_screen": true,
@@ -22376,6 +24107,14 @@
       ]
     },
     "claude-2.1.322-composer-prompt-plain-41-post-submit-herdr-092-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 92,
       "alternate_screen": true,
@@ -22772,6 +24511,26 @@
       ]
     },
     "claude-2.1.322-composer-prompt-plain-4000-post-submit-herdr-092-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 92,
       "alternate_screen": true,
@@ -23599,6 +25358,14 @@
       ]
     },
     "claude-2.1.322-composer-exec-plain-41-literal-herdr-092-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 36,
       "cols": 92,
       "alternate_screen": true,
@@ -24367,6 +26134,14 @@
       ]
     },
     "claude-2.1.322-composer-exec-plain-41-post-submit-herdr-092-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 92,
       "alternate_screen": true,
@@ -25113,6 +26888,26 @@
       ]
     },
     "claude-2.1.322-composer-exec-plain-4000-post-submit-herdr-092-1": {
+      "native_version": "2.1.322",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 92,
       "alternate_screen": true,
@@ -25926,6 +27721,7 @@
       ]
     },
     "claude-2.1.322-ask-single-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -26166,6 +27962,7 @@
       ]
     },
     "claude-2.1.322-ask-single-closed-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -26399,6 +28196,7 @@
       ]
     },
     "claude-2.1.322-ask-tabs-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -26668,6 +28466,7 @@
       ]
     },
     "claude-2.1.322-ask-tabs-tmux-120-2": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -26927,6 +28726,7 @@
       ]
     },
     "claude-2.1.322-ask-multi-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -27197,6 +28997,7 @@
       ]
     },
     "claude-2.1.322-ask-multi-tmux-120-2": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -27467,6 +29268,7 @@
       ]
     },
     "claude-2.1.322-ask-multi-tmux-120-3": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -27747,6 +29549,7 @@
       ]
     },
     "claude-2.1.322-ask-review-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -28006,6 +29809,7 @@
       ]
     },
     "claude-2.1.322-ask-review-tmux-120-2": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -28275,6 +30079,7 @@
       ]
     },
     "claude-2.1.322-ask-review-narrow-tmux-060-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 60,
       "alternate_screen": true,
@@ -28620,6 +30425,7 @@
       ]
     },
     "claude-2.1.322-ask-review-narrow-tmux-060-2": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 60,
       "alternate_screen": true,
@@ -28965,6 +30771,7 @@
       ]
     },
     "claude-2.1.322-ask-review-narrow-tmux-040-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 40,
       "alternate_screen": true,
@@ -29415,6 +31222,7 @@
       ]
     },
     "claude-2.1.322-ask-review-narrow-tmux-040-2": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 40,
       "alternate_screen": true,
@@ -29855,6 +31663,7 @@
       ]
     },
     "claude-2.1.322-ask-typing-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -30092,6 +31901,7 @@
       ]
     },
     "claude-2.1.322-ask-typing-tmux-120-2": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -30322,6 +32132,7 @@
       ]
     },
     "claude-2.1.322-ask-narrow-tmux-060-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 60,
       "alternate_screen": true,
@@ -30619,6 +32430,7 @@
       ]
     },
     "claude-2.1.322-ask-narrow-tmux-040-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 40,
       "alternate_screen": true,
@@ -31002,6 +32814,7 @@
       ]
     },
     "claude-2.1.322-ask-quoted-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -31314,6 +33127,7 @@
       ]
     },
     "claude-2.1.322-ask-pending-tmux-120-1": {
+      "native_version": "2.1.322",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -31554,6 +33368,7 @@
       ]
     },
     "claude-2.1.322-ask-single-herdr-359-1": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -31832,6 +33647,7 @@
       ]
     },
     "claude-2.1.322-ask-single-closed-herdr-359-1": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -32099,6 +33915,7 @@
       ]
     },
     "claude-2.1.322-ask-tabs-herdr-359-1": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -32412,6 +34229,7 @@
       ]
     },
     "claude-2.1.322-ask-tabs-herdr-359-2": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -32713,6 +34531,7 @@
       ]
     },
     "claude-2.1.322-ask-multi-herdr-359-1": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -33027,6 +34846,7 @@
       ]
     },
     "claude-2.1.322-ask-multi-herdr-359-2": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -33341,6 +35161,7 @@
       ]
     },
     "claude-2.1.322-ask-multi-herdr-359-3": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -33667,6 +35488,7 @@
       ]
     },
     "claude-2.1.322-ask-review-herdr-359-1": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,
@@ -33968,6 +35790,7 @@
       ]
     },
     "claude-2.1.322-ask-review-herdr-359-2": {
+      "native_version": "2.1.322",
       "rows": 84,
       "cols": 359,
       "alternate_screen": true,

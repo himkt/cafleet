@@ -1,9 +1,364 @@
 {
   "schema_version": 1,
   "backend": "pi",
-  "provenance": "native",
+  "profile": {
+    "rules": [
+      {
+        "id": "pi-gate-approval",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^ CAFleet member gate: allow this bash command\\? *$",
+          "end_pattern": "^ ↑↓ navigate  enter select  escape/ctrl\\+c cancel *$",
+          "max_rows": 24,
+          "cursor": "any"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^ CAFleet member gate: allow this bash command\\? *$"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^ CAFleet member gate: allow this bash command\\? *\\n *\\n \\$ (?P<operation>[^\\n]*?) *\\n *\\n (?:→ |  )Allow once *$"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ → (?:Allow once|Deny) *$",
+            "focus_style": "marker"
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ (?:→ |  )(?P<label>Allow once) *$"
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "^ (?:→ |  )(?P<label>Deny) *$"
+          },
+          {
+            "id": "footer",
+            "scope": "line",
+            "pattern": "^ ↑↓ navigate  enter select  escape/ctrl\\+c cancel *$"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation"
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "pi-idle-composer",
+        "priority": 50,
+        "observation": "composer_empty",
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^─+ *$",
+          "end_pattern": "^─+ *$",
+          "max_rows": 3,
+          "cursor": "inside"
+        },
+        "matchers": [
+          {
+            "id": "editor",
+            "scope": "region",
+            "pattern": "\\A─+ *\\n *\\n─+ *\\z"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
+      },
+      {
+        "id": "pi-working-composer",
+        "priority": 50,
+        "observation": "composer_empty",
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+ *$",
+          "end_pattern": "^─+ *$",
+          "max_rows": 3,
+          "cursor": "inside"
+        },
+        "matchers": [
+          {
+            "id": "editor",
+            "scope": "region",
+            "pattern": "\\A── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+ *\\n *\\n─+ *\\z"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
+      }
+    ],
+    "capabilities": {
+      "detection": {
+        "rule_ids": [
+          "pi-gate-approval"
+        ],
+        "fixture_ids": [
+          "pi-1.5.0-allow-pre-stage-tmux-120-1",
+          "pi-1.5.0-deny-pre-stage-1-tmux-120-1",
+          "pi-1.5.0-deny-pre-stage-2-tmux-120-1",
+          "pi-1.5.0-allow-pre-stage-tmux-049-1",
+          "pi-1.5.0-deny-pre-stage-1-tmux-049-1",
+          "pi-1.5.0-deny-pre-stage-2-tmux-049-1",
+          "pi-1.5.0-allow-pre-stage-herdr-120-1",
+          "pi-1.5.0-deny-pre-stage-1-herdr-120-1",
+          "pi-1.5.0-deny-pre-stage-2-herdr-120-1",
+          "pi-1.5.0-allow-pre-stage-herdr-049-1",
+          "pi-1.5.0-deny-pre-stage-1-herdr-049-1",
+          "pi-1.5.0-deny-pre-stage-2-herdr-049-1"
+        ]
+      },
+      "composer": {
+        "rule_ids": [
+          "pi-idle-composer",
+          "pi-working-composer"
+        ],
+        "fixture_ids": [
+          "pi-1.5.0-idle-composer-tmux-120-1",
+          "pi-1.5.0-exec-empty-composer-tmux-120-1",
+          "pi-1.5.0-allow-continuation-tmux-120-1",
+          "pi-1.5.0-deny-continuation-tmux-120-1",
+          "pi-1.5.0-exec-post-submit-tmux-120-1",
+          "pi-1.5.0-idle-composer-tmux-049-1",
+          "pi-1.5.0-exec-empty-composer-tmux-049-1",
+          "pi-1.5.0-allow-continuation-tmux-049-1",
+          "pi-1.5.0-deny-continuation-tmux-049-1",
+          "pi-1.5.0-exec-post-submit-tmux-049-1",
+          "pi-1.5.0-idle-composer-herdr-120-1",
+          "pi-1.5.0-exec-empty-composer-herdr-120-1",
+          "pi-1.5.0-allow-continuation-herdr-120-1",
+          "pi-1.5.0-deny-continuation-herdr-120-1",
+          "pi-1.5.0-exec-post-submit-herdr-120-1",
+          "pi-1.5.0-idle-composer-herdr-049-1",
+          "pi-1.5.0-exec-empty-composer-herdr-049-1",
+          "pi-1.5.0-allow-continuation-herdr-049-1",
+          "pi-1.5.0-deny-continuation-herdr-049-1",
+          "pi-1.5.0-exec-post-submit-herdr-049-1",
+          "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-herdr-119-55",
+          "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-tmux-120-55",
+          "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-herdr-119-49",
+          "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-tmux-120-49",
+          "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-67",
+          "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-67",
+          "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-herdr-119-43",
+          "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-43",
+          "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-herdr-119-6",
+          "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-tmux-120-6",
+          "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61",
+          "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61",
+          "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-70",
+          "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-70",
+          "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1",
+          "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1",
+          "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-herdr-119-19",
+          "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-tmux-120-19",
+          "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-herdr-119-13",
+          "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-tmux-120-13",
+          "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-31",
+          "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-31",
+          "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7",
+          "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7",
+          "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
+          "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
+          "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
+          "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+          "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
+          "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+          "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+          "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
+        ],
+        "submission": {
+          "prompt": {
+            "prefix_hex": "",
+            "submit_hex": "0d",
+            "fixture_ids": [
+              "pi-1.5.0-idle-composer-tmux-120-1",
+              "pi-1.5.0-prompt-typed-literal-tmux-120-1",
+              "pi-1.5.0-prompt-post-submit-tmux-120-1",
+              "pi-1.5.0-idle-composer-tmux-049-1",
+              "pi-1.5.0-prompt-typed-literal-tmux-049-1",
+              "pi-1.5.0-prompt-post-submit-tmux-049-1",
+              "pi-1.5.0-idle-composer-herdr-120-1",
+              "pi-1.5.0-prompt-typed-literal-herdr-120-1",
+              "pi-1.5.0-prompt-post-submit-herdr-120-1",
+              "pi-1.5.0-idle-composer-herdr-049-1",
+              "pi-1.5.0-prompt-typed-literal-herdr-049-1",
+              "pi-1.5.0-prompt-post-submit-herdr-049-1",
+              "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1",
+              "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1",
+              "pi-1.5.0-composer-prompt-paste-2049-literal-tapped-v2-herdr-119-15",
+              "pi-1.5.0-composer-prompt-paste-2049-literal-tapped-v2-tmux-120-15",
+              "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-herdr-119-19",
+              "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-tmux-120-19",
+              "pi-1.5.0-composer-prompt-paste-40-literal-tapped-v2-herdr-119-9",
+              "pi-1.5.0-composer-prompt-paste-40-literal-tapped-v2-tmux-120-9",
+              "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-herdr-119-13",
+              "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-tmux-120-13",
+              "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-herdr-119-27",
+              "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-tmux-120-27",
+              "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-31",
+              "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-31",
+              "pi-1.5.0-composer-prompt-plain-40-literal-tapped-v2-herdr-119-3",
+              "pi-1.5.0-composer-prompt-plain-40-literal-tapped-v2-tmux-120-3",
+              "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7",
+              "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7",
+              "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-literal-tapped-v2-herdr-119-21",
+              "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-literal-tapped-v2-tmux-120-21",
+              "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25",
+              "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25",
+              "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
+              "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
+              "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
+              "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
+            ],
+            "literal_framing": "plain",
+            "plain_literal_limit": null
+          },
+          "exec": {
+            "prefix_hex": "2120",
+            "submit_hex": "0d",
+            "fixture_ids": [
+              "pi-1.5.0-exec-empty-composer-tmux-120-1",
+              "pi-1.5.0-exec-typed-literal-tmux-120-1",
+              "pi-1.5.0-exec-post-submit-tmux-120-1",
+              "pi-1.5.0-exec-empty-composer-tmux-049-1",
+              "pi-1.5.0-exec-typed-literal-tmux-049-1",
+              "pi-1.5.0-exec-post-submit-tmux-049-1",
+              "pi-1.5.0-exec-empty-composer-herdr-120-1",
+              "pi-1.5.0-exec-typed-literal-herdr-120-1",
+              "pi-1.5.0-exec-post-submit-herdr-120-1",
+              "pi-1.5.0-exec-empty-composer-herdr-049-1",
+              "pi-1.5.0-exec-typed-literal-herdr-049-1",
+              "pi-1.5.0-exec-post-submit-herdr-049-1",
+              "pi-1.5.0-composer-exec-final-mode-2004-tapped-v2-herdr-119-74",
+              "pi-1.5.0-composer-exec-final-mode-2004-tapped-v2-tmux-120-74",
+              "pi-1.5.0-composer-exec-paste-2049-args-literal-tapped-v2-herdr-119-51",
+              "pi-1.5.0-composer-exec-paste-2049-args-literal-tapped-v2-tmux-120-51",
+              "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-herdr-119-55",
+              "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-tmux-120-55",
+              "pi-1.5.0-composer-exec-paste-40-args-literal-tapped-v2-herdr-119-45",
+              "pi-1.5.0-composer-exec-paste-40-args-literal-tapped-v2-tmux-120-45",
+              "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-herdr-119-49",
+              "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-tmux-120-49",
+              "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-63",
+              "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-tmux-120-63",
+              "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-67",
+              "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-67",
+              "pi-1.5.0-composer-exec-plain-40-args-literal-tapped-v2-herdr-119-39",
+              "pi-1.5.0-composer-exec-plain-40-args-literal-tapped-v2-tmux-120-39",
+              "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-herdr-119-43",
+              "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-43",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-literal-tapped-v2-herdr-119-2",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-literal-tapped-v2-tmux-120-2",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-herdr-119-6",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-tmux-120-6",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-57",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-tmux-120-57",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61",
+              "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61",
+              "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-70",
+              "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-70",
+              "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
+              "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
+            ],
+            "literal_framing": "plain",
+            "plain_literal_limit": null
+          }
+        }
+      },
+      "answers": [
+        {
+          "decision": "allow",
+          "request_rule_id": "pi-gate-approval",
+          "answer_rule_id": "pi-gate-allow-once",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "pi-gate-approval",
+              "required_choice_id": "allow-once",
+              "required_focus_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "pi-1.5.0-allow-pre-stage-tmux-120-1",
+            "pi-1.5.0-allow-pre-stage-tmux-049-1",
+            "pi-1.5.0-allow-pre-stage-herdr-120-1",
+            "pi-1.5.0-allow-pre-stage-herdr-049-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "pi-gate-approval",
+          "answer_rule_id": "pi-gate-deny-once",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "6a",
+              "required_rule_id": "pi-gate-approval",
+              "required_choice_id": "deny-once",
+              "required_focus_choice_id": "allow-once"
+            },
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "pi-gate-approval",
+              "required_choice_id": "deny-once",
+              "required_focus_choice_id": "deny-once"
+            }
+          ],
+          "fixture_ids": [
+            "pi-1.5.0-deny-pre-stage-1-tmux-120-1",
+            "pi-1.5.0-deny-pre-stage-2-tmux-120-1",
+            "pi-1.5.0-deny-pre-stage-1-tmux-049-1",
+            "pi-1.5.0-deny-pre-stage-2-tmux-049-1",
+            "pi-1.5.0-deny-pre-stage-1-herdr-120-1",
+            "pi-1.5.0-deny-pre-stage-2-herdr-120-1",
+            "pi-1.5.0-deny-pre-stage-1-herdr-049-1",
+            "pi-1.5.0-deny-pre-stage-2-herdr-049-1"
+          ]
+        }
+      ]
+    }
+  },
   "screens": {
     "pi-1.5.0-allow-pre-stage-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -136,6 +491,7 @@
       ]
     },
     "pi-1.5.0-allow-continuation-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -268,6 +624,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-1-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -400,6 +757,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-2-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -532,6 +890,7 @@
       ]
     },
     "pi-1.5.0-deny-continuation-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -664,6 +1023,7 @@
       ]
     },
     "pi-1.5.0-idle-composer-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -796,6 +1156,7 @@
       ]
     },
     "pi-1.5.0-prompt-typed-literal-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -928,6 +1289,7 @@
       ]
     },
     "pi-1.5.0-prompt-post-submit-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1060,6 +1422,7 @@
       ]
     },
     "pi-1.5.0-exec-empty-composer-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1192,6 +1555,7 @@
       ]
     },
     "pi-1.5.0-exec-typed-literal-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1324,6 +1688,7 @@
       ]
     },
     "pi-1.5.0-exec-post-submit-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -1456,6 +1821,7 @@
       ]
     },
     "pi-1.5.0-allow-pre-stage-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -1588,6 +1954,7 @@
       ]
     },
     "pi-1.5.0-allow-continuation-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -1720,6 +2087,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-1-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -1852,6 +2220,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-2-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -1984,6 +2353,7 @@
       ]
     },
     "pi-1.5.0-deny-continuation-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -2116,6 +2486,7 @@
       ]
     },
     "pi-1.5.0-idle-composer-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -2248,6 +2619,7 @@
       ]
     },
     "pi-1.5.0-prompt-typed-literal-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -2380,6 +2752,7 @@
       ]
     },
     "pi-1.5.0-prompt-post-submit-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -2512,6 +2885,7 @@
       ]
     },
     "pi-1.5.0-exec-empty-composer-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -2644,6 +3018,7 @@
       ]
     },
     "pi-1.5.0-exec-typed-literal-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -2776,6 +3151,7 @@
       ]
     },
     "pi-1.5.0-exec-post-submit-tmux-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -2908,6 +3284,7 @@
       ]
     },
     "pi-1.5.0-allow-pre-stage-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3040,6 +3417,7 @@
       ]
     },
     "pi-1.5.0-allow-continuation-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3172,6 +3550,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-1-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3304,6 +3683,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-2-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3436,6 +3816,7 @@
       ]
     },
     "pi-1.5.0-deny-continuation-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3568,6 +3949,7 @@
       ]
     },
     "pi-1.5.0-idle-composer-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3700,6 +4082,7 @@
       ]
     },
     "pi-1.5.0-prompt-typed-literal-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3832,6 +4215,7 @@
       ]
     },
     "pi-1.5.0-prompt-post-submit-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -3964,6 +4348,7 @@
       ]
     },
     "pi-1.5.0-exec-empty-composer-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4096,6 +4481,7 @@
       ]
     },
     "pi-1.5.0-exec-typed-literal-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4228,6 +4614,7 @@
       ]
     },
     "pi-1.5.0-exec-post-submit-herdr-120-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 120,
       "alternate_screen": true,
@@ -4360,6 +4747,7 @@
       ]
     },
     "pi-1.5.0-allow-pre-stage-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -4492,6 +4880,7 @@
       ]
     },
     "pi-1.5.0-allow-continuation-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -4624,6 +5013,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-1-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -4756,6 +5146,7 @@
       ]
     },
     "pi-1.5.0-deny-pre-stage-2-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -4888,6 +5279,7 @@
       ]
     },
     "pi-1.5.0-deny-continuation-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -5020,6 +5412,7 @@
       ]
     },
     "pi-1.5.0-idle-composer-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -5152,6 +5545,7 @@
       ]
     },
     "pi-1.5.0-prompt-typed-literal-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -5284,6 +5678,7 @@
       ]
     },
     "pi-1.5.0-prompt-post-submit-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -5416,6 +5811,7 @@
       ]
     },
     "pi-1.5.0-exec-empty-composer-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -5548,6 +5944,7 @@
       ]
     },
     "pi-1.5.0-exec-typed-literal-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -5680,6 +6077,7 @@
       ]
     },
     "pi-1.5.0-exec-post-submit-herdr-049-1": {
+      "native_version": "1.5.0",
       "rows": 36,
       "cols": 49,
       "alternate_screen": true,
@@ -5812,6 +6210,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-final-mode-2004-tapped-v2-herdr-119-74": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -5868,6 +6267,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-final-mode-2004-tapped-v2-tmux-120-74": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -5923,6 +6323,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-2049-args-literal-tapped-v2-herdr-119-51": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -5979,6 +6380,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-2049-args-literal-tapped-v2-tmux-120-51": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6034,6 +6436,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-herdr-119-55": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6090,6 +6493,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-tmux-120-55": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6145,6 +6549,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-40-args-literal-tapped-v2-herdr-119-45": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6201,6 +6606,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-40-args-literal-tapped-v2-tmux-120-45": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6256,6 +6662,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-herdr-119-49": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6312,6 +6719,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-tmux-120-49": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6367,6 +6775,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-63": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6423,6 +6832,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-tmux-120-63": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6478,6 +6888,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-67": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6534,6 +6945,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-67": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6589,6 +7001,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-40-args-literal-tapped-v2-herdr-119-39": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6645,6 +7058,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-40-args-literal-tapped-v2-tmux-120-39": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6700,6 +7114,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-herdr-119-43": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6756,6 +7171,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-43": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6811,6 +7227,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-literal-tapped-v2-herdr-119-2": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6867,6 +7284,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-literal-tapped-v2-tmux-120-2": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -6922,6 +7340,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-herdr-119-6": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -6978,6 +7397,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-tmux-120-6": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7033,6 +7453,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-57": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7089,6 +7510,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-tmux-120-57": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7144,6 +7566,26 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7200,6 +7642,26 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7255,6 +7717,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-70": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7311,6 +7774,7 @@
       ]
     },
     "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-70": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7366,6 +7830,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7422,6 +7887,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7477,6 +7943,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-2049-literal-tapped-v2-herdr-119-15": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7533,6 +8000,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-2049-literal-tapped-v2-tmux-120-15": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7588,6 +8056,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-herdr-119-19": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7644,6 +8113,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-tmux-120-19": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7699,6 +8169,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-40-literal-tapped-v2-herdr-119-9": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7755,6 +8226,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-40-literal-tapped-v2-tmux-120-9": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7810,6 +8282,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-herdr-119-13": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7866,6 +8339,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-tmux-120-13": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -7921,6 +8395,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-herdr-119-27": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -7977,6 +8452,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-tmux-120-27": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8032,6 +8508,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-31": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8088,6 +8565,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-31": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8143,6 +8621,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-40-literal-tapped-v2-herdr-119-3": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8199,6 +8678,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-40-literal-tapped-v2-tmux-120-3": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8254,6 +8734,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8310,6 +8791,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8365,6 +8847,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-literal-tapped-v2-herdr-119-21": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8421,6 +8904,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-literal-tapped-v2-tmux-120-21": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8476,6 +8960,26 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8532,6 +9036,26 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8587,6 +9111,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34": {
+      "native_version": "1.5.0",
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8643,6 +9168,7 @@
       ]
     },
     "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34": {
+      "native_version": "1.5.0",
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8698,6 +9224,14 @@
       ]
     },
     "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8754,6 +9288,14 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": true,
@@ -8810,6 +9352,14 @@
       ]
     },
     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,
@@ -8865,6 +9415,14 @@
       ]
     },
     "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2": {
+      "native_version": "1.5.0",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": true,

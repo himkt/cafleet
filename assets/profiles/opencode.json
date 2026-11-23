@@ -1,9 +1,510 @@
 {
   "schema_version": 1,
   "backend": "opencode",
-  "provenance": "native",
+  "profile": {
+    "rules": [
+      {
+        "id": "opencode-shell-permission",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^  △ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "  ⇆ select  enter confirm  esc reject[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "any"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^  △ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "shell",
+            "scope": "line",
+            "pattern": "^   # Shell command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]|$)"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^  \\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n  [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)(?:\\n *(?:█ *)?)*\\n   Allow once   "
+          },
+          {
+            "id": "unclipped",
+            "scope": "region",
+            "pattern": "(?m)^   # Shell command +█ *\\n(?: *█ *\\n)*  \\$ [^\\n]*█ *(?:\\n  [^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n   Allow once   "
+          },
+          {
+            "id": "controls",
+            "scope": "region",
+            "pattern": "(?m)^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject *| *(?:\\n *)*\\n  ⇆ select  enter confirm  esc reject *)\\z"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^   Allow once   (?:Always allow   )?Reject(?: +⇆ select  enter confirm  esc reject)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "focus_style": "background"
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^   (?P<label>Allow once)   "
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_margin": "  ",
+            "margin_rows": "continuation",
+            "row_trailer": "█"
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "opencode-reject-reason",
+        "priority": 100,
+        "observation": "permission_continuation",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^  △ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "  enter confirm  esc cancel[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "any"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^  △ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "empty_reason",
+            "scope": "region",
+            "pattern": "(?m)^  △ Reject permission *(?:\\n *)*\\n  Tell OpenCode what to do differently *(?:\\n *)*\\n  Tell OpenCode what to do differently(?: {2,}enter confirm  esc cancel *| *(?:\\n *)*\\n  enter confirm  esc cancel *)\\z"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": false,
+        "continues_rule_id": "opencode-shell-permission",
+        "continues_choice_id": "deny-once",
+        "fixture_ids": [
+          "opencode-2.1.4-deny-pre-stage-3",
+          "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+          "opencode-2.2.7-deny-pre-stage-3-tmux-120-1",
+          "opencode-2.2.7-deny-pre-stage-3-tmux-057-1"
+        ]
+      },
+      {
+        "id": "opencode-shell-permission-compact",
+        "priority": 100,
+        "observation": "permission_request",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^△ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "pgup/pgdn scroll[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "any"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^△ Permission required[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "shell",
+            "scope": "line",
+            "pattern": "^# Shell command(?:[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]|$)"
+          },
+          {
+            "id": "operation",
+            "scope": "region",
+            "pattern": "(?m)^\\$ (?P<operation>[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*(?:\\n[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*)*)(?:\\n *(?:█ *)?)*\\n Allow once   "
+          },
+          {
+            "id": "unclipped",
+            "scope": "region",
+            "pattern": "(?m)^# Shell command +█ *\\n(?: *█ *\\n)*\\$ [^\\n]*█ *(?:\\n[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}][^\\n]*█ *)*(?:\\n *(?:█ *)?)*\\n Allow once   "
+          },
+          {
+            "id": "controls",
+            "scope": "region",
+            "pattern": "(?m)^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll *| *(?:\\n *)*\\npgup/pgdn scroll *)\\z"
+          },
+          {
+            "id": "focus",
+            "scope": "line",
+            "pattern": "^ Allow once   (?:Always allow   )?Reject(?: +pgup/pgdn scroll)?[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+            "focus_style": "background"
+          },
+          {
+            "id": "allow",
+            "scope": "line",
+            "pattern": "^ (?P<label>Allow once)   "
+          },
+          {
+            "id": "deny",
+            "scope": "line",
+            "pattern": "(?:Allow once|Always allow)   (?P<label>Reject)(?: |$)"
+          }
+        ],
+        "extract": {
+          "operation": {
+            "matcher_id": "operation",
+            "capture": "operation",
+            "row_trailer": "█"
+          },
+          "choices": [
+            {
+              "id": "allow-once",
+              "label": {
+                "matcher_id": "allow",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            },
+            {
+              "id": "deny-once",
+              "label": {
+                "matcher_id": "deny",
+                "capture": "label"
+              },
+              "scope": "single_request"
+            }
+          ]
+        },
+        "verified_noninteraction": false
+      },
+      {
+        "id": "opencode-reject-reason-compact",
+        "priority": 100,
+        "observation": "permission_continuation",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^△ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "end_pattern": "^enter reject esc back[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$",
+          "max_rows": 24,
+          "cursor": "any"
+        },
+        "matchers": [
+          {
+            "id": "heading",
+            "scope": "line",
+            "pattern": "^△ Reject permission[\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]*$"
+          },
+          {
+            "id": "empty_reason",
+            "scope": "region",
+            "pattern": "(?m)^△ Reject permission *(?:\\n *)*\\nTell OpenCode what to do differently *(?:\\n *)*\\nenter reject esc back *\\z"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": false,
+        "continues_rule_id": "opencode-shell-permission-compact",
+        "continues_choice_id": "deny-once",
+        "fixture_ids": [
+          "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+          "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
+          "opencode-2.2.7-deny-pre-stage-3-tmux-055-1",
+          "opencode-2.2.7-deny-pre-stage-3-tmux-036-1"
+        ]
+      },
+      {
+        "id": "opencode-idle-composer",
+        "priority": 50,
+        "observation": "composer_empty",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^┃ ",
+          "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?cafleet(?:-ask)? · ",
+          "max_rows": 3,
+          "cursor": "after_prompt"
+        },
+        "matchers": [
+          {
+            "id": "prompt",
+            "scope": "line",
+            "pattern": "^┃  *$"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true
+      },
+      {
+        "id": "opencode-suggestion-composer",
+        "priority": 50,
+        "observation": "composer_empty",
+        "region": {
+          "screen": "primary",
+          "start_pattern": "^┃ ",
+          "end_pattern": "^(?:[^\\t-\\r \\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}] esc interrupt · )?(?:ctrl\\+x q [0-9]+ pending · )?cafleet(?:-ask)? · ",
+          "max_rows": 3,
+          "cursor": "after_prompt"
+        },
+        "matchers": [
+          {
+            "id": "prompt",
+            "scope": "line",
+            "pattern": "^┃ "
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true,
+        "suggestion": {
+          "style": {
+            "foreground": {
+              "kind": "rgb",
+              "r": 128,
+              "g": 128,
+              "b": 128
+            }
+          }
+        }
+      }
+    ],
+    "capabilities": {
+      "detection": {
+        "rule_ids": [
+          "opencode-shell-permission",
+          "opencode-shell-permission-compact"
+        ],
+        "fixture_ids": [
+          "opencode-2.1.4-ask-permission-1",
+          "opencode-2.1.4-narrow-permission-057-1",
+          "opencode-2.1.4-compact-permission-055-1",
+          "opencode-2.1.4-narrow-permission-min-1",
+          "opencode-2.2.7-deny-pre-stage-1-tmux-120-1",
+          "opencode-2.2.7-deny-pre-stage-1-tmux-057-1",
+          "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
+          "opencode-2.2.7-deny-pre-stage-1-tmux-036-1"
+        ]
+      },
+      "composer": {
+        "rule_ids": [
+          "opencode-idle-composer",
+          "opencode-suggestion-composer"
+        ],
+        "fixture_ids": [
+          "opencode-2.2.7-suggestion-tmux-120-1",
+          "opencode-2.2.7-shell-mode-tmux-120-1",
+          "opencode-2.2.7-deny-post-idle-tmux-120-1",
+          "opencode-2.2.7-deny-post-idle-tmux-057-1",
+          "opencode-2.2.7-deny-post-idle-tmux-055-1",
+          "opencode-2.2.7-deny-post-idle-tmux-036-1",
+          "opencode-2.2.7-allow-post-idle-tmux-120-1",
+          "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1",
+          "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1",
+          "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1",
+          "opencode-2.2.7-composer-exec-plain-41-literal-tmux-120-1",
+          "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1",
+          "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1",
+          "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1",
+          "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
+          "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1",
+          "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1",
+          "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1",
+          "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1"
+        ],
+        "submission": {
+          "prompt": {
+            "prefix_hex": "",
+            "submit_hex": "0d",
+            "fixture_ids": [
+              "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1",
+              "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1",
+              "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1",
+              "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1",
+              "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1",
+              "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1"
+            ],
+            "literal_framing": "plain",
+            "plain_literal_limit": null
+          },
+          "exec": {
+            "prefix_hex": "2120",
+            "submit_hex": "0d",
+            "fixture_ids": [
+              "opencode-2.2.7-composer-exec-plain-41-literal-tmux-120-1",
+              "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1",
+              "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1",
+              "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1",
+              "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1",
+              "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1"
+            ],
+            "literal_framing": "plain",
+            "plain_literal_limit": null
+          }
+        }
+      },
+      "answers": [
+        {
+          "decision": "allow",
+          "request_rule_id": "opencode-shell-permission",
+          "answer_rule_id": "opencode-shell-allow-once",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "opencode-shell-permission",
+              "required_choice_id": "allow-once",
+              "required_focus_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "opencode-2.1.4-allow-pre-stage-1",
+            "opencode-2.1.4-narrow-permission-057-1",
+            "opencode-2.2.7-allow-pre-stage-tmux-120-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-057-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "opencode-shell-permission",
+          "answer_rule_id": "opencode-shell-deny-once",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "68",
+              "required_rule_id": "opencode-shell-permission",
+              "required_choice_id": "deny-once",
+              "required_focus_choice_id": "allow-once"
+            },
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "opencode-shell-permission",
+              "required_choice_id": "deny-once",
+              "required_focus_choice_id": "deny-once"
+            },
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "opencode-shell-permission",
+              "required_choice_id": "deny-once",
+              "required_screen_rule_id": "opencode-reject-reason"
+            }
+          ],
+          "fixture_ids": [
+            "opencode-2.1.4-deny-pre-stage-1",
+            "opencode-2.1.4-deny-pre-stage-2",
+            "opencode-2.1.4-deny-pre-stage-3",
+            "opencode-2.1.4-narrow-permission-057-1",
+            "opencode-2.1.4-narrow-deny-pre-stage-2-057-1",
+            "opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-120-1",
+            "opencode-2.2.7-deny-pre-stage-2-tmux-120-1",
+            "opencode-2.2.7-deny-pre-stage-3-tmux-120-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-057-1",
+            "opencode-2.2.7-deny-pre-stage-2-tmux-057-1",
+            "opencode-2.2.7-deny-pre-stage-3-tmux-057-1"
+          ]
+        },
+        {
+          "decision": "allow",
+          "request_rule_id": "opencode-shell-permission-compact",
+          "answer_rule_id": "opencode-shell-compact-allow-once",
+          "choice_id": "allow-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "opencode-shell-permission-compact",
+              "required_choice_id": "allow-once",
+              "required_focus_choice_id": "allow-once"
+            }
+          ],
+          "fixture_ids": [
+            "opencode-2.1.4-compact-permission-055-1",
+            "opencode-2.1.4-narrow-permission-min-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-036-1"
+          ]
+        },
+        {
+          "decision": "deny",
+          "request_rule_id": "opencode-shell-permission-compact",
+          "answer_rule_id": "opencode-shell-compact-deny-once",
+          "choice_id": "deny-once",
+          "focus_matcher_id": "focus",
+          "stages": [
+            {
+              "bytes_hex": "68",
+              "required_rule_id": "opencode-shell-permission-compact",
+              "required_choice_id": "deny-once",
+              "required_focus_choice_id": "allow-once"
+            },
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "opencode-shell-permission-compact",
+              "required_choice_id": "deny-once",
+              "required_focus_choice_id": "deny-once"
+            },
+            {
+              "bytes_hex": "0d",
+              "required_rule_id": "opencode-shell-permission-compact",
+              "required_choice_id": "deny-once",
+              "required_screen_rule_id": "opencode-reject-reason-compact"
+            }
+          ],
+          "fixture_ids": [
+            "opencode-2.1.4-compact-permission-055-1",
+            "opencode-2.1.4-compact-deny-pre-stage-2-055-1",
+            "opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+            "opencode-2.1.4-narrow-permission-min-1",
+            "opencode-2.1.4-narrow-deny-pre-stage-2-min-1",
+            "opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-055-1",
+            "opencode-2.2.7-deny-pre-stage-2-tmux-055-1",
+            "opencode-2.2.7-deny-pre-stage-3-tmux-055-1",
+            "opencode-2.2.7-deny-pre-stage-1-tmux-036-1",
+            "opencode-2.2.7-deny-pre-stage-2-tmux-036-1",
+            "opencode-2.2.7-deny-pre-stage-3-tmux-036-1"
+          ]
+        }
+      ]
+    }
+  },
   "screens": {
     "opencode-2.1.4-ask-permission-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -234,6 +735,7 @@
       ]
     },
     "opencode-2.1.4-allow-pre-stage-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -464,6 +966,7 @@
       ]
     },
     "opencode-2.1.4-deny-pre-stage-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -694,6 +1197,7 @@
       ]
     },
     "opencode-2.1.4-deny-pre-stage-2": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -924,6 +1428,7 @@
       ]
     },
     "opencode-2.1.4-deny-pre-stage-3": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -1154,6 +1659,7 @@
       ]
     },
     "opencode-2.1.4-focus-always-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -1384,6 +1890,7 @@
       ]
     },
     "opencode-2.1.4-idle-composer-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 120,
       "alternate_screen": false,
@@ -1436,6 +1943,7 @@
       ]
     },
     "opencode-2.1.4-narrow-permission-057-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -1655,6 +2163,7 @@
       ]
     },
     "opencode-2.1.4-narrow-deny-pre-stage-2-057-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -1885,6 +2394,7 @@
       ]
     },
     "opencode-2.1.4-narrow-deny-pre-stage-3-057-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -2104,6 +2614,7 @@
       ]
     },
     "opencode-2.1.4-narrow-long-command-057-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -2323,6 +2834,7 @@
       ]
     },
     "opencode-2.1.4-narrow-idle-composer-057-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -2375,6 +2887,7 @@
       ]
     },
     "opencode-2.1.4-compact-permission-055-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 55,
       "alternate_screen": false,
@@ -2594,6 +3107,7 @@
       ]
     },
     "opencode-2.1.4-compact-deny-pre-stage-2-055-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 55,
       "alternate_screen": false,
@@ -2824,6 +3338,7 @@
       ]
     },
     "opencode-2.1.4-compact-deny-pre-stage-3-055-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 55,
       "alternate_screen": false,
@@ -3032,6 +3547,7 @@
       ]
     },
     "opencode-2.1.4-narrow-permission-min-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 36,
       "alternate_screen": false,
@@ -3251,6 +3767,7 @@
       ]
     },
     "opencode-2.1.4-narrow-deny-pre-stage-2-min-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 36,
       "alternate_screen": false,
@@ -3470,6 +3987,7 @@
       ]
     },
     "opencode-2.1.4-narrow-deny-pre-stage-3-min-1": {
+      "native_version": "2.1.4",
       "rows": 36,
       "cols": 36,
       "alternate_screen": false,
@@ -3678,6 +4196,7 @@
       ]
     },
     "opencode-2.2.5-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1": {
+      "native_version": "2.2.5",
       "rows": 40,
       "cols": 119,
       "alternate_screen": false,
@@ -3729,6 +4248,7 @@
       "masked_rows": []
     },
     "opencode-2.2.5-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1": {
+      "native_version": "2.2.5",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -3779,6 +4299,14 @@
       "masked_rows": []
     },
     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68": {
+      "native_version": "2.2.5",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": false,
@@ -3830,6 +4358,14 @@
       "masked_rows": []
     },
     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68": {
+      "native_version": "2.2.5",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -3880,6 +4416,14 @@
       "masked_rows": []
     },
     "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33": {
+      "native_version": "2.2.5",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 40,
       "cols": 119,
       "alternate_screen": false,
@@ -3931,6 +4475,14 @@
       "masked_rows": []
     },
     "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33": {
+      "native_version": "2.2.5",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -3981,6 +4533,7 @@
       "masked_rows": []
     },
     "opencode-2.2.7-suggestion-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -4161,6 +4714,7 @@
       ]
     },
     "opencode-2.2.7-shell-mode-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -4305,6 +4859,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -5035,6 +5590,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -5765,6 +6321,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -6231,6 +6788,7 @@
       ]
     },
     "opencode-2.2.7-deny-post-idle-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -6487,6 +7045,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-057-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -7230,6 +7789,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-057-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -7973,6 +8533,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-057-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -8476,6 +9037,7 @@
       ]
     },
     "opencode-2.2.7-deny-post-idle-tmux-057-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 57,
       "alternate_screen": false,
@@ -8769,6 +9331,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-055-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 55,
       "alternate_screen": false,
@@ -9563,6 +10126,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-055-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 55,
       "alternate_screen": false,
@@ -10368,6 +10932,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-055-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 55,
       "alternate_screen": false,
@@ -10779,6 +11344,7 @@
       ]
     },
     "opencode-2.2.7-deny-post-idle-tmux-055-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 55,
       "alternate_screen": false,
@@ -11062,6 +11628,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-036-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 36,
       "alternate_screen": false,
@@ -11842,6 +12409,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-036-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 36,
       "alternate_screen": false,
@@ -12622,6 +13190,7 @@
       ]
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-036-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 36,
       "alternate_screen": false,
@@ -13043,6 +13612,7 @@
       ]
     },
     "opencode-2.2.7-deny-post-idle-tmux-036-1": {
+      "native_version": "2.2.7",
       "rows": 36,
       "cols": 36,
       "alternate_screen": false,
@@ -13312,6 +13882,7 @@
       ]
     },
     "opencode-2.2.7-allow-pre-stage-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -14112,6 +14683,7 @@
       ]
     },
     "opencode-2.2.7-allow-post-idle-tmux-120-1": {
+      "native_version": "2.2.7",
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -14488,6 +15060,14 @@
       ]
     },
     "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -14743,6 +15323,14 @@
       ]
     },
     "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -15032,6 +15620,26 @@
       ]
     },
     "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -15566,6 +16174,14 @@
       ]
     },
     "opencode-2.2.7-composer-exec-plain-41-literal-tmux-120-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -16030,6 +16646,14 @@
       ]
     },
     "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -16506,6 +17130,26 @@
       ]
     },
     "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 39,
       "cols": 120,
       "alternate_screen": false,
@@ -16932,6 +17576,14 @@
       ]
     },
     "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 36,
       "cols": 91,
       "alternate_screen": false,
@@ -17184,6 +17836,14 @@
       ]
     },
     "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 91,
       "alternate_screen": false,
@@ -17470,6 +18130,26 @@
       ]
     },
     "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 91,
       "alternate_screen": false,
@@ -17971,6 +18651,14 @@
       ]
     },
     "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal"
+        }
+      ],
       "rows": 36,
       "cols": 91,
       "alternate_screen": false,
@@ -18402,6 +19090,14 @@
       ]
     },
     "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 91,
       "alternate_screen": false,
@@ -18893,6 +19589,26 @@
       ]
     },
     "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1": {
+      "native_version": "2.2.7",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "framing",
+          "literal_framing": "plain"
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": null
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "post_submit"
+        }
+      ],
       "rows": 36,
       "cols": 91,
       "alternate_screen": false,

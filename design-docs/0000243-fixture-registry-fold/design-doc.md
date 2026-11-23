@@ -1,7 +1,7 @@
 # Fold the fixture registry into per-backend profile files
 
 **Status**: Approved
-**Progress**: 8/30 tasks complete
+**Progress**: 15/30 tasks complete
 **Last Updated**: 2026-11-23
 
 ## Overview
@@ -243,16 +243,16 @@ Script `BASE/.scripts/fold_registry.py`, run with `python3 -I` from the reposito
 
 ### Step 3: Data conversion
 
-- [ ] Before any data or code edit, run `mise //:build` and record the byte size of `target/release/cafleet` in `BASE/.notes/binary-size.md` as the baseline <!-- completed: -->
-- [ ] Write and run `BASE/.scripts/fold_registry.py` per § Conversion; all assertions pass <!-- completed: -->
-- [ ] Spot-check one screen per backend and one `composer_evidence` screen against the old files with `git diff --stat` and `git show HEAD:<path>` <!-- completed: -->
-- [ ] Delete `assets/profiles/bundled.json` and `assets/profiles/native/` from the filesystem (conversion step 6), leaving staging to the Director <!-- completed: -->
+- [x] Before any data or code edit, run `mise //:build` and record the byte size of `target/release/cafleet` in `BASE/.notes/binary-size.md` as the baseline <!-- completed: 2026-11-23T07:55 -->
+- [x] Write and run `BASE/.scripts/fold_registry.py` per § Conversion; all assertions pass <!-- completed: 2026-11-23T07:55 -->
+- [x] Spot-check one screen per backend and one `composer_evidence` screen against the old files with `git diff --stat` and `git show HEAD:<path>` <!-- completed: 2026-11-23T07:55 -->
+- [x] Delete `assets/profiles/bundled.json` and `assets/profiles/native/` from the filesystem (conversion step 6), leaving staging to the Director <!-- completed: 2026-11-23T07:55 -->
 
 ### Step 4: Production loader
 
-- [ ] Add `RawProfileFile`, drop `backend` from `RawProfile`, pass the backend into `compile_profile` <!-- completed: -->
-- [ ] Add `bundled_profile_text` (exhaustive match over every backend) and `decode_file`; rebuild `BUNDLED` from them <!-- completed: -->
-- [ ] Delete `RawCatalog`, `BUNDLED_DEFINITIONS`, `from_definitions` and the duplicate-profile check; rewrite the provenance comment on the raw types <!-- completed: -->
+- [x] Add `RawProfileFile`, drop `backend` from `RawProfile`, pass the backend into `compile_profile` <!-- completed: 2026-11-23T07:58 -->
+- [x] Add `bundled_profile_text` (exhaustive match over every backend) and `decode_file`; rebuild `BUNDLED` from them <!-- completed: 2026-11-23T07:58 -->
+- [x] Delete `RawCatalog`, `BUNDLED_DEFINITIONS`, `from_definitions` and the duplicate-profile check; rewrite the provenance comment on the raw types <!-- completed: 2026-11-23T07:58 -->
 
 ### Step 5: Guard and test support
 

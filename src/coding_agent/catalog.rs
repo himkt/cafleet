@@ -10,12 +10,13 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error as _;
 use serde::de::IgnoredAny;
-use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 #[cfg(test)]
 use crate::coding_agent::detector::Detector;
+#[cfg(test)]
+use serde_json::Value;
 #[cfg(test)]
 use std::collections::BTreeMap;
 
@@ -163,21 +164,21 @@ impl TryFrom<Vec<NonBlank>> for Ids {
     }
 }
 
-/// The fixture registry and every `fixture_ids` value are provenance that the bundled-catalog
-/// build guard checks; the production loader accepts their contents unread.
+/// A profile file's `screens` and every `fixture_ids` value are provenance that the
+/// bundled-catalog guard checks; the production loader accepts their contents unread.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawCatalog {
+struct RawProfileFile {
     schema_version: u64,
-    #[serde(rename = "fixtures")]
-    _fixtures: IgnoredAny,
-    profiles: Vec<RawProfile>,
+    backend: CodingAgent,
+    profile: RawProfile,
+    #[serde(rename = "screens")]
+    _screens: IgnoredAny,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProfile {
-    backend: CodingAgent,
     rules: Vec<RawRule>,
     capabilities: RawCapabilities,
 }
@@ -964,8 +965,7 @@ fn compile_answer(
     })
 }
 
-fn compile_profile(raw: RawProfile) -> Result<Profile> {
-    let backend = raw.backend;
+fn compile_profile(backend: CodingAgent, raw: RawProfile) -> Result<Profile> {
     let rules = raw
         .rules
         .into_iter()
@@ -1018,19 +1018,41 @@ fn compile_profile(raw: RawProfile) -> Result<Profile> {
     })
 }
 
-const BUNDLED_DEFINITIONS: &str = include_str!("../../assets/profiles/bundled.json");
+fn bundled_profile_text(agent: CodingAgent) -> Option<&'static str> {
+    match agent {
+        CodingAgent::Claude => Some(include_str!("../../assets/profiles/claude.json")),
+        CodingAgent::Codex => Some(include_str!("../../assets/profiles/codex.json")),
+        CodingAgent::Opencode => Some(include_str!("../../assets/profiles/opencode.json")),
+        CodingAgent::Hermes => Some(include_str!("../../assets/profiles/hermes.json")),
+        CodingAgent::Pi => Some(include_str!("../../assets/profiles/pi.json")),
+    }
+}
+
+fn decode_file(backend: CodingAgent, raw: RawProfileFile) -> Result<Profile> {
+    require(raw.schema_version == 1, "unsupported profile schema")?;
+    require(
+        raw.backend == backend,
+        "profile file backend differs from its file",
+    )?;
+    compile_profile(backend, raw.profile)
+}
 
 static BUNDLED: LazyLock<ProfileCatalog> = LazyLock::new(|| {
-    let catalog = ProfileCatalog::from_definitions(
-        &serde_json::from_str(BUNDLED_DEFINITIONS).expect("bundled.json is valid JSON"),
-    )
-    .expect("the bundled catalog passes its build guard");
-    #[cfg(test)]
-    let catalog = ProfileCatalog {
+    let profiles = CodingAgent::all()
+        .iter()
+        .filter_map(|&agent| bundled_profile_text(agent).map(|text| (agent, text)))
+        .map(|(agent, text)| {
+            let raw = serde_json::from_str::<RawProfileFile>(text)
+                .map_err(|cause| invalid(cause.to_string()))?;
+            decode_file(agent, raw)
+        })
+        .collect::<Result<Vec<_>>>()
+        .expect("the bundled catalog passes its build guard");
+    ProfileCatalog {
+        profiles,
+        #[cfg(test)]
         capture_origin: "bundled_unknown",
-        ..catalog
-    };
-    catalog
+    }
 });
 
 impl ProfileCatalog {
@@ -1040,28 +1062,6 @@ impl ProfileCatalog {
     #[cfg(test)]
     pub(crate) fn capture_origin(&self) -> &'static str {
         self.capture_origin
-    }
-    pub(crate) fn from_definitions(value: &Value) -> Result<Self> {
-        let raw = RawCatalog::deserialize(value).map_err(|cause| invalid(cause.to_string()))?;
-        require(raw.schema_version == 1, "unsupported profile schema")?;
-        for (index, profile) in raw.profiles.iter().enumerate() {
-            require(
-                raw.profiles[..index]
-                    .iter()
-                    .all(|earlier| earlier.backend != profile.backend),
-                "more than one profile for one backend",
-            )?;
-        }
-        let profiles = raw
-            .profiles
-            .into_iter()
-            .map(compile_profile)
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self {
-            profiles,
-            #[cfg(test)]
-            capture_origin: "synthetic",
-        })
     }
     pub(super) fn profile(&self, backend: CodingAgent) -> Option<&Profile> {
         self.profiles.iter().find(|p| p.backend == backend)
