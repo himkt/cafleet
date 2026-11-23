@@ -135,7 +135,7 @@ A mechanism with three invalid runs is recorded as "not established" with the in
 
 ### Bundled catalog provenance checks
 
-The bundled-catalog guard tests in `src/coding_agent/catalog.rs` check every provenance rule of [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) against the embedded profile files, so a build whose bundled profile files fail them does not pass `mise //:test`. The guard validates every screen of every profile file, including screens that no profile capability cites. The production catalog loader skips the contents of each file's `screens` and of every `fixture_ids` value, so only the guard reads them, and screen validation parses capture versions with the version probe's SemVer rule. The guard reports these errors, each prefixed `invalid native profile: `:
+The bundled-catalog guard tests in `src/coding_agent/catalog.rs` check every provenance rule of [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) against the embedded profile files, so a build whose bundled profile files fail them does not pass `mise //:test`. The guard validates every screen of every profile file, including screens that no profile capability cites. The production catalog loader skips the contents of each file's `screens` and of every `fixture_ids` value, so only the guard reads them, and screen validation parses capture versions with the version probe's SemVer rule. The guard reports these errors; the provenance errors carry the prefix `invalid native profile: `, and the pattern-syntax error is a bare line:
 
 | Condition | Error |
 |---|---|
