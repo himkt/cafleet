@@ -2015,7 +2015,7 @@ mod tests {
         with_input_service_catalog(
             |catalog| {
                 for operation in ["prompt", "exec"] {
-                    let plan = &mut catalog["profiles"][0]["capabilities"]["composer"]["submission"]
+                    let plan = &mut catalog["codex"]["profile"]["capabilities"]["composer"]["submission"]
                         [operation];
                     plan["literal_framing"] = json!(framing);
                     plan["plain_literal_limit"] = json!({"unit":unit,"max":3});

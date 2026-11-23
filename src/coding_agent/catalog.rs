@@ -1085,6 +1085,26 @@ impl ProfileCatalog {
 
 #[cfg(test)]
 impl ProfileCatalog {
+    /// Decodes a JSON object mapping each backend name to its profile file.
+    pub(crate) fn from_files(files: &Value) -> Result<Self> {
+        let files = files
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?;
+        let profiles = files
+            .iter()
+            .map(|(name, file)| {
+                let backend = crate::coding_agent::coding_agent(name)
+                    .ok_or_else(|| invalid("unknown backend"))?;
+                let raw = RawProfileFile::deserialize(file)
+                    .map_err(|cause| invalid(cause.to_string()))?;
+                decode_file(backend, raw)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            profiles,
+            capture_origin: "synthetic",
+        })
+    }
     /// This catalog without `operation`'s submission plan for `backend`, for missing-plan
     /// fallback tests.
     pub(crate) fn without_submission(
@@ -1292,9 +1312,6 @@ pub(crate) mod test_support {
     fn boolean(value: &Value) -> Result<bool> {
         value.as_bool().ok_or_else(|| invalid("boolean required"))
     }
-    fn backend(value: &Value) -> Result<CodingAgent> {
-        crate::coding_agent::coding_agent(&text(value)?).ok_or_else(|| invalid("unknown backend"))
-    }
     fn positive(value: &Value) -> Result<u16> {
         value
             .as_u64()
@@ -1303,47 +1320,105 @@ pub(crate) mod test_support {
             .ok_or_else(|| invalid("positive viewport bound required"))
     }
 
-    const CLAUDE_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/claude.json");
-    const CODEX_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/codex.json");
-    const OPENCODE_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/opencode.json");
-    const HERMES_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/hermes.json");
-    const PI_FIXTURES: &[u8] = include_bytes!("../../assets/profiles/native/pi.json");
-    pub(crate) const BUNDLED_FIXTURES: &[(&str, &[u8])] = &[
-        ("native/claude.json", CLAUDE_FIXTURES),
-        ("native/codex.json", CODEX_FIXTURES),
-        ("native/opencode.json", OPENCODE_FIXTURES),
-        ("native/hermes.json", HERMES_FIXTURES),
-        ("native/pi.json", PI_FIXTURES),
-    ];
+    /// A JSON value and the first object key it repeats at any level.
+    struct Strict {
+        value: Value,
+        duplicate: Option<String>,
+    }
 
-    fn verify_bundled_fixtures(entries: &[Value], embedded: &[(&str, &[u8])]) -> Result<()> {
-        let mut sources = BTreeMap::<String, Vec<&Value>>::new();
-        for entry in entries {
-            require(
-                entry["kind"] == "native",
-                "bundled fixtures require native provenance",
-            )?;
-            let source = text(&entry["source_ref"])?;
-            require(
-                embedded.iter().any(|(reference, _)| *reference == source),
-                "bundled fixture bytes are not embedded",
-            )?;
-            sources.entry(source).or_default().push(entry);
+    impl<'de> Deserialize<'de> for Strict {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Field<Self, D::Error> {
+            d.deserialize_any(StrictVisitor)
         }
-        for (source, bytes) in embedded {
-            let file: Value = serde_json::from_slice(bytes)
-                .map_err(|cause| invalid(format!("bundled fixture: {cause}")))?;
-            let entries = sources.get(*source).map(Vec::as_slice).unwrap_or(&[]);
-            let screens = verify_native_fixture_file(&file, entries)?;
-            for entry in entries {
-                let id = text(&entry["id"])?;
-                let screen = screens
-                    .get(&id)
-                    .expect("the file guard verified every catalogued screen");
-                verify_native_screen(entry, screen)?;
+    }
+
+    struct StrictVisitor;
+
+    fn scalar<E>(value: Value) -> Field<Strict, E> {
+        Ok(Strict {
+            value,
+            duplicate: None,
+        })
+    }
+
+    impl<'de> serde::de::Visitor<'de> for StrictVisitor {
+        type Value = Strict;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a JSON value")
+        }
+        fn visit_bool<E: serde::de::Error>(self, v: bool) -> Field<Strict, E> {
+            scalar(Value::Bool(v))
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Field<Strict, E> {
+            scalar(Value::from(v))
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Field<Strict, E> {
+            scalar(Value::from(v))
+        }
+        fn visit_f64<E: serde::de::Error>(self, v: f64) -> Field<Strict, E> {
+            scalar(Value::from(v))
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Field<Strict, E> {
+            scalar(Value::from(v))
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Field<Strict, E> {
+            scalar(Value::Null)
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Field<Strict, A::Error> {
+            let mut items = Vec::new();
+            let mut duplicate = None;
+            while let Some(item) = seq.next_element::<Strict>()? {
+                duplicate = duplicate.or(item.duplicate);
+                items.push(item.value);
             }
+            Ok(Strict {
+                value: Value::Array(items),
+                duplicate,
+            })
         }
-        Ok(())
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Field<Strict, A::Error> {
+            let mut object = Map::new();
+            let mut duplicate = None;
+            while let Some(key) = map.next_key::<String>()? {
+                let item = map.next_value::<Strict>()?;
+                duplicate = duplicate.or(item.duplicate);
+                if object.contains_key(&key) {
+                    duplicate = duplicate.or(Some(key.clone()));
+                }
+                object.insert(key, item.value);
+            }
+            Ok(Strict {
+                value: Value::Object(object),
+                duplicate,
+            })
+        }
+    }
+
+    /// Parses a profile file's text, rejecting an object that repeats a key, which a plain
+    /// parse would collapse to its last value.
+    pub(crate) fn parse_bundled_text(text: &str) -> Result<Value> {
+        let parsed: Strict =
+            serde_json::from_str(text).map_err(|cause| invalid(cause.to_string()))?;
+        match parsed.duplicate {
+            Some(key) => Err(invalid(format!("duplicate object key {key}"))),
+            None => Ok(parsed.value),
+        }
+    }
+
+    /// Every embedded profile file, keyed by its backend name.
+    pub(crate) fn bundled_files() -> Value {
+        Value::Object(
+            CodingAgent::all()
+                .iter()
+                .filter_map(|&backend| {
+                    bundled_profile_text(backend).map(|text| {
+                        let file = parse_bundled_text(text)
+                            .expect("the bundled-catalog guard test reports a malformed file");
+                        (backend.name().to_owned(), file)
+                    })
+                })
+                .collect(),
+        )
     }
 
     const SYNTAX_LETTER_ESCAPES: &[char] = &['t', 'n', 'r', 'f', 'v', 'x', 'p', 'A', 'z'];
@@ -1415,11 +1490,12 @@ pub(crate) mod test_support {
 
     /// One ``<backend> <location>: `<construct>` `` line per Perl class, boundary
     /// or other escape outside the pattern syntax in a profile string the decoder compiles.
-    pub(crate) fn implicit_pattern_classes(definitions: &Value) -> Vec<String> {
+    pub(crate) fn implicit_pattern_classes(files: &Value) -> Vec<String> {
         let mut found = Vec::new();
-        for profile in array(&definitions["profiles"]).expect("catalog profiles") {
+        for file in files.as_object().expect("profile files").values() {
+            let profile = &file["profile"];
             RawProfile::deserialize(profile).expect("the profile decodes before probing");
-            let name = text(&profile["backend"]).expect("profile backend");
+            let name = text(&file["backend"]).expect("profile file backend");
             let mut strings = Vec::new();
             profile_strings(profile, String::new(), &mut strings);
             for (pointer, pattern) in strings {
@@ -1438,66 +1514,20 @@ pub(crate) mod test_support {
         found
     }
 
-    fn verify_native_fixture_file<'a>(
-        file: &'a Value,
-        entries: &[&Value],
-    ) -> Result<&'a Map<String, Value>> {
-        let file = object(
-            file,
-            &["schema_version", "backend", "provenance", "screens"],
-        )?;
-        require(
-            file["schema_version"].as_u64() == Some(1)
-                && file["provenance"] == "native"
-                && entries
-                    .iter()
-                    .all(|entry| file["backend"] == entry["backend"]),
-            "bundled fixture file identity differs from its catalog entry",
-        )?;
-        backend(&file["backend"])?;
-        let screens = file["screens"]
-            .as_object()
-            .ok_or_else(|| invalid("object required"))?;
-        for entry in entries {
-            require(
-                screens.contains_key(&text(&entry["id"])?),
-                "bundled fixture screen is missing",
-            )?;
-        }
-        require(
-            screens.keys().all(|id| {
-                entries
-                    .iter()
-                    .any(|entry| entry["id"].as_str() == Some(id.as_str()))
-            }),
-            "bundled fixture file holds an uncited screen",
-        )?;
-        Ok(screens)
-    }
-
-    fn verify_native_screen(entry: &Value, screen: &Value) -> Result<()> {
-        let id = text(&entry["id"])?;
-        let recorded = text(&entry["sha256"])?;
-        let computed = crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes());
-        require(
-            recorded == computed,
-            &format!(
-                "bundled fixture digest mismatch for {id}: catalog {recorded}, computed {computed}"
-            ),
-        )?;
-        let backgrounds = screen.get("cell_backgrounds").is_some();
-        let styles = screen.get("cell_styles").is_some();
-        let fields = SCREEN_FIELDS
-            .iter()
-            .copied()
-            .chain(backgrounds.then_some("cell_backgrounds"))
-            .chain(styles.then_some("cell_styles"))
+    fn verify_bundled_screen(screen: &Value) -> Result<()> {
+        let optional = ["composer_evidence", "cell_backgrounds", "cell_styles"];
+        let fields = ["native_version"]
+            .into_iter()
+            .chain(SCREEN_FIELDS)
+            .chain(
+                optional
+                    .into_iter()
+                    .filter(|field| screen.get(*field).is_some()),
+            )
             .collect::<Vec<_>>();
         let m = object(screen, &fields)?;
-        require(
-            m["rows"] == entry["rows"] && m["cols"] == entry["cols"],
-            "bundled fixture identity differs from its catalog entry",
-        )?;
+        let backgrounds = m.contains_key("cell_backgrounds");
+        let styles = m.contains_key("cell_styles");
         let rows = positive(&m["rows"])?;
         let cols = positive(&m["cols"])?;
         boolean(&m["alternate_screen"])?;
@@ -1669,34 +1699,16 @@ pub(crate) mod test_support {
         Ok(())
     }
 
-    #[derive(Deserialize, PartialEq, Eq)]
-    #[serde(rename_all = "snake_case")]
-    enum FixtureKind {
-        Synthetic,
-        Native,
+    #[derive(Deserialize)]
+    struct ProvenanceFile {
+        profile: ProvenanceProfile,
+        screens: BTreeMap<String, ProvenanceScreen>,
     }
 
     #[derive(Deserialize)]
-    struct ProvenanceCatalog {
-        fixtures: Vec<ProvenanceFixture>,
-        profiles: Vec<ProvenanceProfile>,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct ProvenanceFixture {
-        id: NonBlank,
-        kind: FixtureKind,
-        backend: CodingAgent,
+    struct ProvenanceScreen {
         #[serde(rename = "native_version")]
         _native_version: NativeVersion,
-        #[serde(rename = "rows", deserialize_with = "positive_bound")]
-        _rows: u16,
-        #[serde(rename = "cols", deserialize_with = "positive_bound")]
-        _cols: u16,
-        #[serde(rename = "source_ref")]
-        _source_ref: NonBlank,
-        sha256: NonBlank,
         #[serde(default, deserialize_with = "present")]
         composer_evidence: Option<Vec<ComposerEvidence>>,
     }
@@ -1784,7 +1796,6 @@ pub(crate) mod test_support {
 
     #[derive(Deserialize)]
     struct ProvenanceProfile {
-        backend: CodingAgent,
         rules: Vec<ProvenanceRule>,
         capabilities: ProvenanceCapabilities,
     }
@@ -1828,15 +1839,12 @@ pub(crate) mod test_support {
         fn validate_evidence(
             &self,
             operation: ComposerOperation,
-            fixtures: &[ProvenanceFixture],
+            screens: &BTreeMap<String, ProvenanceScreen>,
         ) -> Result<()> {
             let mut coverage = BTreeSet::new();
             for id in &self.fixture_ids.0 {
-                let fixture = fixtures
-                    .iter()
-                    .find(|fixture| &fixture.id.0 == id)
-                    .ok_or_else(|| invalid("unknown fixture"))?;
-                for record in fixture.composer_evidence.iter().flatten() {
+                let screen = &screens[id];
+                for record in screen.composer_evidence.iter().flatten() {
                     let (observed_operation, multiplexer, kind) = record.identity();
                     if observed_operation != operation {
                         continue;
@@ -1874,42 +1882,39 @@ pub(crate) mod test_support {
         fixture_ids: Ids,
     }
 
-    pub(crate) fn validate_provenance(definitions: &Value) -> Result<()> {
-        let raw = ProvenanceCatalog::deserialize(definitions)
+    pub(crate) fn validate_provenance(files: &Value) -> Result<()> {
+        let files = BTreeMap::<String, ProvenanceFile>::deserialize(files)
             .map_err(|cause| invalid(cause.to_string()))?;
         let mut ids = BTreeSet::new();
-        for fixture in &raw.fixtures {
-            unique(&mut ids, &fixture.id.0)?;
-            require(
-                lower_hex_bytes(&fixture.sha256.0, 32).is_some_and(|hash| hash.len() == 32),
-                "lowercase source digest required",
-            )?;
-            if let Some(evidence) = &fixture.composer_evidence {
+        for file in files.values() {
+            for (id, screen) in &file.screens {
                 require(
-                    !evidence.is_empty(),
-                    "present composer evidence must be nonempty",
+                    ids.insert(id.clone()),
+                    &format!("duplicate fixture id {id}"),
                 )?;
-                let mut claims = BTreeSet::new();
-                for record in evidence {
+                if let Some(evidence) = &screen.composer_evidence {
                     require(
-                        claims.insert(record.identity()),
-                        "duplicate operation/multiplexer/evidence kind",
+                        !evidence.is_empty(),
+                        "present composer evidence must be nonempty",
                     )?;
+                    let mut claims = BTreeSet::new();
+                    for record in evidence {
+                        require(
+                            claims.insert(record.identity()),
+                            "duplicate operation/multiplexer/evidence kind",
+                        )?;
+                    }
                 }
             }
         }
-        for profile in &raw.profiles {
+        for (backend, file) in &files {
+            let profile = &file.profile;
             let cite = |cited: &Ids| -> Result<()> {
                 require(!cited.0.is_empty(), "capability provenance required")?;
                 for id in &cited.0 {
-                    let fixture = raw
-                        .fixtures
-                        .iter()
-                        .find(|fixture| &fixture.id.0 == id)
-                        .ok_or_else(|| invalid("unknown fixture"))?;
                     require(
-                        fixture.backend == profile.backend,
-                        "fixture backend differs from the profile backend",
+                        file.screens.contains_key(id),
+                        &format!("{backend} cites unknown fixture {id}"),
                     )?;
                 }
                 Ok(())
@@ -1920,14 +1925,6 @@ pub(crate) mod test_support {
                 .filter_map(|rule| rule.fixture_ids.as_ref())
             {
                 cite(cited)?;
-                require(
-                    cited.0.iter().all(|id| {
-                        raw.fixtures.iter().any(|fixture| {
-                            &fixture.id.0 == id && fixture.kind == FixtureKind::Native
-                        })
-                    }),
-                    "continuation cites native fixtures",
-                )?;
             }
             let capabilities = &profile.capabilities;
             if let Some(composer) = &capabilities.composer
@@ -1953,7 +1950,7 @@ pub(crate) mod test_support {
                     ] {
                         if let Some(plan) = plan {
                             cite(&plan.fixture_ids)?;
-                            plan.validate_evidence(operation, &raw.fixtures)?;
+                            plan.validate_evidence(operation, &file.screens)?;
                         }
                     }
                 }
@@ -1979,14 +1976,14 @@ pub(crate) mod test_support {
         ]
     }
 
-    pub(crate) fn with_synthetic_composer_evidence(definitions: &Value) -> Result<Value> {
-        let mut decorated = definitions.clone();
-        let fixtures = decorated["fixtures"]
-            .as_array_mut()
-            .ok_or_else(|| invalid("fixture registry array required"))?;
-        let mut claims = std::collections::BTreeMap::<String, Vec<Value>>::new();
-        for profile in definitions["profiles"].as_array().expect("parsed profiles") {
-            let submission = &profile["capabilities"]["composer"]["submission"];
+    pub(crate) fn with_synthetic_composer_evidence(files: &Value) -> Result<Value> {
+        let mut decorated = files.clone();
+        for (backend, file) in files
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?
+        {
+            let mut claims = BTreeMap::<String, Vec<Value>>::new();
+            let submission = &file["profile"]["capabilities"]["composer"]["submission"];
             for operation in ["prompt", "exec"] {
                 let plan = &submission[operation];
                 if plan.is_null() {
@@ -1995,12 +1992,11 @@ pub(crate) mod test_support {
                 let cited: Ids = serde_json::from_value(plan["fixture_ids"].clone())
                     .map_err(|cause| invalid(cause.to_string()))?;
                 for id in cited.0 {
-                    let fixture = fixtures
-                        .iter()
-                        .find(|fixture| fixture["id"] == id)
-                        .ok_or_else(|| invalid("unknown fixture"))?;
-                    if fixture["kind"] != "synthetic" || fixture.get("composer_evidence").is_some()
-                    {
+                    // validate_provenance reports a citation that names no screen.
+                    let Some(screen) = file["screens"].get(&id) else {
+                        continue;
+                    };
+                    if screen.get("composer_evidence").is_some() {
                         continue;
                     }
                     for multiplexer in ["tmux", "herdr"] {
@@ -2024,62 +2020,56 @@ pub(crate) mod test_support {
                     }
                 }
             }
-        }
-        for (id, records) in claims {
-            let fixture = fixtures
-                .iter_mut()
-                .find(|fixture| fixture["id"] == id)
-                .expect("a cited synthetic fixture remains in the registry");
-            fixture["composer_evidence"] = json!(records);
+            for (id, records) in claims {
+                decorated[backend]["screens"][&id]["composer_evidence"] = json!(records);
+            }
         }
         Ok(decorated)
     }
 
-    /// A test catalog: production loading followed by the provenance build guard.
-    pub(crate) fn load(definitions: &Value) -> Result<ProfileCatalog> {
-        let catalog = ProfileCatalog::from_definitions(definitions)?;
-        validate_provenance(&with_synthetic_composer_evidence(definitions)?)?;
+    /// A test catalog: production decoding followed by the provenance build guard.
+    pub(crate) fn load(files: &Value) -> Result<ProfileCatalog> {
+        let catalog = ProfileCatalog::from_files(files)?;
+        validate_provenance(&with_synthetic_composer_evidence(files)?)?;
         Ok(catalog)
     }
 
     impl ProfileCatalog {
-        pub(crate) fn from_bundled_definitions(
-            definitions: &Value,
-            embedded: &[(&str, &[u8])],
-        ) -> Result<Self> {
-            let catalog = load(definitions)?;
-            verify_bundled_fixtures(array(&definitions["fixtures"])?, embedded)?;
-            let catalog = Self {
+        pub(crate) fn from_bundled_files(files: &Value) -> Result<Self> {
+            let catalog = Self::from_files(files)?;
+            for file in files.as_object().expect("decoded profile files").values() {
+                for screen in file["screens"]
+                    .as_object()
+                    .ok_or_else(|| invalid("object required"))?
+                    .values()
+                {
+                    verify_bundled_screen(screen)?;
+                }
+            }
+            validate_provenance(files)?;
+            Ok(Self {
                 capture_origin: "bundled_unknown",
                 ..catalog
-            };
-            Ok(catalog)
+            })
         }
     }
 
-    pub(crate) fn fixture_at(id: &str, version: &str) -> Value {
-        let mut fixture = synthetic_definitions()["fixtures"][0].clone();
-        fixture["id"] = json!(id);
-        fixture["native_version"] = json!(version);
-        fixture
+    /// A synthetic stub screen captured at `version`.
+    pub(crate) fn fixture_at(version: &str) -> Value {
+        json!({"native_version": version})
     }
 
-    /// A catalog holding one `backend` profile per `(backend, label)` entry, each citing one
-    /// fixture for detection, composer observation, both composer operations and an allow answer;
-    /// the label names that fixture and answer rule.
+    /// A catalog holding one profile file per `(backend, label)` entry, each citing one
+    /// stub screen for detection, composer observation, both composer operations and an allow
+    /// answer; the label names that screen and answer rule.
     pub(crate) fn single_profiles(profiles: &[(CodingAgent, &str)]) -> Value {
-        let base = synthetic_definitions();
-        let composer = simple_definition("composer_empty", true)["profiles"][0]["rules"][0].clone();
-        let mut value = base.clone();
-        value["fixtures"] = json!([]);
-        value["profiles"] = json!([]);
+        let base = synthetic_definitions()["codex"]["profile"].clone();
+        let composer =
+            simple_definition("composer_empty", true)["codex"]["profile"]["rules"][0].clone();
+        let mut value = json!({});
         for (backend, name) in profiles {
             let id = format!("{FIXTURE}-{}-{name}", backend.name());
-            let mut fixture = fixture_at(&id, VERSION);
-            fixture["backend"] = json!(backend.name());
-            value["fixtures"].as_array_mut().unwrap().push(fixture);
-            let mut profile = base["profiles"][0].clone();
-            profile["backend"] = json!(backend.name());
+            let mut profile = base.clone();
             profile["rules"]
                 .as_array_mut()
                 .unwrap()
@@ -2098,46 +2088,44 @@ pub(crate) mod test_support {
                 "choice_id":"allow-once","focus_matcher_id":"allow","fixture_ids":[id],
                 "stages":[{"bytes_hex":"78","required_rule_id":RULE,"required_choice_id":"allow-once"}]
             }]);
-            value["profiles"].as_array_mut().unwrap().push(profile);
+            let previous = value.as_object_mut().unwrap().insert(
+                backend.name().to_owned(),
+                json!({
+                    "schema_version":1,"backend":backend.name(),"profile":profile,
+                    "screens":{id.clone(): fixture_at(VERSION)}
+                }),
+            );
+            assert!(
+                previous.is_none(),
+                "one profile file per backend: {backend:?}"
+            );
         }
         value
     }
 
-    pub(crate) fn bundled_file(id: &str) -> (String, Value) {
-        let definitions = bundled_definitions();
-        let entry = definitions["fixtures"]
-            .as_array()
+    /// The backend and parsed bundled profile file whose `screens` holds `id`.
+    pub(crate) fn bundled_file(id: &str) -> (CodingAgent, Value) {
+        bundled_files()
+            .as_object()
             .unwrap()
             .iter()
-            .find(|entry| entry["id"] == id)
-            .unwrap_or_else(|| panic!("the bundled catalog contains {id}"));
-        let source = entry["source_ref"].as_str().unwrap().to_owned();
-        let (_, bytes) = BUNDLED_FIXTURES
-            .iter()
-            .find(|(cited, _)| *cited == source)
-            .expect("the catalogued backend file is embedded");
-        (source, serde_json::from_slice(bytes).unwrap())
+            .find(|(_, file)| file["screens"].get(id).is_some())
+            .map(|(name, file)| {
+                let backend = crate::coding_agent::coding_agent(name).expect("a backend name");
+                (backend, file.clone())
+            })
+            .unwrap_or_else(|| panic!("the bundled catalog contains {id}"))
     }
 
     pub(crate) fn bundled_fixture(id: &str) -> String {
         let (_, file) = bundled_file(id);
-        let screen = file["screens"]
-            .as_object()
-            .expect("the backend file contains a screen map")
-            .get(id)
-            .expect("the catalogued screen is embedded");
-        crate::digest::canonical_json(screen)
-    }
-
-    pub(crate) fn bundled_definitions() -> Value {
-        serde_json::from_str(BUNDLED_DEFINITIONS).unwrap()
+        crate::digest::canonical_json(&file["screens"][id])
     }
 
     pub(crate) fn synthetic_definitions() -> Value {
-        json!({
-            "schema_version":1,
-            "fixtures":[{"id":"synthetic-permission-1","kind":"synthetic","backend":"codex","native_version":"0.0.1-synthetic","rows":24,"cols":80,"source_ref":"synthetic-permission-screen.json","sha256":"689868668a9fa97d9efca75cda3f2cc0a87fde25884a5cb36aab3163b8abd773"}],
-            "profiles":[{"backend":"codex",
+        json!({"codex":{
+            "schema_version":1,"backend":"codex",
+            "profile":{
                 "rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
                     "region":{"screen":"either","start_pattern":"^Synthetic permission request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"at_end"},
                     "matchers":[
@@ -2150,8 +2138,9 @@ pub(crate) mod test_support {
                         {"id":"allow-once","label":{"matcher_id":"allow","capture":"label"},"scope":"single_request"},
                         {"id":"deny-once","label":{"matcher_id":"deny","capture":"label"},"scope":"single_request"}
                     ]},"verified_noninteraction":false}],
-                "capabilities":{"detection":{"rule_ids":["synthetic-permission"],"fixture_ids":["synthetic-permission-1"]},"composer":null,"answers":[]}}]
-        })
+                "capabilities":{"detection":{"rule_ids":["synthetic-permission"],"fixture_ids":["synthetic-permission-1"]},"composer":null,"answers":[]}},
+            "screens":{"synthetic-permission-1":{"native_version":"0.0.1-synthetic"}}
+        }})
     }
 
     pub(crate) fn synthetic_catalog() -> ProfileCatalog {
@@ -2159,18 +2148,18 @@ pub(crate) mod test_support {
     }
     pub(crate) fn inspection_fixture_definition() -> Value {
         let mut value = synthetic_definitions();
-        value["profiles"][0]["rules"][0]["matchers"][3]["pattern"] =
+        value["codex"]["profile"]["rules"][0]["matchers"][3]["pattern"] =
             json!("^Request form: (?P<focus>synthetic-only|synthetic-other)$");
-        let mut alternate = value["profiles"][0]["rules"][0].clone();
+        let mut alternate = value["codex"]["profile"]["rules"][0].clone();
         alternate["id"] = json!("inspection-alternate-request");
         alternate["matchers"][3]["pattern"] = json!("^Request form: (?P<focus>synthetic-alt)$");
-        value["profiles"][0]["rules"]
+        value["codex"]["profile"]["rules"]
             .as_array_mut()
             .unwrap()
             .push(alternate);
-        value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+        value["codex"]["profile"]["capabilities"]["detection"]["rule_ids"] =
             json!(["synthetic-permission", "inspection-alternate-request"]);
-        value["profiles"][0]["capabilities"]["answers"] = json!([
+        value["codex"]["profile"]["capabilities"]["answers"] = json!([
             answer(
                 "allow",
                 "synthetic-permission",
@@ -2224,11 +2213,8 @@ pub(crate) mod test_support {
 
     pub(crate) fn gated_fixture_definition() -> Value {
         let mut value = synthetic_definitions();
-        let mut native = value["fixtures"][0].clone();
-        native["id"] = json!(GATED_REASON_FIXTURE);
-        native["kind"] = json!("native");
-        value["fixtures"].as_array_mut().unwrap().push(native);
-        value["profiles"][0]["rules"] = json!([
+        value["codex"]["screens"][GATED_REASON_FIXTURE] = fixture_at(VERSION);
+        value["codex"]["profile"]["rules"] = json!([
             {
                 "id":GATED_RULE,"priority":100,"observation":"permission_request",
                 "region":{"screen":"either","start_pattern":"^Synthetic gated request$","end_pattern":"^Selection: $","max_rows":8,"cursor":"any"},
@@ -2257,8 +2243,8 @@ pub(crate) mod test_support {
                 "fixture_ids":[GATED_REASON_FIXTURE]
             }
         ]);
-        value["profiles"][0]["capabilities"]["detection"]["rule_ids"] = json!([GATED_RULE]);
-        value["profiles"][0]["capabilities"]["answers"] = json!([
+        value["codex"]["profile"]["capabilities"]["detection"]["rule_ids"] = json!([GATED_RULE]);
+        value["codex"]["profile"]["capabilities"]["answers"] = json!([
             {
                 "decision":"allow","request_rule_id":GATED_RULE,"answer_rule_id":"synthetic-gated-allow",
                 "choice_id":"allow-once","focus_matcher_id":"focus","fixture_ids":["synthetic-permission-1"],
@@ -2353,7 +2339,7 @@ pub(crate) mod test_support {
     /// question notice.
     pub(crate) fn question_fixture_definition() -> Value {
         let mut value = synthetic_definitions();
-        let rules = value["profiles"][0]["rules"].as_array_mut().unwrap();
+        let rules = value["codex"]["profile"]["rules"].as_array_mut().unwrap();
         rules.push(json!({
             "id":QUESTION_RULE,"priority":100,"observation":"question",
             "region":{"screen":"either","start_pattern":"^Synthetic question\\?$","end_pattern":"^Question end$","max_rows":8,"cursor":"any"},
@@ -2378,9 +2364,9 @@ pub(crate) mod test_support {
             "extract":{"operation":null,"choices":[]},
             "verified_noninteraction":false
         }));
-        value["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+        value["codex"]["profile"]["capabilities"]["detection"]["rule_ids"] =
             json!([RULE, QUESTION_RULE, QUESTION_NOTICE_RULE]);
-        value["profiles"][0]["capabilities"]["answers"] = json!([
+        value["codex"]["profile"]["capabilities"]["answers"] = json!([
             answer(
                 "allow",
                 RULE,
@@ -2436,7 +2422,7 @@ pub(crate) mod test_support {
     pub(crate) const FIXTURE: &str = "synthetic-permission-1";
     pub(crate) fn simple_definition(kind: &str, verified: bool) -> Value {
         let mut value = synthetic_definitions();
-        let rule = &mut value["profiles"][0]["rules"][0];
+        let rule = &mut value["codex"]["profile"]["rules"][0];
         rule["id"] = json!(format!("synthetic-{kind}"));
         rule["observation"] = json!(kind);
         rule["region"]["start_pattern"] = json!("^Synthetic state$");
@@ -2445,7 +2431,7 @@ pub(crate) mod test_support {
         rule["extract"] = json!({"operation":null,"choices":[]});
         rule["verified_noninteraction"] = json!(verified);
         let declaration = json!({"rule_ids":[format!("synthetic-{kind}")],"fixture_ids":[FIXTURE]});
-        value["profiles"][0]["capabilities"] = if kind.starts_with("composer_") {
+        value["codex"]["profile"]["capabilities"] = if kind.starts_with("composer_") {
             let mut composer = declaration;
             composer["submission"] = json!({
                 "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[FIXTURE]},
@@ -2471,13 +2457,11 @@ pub(crate) mod test_support {
     pub(crate) fn definition(prompt: Option<&str>, exec: Option<&str>) -> Value {
         let mut value = simple_definition("composer_empty", true);
         for id in [PROMPT_FIXTURE, EXEC_FIXTURE] {
-            let mut fixture = value["fixtures"][0].clone();
-            fixture["id"] = json!(id);
-            value["fixtures"].as_array_mut().unwrap().push(fixture);
+            value["codex"]["screens"][id] = fixture_at(VERSION);
         }
         let prompt = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":prompt.unwrap_or("0d"),"fixture_ids":[PROMPT_FIXTURE]});
         let exec = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
-        value["profiles"][0]["capabilities"]["composer"] = json!({
+        value["codex"]["profile"]["capabilities"]["composer"] = json!({
             "rule_ids":[EMPTY],"fixture_ids":[FIXTURE],
             "submission":{"prompt":prompt,"exec":exec}
         });
@@ -2670,8 +2654,8 @@ mod tests {
         fn framed_definition(framing: &str, limit: Value) -> Value {
             let mut value = definition(Some("0d"), Some("0d"));
             for operation in ["prompt", "exec"] {
-                let plan =
-                    &mut value["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                let plan = &mut value["codex"]["profile"]["capabilities"]["composer"]["submission"]
+                    [operation];
                 plan["literal_framing"] = json!(framing);
                 plan["plain_literal_limit"] = limit.clone();
             }
@@ -2753,7 +2737,7 @@ mod tests {
             for operation in ["prompt", "exec"] {
                 for key in ["literal_framing", "plain_literal_limit"] {
                     let mut value = framed_definition("plain", Value::Null);
-                    value["profiles"][0]["capabilities"]["composer"]["submission"][operation]
+                    value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]
                         .as_object_mut()
                         .unwrap()
                         .remove(key);
@@ -2788,7 +2772,7 @@ mod tests {
                 json!("paste"),
             ] {
                 let mut value = framed_definition("plain", Value::Null);
-                value["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["literal_framing"] =
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"]["prompt"]["literal_framing"] =
                     framing.clone();
                 assert!(load(&value).is_err(), "{framing}");
             }
@@ -2864,15 +2848,20 @@ mod tests {
             }
         }
 
+        fn bundled_composer_profile(files: &mut Value) -> &mut Value {
+            files
+                .as_object_mut()
+                .unwrap()
+                .values_mut()
+                .map(|file| &mut file["profile"])
+                .find(|profile| !profile["capabilities"]["composer"].is_null())
+                .expect("a bundled executable composer profile")
+        }
+
         #[test]
         fn bundled_guard_requires_an_empty_composer_rule_for_executable_plans() {
-            let mut value = bundled_definitions();
-            let profile = value["profiles"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|profile| !profile["capabilities"]["composer"].is_null())
-                .expect("a bundled executable composer profile");
+            let mut value = bundled_files();
+            let profile = bundled_composer_profile(&mut value);
             let ids = profile["capabilities"]["composer"]["rule_ids"]
                 .as_array()
                 .unwrap()
@@ -2892,13 +2881,8 @@ mod tests {
 
         #[test]
         fn bundled_guard_requires_plan_fixture_citations_for_measured_delivery() {
-            let mut value = bundled_definitions();
-            let profile = value["profiles"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|profile| !profile["capabilities"]["composer"].is_null())
-                .expect("a bundled executable composer profile");
+            let mut value = bundled_files();
+            let profile = bundled_composer_profile(&mut value);
             profile["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] = json!([]);
             assert!(validate_provenance(&value).is_err());
         }
@@ -2909,8 +2893,6 @@ mod tests {
 
         fn measured() -> Value {
             let mut value = definition(Some("0d"), Some("0d"));
-            let unrelated = value["fixtures"][0]["id"].clone();
-            let template = value["fixtures"][0].clone();
             let mut sequence = 0;
             for operation in ["prompt", "exec"] {
                 let framing = if operation == "prompt" {
@@ -2923,29 +2905,44 @@ mod tests {
                 } else {
                     json!({"unit":"scalars","max":1024})
                 };
-                let plan =
-                    &mut value["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                let plan = &mut value["codex"]["profile"]["capabilities"]["composer"]["submission"]
+                    [operation];
                 plan["literal_framing"] = framing.clone();
                 plan["plain_literal_limit"] = limit.clone();
-                let mut ids = vec![unrelated.clone()];
+                let mut ids = vec![json!(FIXTURE)];
                 for multiplexer in ["tmux", "herdr"] {
                     for record in
                         composer_evidence_records(operation, multiplexer, &framing, &limit)
                     {
                         sequence += 1;
                         let id = format!("witness-{sequence}");
-                        let mut fixture = template.clone();
-                        fixture["id"] = json!(id);
-                        fixture["kind"] = json!("native");
-                        fixture["composer_evidence"] = json!([record]);
-                        value["fixtures"].as_array_mut().unwrap().push(fixture);
+                        value["codex"]["screens"][id.as_str()] =
+                            json!({"native_version":VERSION,"composer_evidence":[record]});
                         ids.push(json!(id));
                     }
                 }
-                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
                     json!(ids);
             }
             value
+        }
+
+        fn witness_id(value: &Value, operation: &str, multiplexer: &str, kind: &str) -> String {
+            value["codex"]["screens"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .find(|(_, screen)| {
+                    screen.get("composer_evidence").is_some_and(|records| {
+                        records.as_array().unwrap().iter().any(|record| {
+                            record["operation"] == operation
+                                && record["multiplexer"] == multiplexer
+                                && record["kind"] == kind
+                        })
+                    })
+                })
+                .map(|(id, _)| id.clone())
+                .expect("the explicit operation/multiplexer/category witness exists")
         }
 
         fn witness_mut<'a>(
@@ -2954,20 +2951,8 @@ mod tests {
             multiplexer: &str,
             kind: &str,
         ) -> &'a mut Value {
-            value["fixtures"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|fixture| {
-                    fixture.get("composer_evidence").is_some_and(|records| {
-                        records.as_array().unwrap().iter().any(|record| {
-                            record["operation"] == operation
-                                && record["multiplexer"] == multiplexer
-                                && record["kind"] == kind
-                        })
-                    })
-                })
-                .expect("the explicit operation/multiplexer/category witness exists")
+            let id = witness_id(value, operation, multiplexer, kind);
+            &mut value["codex"]["screens"][id.as_str()]
         }
 
         fn missing_category(kind: &str) {
@@ -2976,9 +2961,9 @@ mod tests {
             for operation in ["prompt", "exec"] {
                 for multiplexer in ["tmux", "herdr"] {
                     let mut value = baseline.clone();
-                    let id = witness_mut(&mut value, operation, multiplexer, kind)["id"].clone();
-                    let unrelated = value["fixtures"][0]["id"].clone();
-                    let ids = value["profiles"][0]["capabilities"]["composer"]["submission"]
+                    let id = json!(witness_id(&value, operation, multiplexer, kind));
+                    let unrelated = json!(FIXTURE);
+                    let ids = value["codex"]["profile"]["capabilities"]["composer"]["submission"]
                         [operation]["fixture_ids"]
                         .as_array_mut()
                         .unwrap();
@@ -3013,16 +2998,11 @@ mod tests {
         #[test]
         fn unrelated_valid_native_citations_cannot_establish_an_executable_plan() {
             let mut value = definition(Some("0d"), Some("0d"));
-            for fixture in value["fixtures"].as_array_mut().unwrap() {
-                fixture["kind"] = json!("native");
-            }
-            let unrelated = &mut value["fixtures"][0];
-            let id = unrelated["id"].clone();
             for operation in ["prompt", "exec"] {
-                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
-                    json!([id]);
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!([FIXTURE]);
             }
-            ProfileCatalog::from_definitions(&value).unwrap();
+            ProfileCatalog::from_files(&value).unwrap();
             assert!(validate_provenance(&value).is_err());
         }
 
@@ -3109,12 +3089,11 @@ mod tests {
 
         #[test]
         fn additional_selected_operation_claims_must_match_despite_complete_valid_coverage() {
-            let mut baseline = measured();
-            baseline["fixtures"][0]["kind"] = json!("native");
+            let baseline = measured();
             validate_provenance(&baseline).unwrap();
             for operation in ["prompt", "exec"] {
-                let plan =
-                    &baseline["profiles"][0]["capabilities"]["composer"]["submission"][operation];
+                let plan = &baseline["codex"]["profile"]["capabilities"]["composer"]["submission"]
+                    [operation];
                 let framing = plan["literal_framing"].as_str().unwrap();
                 let unit = plan["plain_literal_limit"]["unit"].as_str().unwrap();
                 let other_framing = if framing == "plain" {
@@ -3131,7 +3110,7 @@ mod tests {
                         &plan["plain_literal_limit"],
                     );
                     let mut valid_extra = baseline.clone();
-                    valid_extra["fixtures"][0]["composer_evidence"] = json!(matching);
+                    valid_extra["codex"]["screens"][FIXTURE]["composer_evidence"] = json!(matching);
                     validate_provenance(&valid_extra).unwrap();
                     let mut wrong_framing = matching[0].clone();
                     wrong_framing["literal_framing"] = json!(other_framing);
@@ -3147,7 +3126,7 @@ mod tests {
                     }
                     for record in mismatched {
                         let mut value = baseline.clone();
-                        value["fixtures"][0]["composer_evidence"] = json!([record]);
+                        value["codex"]["screens"][FIXTURE]["composer_evidence"] = json!([record]);
                         assert!(
                             validate_provenance(&value).is_err(),
                             "the additional selected claim contradicts its plan: {record}"
@@ -3160,7 +3139,7 @@ mod tests {
         fn unlimited() -> Value {
             let mut value = measured();
             for operation in ["prompt", "exec"] {
-                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
                     Value::Null;
                 for multiplexer in ["tmux", "herdr"] {
                     witness_mut(&mut value, operation, multiplexer, "plain_limit")["composer_evidence"]
@@ -3178,20 +3157,17 @@ mod tests {
         #[test]
         fn one_fixture_can_carry_distinct_operation_multiplexer_and_category_claims() {
             let mut value = measured();
-            let records = value["fixtures"]
-                .as_array()
+            let records = value["codex"]["screens"]
+                .as_object()
                 .unwrap()
-                .iter()
-                .filter_map(|fixture| fixture.get("composer_evidence"))
+                .values()
+                .filter_map(|screen| screen.get("composer_evidence"))
                 .flat_map(|records| records.as_array().unwrap().iter().cloned())
                 .collect::<Vec<_>>();
-            let fixture = &mut value["fixtures"][0];
-            fixture["kind"] = json!("native");
-            fixture["composer_evidence"] = json!(records);
-            let id = fixture["id"].clone();
+            value["codex"]["screens"][FIXTURE]["composer_evidence"] = json!(records);
             for operation in ["prompt", "exec"] {
-                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
-                    json!([id]);
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]["fixture_ids"] =
+                    json!([FIXTURE]);
             }
             validate_provenance(&value).unwrap();
         }
@@ -3200,7 +3176,7 @@ mod tests {
         fn missing_plain_limit_key_is_rejected_even_when_the_plan_is_unlimited() {
             let mut value = unlimited();
             validate_provenance(&value).unwrap();
-            value["fixtures"][0]["composer_evidence"] =
+            value["codex"]["screens"][FIXTURE]["composer_evidence"] =
                 json!([{"operation":"prompt","multiplexer":"tmux","kind":"plain_limit"}]);
             assert!(validate_provenance(&value).is_err());
         }
@@ -3239,7 +3215,7 @@ mod tests {
             }
             for record in malformed {
                 let mut value = baseline.clone();
-                value["fixtures"][0]["composer_evidence"] = json!([record]);
+                value["codex"]["screens"][FIXTURE]["composer_evidence"] = json!([record]);
                 assert!(validate_provenance(&value).is_err(), "{record}");
             }
         }
@@ -3261,7 +3237,7 @@ mod tests {
         fn a_present_empty_evidence_array_is_rejected_without_affecting_other_valid_citations() {
             let mut value = measured();
             validate_provenance(&value).unwrap();
-            value["fixtures"][0]["composer_evidence"] = json!([]);
+            value["codex"]["screens"][FIXTURE]["composer_evidence"] = json!([]);
             assert!(validate_provenance(&value).is_err());
         }
 
@@ -3269,35 +3245,27 @@ mod tests {
         fn synthetic_test_helper_populates_absent_evidence_for_dynamic_plan_values() {
             let mut value = definition(Some("0d"), Some("0d"));
             for operation in ["prompt", "exec"] {
-                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["literal_framing"] =
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]["literal_framing"] =
                     json!("bracketed_paste");
-                value["profiles"][0]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]["plain_literal_limit"] =
                     json!({"unit":"bytes","max":3});
             }
             validate_provenance(&with_synthetic_composer_evidence(&value).unwrap()).unwrap();
         }
 
         #[test]
-        fn synthetic_test_helper_preserves_explicit_and_native_evidence_gaps() {
-            let mut baseline = measured();
-            baseline["fixtures"][0]["kind"] = json!("native");
-            validate_provenance(&baseline).unwrap();
-            for explicit in [false, true] {
-                let mut value = baseline.clone();
-                let fixture = witness_mut(&mut value, "prompt", "tmux", "post_submit");
-                if explicit {
-                    fixture["kind"] = json!("synthetic");
-                    fixture["composer_evidence"] =
-                        json!([{"operation":"exec","multiplexer":"tmux","kind":"post_submit"}]);
-                } else {
-                    fixture
-                        .as_object_mut()
-                        .unwrap()
-                        .remove("composer_evidence")
-                        .unwrap();
-                }
-                assert!(load(&value).is_err());
+        fn synthetic_test_helper_preserves_explicit_evidence_gaps() {
+            let mut value = measured();
+            for operation in ["prompt", "exec"] {
+                value["codex"]["profile"]["capabilities"]["composer"]["submission"][operation]["fixture_ids"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|id| id != FIXTURE);
             }
+            load(&value).unwrap();
+            witness_mut(&mut value, "prompt", "tmux", "post_submit")["composer_evidence"] =
+                json!([{"operation":"exec","multiplexer":"tmux","kind":"post_submit"}]);
+            assert!(load(&value).is_err());
         }
     }
 
@@ -3312,7 +3280,7 @@ mod tests {
 
         #[test]
         fn a_region_loads_with_one_non_whitespace_panel_separator_glyph() {
-            let value = with_separator("/profiles/0/rules/0", json!("│"));
+            let value = with_separator("/codex/profile/rules/0", json!("│"));
             crate::coding_agent::catalog::test_support::load(&value).unwrap();
             assert!(
                 crate::coding_agent::catalog::test_support::load(&question_fixture_definition())
@@ -3324,7 +3292,7 @@ mod tests {
         #[test]
         fn a_panel_separator_that_is_not_one_non_whitespace_glyph_is_refused() {
             for separator in [json!(1), json!(""), json!(" "), json!("││")] {
-                let value = with_separator("/profiles/0/rules/0", separator.clone());
+                let value = with_separator("/codex/profile/rules/0", separator.clone());
                 assert!(
                     crate::coding_agent::catalog::test_support::load(&value).is_err(),
                     "{separator}"
@@ -3336,8 +3304,8 @@ mod tests {
     mod question_answers {
         use crate::coding_agent::catalog::tests::*;
 
-        const QUESTION: &str = "/profiles/0/rules/1";
-        const ANSWERS: &str = "/profiles/0/capabilities/answers";
+        const QUESTION: &str = "/codex/profile/rules/1";
+        const ANSWERS: &str = "/codex/profile/capabilities/answers";
 
         fn refusal(value: &Value) -> String {
             assert!(
@@ -3472,7 +3440,7 @@ mod tests {
                 (
                     "a decision answer on a persistent choice",
                     |value| {
-                        value["profiles"][0]["rules"][0]["extract"]["choices"][0]["scope"] =
+                        value["codex"]["profile"]["rules"][0]["extract"]["choices"][0]["scope"] =
                             json!("persistent");
                     },
                     "invalid native profile: answer requires single-request scope",
@@ -3549,7 +3517,7 @@ mod tests {
         #[test]
         fn marker_focus_gates_a_decision_plan_as_background_focus_does() {
             let mut marker = gated_fixture_definition();
-            marker["profiles"][0]["rules"][0]["matchers"][2]["focus_style"] = json!("marker");
+            marker["codex"]["profile"]["rules"][0]["matchers"][2]["focus_style"] = json!("marker");
             let catalog = crate::coding_agent::catalog::test_support::load(&marker).unwrap();
             let deny = catalog
                 .answer_plan(
@@ -3575,7 +3543,7 @@ mod tests {
                     .unwrap_or_else(|cause| panic!("{require}: {}", cause.message()));
             }
             let permission = changed(|value| {
-                value["profiles"][0]["rules"][0]["frame"] =
+                value["codex"]["profile"]["rules"][0]["frame"] =
                     json!({"require_patterns":[],"reject_patterns":["^Live composer$"]});
             });
             assert!(crate::coding_agent::catalog::test_support::load(&permission).is_ok());
@@ -3595,85 +3563,74 @@ mod tests {
     }
 
     mod bundled_backend_files {
+        use crate::coding_agent::CodingAgent;
         use crate::coding_agent::catalog::ProfileCatalog;
-        use crate::coding_agent::catalog::test_support::BUNDLED_FIXTURES;
-        use crate::coding_agent::catalog::test_support::bundled_definitions;
+        use crate::coding_agent::catalog::bundled_profile_text;
+        use crate::coding_agent::catalog::test_support::VERSION;
+        use crate::coding_agent::catalog::test_support::bundled_files;
+        use crate::coding_agent::catalog::test_support::fixture_at;
         use crate::coding_agent::catalog::test_support::implicit_pattern_classes;
+        use crate::coding_agent::catalog::test_support::parse_bundled_text;
         use crate::coding_agent::catalog::tests::definitions;
         use crate::error::CafleetError;
         use serde_json::Value;
         use serde_json::json;
 
-        const SOURCE: &str = "native/codex.json";
         const PRIMARY: &str = "native-permission-one";
         const REGRESSION: &str = "native-regression-one";
-        const UNCITED: &str =
-            "invalid native profile: bundled fixture file holds an uncited screen";
+        const CLAUDE_SCREEN: &str = "native-claude-one";
 
         struct NativeFixtureCatalog {
-            definitions: Value,
-            file: Value,
+            files: Value,
         }
 
         fn screen(line: &str) -> Value {
             let mut lines = vec![""; 24];
             lines[0] = line;
             json!({
+                "native_version":"1.2.3",
                 "rows":24,"cols":80,"alternate_screen":true,"screen_seq":0,
                 "cursor_row":23,"cursor_col":0,"lines":lines,"masked_rows":[]
             })
         }
 
-        fn screen_digest(screen: &Value) -> String {
-            crate::digest::sha256_hex(crate::digest::canonical_json(screen).as_bytes())
-        }
-
         impl NativeFixtureCatalog {
+            /// A codex profile file citing `PRIMARY` for detection and holding the uncited
+            /// `REGRESSION` screen beside it.
             fn new() -> Self {
-                let primary = screen("permission screen");
-                let regression = screen("regression screen");
-                let mut definitions = definitions();
-                let entry = &mut definitions["fixtures"][0];
-                entry["id"] = json!(PRIMARY);
-                entry["kind"] = json!("native");
-                entry["native_version"] = json!("1.2.3");
-                entry["source_ref"] = json!(SOURCE);
-                entry["sha256"] = json!(screen_digest(&primary));
-                let mut sibling = entry.clone();
-                sibling["id"] = json!(REGRESSION);
-                sibling["sha256"] = json!(screen_digest(&regression));
-                definitions["fixtures"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(sibling);
-                definitions["profiles"][0]["capabilities"]["detection"]["fixture_ids"] =
+                let mut files = definitions();
+                files["codex"]["screens"] = json!({
+                    PRIMARY: screen("permission screen"),
+                    REGRESSION: screen("regression screen")
+                });
+                files["codex"]["profile"]["capabilities"]["detection"]["fixture_ids"] =
                     json!([PRIMARY]);
-
-                let mut screens = serde_json::Map::new();
-                screens.insert(PRIMARY.to_owned(), primary);
-                screens.insert(REGRESSION.to_owned(), regression);
-                Self {
-                    definitions,
-                    file: json!({
-                        "schema_version":1,"backend":"codex","provenance":"native",
-                        "screens":screens
-                    }),
-                }
+                Self { files }
             }
 
-            fn load_embedded(
-                &self,
-                embedded: &[(&str, &[u8])],
-            ) -> Result<ProfileCatalog, CafleetError> {
-                crate::coding_agent::catalog::test_support::load(&self.definitions).unwrap_or_else(
-                    |error| panic!("native test declarations are valid: {}", error.message()),
-                );
-                ProfileCatalog::from_bundled_definitions(&self.definitions, embedded)
+            /// [`Self::new`] plus a claude profile file citing its own `screen_id`.
+            fn with_claude(screen_id: &str) -> Self {
+                let mut fixture = Self::new();
+                let mut claude = fixture.files["codex"].clone();
+                claude["backend"] = json!("claude");
+                claude["screens"] = json!({ screen_id: screen("claude screen") });
+                claude["profile"]["capabilities"]["detection"]["fixture_ids"] = json!([screen_id]);
+                fixture.files["claude"] = claude;
+                fixture
             }
 
             fn load(&self) -> Result<ProfileCatalog, CafleetError> {
-                let bytes = serde_json::to_vec(&self.file).unwrap();
-                self.load_embedded(&[(SOURCE, &bytes)])
+                ProfileCatalog::from_bundled_files(&self.files)
+            }
+
+            fn masked() -> Self {
+                let mut fixture = Self::new();
+                fixture.change_primary(|s| push_mask(s, 5, "reviewed_privacy"));
+                fixture
+            }
+
+            fn change_primary(&mut self, change: impl FnOnce(&mut Value)) {
+                change(&mut self.files["codex"]["screens"][PRIMARY]);
             }
         }
 
@@ -3685,110 +3642,124 @@ mod tests {
             }
         }
 
-        #[test]
-        fn a_catalogued_screen_requires_its_key_in_the_backend_file() {
-            let mut fixture = NativeFixtureCatalog::new();
-            fixture.file["screens"]
-                .as_object_mut()
-                .unwrap()
-                .remove(REGRESSION);
-            assert_eq!(
-                usage_failure(fixture.load()),
-                "invalid native profile: bundled fixture screen is missing"
-            );
+        fn failure_message(result: Result<ProfileCatalog, CafleetError>) -> Option<String> {
+            result.err().map(|error| error.message().into_owned())
         }
 
-        #[test]
-        fn a_referenced_backend_file_rejects_an_uncited_sibling_screen() {
-            let mut fixture = NativeFixtureCatalog::new();
-            fixture.file["screens"]["unlisted-screen"] = screen("uncited screen");
-            assert_eq!(usage_failure(fixture.load()), UNCITED);
-        }
-
-        #[test]
-        fn an_uncited_screen_in_an_unreferenced_file_is_rejected_before_referenced_files() {
-            let fixture = NativeFixtureCatalog::new();
-            let bytes = serde_json::to_vec(&fixture.file).unwrap();
-            let extra = serde_json::to_vec(&json!({
-                "schema_version":1,"backend":"claude","provenance":"native",
-                "screens":{"unlisted-screen":screen("uncited file screen")}
-            }))
-            .unwrap();
-            for extra_first in [true, false] {
-                let mut embedded = vec![
-                    (SOURCE, bytes.as_slice()),
-                    ("native/claude.json", extra.as_slice()),
-                ];
-                if extra_first {
-                    embedded.reverse();
+        fn embedded_files() -> Result<ProfileCatalog, CafleetError> {
+            let mut files = serde_json::Map::new();
+            for &backend in CodingAgent::all() {
+                if let Some(text) = bundled_profile_text(backend) {
+                    files.insert(backend.name().to_owned(), parse_bundled_text(text)?);
                 }
-                assert_eq!(
-                    usage_failure(fixture.load_embedded(&embedded)),
-                    UNCITED,
-                    "extra file first: {extra_first}"
-                );
+            }
+            ProfileCatalog::from_bundled_files(&Value::Object(files))
+        }
+
+        fn changed(change: fn(&mut Value)) -> Result<ProfileCatalog, CafleetError> {
+            let mut fixture = NativeFixtureCatalog::new();
+            change(&mut fixture.files);
+            fixture.load()
+        }
+
+        type GuardCase = (
+            &'static str,
+            fn() -> Result<ProfileCatalog, CafleetError>,
+            Option<&'static str>,
+        );
+
+        const GUARD_CASES: &[GuardCase] = &[
+            ("the embedded files", embedded_files, None),
+            (
+                "an uncited screen",
+                || NativeFixtureCatalog::new().load(),
+                None,
+            ),
+            (
+                "a cross-backend citation",
+                || {
+                    let mut fixture = NativeFixtureCatalog::with_claude(CLAUDE_SCREEN);
+                    fixture.files["codex"]["profile"]["capabilities"]["detection"]["fixture_ids"] =
+                        json!([CLAUDE_SCREEN]);
+                    fixture.load()
+                },
+                Some("invalid native profile: codex cites unknown fixture native-claude-one"),
+            ),
+            (
+                "a fixture id in two profile files",
+                || NativeFixtureCatalog::with_claude(PRIMARY).load(),
+                Some("invalid native profile: duplicate fixture id native-permission-one"),
+            ),
+            (
+                "a screen id repeated within one file's text",
+                || {
+                    let file = &NativeFixtureCatalog::new().files["codex"];
+                    let text = serde_json::to_string_pretty(file)
+                        .unwrap()
+                        .replace(&format!("\"{REGRESSION}\""), &format!("\"{PRIMARY}\""));
+                    let file = parse_bundled_text(&text)?;
+                    ProfileCatalog::from_bundled_files(&json!({ "codex": file }))
+                },
+                Some("invalid native profile: duplicate object key native-permission-one"),
+            ),
+            (
+                "a file backend other than its file",
+                || changed(|files| files["codex"]["backend"] = json!("claude")),
+                Some("invalid native profile: profile file backend differs from its file"),
+            ),
+            (
+                "schema_version 2",
+                || changed(|files| files["codex"]["schema_version"] = json!(2)),
+                Some("invalid native profile: unsupported profile schema"),
+            ),
+            (
+                "a bundled screen without native_version",
+                || {
+                    changed(|files| {
+                        files["codex"]["screens"][PRIMARY]
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("native_version");
+                    })
+                },
+                Some("invalid native profile: exact required object fields expected"),
+            ),
+            (
+                "an uncited bundled screen with an extra key",
+                || changed(|files| files["codex"]["screens"][REGRESSION]["note"] = json!("x")),
+                Some("invalid native profile: exact required object fields expected"),
+            ),
+            (
+                "a bundled stub screen",
+                || changed(|files| files["codex"]["screens"][PRIMARY] = fixture_at(VERSION)),
+                Some("invalid native profile: exact required object fields expected"),
+            ),
+            (
+                "a bundled screen with empty composer_evidence",
+                || {
+                    changed(|files| {
+                        files["codex"]["screens"][PRIMARY]["composer_evidence"] = json!([])
+                    })
+                },
+                Some("invalid native profile: present composer evidence must be nonempty"),
+            ),
+        ];
+
+        #[test]
+        fn the_bundled_catalog_guard_accepts_valid_profile_files_and_names_each_violation() {
+            for (case, load, expected) in GUARD_CASES {
+                assert_eq!(failure_message(load()).as_deref(), *expected, "{case}");
             }
         }
 
         #[test]
-        fn file_schema_provenance_and_backend_match_the_catalog() {
-            let causes = [
-                ("schema_version", json!(2)),
-                ("provenance", json!("synthetic")),
-                ("backend", json!("claude")),
-            ]
-            .map(|(field, value)| {
-                let mut fixture = NativeFixtureCatalog::new();
-                fixture.file[field] = value;
-                usage_failure(fixture.load())
-            });
-            assert_eq!(
-                causes,
-                ["invalid native profile: bundled fixture file identity differs from its catalog entry";
-                    3]
-            );
-        }
-
-        #[test]
-        fn a_catalogued_regression_screen_digest_error_names_its_id_and_both_hashes() {
+        fn the_bundled_catalog_guard_reports_a_noncanonical_screen_native_version() {
             let mut fixture = NativeFixtureCatalog::new();
-            let recorded = fixture.definitions["fixtures"][1]["sha256"]
-                .as_str()
-                .unwrap()
-                .to_owned();
-            fixture.file["screens"][REGRESSION]["lines"][0] = json!("changed regression");
-            let computed = screen_digest(&fixture.file["screens"][REGRESSION]);
-            assert_ne!(recorded, computed);
-            assert_eq!(
-                usage_failure(fixture.load()),
-                format!(
-                    "invalid native profile: bundled fixture digest mismatch for {REGRESSION}: catalog {recorded}, computed {computed}"
-                )
-            );
-        }
-
-        #[test]
-        fn canonical_screen_digests_accept_compact_and_pretty_backend_files() {
-            let fixture = NativeFixtureCatalog::new();
-            let failures = [
-                serde_json::to_vec(&fixture.file).unwrap(),
-                serde_json::to_vec_pretty(&fixture.file).unwrap(),
-            ]
-            .map(|bytes| {
-                fixture
-                    .load_embedded(&[(SOURCE, &bytes)])
-                    .err()
-                    .map(|error| error.message().into_owned())
-            });
-            assert_eq!(failures, [None, None]);
-        }
-
-        #[test]
-        fn a_catalogued_source_requires_provided_embedded_bytes() {
-            let fixture = NativeFixtureCatalog::new();
-            assert_eq!(
-                usage_failure(fixture.load_embedded(&[])),
-                "invalid native profile: bundled fixture bytes are not embedded"
+            fixture.change_primary(|s| s["native_version"] = json!("1.2"));
+            let failure = usage_failure(fixture.load());
+            assert!(
+                failure.contains("canonical SemVer version required"),
+                "{failure}"
             );
         }
 
@@ -3867,9 +3838,7 @@ mod tests {
             ("line count", |s| {
                 s["lines"].as_array_mut().unwrap().pop();
             }),
-            ("cols differ from the entry", |s| {
-                s["cols"] = json!(s["cols"].as_u64().unwrap() + 1)
-            }),
+            ("zero cols", |s| s["cols"] = json!(0)),
             ("cursor row outside the geometry", |s| {
                 s["cursor_row"] = s["rows"].clone()
             }),
@@ -3877,24 +3846,6 @@ mod tests {
                 s["cursor_col"] = json!(s["cols"].as_u64().unwrap() + 1)
             }),
         ];
-
-        impl NativeFixtureCatalog {
-            fn masked() -> Self {
-                let mut fixture = Self::new();
-                fixture.change_primary(|s| push_mask(s, 5, "reviewed_privacy"));
-                fixture
-            }
-
-            fn change_primary(&mut self, change: impl FnOnce(&mut Value)) {
-                let screen = &mut self.file["screens"][PRIMARY];
-                change(screen);
-                self.definitions["fixtures"][0]["sha256"] = json!(screen_digest(screen));
-            }
-        }
-
-        fn failure_message(result: Result<ProfileCatalog, CafleetError>) -> Option<String> {
-            result.err().map(|error| error.message().into_owned())
-        }
 
         #[test]
         fn a_screen_outside_the_reviewed_shape_is_rejected() {
@@ -3913,22 +3864,6 @@ mod tests {
                     "cursor_col equal to cols records the pending-wrap position"
                 );
             }
-            let mut flipped = NativeFixtureCatalog::new();
-            let screen = &mut flipped.file["screens"][PRIMARY];
-            screen["alternate_screen"] = json!(!screen["alternate_screen"].as_bool().unwrap());
-            let failure = usage_failure(flipped.load());
-            assert!(
-                failure.starts_with(&format!(
-                    "invalid native profile: bundled fixture digest mismatch for {PRIMARY}: "
-                )),
-                "{failure}"
-            );
-            let mut synthetic = NativeFixtureCatalog::new();
-            synthetic.definitions["fixtures"][0]["kind"] = json!("synthetic");
-            assert_eq!(
-                usage_failure(synthetic.load()),
-                "invalid native profile: bundled fixtures require native provenance"
-            );
         }
 
         #[test]
@@ -4127,60 +4062,48 @@ mod tests {
         }
 
         #[test]
-        fn the_bundled_catalog_passes_its_fixture_build_guard() {
-            assert_eq!(
-                failure_message(ProfileCatalog::from_bundled_definitions(
-                    &bundled_definitions(),
-                    BUNDLED_FIXTURES
-                )),
-                None
-            );
-        }
-
-        #[test]
         fn the_bundled_catalog_spells_every_pattern_class_explicitly() {
             assert_eq!(
-                implicit_pattern_classes(&bundled_definitions()),
+                implicit_pattern_classes(&bundled_files()),
                 Vec::<String>::new()
             );
         }
 
         /// The first bundled rule whose `suffix` holds a pattern string, as
-        /// `(profile index, rule index)`.
-        fn rule_with(definitions: &Value, suffix: &str) -> (usize, usize) {
-            definitions["profiles"]
-                .as_array()
+        /// `(backend name, rule index)`.
+        fn rule_with(files: &Value, suffix: &str) -> (String, usize) {
+            files
+                .as_object()
                 .unwrap()
                 .iter()
-                .enumerate()
-                .find_map(|(profile, value)| {
-                    value["rules"]
+                .find_map(|(backend, file)| {
+                    file["profile"]["rules"]
                         .as_array()
                         .unwrap()
                         .iter()
                         .position(|rule| rule.pointer(suffix).is_some_and(Value::is_string))
-                        .map(|rule| (profile, rule))
+                        .map(|rule| (backend.clone(), rule))
                 })
                 .unwrap_or_else(|| panic!("a bundled rule carries {suffix}"))
         }
 
         fn with_pattern(suffix: &str, pattern: &str) -> (Value, String) {
-            let mut definitions = bundled_definitions();
-            let (profile, rule) = rule_with(&definitions, suffix);
-            let value = &mut definitions["profiles"][profile];
-            *value["rules"][rule].pointer_mut(suffix).unwrap() = json!(pattern);
+            let mut files = bundled_files();
+            let (backend, rule) = rule_with(&files, suffix);
+            let file = &mut files[&backend];
+            *file["profile"]["rules"][rule].pointer_mut(suffix).unwrap() = json!(pattern);
             let location = format!(
                 "{} rule {}",
-                value["backend"].as_str().unwrap(),
-                value["rules"][rule]["id"].as_str().unwrap()
+                file["backend"].as_str().unwrap(),
+                file["profile"]["rules"][rule]["id"].as_str().unwrap()
             );
-            (definitions, location)
+            (files, location)
         }
 
         #[test]
         fn the_explicit_class_guard_line_reads_backend_location_and_construct() {
             let mut value = definitions();
-            value["profiles"][0]["rules"][0]["matchers"][0]["pattern"] =
+            value["codex"]["profile"]["rules"][0]["matchers"][0]["pattern"] =
                 json!(r"^Operation:\s(?P<operation>.+)$");
             assert_eq!(
                 implicit_pattern_classes(&value),
@@ -4254,80 +4177,10 @@ mod tests {
 
         #[test]
         fn the_explicit_class_guard_ignores_strings_the_decoder_does_not_compile_as_patterns() {
-            let (mut definitions, _) = with_pattern("/matchers/0/pattern", "x");
-            let (profile, rule) = rule_with(&definitions, "/matchers/0/pattern");
-            definitions["profiles"][profile]["rules"][rule]["id"] = json!(r"rule-\s-\d");
-            assert_eq!(implicit_pattern_classes(&definitions), Vec::<String>::new());
-        }
-
-        fn load_with_file(
-            definitions: &Value,
-            source: &str,
-            file: &Value,
-        ) -> Result<ProfileCatalog, CafleetError> {
-            let bytes = serde_json::to_vec(file).unwrap();
-            let embedded = BUNDLED_FIXTURES
-                .iter()
-                .map(|&(cited, original)| {
-                    (
-                        cited,
-                        if cited == source {
-                            bytes.as_slice()
-                        } else {
-                            original
-                        },
-                    )
-                })
-                .collect::<Vec<_>>();
-            ProfileCatalog::from_bundled_definitions(definitions, &embedded)
-        }
-
-        #[test]
-        fn each_embedded_backend_file_is_bound_to_its_catalog_identity_screens_and_bytes() {
-            let definitions = bundled_definitions();
-            for &(source, bytes) in BUNDLED_FIXTURES {
-                let file: Value = serde_json::from_slice(bytes).unwrap();
-                let other = if file["backend"] == "codex" {
-                    "claude"
-                } else {
-                    "codex"
-                };
-                for (field, value) in [
-                    ("schema_version", json!(2)),
-                    ("provenance", json!("synthetic")),
-                    ("backend", json!(other)),
-                ] {
-                    let mut changed = file.clone();
-                    changed[field] = value;
-                    assert_eq!(
-                        usage_failure(load_with_file(&definitions, source, &changed)),
-                        "invalid native profile: bundled fixture file identity differs from its catalog entry",
-                        "{source}: {field}"
-                    );
-                }
-                let mut missing = file.clone();
-                let screens = missing["screens"].as_object_mut().unwrap();
-                let first = screens.keys().next().unwrap().clone();
-                screens.remove(&first);
-                assert_eq!(
-                    usage_failure(load_with_file(&definitions, source, &missing)),
-                    "invalid native profile: bundled fixture screen is missing",
-                    "{source}"
-                );
-                let absent = BUNDLED_FIXTURES
-                    .iter()
-                    .copied()
-                    .filter(|&(cited, _)| cited != source)
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    usage_failure(ProfileCatalog::from_bundled_definitions(
-                        &definitions,
-                        &absent
-                    )),
-                    "invalid native profile: bundled fixture bytes are not embedded",
-                    "{source}"
-                );
-            }
+            let (mut files, _) = with_pattern("/matchers/0/pattern", "x");
+            let (backend, rule) = rule_with(&files, "/matchers/0/pattern");
+            files[&backend]["profile"]["rules"][rule]["id"] = json!(r"rule-\s-\d");
+            assert_eq!(implicit_pattern_classes(&files), Vec::<String>::new());
         }
     }
 
@@ -4396,9 +4249,10 @@ mod tests {
     #[test]
     fn permission_inspection_catalog_bounds_each_stage_and_complete_plan() {
         let mut value = inspection_fixture_definition();
-        let mut stage = value["profiles"][0]["capabilities"]["answers"][0]["stages"][0].clone();
+        let mut stage =
+            value["codex"]["profile"]["capabilities"]["answers"][0]["stages"][0].clone();
         stage["bytes_hex"] = json!("79".repeat(256));
-        value["profiles"][0]["capabilities"]["answers"][0]["stages"] =
+        value["codex"]["profile"]["capabilities"]["answers"][0]["stages"] =
             json!(vec![stage.clone(); 16]);
         let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
         let plan = catalog
@@ -4412,9 +4266,9 @@ mod tests {
             plan.stages().iter().map(|s| s.bytes().len()).sum::<usize>(),
             4096
         );
-        value["profiles"][0]["capabilities"]["answers"][0]["stages"] = json!(vec![stage; 17]);
+        value["codex"]["profile"]["capabilities"]["answers"][0]["stages"] = json!(vec![stage; 17]);
         assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
-        value["profiles"][0]["capabilities"]["answers"][0]["stages"] = json!([{
+        value["codex"]["profile"]["capabilities"]["answers"][0]["stages"] = json!([{
             "bytes_hex":"79".repeat(257),"required_rule_id":"synthetic-permission","required_choice_id":"allow-once"
         }]);
         assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
@@ -4443,7 +4297,7 @@ mod tests {
             "deny-once"
         };
         let focus = if decision == "allow" { "allow" } else { "deny" };
-        value["profiles"][0]["capabilities"]["answers"] = json!([{
+        value["codex"]["profile"]["capabilities"]["answers"] = json!([{
             "decision":decision,"request_rule_id":RULE,"answer_rule_id":format!("synthetic-{decision}-plan"),
             "choice_id":choice,"focus_matcher_id":focus,"fixture_ids":[FIXTURE],
             "stages":[{"bytes_hex":"78","required_rule_id":RULE,"required_choice_id":choice}]
@@ -4509,26 +4363,26 @@ mod tests {
 
     #[test]
     fn runtime_profile_root_schema_and_unknown_fields_fail_initialization() {
-        for value in [
-            Value::Null,
-            json!([]),
-            json!({}),
-            json!({"schema_version":2,"fixtures":[],"profiles":[]}),
-        ] {
+        for value in [Value::Null, json!([]), json!({"codex":[]})] {
             assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
         }
+        invalid(|value| value["codex"]["schema_version"] = json!(2));
+        invalid(|value| {
+            let file = value.as_object_mut().unwrap().remove("codex").unwrap();
+            value["other"] = file;
+        });
         for path in [
             "",
-            "/fixtures/0",
-            "/profiles/0",
-            "/profiles/0/rules/0",
-            "/profiles/0/rules/0/region",
-            "/profiles/0/rules/0/matchers/0",
-            "/profiles/0/rules/0/extract",
-            "/profiles/0/rules/0/extract/choices/0",
-            "/profiles/0/rules/0/extract/operation",
-            "/profiles/0/capabilities",
-            "/profiles/0/capabilities/detection",
+            "/codex",
+            "/codex/profile",
+            "/codex/profile/rules/0",
+            "/codex/profile/rules/0/region",
+            "/codex/profile/rules/0/matchers/0",
+            "/codex/profile/rules/0/extract",
+            "/codex/profile/rules/0/extract/choices/0",
+            "/codex/profile/rules/0/extract/operation",
+            "/codex/profile/capabilities",
+            "/codex/profile/capabilities/detection",
         ] {
             invalid(|value| {
                 value
@@ -4539,35 +4393,46 @@ mod tests {
                     .insert("unexpected".into(), json!(true));
             });
         }
-        invalid(|value| {
-            value.as_object_mut().unwrap().remove("fixtures");
-        });
+        for field in ["schema_version", "backend", "profile", "screens"] {
+            invalid(|value| {
+                value["codex"].as_object_mut().unwrap().remove(field);
+            });
+        }
     }
 
     #[test]
     fn runtime_profile_enums_geometry_and_real_boolean_types_are_validated() {
         for (path, replacement) in [
-            ("/fixtures/0/kind", json!("unverified")),
-            ("/fixtures/0/backend", json!("other")),
-            ("/fixtures/0/rows", json!(0)),
-            ("/fixtures/0/cols", json!(-1)),
-            ("/fixtures/0/sha256", json!("A".repeat(64))),
-            ("/fixtures/0/source_ref", json!(" ")),
-            ("/fixtures/0/native_version", json!(" ")),
-            ("/fixtures/0/native_version", json!([VERSION])),
-            ("/fixtures/0/native_version", Value::Null),
-            ("/profiles/0/rules/0/priority", json!(1.5)),
-            ("/profiles/0/rules/0/observation", json!("approved")),
+            ("/codex/backend", json!("other")),
+            ("/codex/backend", json!("claude")),
+            ("/codex/screens", json!([])),
             (
-                "/profiles/0/rules/0/verified_noninteraction",
+                "/codex/screens/synthetic-permission-1/native_version",
+                json!(" "),
+            ),
+            (
+                "/codex/screens/synthetic-permission-1/native_version",
+                json!([VERSION]),
+            ),
+            (
+                "/codex/screens/synthetic-permission-1/native_version",
+                Value::Null,
+            ),
+            ("/codex/profile/rules/0/priority", json!(1.5)),
+            ("/codex/profile/rules/0/observation", json!("approved")),
+            (
+                "/codex/profile/rules/0/verified_noninteraction",
                 json!("false"),
             ),
-            ("/profiles/0/rules/0/region/screen", json!("scrollback")),
-            ("/profiles/0/rules/0/region/max_rows", json!(0)),
-            ("/profiles/0/rules/0/region/cursor", json!("nearby")),
-            ("/profiles/0/rules/0/matchers/0/scope", json!("transcript")),
+            ("/codex/profile/rules/0/region/screen", json!("scrollback")),
+            ("/codex/profile/rules/0/region/max_rows", json!(0)),
+            ("/codex/profile/rules/0/region/cursor", json!("nearby")),
             (
-                "/profiles/0/rules/0/extract/choices/0/scope",
+                "/codex/profile/rules/0/matchers/0/scope",
+                json!("transcript"),
+            ),
+            (
+                "/codex/profile/rules/0/extract/choices/0/scope",
                 json!("forever"),
             ),
         ] {
@@ -4578,19 +4443,16 @@ mod tests {
     }
 
     #[test]
-    fn runtime_profile_duplicate_identity_and_a_second_backend_profile_fail() {
+    fn runtime_profile_duplicate_identity_fails() {
         invalid(|value| {
-            let copy = value["fixtures"][0].clone();
-            value["fixtures"].as_array_mut().unwrap().push(copy);
-        });
-        invalid(|value| {
-            let copy = value["profiles"][0].clone();
-            value["profiles"].as_array_mut().unwrap().push(copy);
+            let mut claude = value["codex"].clone();
+            claude["backend"] = json!("claude");
+            value["claude"] = claude;
         });
         for array in [
-            "/profiles/0/rules",
-            "/profiles/0/rules/0/matchers",
-            "/profiles/0/rules/0/extract/choices",
+            "/codex/profile/rules",
+            "/codex/profile/rules/0/matchers",
+            "/codex/profile/rules/0/extract/choices",
         ] {
             invalid(|value| {
                 let items = value.pointer_mut(array).unwrap().as_array_mut().unwrap();
@@ -4602,15 +4464,15 @@ mod tests {
     #[test]
     fn runtime_profile_regex_and_capture_relationships_fail_at_initialization() {
         for (path, replacement) in [
-            ("/profiles/0/rules/0/region/start_pattern", json!("[")),
-            ("/profiles/0/rules/0/region/end_pattern", json!("[")),
-            ("/profiles/0/rules/0/matchers/0/pattern", json!("[")),
+            ("/codex/profile/rules/0/region/start_pattern", json!("[")),
+            ("/codex/profile/rules/0/region/end_pattern", json!("[")),
+            ("/codex/profile/rules/0/matchers/0/pattern", json!("[")),
             (
-                "/profiles/0/rules/0/extract/operation/matcher_id",
+                "/codex/profile/rules/0/extract/operation/matcher_id",
                 json!("missing"),
             ),
             (
-                "/profiles/0/rules/0/extract/operation/capture",
+                "/codex/profile/rules/0/extract/operation/capture",
                 json!("missing"),
             ),
         ] {
@@ -4619,22 +4481,23 @@ mod tests {
             });
         }
         invalid(|value| {
-            value["profiles"][0]["rules"][0]["verified_noninteraction"] = json!(true);
+            value["codex"]["profile"]["rules"][0]["verified_noninteraction"] = json!(true);
         });
     }
 
     #[test]
     fn runtime_profile_operation_row_margin_must_be_a_nonempty_single_row_string() {
         let mut margined = definitions();
-        margined["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = json!(" ");
+        margined["codex"]["profile"]["rules"][0]["extract"]["operation"]["row_margin"] = json!(" ");
         assert!(crate::coding_agent::catalog::test_support::load(&margined).is_ok());
         for margin in [json!(1), json!(""), json!("\n")] {
             invalid(|value| {
-                value["profiles"][0]["rules"][0]["extract"]["operation"]["row_margin"] = margin;
+                value["codex"]["profile"]["rules"][0]["extract"]["operation"]["row_margin"] =
+                    margin;
             });
         }
         invalid(|value| {
-            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            let operation = &mut value["codex"]["profile"]["rules"][0]["extract"]["operation"];
             operation["row_margin"] = json!(" ");
             operation["reassembly"] = json!("rows");
         });
@@ -4644,7 +4507,7 @@ mod tests {
     fn runtime_profile_operation_margin_rows_select_all_or_continuation_rows_of_a_margin() {
         for margin_rows in ["all", "continuation"] {
             let mut value = definitions();
-            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            let operation = &mut value["codex"]["profile"]["rules"][0]["extract"]["operation"];
             operation["row_margin"] = json!(" ");
             operation["margin_rows"] = json!(margin_rows);
             assert!(
@@ -4653,12 +4516,13 @@ mod tests {
             );
         }
         invalid(|value| {
-            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            let operation = &mut value["codex"]["profile"]["rules"][0]["extract"]["operation"];
             operation["row_margin"] = json!(" ");
             operation["margin_rows"] = json!("first");
         });
         invalid(|value| {
-            value["profiles"][0]["rules"][0]["extract"]["operation"]["margin_rows"] = json!("all");
+            value["codex"]["profile"]["rules"][0]["extract"]["operation"]["margin_rows"] =
+                json!("all");
         });
     }
 
@@ -4666,7 +4530,7 @@ mod tests {
     fn runtime_profile_operation_row_trailer_is_a_trimmed_single_row_literal() {
         for with_margin in [false, true] {
             let mut value = definitions();
-            let operation = &mut value["profiles"][0]["rules"][0]["extract"]["operation"];
+            let operation = &mut value["codex"]["profile"]["rules"][0]["extract"]["operation"];
             if with_margin {
                 operation["row_margin"] = json!(" ");
                 operation["margin_rows"] = json!("continuation");
@@ -4679,32 +4543,41 @@ mod tests {
         }
         for trailer in [json!(1), json!(""), json!(" █"), json!("█\n█")] {
             invalid(|value| {
-                value["profiles"][0]["rules"][0]["extract"]["operation"]["row_trailer"] = trailer;
+                value["codex"]["profile"]["rules"][0]["extract"]["operation"]["row_trailer"] =
+                    trailer;
             });
         }
     }
 
     #[test]
     fn runtime_profile_capability_provenance_references_are_checked() {
+        invalid(|value| {
+            let mut claude = value["codex"].clone();
+            claude["backend"] = json!("claude");
+            value["claude"] = claude;
+            value["codex"]["screens"] = json!({});
+        });
         for (path, replacement) in [
-            ("/fixtures/0/backend", json!("claude")),
             (
-                "/profiles/0/capabilities/detection/rule_ids",
+                "/codex/profile/capabilities/detection/rule_ids",
                 json!(["missing-rule"]),
             ),
             (
-                "/profiles/0/capabilities/detection/fixture_ids",
+                "/codex/profile/capabilities/detection/fixture_ids",
                 json!(["missing-fixture"]),
             ),
-            ("/profiles/0/capabilities/detection/fixture_ids", json!([])),
+            (
+                "/codex/profile/capabilities/detection/fixture_ids",
+                json!([]),
+            ),
         ] {
             invalid(|value| {
                 *value.pointer_mut(path).unwrap() = replacement;
             });
         }
         invalid(|value| {
-            value["profiles"][0]["capabilities"]["composer"] =
-                value["profiles"][0]["capabilities"]["detection"].clone();
+            value["codex"]["profile"]["capabilities"]["composer"] =
+                value["codex"]["profile"]["capabilities"]["detection"].clone();
         });
     }
 
@@ -4714,51 +4587,51 @@ mod tests {
         assert!(crate::coding_agent::catalog::test_support::load(&valid).is_ok());
         for (path, replacement) in [
             (
-                "/profiles/0/capabilities/answers/0/decision",
+                "/codex/profile/capabilities/answers/0/decision",
                 json!("approve-session"),
             ),
             (
-                "/profiles/0/capabilities/answers/0/request_rule_id",
+                "/codex/profile/capabilities/answers/0/request_rule_id",
                 json!("missing"),
             ),
             (
-                "/profiles/0/capabilities/answers/0/focus_matcher_id",
+                "/codex/profile/capabilities/answers/0/focus_matcher_id",
                 json!("missing"),
             ),
             (
-                "/profiles/0/capabilities/answers/0/choice_id",
+                "/codex/profile/capabilities/answers/0/choice_id",
                 json!("missing"),
             ),
             (
-                "/profiles/0/capabilities/answers/0/fixture_ids",
+                "/codex/profile/capabilities/answers/0/fixture_ids",
                 json!(["missing"]),
             ),
-            ("/profiles/0/capabilities/answers/0/stages", json!([])),
+            ("/codex/profile/capabilities/answers/0/stages", json!([])),
             (
-                "/profiles/0/capabilities/answers/0/stages/0/bytes_hex",
+                "/codex/profile/capabilities/answers/0/stages/0/bytes_hex",
                 json!("7"),
             ),
             (
-                "/profiles/0/capabilities/answers/0/stages/0/bytes_hex",
+                "/codex/profile/capabilities/answers/0/stages/0/bytes_hex",
                 json!("AF"),
             ),
             (
-                "/profiles/0/capabilities/answers/0/stages/0/bytes_hex",
+                "/codex/profile/capabilities/answers/0/stages/0/bytes_hex",
                 json!(""),
             ),
             (
-                "/profiles/0/capabilities/answers/0/stages/0/required_rule_id",
+                "/codex/profile/capabilities/answers/0/stages/0/required_rule_id",
                 json!("missing"),
             ),
             (
-                "/profiles/0/capabilities/answers/0/stages/0/required_choice_id",
+                "/codex/profile/capabilities/answers/0/stages/0/required_choice_id",
                 json!("deny-once"),
             ),
             (
-                "/profiles/0/rules/0/extract/choices/0/scope",
+                "/codex/profile/rules/0/extract/choices/0/scope",
                 json!("persistent"),
             ),
-            ("/profiles/0/rules/0/observation", json!("trust")),
+            ("/codex/profile/rules/0/observation", json!("trust")),
         ] {
             let mut value = valid.clone();
             *value.pointer_mut(path).unwrap() = replacement;
@@ -4774,8 +4647,8 @@ mod tests {
         let valid = with_answer("allow");
         assert!(crate::coding_agent::catalog::test_support::load(&valid).is_ok());
         for path in [
-            "/profiles/0/capabilities/answers/0",
-            "/profiles/0/capabilities/answers/0/stages/0",
+            "/codex/profile/capabilities/answers/0",
+            "/codex/profile/capabilities/answers/0/stages/0",
         ] {
             let mut value = valid.clone();
             value
@@ -4787,19 +4660,19 @@ mod tests {
             assert!(crate::coding_agent::catalog::test_support::load(&value).is_err());
         }
         let mut duplicate = valid.clone();
-        duplicate["profiles"][0]["capabilities"]["answers"]
+        duplicate["codex"]["profile"]["capabilities"]["answers"]
             .as_array_mut()
             .unwrap()
-            .push(valid["profiles"][0]["capabilities"]["answers"][0].clone());
+            .push(valid["codex"]["profile"]["capabilities"]["answers"][0].clone());
         assert!(crate::coding_agent::catalog::test_support::load(&duplicate).is_err());
     }
 
     mod gated_catalog {
         use crate::coding_agent::catalog::tests::*;
 
-        const STAGES: &str = "/profiles/0/capabilities/answers/1/stages";
-        const ALLOW_STAGES: &str = "/profiles/0/capabilities/answers/0/stages";
-        const REASON: &str = "/profiles/0/rules/1";
+        const STAGES: &str = "/codex/profile/capabilities/answers/1/stages";
+        const ALLOW_STAGES: &str = "/codex/profile/capabilities/answers/0/stages";
+        const REASON: &str = "/codex/profile/rules/1";
 
         fn rejected(case: &str, change: impl FnOnce(&mut Value)) {
             assert!(
@@ -4978,15 +4851,15 @@ mod tests {
                 ]);
             });
             rejected("continuation of an unrelated request rule", |definition| {
-                let mut other = definition["profiles"][0]["rules"][0].clone();
+                let mut other = definition["codex"]["profile"]["rules"][0].clone();
                 other["id"] = json!("synthetic-other-request");
                 other["region"]["start_pattern"] = json!("^Synthetic other request$");
                 other["matchers"][0]["pattern"] = json!("^Synthetic other request$");
-                definition["profiles"][0]["rules"]
+                definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
                     .push(other);
-                definition["profiles"][0]["capabilities"]["detection"]["rule_ids"] =
+                definition["codex"]["profile"]["capabilities"]["detection"]["rule_ids"] =
                     json!([GATED_RULE, "synthetic-other-request"]);
                 definition.pointer_mut(REASON).unwrap()["continues_rule_id"] =
                     json!("synthetic-other-request");
@@ -5027,7 +4900,7 @@ mod tests {
                 rule["extract"]["choices"] = json!([{"id":"confirm","label":{"matcher_id":"confirm","capture":"label"},"scope":"single_request"}]);
             });
             rejected("continuation as an answer request rule", |definition| {
-                definition["profiles"][0]["capabilities"]["answers"][0]["request_rule_id"] =
+                definition["codex"]["profile"]["capabilities"]["answers"][0]["request_rule_id"] =
                     json!(GATED_REASON_RULE);
             });
             rejected("continuation verifying noninteraction", |definition| {
@@ -5060,26 +4933,21 @@ mod tests {
                     "fixture_ids",
                     json!(["missing-fixture"]),
                 ),
-                (
-                    "synthetic cited fixture",
-                    "fixture_ids",
-                    json!(["synthetic-permission-1"]),
-                ),
             ] {
                 rejected(case, |definition| {
                     definition.pointer_mut(REASON).unwrap()[key] = value;
                 });
             }
             rejected("continuation of a non-permission rule", |definition| {
-                definition["profiles"][0]["rules"][0]["observation"] = json!("question");
-                definition["profiles"][0]["capabilities"]["answers"] = json!([]);
+                definition["codex"]["profile"]["rules"][0]["observation"] = json!("question");
+                definition["codex"]["profile"]["capabilities"]["answers"] = json!([]);
             });
             for key in ["continues_rule_id", "continues_choice_id", "fixture_ids"] {
                 rejected(
                     &format!("{key} on a permission request rule"),
                     |definition| {
                         let value = definition.pointer(REASON).unwrap()[key].clone();
-                        definition["profiles"][0]["rules"][0][key] = value;
+                        definition["codex"]["profile"]["rules"][0][key] = value;
                     },
                 );
             }
@@ -5088,19 +4956,22 @@ mod tests {
         #[test]
         fn gated_catalog_requires_a_background_focus_matcher_over_line_scoped_labels() {
             rejected("focus matcher without focus_style", |definition| {
-                definition["profiles"][0]["rules"][0]["matchers"][2]
+                definition["codex"]["profile"]["rules"][0]["matchers"][2]
                     .as_object_mut()
                     .unwrap()
                     .remove("focus_style");
             });
             rejected("focus_style bold", |definition| {
-                definition["profiles"][0]["rules"][0]["matchers"][2]["focus_style"] = json!("bold");
+                definition["codex"]["profile"]["rules"][0]["matchers"][2]["focus_style"] =
+                    json!("bold");
             });
             rejected("region-scoped choice label", |definition| {
-                definition["profiles"][0]["rules"][0]["matchers"][3]["scope"] = json!("region");
+                definition["codex"]["profile"]["rules"][0]["matchers"][3]["scope"] =
+                    json!("region");
             });
             let mut textual = definitions();
-            textual["profiles"][0]["rules"][0]["matchers"][1]["focus_style"] = json!("background");
+            textual["codex"]["profile"]["rules"][0]["matchers"][1]["focus_style"] =
+                json!("background");
             assert!(
                 crate::coding_agent::catalog::test_support::load(&textual).is_ok(),
                 "an ungated profile may declare a background focus matcher"
@@ -5115,13 +4986,13 @@ mod tests {
                     .unwrap() = json!("1b");
             });
             let mut value = definitions();
-            value["profiles"][0]["capabilities"]["answers"] = json!([{
+            value["codex"]["profile"]["capabilities"]["answers"] = json!([{
                 "decision":"deny","request_rule_id":RULE,"answer_rule_id":"synthetic-escape",
                 "choice_id":"deny-once","focus_matcher_id":"deny","fixture_ids":[FIXTURE],
                 "stages":[{"bytes_hex":"6e","required_rule_id":RULE,"required_choice_id":"deny-once"}]
             }]);
             assert!(crate::coding_agent::catalog::test_support::load(&value).is_ok());
-            value["profiles"][0]["capabilities"]["answers"][0]["stages"][0]["bytes_hex"] =
+            value["codex"]["profile"]["capabilities"]["answers"][0]["stages"][0]["bytes_hex"] =
                 json!("0d1b");
             assert!(
                 crate::coding_agent::catalog::test_support::load(&value).is_err(),
@@ -5148,7 +5019,7 @@ mod tests {
                     );
                     for invalid in [0, 33] {
                         let mut bad = good.clone();
-                        bad["profiles"][0]["capabilities"]["composer"]["submission"]
+                        bad["codex"]["profile"]["capabilities"]["composer"]["submission"]
                             [operation_name(operation)]["submit_hex"] = json!("7a".repeat(invalid));
                         reject(&good, &bad, operation, "decoded submit length");
                     }
@@ -5165,7 +5036,7 @@ mod tests {
                 (ComposerOperation::Exec, json!(17)),
             ] {
                 let mut bad = good.clone();
-                bad["profiles"][0]["capabilities"]["composer"]["submission"]
+                bad["codex"]["profile"]["capabilities"]["composer"]["submission"]
                     [operation_name(operation)]["prefix_hex"] = invalid;
                 reject(&good, &bad, operation, "operation prefix");
             }
@@ -5176,7 +5047,7 @@ mod tests {
             let good = definition(Some("7e"), Some("6b6c"));
             for invalid in [json!(""), json!("0"), json!("ABCDEF"), Value::Null] {
                 let mut bad = good.clone();
-                bad["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["submit_hex"] =
+                bad["codex"]["profile"]["capabilities"]["composer"]["submission"]["prompt"]["submit_hex"] =
                     invalid;
                 reject(&good, &bad, ComposerOperation::Prompt, "submit hex");
             }
@@ -5185,7 +5056,7 @@ mod tests {
         #[test]
         fn composer_optional_submission_and_operation_objects_have_exact_complete_fields() {
             let good = definition(Some("7e"), Some("6b6c"));
-            let submission = "/profiles/0/capabilities/composer/submission";
+            let submission = "/codex/profile/capabilities/composer/submission";
             let prompt = format!("{submission}/prompt");
             let rejected = |label: &str, change: &dyn Fn(&mut Value)| {
                 let mut bad = good.clone();
@@ -5193,13 +5064,13 @@ mod tests {
                 reject(&good, &bad, ComposerOperation::Prompt, label);
             };
             rejected("missing composer field", &|bad| {
-                bad["profiles"][0]["capabilities"]["composer"]
+                bad["codex"]["profile"]["capabilities"]["composer"]
                     .as_object_mut()
                     .unwrap()
                     .remove("rule_ids");
             });
             rejected("unknown composer field", &|bad| {
-                bad["profiles"][0]["capabilities"]["composer"]["unknown"] = json!(true);
+                bad["codex"]["profile"]["capabilities"]["composer"]["unknown"] = json!(true);
             });
             rejected("null submission", &|bad| {
                 *bad.pointer_mut(submission).unwrap() = Value::Null;
@@ -5243,7 +5114,7 @@ mod tests {
                 Value::Null,
             ] {
                 let mut bad = good.clone();
-                bad["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
+                bad["codex"]["profile"]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
                     invalid;
                 reject(
                     &good,
@@ -5254,11 +5125,13 @@ mod tests {
             }
             {
                 let mut bad = good.clone();
-                let mut foreign = bad["fixtures"][0].clone();
-                foreign["id"] = json!("foreign-operation-fixture");
-                foreign["backend"] = json!("claude");
-                bad["fixtures"].as_array_mut().unwrap().push(foreign);
-                bad["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
+                let mut claude = definitions()["codex"].clone();
+                claude["backend"] = json!("claude");
+                claude["screens"] = json!({"foreign-operation-fixture": fixture_at(VERSION)});
+                claude["profile"]["capabilities"]["detection"]["fixture_ids"] =
+                    json!(["foreign-operation-fixture"]);
+                bad["claude"] = claude;
+                bad["codex"]["profile"]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
                     json!(["foreign-operation-fixture"]);
                 reject(
                     &good,
@@ -5268,7 +5141,7 @@ mod tests {
                 );
             }
             let mut bad = good.clone();
-            bad["profiles"][0]["capabilities"]["composer"]["submission"]["exec"]["fixture_ids"] =
+            bad["codex"]["profile"]["capabilities"]["composer"]["submission"]["exec"]["fixture_ids"] =
                 json!([]);
             reject(&good, &bad, ComposerOperation::Exec, "exec fixture set");
         }
@@ -5276,11 +5149,11 @@ mod tests {
         #[test]
         fn composer_rule_references_keep_component_identity_and_declared_order() {
             let mut good = definition(Some("7e"), Some("6b6c"));
-            good["profiles"][0]["rules"]
+            good["codex"]["profile"]["rules"]
                 .as_array_mut()
                 .unwrap()
-                .push(definitions()["profiles"][0]["rules"][0].clone());
-            good["profiles"][0]["capabilities"]["detection"] =
+                .push(definitions()["codex"]["profile"]["rules"][0].clone());
+            good["codex"]["profile"]["capabilities"]["detection"] =
                 json!({"rule_ids":[RULE],"fixture_ids":[FIXTURE]});
             let catalog = crate::coding_agent::catalog::test_support::load(&good).unwrap();
             assert_eq!(
@@ -5294,7 +5167,7 @@ mod tests {
                 json!([EMPTY, EMPTY]),
             ] {
                 let mut bad = good.clone();
-                bad["profiles"][0]["capabilities"]["composer"]["rule_ids"] = invalid;
+                bad["codex"]["profile"]["capabilities"]["composer"]["rule_ids"] = invalid;
                 reject(
                     &good,
                     &bad,
@@ -6623,13 +6496,8 @@ mod tests {
 
         /// The bundled catalog without the two AskUserQuestion rules.
         fn without_ask_rules() -> ProfileCatalog {
-            let mut definitions = bundled_definitions();
-            let claude = definitions["profiles"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .find(|profile| profile["backend"] == "claude")
-                .expect("the bundled claude profile");
+            let mut files = bundled_files();
+            let claude = &mut files["claude"]["profile"];
             let ask = |id: &Value| id == FORM_RULE || id == REVIEW_RULE;
             claude["rules"]
                 .as_array_mut()
@@ -6639,7 +6507,7 @@ mod tests {
                 .as_array_mut()
                 .unwrap()
                 .retain(|id| !ask(id));
-            ProfileCatalog::from_definitions(&definitions).unwrap()
+            ProfileCatalog::from_files(&files).unwrap()
         }
 
         #[test]
@@ -6654,18 +6522,12 @@ mod tests {
                 .collect();
 
             let without = without_ask_rules();
-            let definitions = bundled_definitions();
-            let existing: Vec<(&str, &str)> = definitions["fixtures"]
-                .as_array()
+            let files = bundled_files();
+            let existing: Vec<(&str, &str)> = files["claude"]["screens"]
+                .as_object()
                 .unwrap()
                 .iter()
-                .filter(|fixture| fixture["backend"] == "claude")
-                .map(|fixture| {
-                    (
-                        fixture["id"].as_str().unwrap(),
-                        fixture["native_version"].as_str().unwrap(),
-                    )
-                })
+                .map(|(id, screen)| (id.as_str(), screen["native_version"].as_str().unwrap()))
                 .filter(|(id, _)| !ask_captures.contains(id))
                 .collect();
             assert!(!existing.is_empty());
@@ -6754,7 +6616,7 @@ mod tests {
         fn bundled_submission_fixtures_replay_their_composer_stages_through_the_production_catalog()
         {
             let bundled = ProfileCatalog::bundled();
-            let definitions = bundled_definitions();
+            let files = bundled_files();
             for (backend, run) in [
                 (CodingAgent::Claude, "2.1.308"),
                 (CodingAgent::Codex, "0.163.0"),
@@ -6762,12 +6624,7 @@ mod tests {
                 (CodingAgent::Pi, "1.5.0"),
             ] {
                 let detector = Detector::new(bundled, backend, Some(run));
-                let profile = definitions["profiles"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|profile| profile["backend"] == backend.name())
-                    .expect("bundled backend profile");
+                let profile = &files[backend.name()]["profile"];
                 for (operation, name) in [
                     (ComposerOperation::Prompt, "prompt"),
                     (ComposerOperation::Exec, "exec"),
@@ -7475,58 +7332,26 @@ mod tests {
         ];
 
         #[test]
-        fn catalog_rejects_a_second_profile_for_one_backend() {
-            type Case = (&'static str, &'static [(CodingAgent, &'static str)]);
-            const CASES: [Case; 3] = [
-                (
-                    "two codex profiles",
-                    &[
-                        (CodingAgent::Codex, "first"),
-                        (CodingAgent::Codex, "second"),
-                    ],
-                ),
-                (
-                    "a second codex profile after a claude profile",
-                    &[
-                        (CodingAgent::Codex, "first"),
-                        (CodingAgent::Claude, "claude"),
-                        (CodingAgent::Codex, "second"),
-                    ],
-                ),
-                (
-                    "two claude profiles",
-                    &[
-                        (CodingAgent::Claude, "first"),
-                        (CodingAgent::Claude, "second"),
-                    ],
-                ),
-            ];
-            for (name, profiles) in CASES {
-                let value = single_profiles(profiles);
-                match ProfileCatalog::from_definitions(&value) {
-                    Err(error) => {
-                        assert_eq!(error.exit_code(), 2, "{name}");
-                        assert_eq!(
-                            error.message(),
-                            "invalid native profile: more than one profile for one backend",
-                            "{name}"
-                        );
-                    }
-                    Ok(_) => panic!("{name} accepted"),
-                }
-            }
-        }
-
-        #[test]
-        fn catalog_profile_keys_are_backend_rules_and_capabilities() {
+        fn catalog_profile_files_hold_their_backend_profile_and_screens() {
             let value = single_profiles(&[(CodingAgent::Codex, "only")]);
-            let keys = value["profiles"][0]
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>();
-            assert_eq!(keys, BTreeSet::from(["backend", "capabilities", "rules"]));
+            let keys = |value: &Value| {
+                value
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .cloned()
+                    .collect::<BTreeSet<_>>()
+            };
+            assert_eq!(
+                keys(&value["codex"]),
+                BTreeSet::from(
+                    ["backend", "profile", "schema_version", "screens"].map(String::from)
+                )
+            );
+            assert_eq!(
+                keys(&value["codex"]["profile"]),
+                BTreeSet::from(["capabilities", "rules"].map(String::from))
+            );
             assert!(crate::coding_agent::catalog::test_support::load(&value).is_ok());
         }
 
@@ -7535,7 +7360,7 @@ mod tests {
             assert!(crate::coding_agent::catalog::test_support::load(&definitions()).is_ok());
             for malformed in MALFORMED {
                 let mut value = definitions();
-                value["fixtures"][0]["native_version"] = json!(malformed);
+                value["codex"]["screens"][FIXTURE]["native_version"] = json!(malformed);
                 rejected(&value, &format!("fixture native_version {malformed:?}"));
             }
         }
@@ -7563,7 +7388,11 @@ mod tests {
                 {
                     let label = format!("{citation} citing a {other:?} fixture");
                     let message = rejected(&citing(citation, other, VERSION), &label);
-                    assert!(message.contains("fixture backend"), "{label}: {message}");
+                    assert_eq!(
+                        message,
+                        "invalid native profile: codex cites unknown fixture citation-probe",
+                        "{label}"
+                    );
                 }
             }
         }
@@ -7576,15 +7405,22 @@ mod tests {
             "answers/0/fixture_ids",
         ];
 
-        /// The single Codex profile with `citation` naming one extra fixture of `backend`
-        /// captured on `captured`.
+        /// The single Codex profile with `citation` naming one extra screen, captured on
+        /// `captured`, of `backend`'s profile file.
         fn citing(citation: &str, backend: CodingAgent, captured: &str) -> Value {
             let mut value = single_profiles(&[(CodingAgent::Codex, "only")]);
-            let mut fixture = fixture_at("citation-probe", captured);
-            fixture["backend"] = json!(backend.name());
-            value["fixtures"].as_array_mut().unwrap().push(fixture);
+            if backend == CodingAgent::Codex {
+                value["codex"]["screens"]["citation-probe"] = fixture_at(captured);
+            } else {
+                let mut file = definitions()["codex"].clone();
+                file["backend"] = json!(backend.name());
+                file["screens"] = json!({"citation-probe": fixture_at(captured)});
+                file["profile"]["capabilities"]["detection"]["fixture_ids"] =
+                    json!(["citation-probe"]);
+                value[backend.name()] = file;
+            }
             *value
-                .pointer_mut(&format!("/profiles/0/capabilities/{citation}"))
+                .pointer_mut(&format!("/codex/profile/capabilities/{citation}"))
                 .unwrap() = json!(["citation-probe"]);
             value
         }
@@ -7713,18 +7549,18 @@ mod tests {
     #[test]
     fn composer_operation_provenance_and_exact_selection_do_not_authorize_other_profiles() {
         let mut value = definition(Some("7e"), Some("6b6c"));
-        value["profiles"][0]["rules"]
+        value["codex"]["profile"]["rules"]
             .as_array_mut()
             .unwrap()
-            .push(definitions()["profiles"][0]["rules"][0].clone());
-        value["profiles"][0]["capabilities"]["detection"] =
+            .push(definitions()["codex"]["profile"]["rules"][0].clone());
+        value["codex"]["profile"]["capabilities"]["detection"] =
             json!({"rule_ids":[RULE],"fixture_ids":[FIXTURE]});
         let answers = [("allow", "allow-once", "allow"), ("deny", "deny-once", "deny")].map(|(decision, choice, focus)| {
                 json!({"decision":decision,"request_rule_id":RULE,"answer_rule_id":format!("synthetic-{decision}-plan"),
                     "choice_id":choice,"focus_matcher_id":focus,"fixture_ids":[FIXTURE],
                     "stages":[{"bytes_hex":"78","required_rule_id":RULE,"required_choice_id":choice}]})
             });
-        value["profiles"][0]["capabilities"]["answers"] = json!(answers);
+        value["codex"]["profile"]["capabilities"]["answers"] = json!(answers);
         let catalog = crate::coding_agent::catalog::test_support::load(&value).unwrap();
         let prompt = plan(&catalog, ComposerOperation::Prompt);
         let exec = plan(&catalog, ComposerOperation::Exec);
@@ -7831,7 +7667,7 @@ mod tests {
                 expected(operation, "positive", SUBMIT.as_bytes())
             );
             let mut bad = good.clone();
-            bad["profiles"][0]["capabilities"]["composer"]["submission"]
+            bad["codex"]["profile"]["capabilities"]["composer"]["submission"]
                 [operation_name(operation)]["prefix_hex"] = match operation {
                 ComposerOperation::Prompt => json!("00"),
                 ComposerOperation::Exec => json!(""),

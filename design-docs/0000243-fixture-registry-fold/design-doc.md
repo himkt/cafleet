@@ -1,7 +1,7 @@
 # Fold the fixture registry into per-backend profile files
 
 **Status**: Approved
-**Progress**: 15/30 tasks complete
+**Progress**: 26/30 tasks complete
 **Last Updated**: 2026-11-23
 
 ## Overview
@@ -256,20 +256,20 @@ Script `BASE/.scripts/fold_registry.py`, run with `python3 -I` from the reposito
 
 ### Step 5: Guard and test support
 
-- [ ] Add `#[cfg(test)] impl ProfileCatalog { from_files, from_bundled_files }`, `parse_bundled_text` (duplicate-key rejection) and `bundled_files()` <!-- completed: -->
-- [ ] Rework `implicit_pattern_classes` to walk each file's `profile` with the backend from the file <!-- completed: -->
-- [ ] Rework `validate_provenance` and `with_synthetic_composer_evidence` to read screens from profile files per § Provenance validation <!-- completed: -->
-- [ ] Replace `verify_native_screen` with `verify_bundled_screen` (new field set, no digest or registry geometry) and add cross-file id uniqueness and same-file citation checks with the new error strings <!-- completed: -->
-- [ ] Delete `verify_bundled_fixtures`, `verify_native_fixture_file`, `BUNDLED_FIXTURES`, the `include_bytes!` constants, `FixtureKind` and the registry fields of `ProvenanceFixture` <!-- completed: -->
-- [ ] Rework `synthetic_definitions`, `single_profiles`, `fixture_at`, `bundled_file`, `bundled_fixture` and the shared definition helpers to the object-keyed file shape with stub screens <!-- completed: -->
+- [x] Add `#[cfg(test)] impl ProfileCatalog { from_files, from_bundled_files }`, `parse_bundled_text` (duplicate-key rejection) and `bundled_files()` <!-- completed: 2026-11-23T08:11 -->
+- [x] Rework `implicit_pattern_classes` to walk each file's `profile` with the backend from the file <!-- completed: 2026-11-23T08:11 -->
+- [x] Rework `validate_provenance` and `with_synthetic_composer_evidence` to read screens from profile files per § Provenance validation <!-- completed: 2026-11-23T08:11 -->
+- [x] Replace `verify_native_screen` with `verify_bundled_screen` (new field set, no digest or registry geometry) and add cross-file id uniqueness and same-file citation checks with the new error strings <!-- completed: 2026-11-23T08:11 -->
+- [x] Delete `verify_bundled_fixtures`, `verify_native_fixture_file`, `BUNDLED_FIXTURES`, the `include_bytes!` constants, `FixtureKind` and the registry fields of `ProvenanceFixture` <!-- completed: 2026-11-23T08:11 -->
+- [x] Rework `synthetic_definitions`, `single_profiles`, `fixture_at`, `bundled_file`, `bundled_fixture` and the shared definition helpers to the object-keyed file shape with stub screens <!-- completed: 2026-11-23T08:11 -->
 
 ### Step 6: Test migration
 
-- [ ] Migrate `src/coding_agent/catalog.rs` tests to the new shape; delete tests of removed rules (duplicate profile, native provenance, digest, uncited screen, embedded bytes, continuation-native) <!-- completed: -->
-- [ ] Migrate `src/runtime/input.rs` and `src/runtime/service.rs` tests (including `native_screen` and the bundled-entry reader) per the Background inventory <!-- completed: -->
-- [ ] Migrate `src/coding_agent/detector.rs` (`suggestion_fixtures`, catalog builders, bundled-profile iterations), `src/runtime/observation.rs` and `src/cli/member.rs` per the Background inventory <!-- completed: -->
-- [ ] Add the table-driven guard test of § Test catalogs <!-- completed: -->
-- [ ] Sweep `src/` with `grep -rnF` for each literal `["fixtures"]`, `"/fixtures/`, `"fixtures":`, `["profiles"]`, `"/profiles/`, `"profiles":`, `source_ref`, `"kind":"synthetic"`, `"kind":"native"`, `profiles/native`, `bundled.json`, `BUNDLED_FIXTURES`, `bundled_definitions`, `FixtureKind`. These lookups index `serde_json::Value` and compile under the old shape, so the grep, not the compiler, finds them; every hit is a caller still on the old shape and must be migrated until the sweep returns nothing <!-- completed: -->
+- [x] Migrate `src/coding_agent/catalog.rs` tests to the new shape; delete tests of removed rules (duplicate profile, native provenance, digest, uncited screen, embedded bytes, continuation-native) <!-- completed: 2026-11-23T08:11 -->
+- [x] Migrate `src/runtime/input.rs` and `src/runtime/service.rs` tests (including `native_screen` and the bundled-entry reader) per the Background inventory <!-- completed: 2026-11-23T08:11 -->
+- [x] Migrate `src/coding_agent/detector.rs` (`suggestion_fixtures`, catalog builders, bundled-profile iterations), `src/runtime/observation.rs` and `src/cli/member.rs` per the Background inventory <!-- completed: 2026-11-23T08:11 -->
+- [x] Add the table-driven guard test of § Test catalogs <!-- completed: 2026-11-23T08:11 -->
+- [x] Sweep `src/` with `grep -rnF` for each literal `["fixtures"]`, `"/fixtures/`, `"fixtures":`, `["profiles"]`, `"/profiles/`, `"profiles":`, `source_ref`, `"kind":"synthetic"`, `"kind":"native"`, `profiles/native`, `bundled.json`, `BUNDLED_FIXTURES`, `bundled_definitions`, `FixtureKind`. These lookups index `serde_json::Value` and compile under the old shape, so the grep, not the compiler, finds them; every hit is a caller still on the old shape and must be migrated until the sweep returns nothing <!-- completed: 2026-11-23T08:11 -->
 
 ### Step 7: Verification
 

@@ -5914,10 +5914,11 @@ mod tests {
             #[test]
             fn operations_exec_selects_its_native_shell_plan_and_requires_its_own_coverage() {
                 let mut definition = catalog_definition();
-                let mut fixture = definition["fixtures"][0].clone();
-                fixture["id"] = serde_json::json!("synthetic-exec-plan");
-                definition["fixtures"].as_array_mut().unwrap().push(fixture);
-                definition["profiles"][0]["capabilities"]["composer"]["submission"] = serde_json::json!({
+                definition["codex"]["screens"]["synthetic-exec-plan"] =
+                    crate::coding_agent::catalog::test_support::fixture_at(
+                        crate::coding_agent::catalog::test_support::VERSION,
+                    );
+                definition["codex"]["profile"]["capabilities"]["composer"]["submission"] = serde_json::json!({
                     "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-exec-plan"]},
                     "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"6b6c","fixture_ids":["synthetic-exec-plan"]}
                 });
@@ -5961,29 +5962,17 @@ mod tests {
             const CLOSE: &[u8] = b"\x1b[201~";
 
             fn after_native_submit(fixture_id: &str, body: impl FnOnce(&mut Host)) {
+                use crate::coding_agent::ComposerOperation;
                 use crate::coding_agent::catalog::LiteralFraming;
-                use crate::coding_agent::catalog::test_support::bundled_definitions;
                 use crate::coding_agent::detector::test_support::bundled_screen;
                 use crate::coding_agent::detector::test_support::native_fixture_bytes;
-                use crate::coding_agent::{CodingAgent, ComposerOperation};
 
-                let definitions = bundled_definitions();
-                let fixtures = definitions["fixtures"].as_array().unwrap();
-                let fixture = fixtures
-                    .iter()
-                    .find(|entry| entry["id"] == fixture_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "the authoritative retained/working fixture is registered: {fixture_id}"
-                        )
-                    });
-                let backend: CodingAgent =
-                    serde_json::from_value(fixture["backend"].clone()).unwrap();
-                let native_version = fixture["native_version"].as_str().unwrap();
-                let (_, file) =
+                let (backend, file) =
                     crate::coding_agent::catalog::test_support::bundled_file(fixture_id);
-                let reads_empty = |candidate: &Value| {
-                    let screen = &file["screens"][candidate["id"].as_str().unwrap()];
+                let screens = file["screens"].as_object().unwrap();
+                let fixture = &screens[fixture_id];
+                let native_version = fixture["native_version"].as_str().unwrap();
+                let reads_empty = |screen: &Value| {
                     crate::coding_agent::detector::test_support::observe_bundled(
                         backend,
                         native_version,
@@ -5997,27 +5986,20 @@ mod tests {
                     .kind
                         == crate::coding_agent::detector::ObservationKind::ComposerEmpty
                 };
-                let same_geometry: Vec<&Value> = fixtures
+                let same_geometry: Vec<(&String, &Value)> = screens
                     .iter()
-                    .filter(|candidate| {
-                        candidate["source_ref"] == fixture["source_ref"]
-                            && candidate["backend"] == fixture["backend"]
-                            && candidate["native_version"] == fixture["native_version"]
+                    .filter(|(_, candidate)| {
+                        candidate["native_version"] == fixture["native_version"]
                             && candidate["rows"] == fixture["rows"]
                             && candidate["cols"] == fixture["cols"]
                     })
                     .collect();
-                let idle = same_geometry
+                let (idle, _) = same_geometry
                     .iter()
                     .copied()
-                    .filter(|candidate| {
-                        candidate["id"]
-                            .as_str()
-                            .unwrap()
-                            .contains("-composer-prompt-idle-mode-2004-")
-                    })
+                    .filter(|(id, _)| id.contains("-composer-prompt-idle-mode-2004-"))
                     .chain(same_geometry.iter().copied())
-                    .find(|candidate| reads_empty(candidate))
+                    .find(|(_, candidate)| reads_empty(candidate))
                     .unwrap_or_else(|| {
                         panic!(
                             "{fixture_id}: its backend/geometry has a captured screen its profile reads as an empty composer"
@@ -6047,7 +6029,7 @@ mod tests {
                             rows: u16::try_from(fixture["rows"].as_u64().unwrap()).unwrap(),
                             cols: u16::try_from(fixture["cols"].as_u64().unwrap()).unwrap(),
                         },
-                        screen: native_fixture_bytes(&bundled_screen(idle["id"].as_str().unwrap())),
+                        screen: native_fixture_bytes(&bundled_screen(idle)),
                         ..HostProfile::metadata()
                     },
                     |host| {
@@ -6250,7 +6232,7 @@ mod tests {
             fn configured(framing: &str, limit: Value) -> ProfileCatalog {
                 let mut value = catalog_definition();
                 for operation in ["prompt", "exec"] {
-                    let plan = &mut value["profiles"][0]["capabilities"]["composer"]["submission"]
+                    let plan = &mut value["codex"]["profile"]["capabilities"]["composer"]["submission"]
                         [operation];
                     plan["literal_framing"] = json!(framing);
                     plan["plain_literal_limit"] = limit.clone();
@@ -6262,18 +6244,16 @@ mod tests {
                 let mut definition =
                     crate::coding_agent::catalog::test_support::inspection_fixture_definition();
                 let composer = catalog_definition();
-                definition["fixtures"]
+                definition["codex"]["screens"]["synthetic-prompt-plan"] =
+                    composer["codex"]["screens"]["synthetic-prompt-plan"].clone();
+                definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(composer["fixtures"][1].clone());
-                definition["profiles"][0]["rules"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(composer["profiles"][0]["rules"][0].clone());
-                definition["profiles"][0]["capabilities"]["composer"] =
-                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                    .push(composer["codex"]["profile"]["rules"][0].clone());
+                definition["codex"]["profile"]["capabilities"]["composer"] =
+                    composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 for operation in ["prompt", "exec"] {
-                    let plan = &mut definition["profiles"][0]["capabilities"]["composer"]["submission"]
+                    let plan = &mut definition["codex"]["profile"]["capabilities"]["composer"]["submission"]
                         [operation];
                     plan["literal_framing"] = json!(framing);
                     plan["plain_literal_limit"] = limit.clone();
@@ -6824,13 +6804,13 @@ mod tests {
             fn partial_submit_key_is_uncertain_with_write_failed() {
                 let mut definition = catalog_definition();
                 for operation in ["prompt", "exec"] {
-                    definition["profiles"][0]["capabilities"]["composer"]["submission"]
+                    definition["codex"]["profile"]["capabilities"]["composer"]["submission"]
                         [operation]["literal_framing"] = json!("plain");
-                    definition["profiles"][0]["capabilities"]["composer"]["submission"]
+                    definition["codex"]["profile"]["capabilities"]["composer"]["submission"]
                         [operation]["plain_literal_limit"] = Value::Null;
                 }
-                definition["profiles"][0]["capabilities"]["composer"]["submission"]["prompt"]["submit_hex"] =
-                    json!("6b6c");
+                definition["codex"]["profile"]["capabilities"]["composer"]["submission"]["prompt"]
+                    ["submit_hex"] = json!("6b6c");
                 let catalog =
                     crate::coding_agent::catalog::test_support::load(&definition).unwrap();
                 let mut bytes = LITERAL.as_bytes().to_vec();
@@ -7166,16 +7146,14 @@ mod tests {
                 let mut definition =
                     crate::coding_agent::catalog::test_support::inspection_fixture_definition();
                 let composer = catalog_definition();
-                definition["fixtures"]
+                definition["codex"]["screens"]["synthetic-prompt-plan"] =
+                    composer["codex"]["screens"]["synthetic-prompt-plan"].clone();
+                definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(composer["fixtures"][1].clone());
-                definition["profiles"][0]["rules"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(composer["profiles"][0]["rules"][0].clone());
-                definition["profiles"][0]["capabilities"]["composer"] =
-                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                    .push(composer["codex"]["profile"]["rules"][0].clone());
+                definition["codex"]["profile"]["capabilities"]["composer"] =
+                    composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 prompt_plan_catalog(&definition)
             }
 
@@ -9210,17 +9188,15 @@ mod tests {
                 let mut definition =
                     crate::coding_agent::catalog::test_support::inspection_fixture_definition();
                 let composer = catalog_definition();
-                definition["fixtures"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(composer["fixtures"][1].clone());
-                let empty = composer["profiles"][0]["rules"][0].clone();
-                definition["profiles"][0]["rules"]
+                definition["codex"]["screens"]["synthetic-prompt-plan"] =
+                    composer["codex"]["screens"]["synthetic-prompt-plan"].clone();
+                let empty = composer["codex"]["profile"]["rules"][0].clone();
+                definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
                     .push(empty);
-                definition["profiles"][0]["capabilities"]["composer"] =
-                    composer["profiles"][0]["capabilities"]["composer"].clone();
+                definition["codex"]["profile"]["capabilities"]["composer"] =
+                    composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 prompt_plan_catalog(&definition)
             }
 
@@ -9783,12 +9759,10 @@ mod tests {
             }
 
             pub(in crate::runtime::input) fn catalog_definition() -> serde_json::Value {
+                use crate::coding_agent::catalog::test_support::{FIXTURE, VERSION, fixture_at};
                 let mut value = crate::coding_agent::catalog::test_support::synthetic_definitions();
-                let fixture = value["fixtures"][0].clone();
-                let mut executable = fixture.clone();
-                executable["id"] = serde_json::json!("synthetic-prompt-plan");
-                value["fixtures"].as_array_mut().unwrap().push(executable);
-                let rule = &mut value["profiles"][0]["rules"][0];
+                value["codex"]["screens"]["synthetic-prompt-plan"] = fixture_at(VERSION);
+                let rule = &mut value["codex"]["profile"]["rules"][0];
                 rule["id"] = serde_json::json!("synthetic-composer-empty");
                 rule["observation"] = serde_json::json!("composer_empty");
                 rule["region"]["start_pattern"] = serde_json::json!("^Synthetic state$");
@@ -9796,9 +9770,9 @@ mod tests {
                 rule["matchers"] = serde_json::json!([{"id":"state","scope":"line","pattern":"^Synthetic state$"}]);
                 rule["extract"] = serde_json::json!({"operation":null,"choices":[]});
                 rule["verified_noninteraction"] = serde_json::json!(true);
-                value["profiles"][0]["capabilities"] = serde_json::json!({
+                value["codex"]["profile"]["capabilities"] = serde_json::json!({
                     "detection":null,"answers":[],"composer":{
-                        "rule_ids":["synthetic-composer-empty"],"fixture_ids":[fixture["id"]],
+                        "rule_ids":["synthetic-composer-empty"],"fixture_ids":[FIXTURE],
                         "submission":{"prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
                     }
                 });
@@ -10768,16 +10742,14 @@ mod tests {
             body: impl FnOnce(&mut Host, Arc<AtomicUsize>, Arc<AtomicBool>),
         ) {
             let composer = catalog_definition();
-            definition["fixtures"]
+            definition["codex"]["screens"]["synthetic-prompt-plan"] =
+                composer["codex"]["screens"]["synthetic-prompt-plan"].clone();
+            definition["codex"]["profile"]["rules"]
                 .as_array_mut()
                 .unwrap()
-                .push(composer["fixtures"][1].clone());
-            definition["profiles"][0]["rules"]
-                .as_array_mut()
-                .unwrap()
-                .push(composer["profiles"][0]["rules"][0].clone());
-            definition["profiles"][0]["capabilities"]["composer"] =
-                composer["profiles"][0]["capabilities"]["composer"].clone();
+                .push(composer["codex"]["profile"]["rules"][0].clone());
+            definition["codex"]["profile"]["capabilities"]["composer"] =
+                composer["codex"]["profile"]["capabilities"]["composer"].clone();
             with_profile_host(
                 crate::runtime::input::tests::ordinary_prompt::support::prompt_plan_catalog(
                     &definition,
@@ -11916,7 +11888,7 @@ mod tests {
         fn permission_response_positive_short_later_stage_keeps_cumulative_uncertainty_without_tail()
          {
             let mut definition = inspection_fixture_definition();
-            definition["profiles"][0]["capabilities"]["answers"][0]["stages"][1]["bytes_hex"] =
+            definition["codex"]["profile"]["capabilities"]["answers"][0]["stages"][1]["bytes_hex"] =
                 serde_json::json!("6f6b");
             with_definition(definition, b"ok".to_vec(), |h, _, _| {
                 let (_, _, id) = admitted(h);
@@ -12166,7 +12138,7 @@ mod tests {
             #[test]
             fn question_with_one_tested_plan_names_its_answer_rule() {
                 let mut definition = question_fixture_definition();
-                definition["profiles"][0]["capabilities"]["answers"]
+                definition["codex"]["profile"]["capabilities"]["answers"]
                     .as_array_mut()
                     .unwrap()
                     .retain(|answer| answer["answer_rule_id"] != QUESTION_LATER_PLAN);
