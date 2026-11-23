@@ -2511,7 +2511,7 @@ A Hermes Director runs the TUI client (§6.7 Host evidence and native-input auth
 | Rule | Class | Declaration |
 |---|---|---|
 | `hermes-tui-idle-composer` | Empty composer | Alternate screen, cursor `any`, a one-row region whose start, end and line matcher are the whole composer line <code>^ ❯(?: (?:Ask me anything…&#124;Try "[^"]*"&#124;Ctrl\+C to interrupt…))? *(?:┃ *)?$</code> |
-| `hermes-tui-composer-text` | Composer text | Alternate screen, cursor `inside`, a region from `^ ❯ ` to the screen's bottom edge, `text_prefixes` `^ ❯ ` and `^   ` for the TUI's one-column margin |
+| `hermes-tui-composer-text` | Composer text | Alternate screen, cursor `inside`, a region from the ` ─ ` status row, which `text_framed` skips, to the screen's bottom edge; `text_prefixes` `^ ❯ ` and `^   ` for the TUI's one-column margin and `text_wrap` `word` |
 | `hermes-tui-approval` | Permission request | Alternate screen, the `╔` to `╚` form with the `⚠ approval required` heading, detection only with no answer plans; the form is answered on the native surface |
 
 The classic-CLI request rules match only the primary-screen `╭` box, so `hermes-tui-approval` keeps a TUI approval form from leaving the composer line verified empty, which would let a preview be typed into the form. The TUI rules rest on Director-pane captures under `approvals.mode: manual`.
@@ -2647,7 +2647,7 @@ A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts
 | `mode_prefix` | Optional. A written literal that begins with it matches with or without it, because the native CLI may consume it as a mode switch, drawing its own mode prompt or none, or keep it as text |
 | `framed` | Optional, default `false`. The region's start row is a frame row, such as an editor border, and composer text begins on the next row |
 
-A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, which replace the `composer.text` prefixes for the regions that rule bounds, so one profile reads composers whose rows carry different margins; only `composer_text` rules declare it.
+A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, `text_wrap` and `text_framed`, which replace the `composer.text` prefixes, `wrap` and `framed` for the regions that rule bounds, so one profile reads composers that differ in margin, wrapping or framing; only `composer_text` rules declare them.
 | `wrap` | `char`: rows join with nothing. `word`: a row break matches either nothing or exactly one literal space |
 | `placeholders` | Collapsed-paste renderings, each with a named `count` group and a `unit` of `scalars` or `lines` |
 

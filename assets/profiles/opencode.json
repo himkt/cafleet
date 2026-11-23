@@ -336,7 +336,9 @@
           "opencode-2.3.0-director-plain-380-herdr-82-1",
           "opencode-2.3.0-director-plain-380-tmux-80-1",
           "opencode-2.3.0-director-wrap-herdr-120-1",
-          "opencode-2.3.0-director-wrap-tmux-120-1"
+          "opencode-2.3.0-director-wrap-tmux-120-1",
+          "opencode-2.3.0-director-preview-after-turn-tmux-120-1",
+          "opencode-2.3.0-director-preview-after-turn-herdr-120-1"
         ]
       }
     ],
@@ -588,7 +590,9 @@
           "opencode-2.3.0-director-plain-380-herdr-82-1",
           "opencode-2.3.0-director-plain-380-tmux-80-1",
           "opencode-2.3.0-director-wrap-herdr-120-1",
-          "opencode-2.3.0-director-wrap-tmux-120-1"
+          "opencode-2.3.0-director-wrap-tmux-120-1",
+          "opencode-2.3.0-director-preview-after-turn-tmux-120-1",
+          "opencode-2.3.0-director-preview-after-turn-herdr-120-1"
         ]
       }
     }
@@ -23933,6 +23937,676 @@
           "row": 10,
           "start_col": 50,
           "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "opencode-2.3.0-director-preview-after-turn-tmux-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 36,
+      "cursor_col": 108,
+      "lines": [
+        "polled: none                  ",
+        "polled: none                  ",
+        "polled: none                  ",
+        "polled: none                  ",
+        "polled: none                  ",
+        "polled: none                  ",
+        "polled: none                  ",
+        "polled: none                  ",
+        "",
+        "› [cafleet msg 15 from 2 2026-11-23T12:28:34.730431+00:00] probe long body 15                                           ",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bbbbb [cafleet] Resume your work if something was still running.                                                        ",
+        "",
+        "polled: 15                    ",
+        "",
+        "› [cafleet msg 16 from 2 2026-11-23T12:28:37.750076+00:00] Body is 265 characters; run cafleet message poll 1 --json to ",
+        "read it. [cafleet] Resume your work if something was still running.                                                     ",
+        "",
+        "polled: 16                    ",
+        "",
+        "› [cafleet msg 17 from 2 2026-11-23T12:28:44.779324+00:00] settle race probe [cafleet] Resume your work if something was",
+        "still running.                ",
+        "",
+        "polled: 17                    ",
+        "",
+        "› Run exactly this shell command: touch /tmp/cfp25/opencode-tmux-perm-probe                                             ",
+        "",
+        "Step interrupted              ",
+        "",
+        "› [cafleet msg 18 from 2 2026-11-23T12:29:30.065232+00:00] interaction hold probe [cafleet] Resume your work if         ",
+        "something was still running.  ",
+        "",
+        "polled: 18                    ",
+        "                                                                                                                        ",
+        "┃ [cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs    ",
+        "┃ and reply with your findings when you are done. [cafleet] Resume your work if something was still running.            ",
+        "                                                                                                                        ",
+        "Build · GPT-6 Luna [medium] · 13.2K (1%) · OpenCode Go · ctrl+p menu                                                    "
+      ],
+      "masked_rows": [],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 77,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 64,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 10,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 67,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 10,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 0,
+          "end_col": 10,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 0,
+          "end_col": 75,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 0,
+          "end_col": 16,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 167
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 0,
+          "end_col": 111,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 0,
+          "end_col": 28,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 0,
+          "end_col": 10,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 2,
+          "end_col": 116,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 2,
+          "end_col": 108,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 27,
+          "end_col": 57,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 57,
+          "end_col": 63,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 63,
+          "end_col": 68,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        }
+      ]
+    },
+    "opencode-2.3.0-director-preview-after-turn-herdr-120-1": {
+      "native_version": "2.3.0",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+        }
+      ],
+      "rows": 13,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        "",
+        "",
+        "› Reply with the single word OK.",
+        "",
+        "OK",
+        "",
+        "Build · GPT-6 Luna · 2.1s",
+        "                                                                                                                       ",
+        "┃ [cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs   ",
+        "┃ and reply with your findings when you are done. [cafleet] Resume your work if something was still running.           ",
+        "                                                                                                                       ",
+        "Build · GPT-6 Luna [medium] · 8.6K (1%) · OpenCode Go · ctrl+p menu                                                    "
+      ],
+      "masked_rows": [
+        {
+          "row": 1,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 32,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 255
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 5,
+          "end_col": 25,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 244
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 2,
+          "end_col": 116,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 1,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 255,
+            "b": 255
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 2,
+          "end_col": 108,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 92,
+            "g": 156,
+            "b": 245
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 5,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 8,
+          "end_col": 27,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 27,
+          "end_col": 56,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 128,
+            "g": 128,
+            "b": 128
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 56,
+          "end_col": 62,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 238,
+            "g": 238,
+            "b": 238
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 62,
+          "end_col": 67,
           "faint": false,
           "foreground": {
             "kind": "rgb",

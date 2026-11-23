@@ -305,16 +305,16 @@
         "observation": "composer_text",
         "region": {
           "screen": "alternate",
-          "start_pattern": "^ ❯ ",
+          "start_pattern": "^ ─ ",
           "end_pattern": "^ ─ ",
           "max_rows": 40,
           "cursor": "inside"
         },
         "matchers": [
           {
-            "id": "prompt",
+            "id": "composer",
             "scope": "region",
-            "pattern": "\\A ❯ "
+            "pattern": "\\A ─ [^\\n]*\\n ❯ "
           }
         ],
         "extract": {
@@ -332,12 +332,16 @@
           "hermes-2026.9.24-director-plain-1024-tmux-120-1",
           "hermes-2026.9.24-director-wrap-tmux-120-1",
           "hermes-2026.9.24-director-plain-1480-tmux-80-1",
-          "hermes-2026.9.24-director-plain-1480-herdr-81-1"
+          "hermes-2026.9.24-director-plain-1480-herdr-81-1",
+          "hermes-2026.9.24-director-preview-after-turn-tmux-120-1",
+          "hermes-2026.9.24-director-preview-after-turn-herdr-120-1"
         ],
         "text_prefixes": {
           "first_prefix": "^ ❯ ",
           "continuation_prefix": "^   "
-        }
+        },
+        "text_wrap": "word",
+        "text_framed": true
       },
       {
         "id": "hermes-tui-approval",
@@ -720,7 +724,9 @@
           "hermes-2026.9.24-director-plain-1480-herdr-81-1",
           "hermes-2026.9.24-director-plain-1480-tmux-80-1",
           "hermes-2026.9.24-director-wrap-herdr-120-1",
-          "hermes-2026.9.24-director-wrap-tmux-120-1"
+          "hermes-2026.9.24-director-wrap-tmux-120-1",
+          "hermes-2026.9.24-director-preview-after-turn-tmux-120-1",
+          "hermes-2026.9.24-director-preview-after-turn-herdr-120-1"
         ]
       }
     }
@@ -11666,7 +11672,7 @@
         "                                                                                                                    ",
         "                                                                                                                    ",
         "                                                                                                                      ",
-        "",
+        " ─ ready │ gpt 6 luna high │ 56s │ voice off │ 2 sessions                               ─ …obe/work (…r-pane-delivery)",
         " ❯ draft text                                                                                       "
       ],
       "masked_rows": [
@@ -11676,10 +11682,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 38,
           "reason": "reviewed_privacy"
         }
       ],
@@ -12705,6 +12707,78 @@
           }
         },
         {
+          "row": 38,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 76,
+            "g": 175,
+            "b": 80
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 8,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 44,
+          "end_col": 57,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 87,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 90,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
           "row": 39,
           "start_col": 1,
           "end_col": 13,
@@ -12766,7 +12840,7 @@
         "",
         "",
         "",
-        "",
+        " ─ ready │ gpt 6 luna high │ 8s │ voice off │ 2 sessions                                ─ …obe/work (…r-pane-delivery)",
         " ❯ Ask me anything…"
       ],
       "masked_rows": [
@@ -12776,10 +12850,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 38,
           "reason": "reviewed_privacy"
         }
       ],
@@ -13710,6 +13780,78 @@
           }
         },
         {
+          "row": 38,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 76,
+            "g": 175,
+            "b": 80
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 8,
+          "end_col": 43,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 43,
+          "end_col": 87,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 87,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 90,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
           "row": 39,
           "start_col": 1,
           "end_col": 3,
@@ -13807,7 +13949,7 @@
         "",
         "",
         "",
-        "",
+        " ─ ready │ gpt 6 luna high │ 16s │ voice off │ 2 sessions                               ─ …obe/work (…r-pane-delivery)",
         " ❯ Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       ],
       "masked_rows": [
@@ -13817,10 +13959,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 38,
           "reason": "reviewed_privacy"
         }
       ],
@@ -14738,6 +14876,78 @@
           }
         },
         {
+          "row": 38,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 76,
+            "g": 175,
+            "b": 80
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 8,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 44,
+          "end_col": 87,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 87,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 90,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
           "row": 39,
           "start_col": 1,
           "end_col": 44,
@@ -14802,7 +15012,7 @@
         "                                                                                                                      ┃",
         "                                                                                                                    ",
         "                                                                                                                    ",
-        "",
+        " ─ ready │ gpt 6 luna high │ 30s │ voice off │ 2 sessions                               ─ …obe/work (…r-pane-delivery)",
         " ❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -14821,10 +15031,6 @@
         },
         {
           "row": 23,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 29,
           "reason": "reviewed_privacy"
         }
       ],
@@ -16066,6 +16272,78 @@
           }
         },
         {
+          "row": 29,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 76,
+            "g": 175,
+            "b": 80
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 8,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 44,
+          "end_col": 87,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 87,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 90,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
           "row": 30,
           "start_col": 1,
           "end_col": 2,
@@ -16258,7 +16536,7 @@
         "",
         "",
         "",
-        "",
+        " ─ ready │ gpt 6 luna high │ 23s │ voice off │ 2 sessions                               ─ …obe/work (…r-pane-delivery)",
         " ❯ Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       ],
@@ -16269,10 +16547,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 37,
           "reason": "reviewed_privacy"
         }
       ],
@@ -17187,6 +17461,78 @@
             "r": 205,
             "g": 127,
             "b": 50
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 76,
+            "g": 175,
+            "b": 80
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 8,
+          "end_col": 44,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 44,
+          "end_col": 87,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 87,
+          "end_col": 90,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 90,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
           }
         },
         {
@@ -20049,7 +20395,7 @@
         "                                                                                                                        ",
         "                                                                                                                        ",
         "                                                                                                                        ",
-        "",
+        " ─ ready │ gpt 6 luna high │ 2m 23s │ voice off │ 1 session                              ─ …obe/work (…r-pane-delivery) ",
         " ❯ draft text                                                                                                           "
       ],
       "masked_rows": [
@@ -20059,10 +20405,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 37,
           "reason": "reviewed_privacy"
         }
       ],
@@ -20918,6 +21260,66 @@
           }
         },
         {
+          "row": 37,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 72
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 8,
+          "end_col": 47,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 47,
+          "end_col": 59,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 88,
+          "end_col": 91,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 91,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
           "row": 38,
           "start_col": 1,
           "end_col": 2,
@@ -20985,7 +21387,7 @@
         "",
         "",
         "",
-        "",
+        " ─ ready │ gpt 6 luna high │ 9s │ voice off │ 1 session                                  ─ …obe/work (…r-pane-delivery) ",
         " ❯ Ask me anything…           "
       ],
       "masked_rows": [
@@ -20995,10 +21397,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 37,
           "reason": "reviewed_privacy"
         }
       ],
@@ -21865,6 +22263,66 @@
           }
         },
         {
+          "row": 37,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 72
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 8,
+          "end_col": 43,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 43,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 88,
+          "end_col": 91,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 91,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
           "row": 38,
           "start_col": 1,
           "end_col": 2,
@@ -21954,7 +22412,7 @@
         "",
         "",
         "                                                                                                                        ",
-        "",
+        " ─ ready │ gpt 6 luna high │ 1m 33s │ voice off │ 1 session                              ─ …obe/work (…r-pane-delivery) ",
         " ❯ Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                                                            "
       ],
       "masked_rows": [
@@ -21964,10 +22422,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 37,
           "reason": "reviewed_privacy"
         }
       ],
@@ -22823,6 +23277,66 @@
           }
         },
         {
+          "row": 37,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 72
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 8,
+          "end_col": 47,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 47,
+          "end_col": 59,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 88,
+          "end_col": 91,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 91,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
           "row": 38,
           "start_col": 1,
           "end_col": 2,
@@ -22894,7 +23408,7 @@
         "                                                                                                                       ┃",
         "                                                                                                                        ",
         "                                                                                                                        ",
-        "",
+        " ─ ready │ gpt 6 luna high │ 1m 47s │ voice off │ 1 session                              ─ …obe/work (…r-pane-delivery) ",
         " ❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
@@ -22912,10 +23426,6 @@
         },
         {
           "row": 23,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 29,
           "reason": "reviewed_privacy"
         }
       ],
@@ -23978,6 +24488,66 @@
           "foreground": {
             "kind": "indexed",
             "index": 220
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 72
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 8,
+          "end_col": 47,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 47,
+          "end_col": 59,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 88,
+          "end_col": 91,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 91,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
           }
         },
         {
@@ -24139,7 +24709,7 @@
         "",
         "",
         "",
-        "",
+        " ─ ready │ gpt 6 luna high │ 1m 40s │ voice off │ 1 session                              ─ …obe/work (…r-pane-delivery) ",
         " ❯ Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                     "
       ],
@@ -24150,10 +24720,6 @@
         },
         {
           "row": 28,
-          "reason": "reviewed_privacy"
-        },
-        {
-          "row": 36,
           "reason": "reviewed_privacy"
         }
       ],
@@ -25009,6 +25575,66 @@
           }
         },
         {
+          "row": 36,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 72
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 8,
+          "end_col": 47,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 47,
+          "end_col": 59,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 88,
+          "end_col": 91,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 91,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
           "row": 37,
           "start_col": 1,
           "end_col": 2,
@@ -25064,7 +25690,7 @@
         "                                                                               ┃",
         "                                                                                ",
         "                                                                                ",
-        "",
+        " ─ ready │ gpt 6 luna high │ 46s │ 4 sessions    ─ …obe/work (…r-pane-delivery) ",
         " ❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
@@ -25086,12 +25712,7 @@
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   "
       ],
-      "masked_rows": [
-        {
-          "row": 3,
-          "reason": "reviewed_privacy"
-        }
-      ],
+      "masked_rows": [],
       "cell_styles": [
         {
           "row": 0,
@@ -25101,6 +25722,66 @@
           "foreground": {
             "kind": "indexed",
             "index": 220
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 72
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 8,
+          "end_col": 32,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 32,
+          "end_col": 45,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 48,
+          "end_col": 51,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 51,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
           }
         },
         {
@@ -25339,7 +26020,7 @@
         "                                                                               ┃",
         "                                                                                ",
         "                                                                                ",
-        "",
+        " ─ ready │ gpt 6 luna high │ 1m 33s │ 4 sessions ─ …obe/work (…r-pane-delivery) ",
         " ❯ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   ",
@@ -25361,12 +26042,7 @@
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  ",
         "   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       ],
-      "masked_rows": [
-        {
-          "row": 3,
-          "reason": "reviewed_privacy"
-        }
-      ],
+      "masked_rows": [],
       "cell_styles": [
         {
           "row": 0,
@@ -25378,6 +26054,78 @@
             "r": 255,
             "g": 215,
             "b": 0
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 76,
+            "g": 175,
+            "b": 80
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 8,
+          "end_col": 35,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 35,
+          "end_col": 48,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 48,
+          "end_col": 51,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 51,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
           }
         },
         {
@@ -33723,6 +34471,2438 @@
           "foreground": {
             "kind": "indexed",
             "index": 101
+          }
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "hermes-2026.9.24-director-preview-after-turn-tmux-120-1": {
+      "native_version": "2026.9.24",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 38,
+      "cursor_col": 110,
+      "lines": [
+        "",
+        " │                                                                                                                  │  │",
+        " ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯  │",
+        "                                                                                                                       │",
+        "                                                                                                                       │",
+        " ❯ You are a CAFleet probe Director (fleet 1, your member ID 1). Standing rule for this session: whenever an input     │",
+        "   line starting with [cafleet msg arrives, run exactly once the shell command: cafleet message poll 1 --json          │",
+        "   --database-url sqlite:////tmp/cfp25/hermes-tmux.db and then reply with one line 'polled: <comma-separated           │",
+        "   message_id values>' (or 'polled: none'). Do nothing else for those lines. For other requests, do exactly what I     │",
+        "   ask. Reply OK now.                                                                                                  │",
+        "                                                                                                                       │",
+        " ┊  OK                                                                                                                 │",
+        "                                                                                                                       │",
+        " ───                                                                                                                   │",
+        "                                                                                                                       │",
+        " ❯ [cafleet msg 1 from 2 2026-11-23T12:27:16.186905+00:00] idle probe [cafleet] Resume your work if something was      ┃",
+        "   still running.Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import time;  ┃",
+        "    time.sleep(60)'                                                                                                    ┃",
+        "                                                                                                                       ┃",
+        " └─ ▾ Tool calls (1)  ~23 tokens                                                                                       ┃",
+        "   └─ ● Terminal(\"cafleet message poll 1 --json --database-url sqlite:////tmp/cfp…\") (0.5s)                            ┃",
+        "                                                                                                                       ┃",
+        " ┊  polled: 3,2,1                                                                                                      ┃",
+        "                                                                                                                       ┃",
+        " ───                                                                                                                   ┃",
+        "                                                                                                                       ┃",
+        " ❯ [cafleet msg 4 from 2 2026-11-23T12:29:53.365788+00:00] draft hold probe [cafleet] Resume your work if something    ┃",
+        "   was still running.Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import    ┃",
+        "   time; time.sleep(45)'                                                                                               ┃",
+        "                                                                                                                       ┃",
+        " └─ ▾ Tool calls (1)  ~23 tokens                                                                                       ┃",
+        "   └─ ● Terminal(\"cafleet message poll 1 --json --database-url sqlite:////tmp/cfp…\") (0.1s)                            ┃",
+        "                                                                                                                       ┃",
+        " ┊  polled: 14,13,12,11,10,9,8,7,6,5,4                                                                                 ┃",
+        "                                                                                                                        ",
+        "",
+        " ─ ready │ gpt 6 luna high │ 14.3k/1.1M │ [░░░░░░░░░░] 1% │ 9m 3s │ ✓ 4m 12s       ─  Set CAFleet message polling rule  ",
+        " ❯ [cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs   ",
+        "    and reply with your findings when you are done. [cafleet] Resume your work if something was still running.          "
+      ],
+      "masked_rows": [
+        {
+          "row": 0,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 116,
+          "end_col": 117,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 117,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 3,
+          "end_col": 110,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 3,
+          "end_col": 109,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 3,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 3,
+          "end_col": 21,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 4,
+          "end_col": 6,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 95
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 1,
+          "end_col": 114,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 3,
+          "end_col": 117,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 3,
+          "end_col": 19,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 4,
+          "end_col": 6,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 6,
+          "end_col": 20,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 20,
+          "end_col": 32,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 250
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 6,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 6,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 8,
+          "end_col": 84,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 84,
+          "end_col": 91,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 250
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 4,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 1,
+          "end_col": 116,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 26,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 3,
+          "end_col": 116,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 3,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 179
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 4,
+          "end_col": 6,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 6,
+          "end_col": 20,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 20,
+          "end_col": 32,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 250
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 1,
+          "end_col": 6,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 6,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 8,
+          "end_col": 84,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 84,
+          "end_col": 91,
+          "faint": true,
+          "foreground": {
+            "kind": "indexed",
+            "index": 250
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 4,
+          "end_col": 38,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 119,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 72
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 8,
+          "end_col": 42,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 42,
+          "end_col": 54,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 151
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 54,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 55,
+          "end_col": 57,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 151
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 57,
+          "end_col": 76,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 178
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 82,
+          "end_col": 85,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 173
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 85,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 3,
+          "end_col": 117,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 3,
+          "end_col": 110,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        }
+      ]
+    },
+    "hermes-2026.9.24-director-preview-after-turn-herdr-120-1": {
+      "native_version": "2026.9.24",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+        }
+      ],
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        " ██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██╔════╝      ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝                │",
+        " ███████║█████╗  ██████╔╝██╔████╔██║█████╗  ███████╗█████╗███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║                   │",
+        " ██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ╚════██║╚════╝██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║                   ┃",
+        " ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗███████║      ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║                   ┃",
+        " ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝      ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝                   ┃",
+        " ☤ Nous Research · Messenger of the Digital Gods                                                                      ┃",
+        "                                                                                                                      ┃",
+        " ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮  ┃",
+        " │                                                                                                                 │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡀⠀⣀⣀⠀⢀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                        Hermes Agent vunknown (2026.9.24)                        │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⢀⣠⣴⣾⣿⣿⣇⠸⣿⣿⠇⣸⣿⣿⣷⣦⣄⡀⠀⠀⠀⠀⠀⠀                                                                                 │  ┃",
+        " │  ⠀⢀⣠⣴⣶⠿⠋⣩⡿⣿⡿⠻⣿⡇⢠⡄⢸⣿⠟⢿⣿⢿⣍⠙⠿⣶⣦⣄⡀⠀                                                                                 │  ┃",
+        " │  ⠀⠀⠉⠉⠁⠶⠟⠋⠀⠉⠀⢀⣈⣁⡈⢁⣈⣁⡀⠀⠉⠀⠙⠻⠶⠈⠉⠉⠀⠀      ▾ Available Tools                                                          │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣴⣿⡿⠛⢁⡈⠛⢿⣿⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      browser-use: browser_exec                                                  │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠿⣿⣦⣤⣈⠁⢠⣴⣿⠿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      clarify: clarify                                                           │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠻⢿⣿⣦⡉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      code_execution: execute_code                                               │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢷⣦⣈⠛⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      connections: manage_connections                                            │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣴⠦⠈⠙⠿⣦⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      delegation: delegate_task                                                  │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣤⡈⠁⢤⣿⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      file: patch, read_file, search_files, write_file                           │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠷⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      memory: memory                                                             │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠑⢶⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      other: tool_call, tool_describe, tool_search                               │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠁⢰⡆⠈⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      (and 5 more toolsets…)                                                     │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠳⠈⣡⠞⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀                                                                                 │  ┃",
+        " │  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀      ▸ Available Skills (53) in 10 categories                                   │  ┃",
+        " │  gpt-6-luna · Nous Research                                                                                     │  ┃",
+        "",
+        "",
+        " │                                                                                                                 │  ┃",
+        " ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯  ┃",
+        "                                                                                                                      ┃",
+        "                                                                                                                      ┃",
+        " ❯ Reply with the single word OK.                                                                                     ┃",
+        "                                                                                                                      ┃",
+        " ┊  OK                                                                                                                ┃",
+        "           ",
+        "                                    ",
+        " ─ ready │ gpt 6 luna high │ 12.6k/1.1M │ [░░░░░░░░░░] 1% │ 41s │ ✓ 31s │ ◷ 1.3s              ─  Single-word OK reply ",
+        " ❯ [cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in ",
+        "   src/parser.rs and reply with your findings when you are done. [cafleet] Resume your work if something was still    ",
+        "   running.                      "
+      ],
+      "masked_rows": [
+        {
+          "row": 25,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 26,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 0,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 97,
+            "g": 75,
+            "b": 30
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 97,
+            "g": 75,
+            "b": 30
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 48,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 4,
+          "end_col": 34,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 58,
+          "end_col": 91,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 4,
+          "end_col": 58,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 4,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 40,
+          "end_col": 53,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 53,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 40,
+          "end_col": 49,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 49,
+          "end_col": 56,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 40,
+          "end_col": 56,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 56,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 40,
+          "end_col": 53,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 53,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 1,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 40,
+          "end_col": 52,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 52,
+          "end_col": 65,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 1,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 40,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 46,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 40,
+          "end_col": 48,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 48,
+          "end_col": 54,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 40,
+          "end_col": 47,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 47,
+          "end_col": 84,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 220,
+            "g": 191,
+            "b": 116
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 4,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 4,
+          "end_col": 40,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 40,
+          "end_col": 58,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 58,
+          "end_col": 115,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 4,
+          "end_col": 14,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 14,
+          "end_col": 30,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 115,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 27,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 28,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 30,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 1,
+          "end_col": 118,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 4,
+          "end_col": 6,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 248,
+            "b": 220
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 118,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 215,
+            "b": 0
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 3,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 76,
+            "g": 175,
+            "b": 80
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 8,
+          "end_col": 42,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 42,
+          "end_col": 54,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 143,
+            "g": 188,
+            "b": 143
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 54,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 55,
+          "end_col": 57,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 143,
+            "g": 188,
+            "b": 143
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 57,
+          "end_col": 93,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 93,
+          "end_col": 96,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 205,
+            "g": 127,
+            "b": 50
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 96,
+          "end_col": 117,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 191,
+            "b": 0
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 1,
+          "end_col": 103,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 248,
+            "b": 220
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 3,
+          "end_col": 114,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 248,
+            "b": 220
+          }
+        },
+        {
+          "row": 39,
+          "start_col": 3,
+          "end_col": 11,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 248,
+            "b": 220
           }
         }
       ],

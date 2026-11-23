@@ -205,6 +205,10 @@ struct RawRule {
     suggestion: Option<RawSuggestion>,
     #[serde(default, deserialize_with = "present")]
     text_prefixes: Option<TextPrefixes>,
+    #[serde(default, deserialize_with = "present")]
+    text_wrap: Option<TextWrap>,
+    #[serde(default, deserialize_with = "present")]
+    text_framed: Option<bool>,
 }
 
 /// The prefixes that open a composer's first and continuation rows.
@@ -543,6 +547,10 @@ pub(super) struct Rule {
     pub(crate) suggestion: Option<SuggestionStyle>,
     /// Prefixes that replace the profile's `composer.text` prefixes in this rule's regions.
     pub(crate) text_prefixes: Option<TextPrefixes>,
+    /// The wrap mode that replaces the profile's `composer.text` wrap in this rule's regions.
+    pub(crate) text_wrap: Option<TextWrap>,
+    /// Whether this rule's region start row frames the composer, replacing `composer.text.framed`.
+    pub(crate) text_framed: Option<bool>,
 }
 #[derive(Clone)]
 pub(super) struct Capability {
@@ -629,7 +637,7 @@ pub(super) struct Profile {
 
 #[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum TextWrap {
+pub(super) enum TextWrap {
     /// Rows join with nothing.
     Char,
     /// A row break matches nothing or exactly one literal space.
@@ -704,7 +712,9 @@ impl ComposerTextSpec {
         rows: &[String],
     ) -> Option<ComposerText> {
         let prefixes = rule.text_prefixes.as_ref().unwrap_or(&self.prefixes);
-        let rows = if self.framed { rows.get(1..)? } else { rows };
+        let wrap = rule.text_wrap.unwrap_or(self.wrap);
+        let framed = rule.text_framed.unwrap_or(self.framed);
+        let rows = if framed { rows.get(1..)? } else { rows };
         let (first, rest) = rows.split_first()?;
         let mut joined = first[anchored_end(&prefixes.first_prefix, first)?..].to_owned();
         let mut breaks = BTreeSet::new();
@@ -724,18 +734,23 @@ impl ComposerTextSpec {
             region,
             #[cfg(test)]
             rows: count,
-            segments: self.segments(&joined, &breaks)?,
+            segments: self.segments(&joined, &breaks, wrap)?,
             mode_prefix: self.mode_prefix.clone(),
         })
     }
 
-    fn segments(&self, joined: &str, breaks: &BTreeSet<usize>) -> Option<Vec<Segment>> {
+    fn segments(
+        &self,
+        joined: &str,
+        breaks: &BTreeSet<usize>,
+        wrap: TextWrap,
+    ) -> Option<Vec<Segment>> {
         let mut segments = Vec::new();
         let mut text = Vec::new();
         let mut offset = 0;
         let push_text = |text: &mut Vec<TextItem>, from: usize, to: usize| {
             for (index, character) in joined[from..to].char_indices() {
-                if self.wrap == TextWrap::Word && breaks.contains(&(from + index)) {
+                if wrap == TextWrap::Word && breaks.contains(&(from + index)) {
                     text.push(TextItem::Break);
                 }
                 text.push(TextItem::Char(character));
@@ -758,7 +773,7 @@ impl ComposerTextSpec {
             };
             let whole = captures.get(0).expect("group 0");
             push_text(&mut text, offset, whole.start());
-            if self.wrap == TextWrap::Word && breaks.contains(&whole.start()) {
+            if wrap == TextWrap::Word && breaks.contains(&whole.start()) {
                 text.push(TextItem::Break);
             }
             if !text.is_empty() {
@@ -1041,8 +1056,9 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         "only composer_empty rules declare a suggestion style",
     )?;
     require(
-        raw.text_prefixes.is_none() || kind == ObservationKind::ComposerText,
-        "only composer_text rules declare text_prefixes",
+        (raw.text_prefixes.is_none() && raw.text_wrap.is_none() && raw.text_framed.is_none())
+            || kind == ObservationKind::ComposerText,
+        "only composer_text rules declare text_prefixes, text_wrap or text_framed",
     )?;
     Ok(Rule {
         id: raw.id.0,
@@ -1057,6 +1073,8 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         frame: raw.frame,
         suggestion,
         text_prefixes: raw.text_prefixes,
+        text_wrap: raw.text_wrap,
+        text_framed: raw.text_framed,
     })
 }
 fn validate_gates(
@@ -9215,6 +9233,49 @@ mod tests {
                 assert_eq!(composer.matches(&[literal]), matches, "{name}");
             }
         }
+
+        #[test]
+        fn a_rule_text_wrap_overrides_the_profile_wrap_for_its_regions() {
+            let mut value = tui_definition();
+            let rules = value["codex"]["profile"]["rules"].as_array_mut().unwrap();
+            let tui = rules
+                .iter_mut()
+                .find(|rule| rule["id"] == TUI_TEXT)
+                .unwrap();
+            tui["text_wrap"] = json!("word");
+            for (name, rows, literal, matches) in [
+                (
+                    "the indented box joins a row break as one space",
+                    &[" > hello", "   world"][..],
+                    "hello world",
+                    true,
+                ),
+                (
+                    "the indented box joins a row break as nothing",
+                    &[" > hello", "   world"][..],
+                    "helloworld",
+                    true,
+                ),
+                (
+                    "the classic box keeps the profile's char wrap",
+                    &["> hello", "  world"][..],
+                    "hello world",
+                    false,
+                ),
+                (
+                    "the classic box joins rows with nothing",
+                    &["> hello", "  world"][..],
+                    "helloworld",
+                    true,
+                ),
+            ] {
+                let composer = detector(&value)
+                    .composer_text(&box_screen(rows))
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{name}: the composer text is extractable"));
+                assert_eq!(composer.matches(&[literal]), matches, "{name}");
+            }
+        }
     }
 
     mod profile_rejections {
@@ -9781,6 +9842,91 @@ mod tests {
             ["hermes-tui-idle-composer", "hermes-tui-composer-text"]
                 .map(String::from)
                 .to_vec()
+        }
+
+        /// `text` split at spaces into rows of at most `width` characters, the space at each
+        /// break dropped, as the hermes TUI wraps its composer.
+        fn word_wrapped(text: &str, width: usize) -> Vec<String> {
+            let mut rows: Vec<String> = Vec::new();
+            for word in text.split(' ') {
+                match rows.last_mut() {
+                    Some(row) if row.chars().count() + 1 + word.chars().count() <= width => {
+                        row.push(' ');
+                        row.push_str(word);
+                    }
+                    _ => rows.push(word.to_owned()),
+                }
+            }
+            rows
+        }
+
+        /// A hermes TUI Director screen: a prior user turn and the status line above a
+        /// composer holding `composer` rows, the cursor after the last one.
+        fn hermes_tui_screen(composer: &[String]) -> ScreenSnapshot {
+            let mut bytes = b"\x1b[?1049h\x1b[2J".to_vec();
+            let transcript = [
+                " ❯ an earlier prompt from the operator",
+                "",
+                "   The earlier answer.",
+                "",
+                " ─ ready · gpt-6-luna · 12% context",
+            ];
+            let lines = transcript.iter().copied().map(str::to_owned).chain(
+                composer.iter().enumerate().map(|(index, text)| {
+                    if index == 0 {
+                        format!(" ❯ {text}")
+                    } else {
+                        format!("   {text}")
+                    }
+                }),
+            );
+            for (offset, line) in lines.enumerate() {
+                bytes.extend(format!("\x1b[{};1H{line}", 30 + offset).into_bytes());
+            }
+            let mut terminal = TerminalState::new(TerminalSize {
+                rows: 39,
+                cols: 120,
+            })
+            .unwrap();
+            terminal.feed(&bytes).unwrap();
+            terminal.snapshot()
+        }
+
+        #[test]
+        fn hermes_tui_composer_text_reads_a_word_wrapped_preview_below_the_transcript_and_status_line()
+         {
+            let message = crate::broker::MessageRecord::fixture(
+                12,
+                3,
+                1,
+                "the results of the review are ready for the director to read",
+            );
+            let preview = crate::runtime::preview::canonical_preview_line(&message);
+            let rows = word_wrapped(&preview, 117);
+            assert!(rows.len() > 1, "the preview wraps: {rows:?}");
+            let detector = Detector::new(ProfileCatalog::bundled(), CodingAgent::Hermes, None);
+            for (name, screen) in [
+                ("as captured", hermes_tui_screen(&rows)),
+                ("cursor-free", cursor_free(hermes_tui_screen(&rows))),
+            ] {
+                let composer = detector
+                    .composer_text(&screen)
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{name}: the TUI composer is extractable"));
+                assert!(composer.matches(&[&preview]), "{name}: {rows:?}");
+                assert!(
+                    !composer.matches(&["an earlier prompt from the operator"]),
+                    "{name}: the transcript turn is not the composer"
+                );
+                let observation = detector
+                    .observe_director(&screen, &hermes_director_rules())
+                    .unwrap();
+                assert_ne!(
+                    observation.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{name}: a typed preview is not an empty composer"
+                );
+            }
         }
 
         /// The Director classification of a bundled fixture as captured and cursor-free.
