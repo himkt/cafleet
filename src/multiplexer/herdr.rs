@@ -8,6 +8,7 @@ use crate::multiplexer::PLACEMENT_MISMATCH;
 use crate::multiplexer::PaneCleanup;
 use crate::multiplexer::PaneOwnership;
 use crate::multiplexer::PaneTarget;
+use crate::multiplexer::ScreenCapture;
 use crate::multiplexer::SpawnedPane;
 use crate::multiplexer::layout::ColumnSide;
 use serde_json::Value;
@@ -128,6 +129,39 @@ impl HerdrMultiplexer {
             }
             Err(error) => Err(self.core.map_error(&argv, error)),
         }
+    }
+
+    /// `pane`'s `rect.width` from the `api snapshot` layouts and its `scroll.viewport_rows` from
+    /// the snapshot's `panes`, joined by pane id.
+    fn pane_geometry(&self, pane: &str) -> Result<(u16, u16), MultiplexerError> {
+        let result = self.run_json(&self.core.argv(&["herdr", "api", "snapshot"]))?;
+        let snapshot = &result["snapshot"];
+        let entries = |field: &str| {
+            snapshot[field].as_array().ok_or_else(|| {
+                MultiplexerError::new(format!("herdr api snapshot missing '{field}' field"))
+            })
+        };
+        let absent = || MultiplexerError::new(format!("herdr api snapshot has no pane {pane}"));
+        let is_pane = |entry: &&Value| entry["pane_id"].as_str() == Some(pane);
+        let layout_entry = entries("layouts")?
+            .iter()
+            .filter_map(|layout| layout["panes"].as_array())
+            .flatten()
+            .find(is_pane)
+            .ok_or_else(absent)?;
+        let pane_entry = entries("panes")?.iter().find(is_pane).ok_or_else(absent)?;
+        let dimension = |object: &Value, field: &str| {
+            let value = f64_field(object, "api snapshot", field)?;
+            (value.fract() == 0.0 && value >= 1.0 && value <= f64::from(u16::MAX))
+                .then_some(value as u16)
+                .ok_or_else(|| {
+                    MultiplexerError::new(format!("herdr api snapshot {field} {value} of {pane}"))
+                })
+        };
+        Ok((
+            dimension(&layout_entry["rect"], "width")?,
+            dimension(&pane_entry["scroll"], "viewport_rows")?,
+        ))
     }
 
     fn list_panes(&self) -> Result<Vec<Value>, MultiplexerError> {
@@ -306,6 +340,55 @@ impl Multiplexer for HerdrMultiplexer {
             &fetch_depth.to_string(),
         ]))?;
         Ok(crate::multiplexer::capture_window(&raw, lines))
+    }
+
+    /// herdr exposes neither the cursor nor the screen mode. The visible read keeps leading and
+    /// interior blank rows at their positions and drops only trailing blank rows, so its lines
+    /// fill the screen from the top.
+    fn capture_screen(&self, pane: &str) -> Result<ScreenCapture, MultiplexerError> {
+        let (cols, rows) = self.pane_geometry(pane)?;
+        let body = self.core.run(&self.core.argv(&[
+            "herdr", "pane", "read", pane, "--source", "visible", "--format", "ansi",
+        ]))?;
+        let lines = body.strip_suffix('\n').unwrap_or(&body).split('\n').count();
+        if lines > usize::from(rows) {
+            return Err(MultiplexerError::new(format!(
+                "herdr pane read of {pane} printed {lines} rows for a {rows}-row viewport"
+            )));
+        }
+        Ok(ScreenCapture {
+            rows,
+            cols,
+            cursor: None,
+            alternate_screen: None,
+            body,
+        })
+    }
+
+    fn type_literal_until(
+        &self,
+        pane: &str,
+        literal: &str,
+        _stopped: &dyn Fn() -> bool,
+    ) -> Result<bool, MultiplexerError> {
+        self.core.acknowledged_run(
+            &self
+                .core
+                .argv(&["herdr", "pane", "send-text", pane, literal]),
+            "text",
+        )?;
+        Ok(true)
+    }
+
+    fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError> {
+        let keys = crate::multiplexer::PressKeys::from_bytes(submit).ok_or_else(|| {
+            MultiplexerError::new(format!(
+                "herdr has no key mapping for the submit bytes {submit:02x?}"
+            ))
+        })?;
+        let mut argv = self.core.argv(&["herdr", "pane", "send-keys", pane]);
+        argv.extend(keys.herdr_arguments());
+        self.core.acknowledged_run(&argv, "submit key")
     }
 
     fn close_pane(&self, target_pane_id: &str, window_id: &str) -> Result<(), MultiplexerError> {
@@ -1826,6 +1909,293 @@ mod tests {
                     "{name}"
                 );
             }
+        }
+    }
+
+    mod director_pane {
+        use crate::multiplexer::herdr::tests::*;
+        use crate::time::Deadline;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        const PANE: &str = "w1:p2";
+
+        /// An `api snapshot` reply in herdr 0.9.5's shape: `layouts[].panes[]` entries carry
+        /// `focused`, `pane_id` and `rect`, and only the `panes[]` entries carry `scroll`.
+        fn snapshot_reply(
+            layouts: serde_json::Value,
+            panes: serde_json::Value,
+        ) -> Result<String, RunError> {
+            Ok(herdr_envelope(json!({
+                "snapshot": {"layouts": layouts, "panes": panes, "version": 1}
+            })))
+        }
+
+        fn layout_pane(id: &str, width: i64, height: i64) -> serde_json::Value {
+            json!({
+                "focused": false,
+                "pane_id": id,
+                "rect": {"height": height, "width": width, "x": 0, "y": 0}
+            })
+        }
+
+        fn pane_state(id: &str, viewport_rows: i64) -> serde_json::Value {
+            json!({
+                "agent_status": "unknown",
+                "focused": false,
+                "pane_id": id,
+                "scroll": {"max_offset_from_bottom": 0, "offset_from_bottom": 0, "viewport_rows": viewport_rows},
+                "workspace_id": "w2"
+            })
+        }
+
+        fn director_layouts() -> serde_json::Value {
+            json!([
+                {"panes": [layout_pane("w1:p1", 60, 40)], "tab_id": "w1:t1"},
+                {"panes": [layout_pane("w2:p1", 120, 40), layout_pane(PANE, 97, 33)], "tab_id": "w2:t1"},
+            ])
+        }
+
+        /// The snapshot `panes[]` with `PANE` between two other panes, each with its own
+        /// viewport row count, so only a join by `pane_id` reads `viewport_rows`.
+        fn director_panes(viewport_rows: i64) -> serde_json::Value {
+            json!([
+                pane_state("w1:p1", 40),
+                pane_state(PANE, viewport_rows),
+                pane_state("w2:p1", 41),
+            ])
+        }
+
+        fn assert_visible_read(call: &[String]) {
+            assert_eq!(call[..6], herdr(&["pane", "read", PANE]));
+            let options: std::collections::BTreeMap<_, _> = call[6..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| (pair[0].as_str(), pair[1].as_str()))
+                .collect();
+            assert_eq!(
+                options,
+                std::collections::BTreeMap::from([("--source", "visible"), ("--format", "ansi")])
+            );
+            assert_eq!(call.len(), 10);
+        }
+
+        #[test]
+        fn capture_screen_takes_the_width_and_rows_from_the_snapshot_and_the_body_from_the_visible_read()
+         {
+            let body = "› \x1b[2mAsk anything\x1b[0m\r\n\r\nstatus line\r\n";
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(snapshot_reply(director_layouts(), director_panes(3)));
+            runner.respond(Ok(body.to_owned()));
+            let capture = on_server(runner.clone()).capture_screen(PANE).unwrap();
+            assert_eq!((capture.rows, capture.cols), (3, 97));
+            assert_eq!(capture.cursor, None, "herdr exposes no cursor position");
+            assert_eq!(
+                capture.alternate_screen, None,
+                "herdr exposes no alternate-screen flag"
+            );
+            assert_eq!(capture.body, body);
+            let calls = runner.run_argvs();
+            assert_eq!(calls.len(), 2);
+            assert_eq!(calls[0], herdr(&["api", "snapshot"]));
+            assert_visible_read(&calls[1]);
+        }
+
+        #[test]
+        fn capture_screen_keeps_the_viewport_rows_when_the_visible_read_drops_trailing_blank_rows()
+        {
+            let body = "\r\nfirst row\r\n\r\nlast drawn row\r\n";
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(snapshot_reply(director_layouts(), director_panes(30)));
+            runner.respond(Ok(body.to_owned()));
+            let capture = on_server(runner).capture_screen(PANE).unwrap();
+            assert_eq!(
+                (capture.rows, capture.cols),
+                (30, 97),
+                "the viewport keeps its rows below the last drawn row"
+            );
+            assert_eq!(
+                capture.body, body,
+                "leading and interior blank rows keep their positions"
+            );
+        }
+
+        #[test]
+        fn capture_screen_fails_for_a_pane_absent_from_the_snapshot_or_an_unreadable_reply() {
+            for (name, snapshot) in [
+                (
+                    "pane absent from the layouts",
+                    snapshot_reply(
+                        json!([{"panes": [layout_pane("w1:p1", 60, 40)]}]),
+                        director_panes(30),
+                    ),
+                ),
+                (
+                    "pane absent from the snapshot panes",
+                    snapshot_reply(
+                        director_layouts(),
+                        json!([pane_state("w1:p1", 40), pane_state("w2:p1", 41)]),
+                    ),
+                ),
+                (
+                    "no snapshot panes",
+                    Ok(herdr_envelope(
+                        json!({"snapshot": {"layouts": director_layouts()}}),
+                    )),
+                ),
+                (
+                    "no viewport rows",
+                    snapshot_reply(
+                        director_layouts(),
+                        json!([{"pane_id": PANE, "scroll": {"offset_from_bottom": 0}}]),
+                    ),
+                ),
+                (
+                    "scroll only on the layout entry",
+                    snapshot_reply(
+                        json!([{"panes": [{
+                            "focused": true,
+                            "pane_id": PANE,
+                            "rect": {"height": 30, "width": 97, "x": 0, "y": 0},
+                            "scroll": {"viewport_rows": 30}
+                        }]}]),
+                        json!([{"pane_id": PANE}]),
+                    ),
+                ),
+                ("non-JSON snapshot", Ok("not json".to_owned())),
+                (
+                    "missing layouts",
+                    Ok(herdr_envelope(json!({"snapshot": {}}))),
+                ),
+                (
+                    "server error",
+                    Err(RunError::Failed {
+                        stderr: herdr_error_stderr("server_unavailable"),
+                    }),
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(snapshot);
+                runner.respond(Ok("body\r\n".to_owned()));
+                assert!(
+                    on_server(runner).capture_screen(PANE).is_err(),
+                    "{name} is a capture failure"
+                );
+            }
+        }
+
+        #[test]
+        fn type_literal_sends_the_whole_literal_in_one_send_text() {
+            for literal in [
+                "[cafleet msg 7 from 3 2026-11-23T10:00:00+00:00] hi".to_owned(),
+                "あ".repeat(600),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.succeed(1);
+                on_server(runner.clone())
+                    .type_literal(PANE, &literal)
+                    .unwrap();
+                assert_eq!(
+                    runner.run_argvs(),
+                    [herdr(&["pane", "send-text", PANE, &literal])]
+                );
+            }
+        }
+
+        #[test]
+        fn press_submit_maps_the_carriage_return_to_the_enter_key() {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.succeed(1);
+            on_server(runner.clone()).press_submit(PANE, b"\r").unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                [herdr(&["pane", "send-keys", PANE, "enter"])]
+            );
+        }
+
+        #[test]
+        fn press_submit_refuses_bytes_without_a_key_mapping_before_any_process() {
+            let runner = FakeRunner::with_binary("herdr");
+            let error = on_server(runner.clone())
+                .press_submit(PANE, b"\xff")
+                .unwrap_err();
+            assert!(!error.submission_started(), "{error}");
+            assert!(runner.run_argvs().is_empty());
+        }
+
+        #[test]
+        fn write_failures_report_whether_a_process_may_have_written() {
+            type WriteStage =
+                fn(&dyn Multiplexer) -> Result<(), crate::multiplexer::MultiplexerError>;
+            let literal: WriteStage = |mux| mux.type_literal(PANE, "short");
+            let submit: WriteStage = |mux| mux.press_submit(PANE, b"\r");
+            for (name, write, reply, written) in [
+                (
+                    "send-text failed",
+                    literal,
+                    Err(RunError::Failed {
+                        stderr: herdr_error_stderr("server_unavailable"),
+                    }),
+                    true,
+                ),
+                ("send-text timed out", literal, Err(RunError::Timeout), true),
+                (
+                    "send-text unreadable acknowledgment",
+                    literal,
+                    Ok("unexpected output".to_owned()),
+                    true,
+                ),
+                (
+                    "send-text not started",
+                    literal,
+                    Err(RunError::NotStarted("spawn failed".into())),
+                    false,
+                ),
+                (
+                    "send-text binary missing",
+                    literal,
+                    Err(RunError::BinaryNotFound("herdr".into())),
+                    false,
+                ),
+                (
+                    "send-keys failed",
+                    submit,
+                    Err(RunError::Failed {
+                        stderr: herdr_error_stderr("server_unavailable"),
+                    }),
+                    true,
+                ),
+                (
+                    "send-keys not started",
+                    submit,
+                    Err(RunError::NotStarted("spawn failed".into())),
+                    false,
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(reply);
+                let error = write(&on_server(runner)).unwrap_err();
+                assert_eq!(error.submission_started(), written, "{name}: {error}");
+            }
+        }
+
+        #[test]
+        fn an_expired_deadline_writes_no_text_and_no_key() {
+            let runner = FakeRunner::with_binary("herdr");
+            let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
+            let mux = on_server(runner.clone()).bounded(expired);
+            assert!(
+                !mux.type_literal(PANE, "short")
+                    .unwrap_err()
+                    .submission_started()
+            );
+            assert!(
+                !mux.press_submit(PANE, b"\r")
+                    .unwrap_err()
+                    .submission_started()
+            );
+            assert!(runner.run_argvs().is_empty());
         }
     }
 }

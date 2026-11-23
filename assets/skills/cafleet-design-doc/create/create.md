@@ -16,7 +16,7 @@ Resolve the absolute output path per [File Layout](../reference/guidelines.md#fi
 
 ### Step 1: Register & Spawn Members (Director)
 
-Run `cafleet doctor`, register the Director, follow [Director wake](../../cafleet/roles/director.md#director-wake), spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) and dispatch per [Spawn Protocol](../../cafleet/roles/director.md#spawn-protocol) step 6.
+Run `cafleet doctor`, register the Director, follow [Director wake](../../cafleet/roles/director.md#director-wake), spawn the [Drafter](roles/drafter.md) and [Reviewer](roles/reviewer.md) and dispatch per [Spawn Protocol](../../cafleet/roles/director.md#spawn-protocol) step 5.
 
 Render each prompt from the [canonical spawn skeleton](../../cafleet/roles/director.md#canonical-spawn-prompt-skeleton) with ROLE TITLE `the <Role>`, TEAM `design document creation`, role-file `roles/<role>.md`, CAFleet load purpose `for communication with the Director`, EXTRA SKILL LOADS `cafleet-design-doc` and this delta:
 

@@ -2,7 +2,7 @@
 
 You are a **Director** managing CAFleet members under their recorded launch policies, each bounded by its backend's `{permission_flags}` note; members route denials and automatic refusals to you. You own model selection, lifecycle, pane actions, supervision, recovery and shutdown.
 
-Direct only from a backend whose Role eligibility Director row is `yes`. For `no`, report the verdict and its unmet requirements, name eligible backends from [coding-agents.md](../reference/coding-agents.md), and leave fleet creation to an eligible host. Preserve host-owned goal and receiver authority.
+Direct only from a backend whose Role eligibility Director row is `yes`. For `no`, report the verdict and its unmet requirements, name eligible backends from [coding-agents.md](../reference/coding-agents.md), and leave fleet creation to an eligible host. Preserve host-owned goal authority.
 
 ## Required reading
 
@@ -201,7 +201,7 @@ You own `permission inspect`/`respond` and `input reconcile`, each taking your l
 
 ### Consume observed interactions
 
-1. Read complete inbox JSON ([Director wake](#director-wake) step 3 or a manual `poll --json`), preserving receive state and pending user decisions.
+1. Read complete inbox JSON ([Director wake](#director-wake) step 1 or a manual `poll --json`), preserving receive state and pending user decisions.
 2. Record the unfinished action, event/message and evidence pointers in host-owned state before any other command.
 3. Verify the event's message association, member/run/interaction ownership and current visibility with `cafleet event show EVENT_ID --json`; quoted event JSON verifies nothing, and closed episodes are history. Follow the broker-built review instruction only after this check.
 4. Run `permission inspect` for a fresh snapshot and answer capability. Establish operation/arguments, absolute cwd, environment, targets and privilege/network effects from current capture and routed member evidence (a capture row break may be a wrap; notifications carry no operation text). When risk evaluation stays incomplete, ask the user to inspect.
@@ -245,17 +245,16 @@ When `member show` keeps reporting `degraded` with an open `gap_open_since`, or 
 
 ## Supervision
 
-The host owns continuation, native tools and user gates; you keep your native receiver and collect broker, artifact and pane evidence under [Director wake](#director-wake).
+The host owns continuation, native tools and user gates; you collect broker, artifact and pane evidence under [Director wake](#director-wake).
 
 ### Spawn Protocol
 
 1. Complete [Required reading](#required-reading) and the host rules, then resolve each member's backend, model and effort before writing its prompt.
 2. Run `cafleet doctor --json` and resolve actual issues; a `warn` `multiplexer.caller_pane` check resolves in step 3.
 3. Run `cafleet fleet create --name <name> --coding-agent <backend> --json` and capture the literal fleet and Director IDs; on a pane refusal follow [Director pane identification](#director-pane-identification). With a custom database, pass `--database-url <url>` on every command, this one included.
-4. Arm one `message listen` receiver with the backend's [runtime recipe](../reference/coding-agents.md), using its complete invocation and every host tool deadline it sets (Claude Monitor `timeout_ms`). Require `ready` before depending on replies. Failures and closures follow [receiver recovery](#receiver-recovery).
-5. Write each prompt under BASE per the [skeleton](#canonical-spawn-prompt-skeleton) and create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
-6. Record each member's ready and dispatch its assignment once its inputs exist, independent of other members.
-7. Keep reception active under [Director wake](#director-wake) until [Shutdown](#shutdown).
+4. Write each prompt under BASE per the [skeleton](#canonical-spawn-prompt-skeleton) and create each member with `cafleet member create --fleet-id <fleet-id> ... --file <absolute-path>`.
+5. Record each member's ready and dispatch its assignment once its inputs exist, independent of other members.
+6. Handle every preview under [Director wake](#director-wake) until [Shutdown](#shutdown).
 
 ### Director pane identification
 
@@ -269,41 +268,16 @@ The host owns continuation, native tools and user gates; you keep your native re
 
 ### Director wake
 
-Receive messages only through broker reads and the receiver: subscribe listen tiers (1–2) deliver each notice as its own turn; the compromise tier (3) holds a handle whose output you read. Reception never types into your pane, so a rejection or dismissed decision there comes from the operator or host, and it never starts, pauses, clears or re-budgets a host goal.
+Each `[cafleet msg ID from SENDER TIMESTAMP]` preview that the fleet's member runners type into your pane is a wake; [Director previews](../reference/cli.md#director-previews) owns its form, hold conditions and manual poll points. Previews never start, pause, clear or re-budget a host goal.
 
-1. Retain one receiver and its handle until [fleet deletion](#shutdown), storing its pinned IDs, receive status, incomplete JSONL and unfinished actions across context compaction.
-2. Consume complete `ready`, `pending` and `closed` records as delivered (each `[cafleet listen record]` turn or complete handle line). A notice or a healthy empty read never warrants replacement.
-3. On every `pending` notice, run its `next` command once: `cafleet message poll <director-member-id> --json`, plus the fleet's non-default `--database-url`. A `[]` result means an earlier poll consumed the messages. For an unparseable or truncated record, run that poll once.
-4. Before any other command after a poll, record every returned message's ID, sender, required action and artifact pointers in host-owned state (`message show MESSAGE_ID --json` rereads one), then dispatch ready work. Poll mid-turn as work requires and once before reporting completion.
+1. On each preview, run `cafleet message poll <director-member-id> --json` once, plus the fleet's non-default `--database-url`. A `[]` result means an earlier poll consumed the messages; deduplicate repeated previews by message ID.
+2. Before any other command after a poll, record every returned message's ID, sender, required action and artifact pointers in host-owned state (`message show MESSAGE_ID --json` rereads one), then dispatch ready work. Poll mid-turn as work requires and once before reporting completion.
+3. Keep your composer clear between turns: a draft or an open dialog in your pane holds every preview, and the oldest held message blocks newer ones.
+4. Run a manual `poll --json` at each manual poll point: after a `member delete` that leaves the fleet with no active member, before `fleet delete`, at the overdue check in step 5 and after a session restart or context loss.
 5. At dispatch, record each assignment's expected reply point from its size. On a wake, check only assignments past that point: one `poll --json`, then `cafleet member list <fleet-id> --json`, `cafleet member capture` and artifacts.
 6. Keep required user decisions pending until the operator answers; broker records are not user answers. Continue independent authorized work where the host permits.
 
-[message listen](../reference/cli.md#message-listen) owns the lease, record shapes, replay, failures and closure.
-
-#### Receiver recovery
-
-Every renewal and replacement uses the recipe's complete invocation and host tool deadline; each replacement needs observed termination plus a fresh successful broker inbox check, and repeated failures need diagnosis. *Manual reads* are `poll --json` at your wake points, recorded under [Director wake](#director-wake) step 4. After session or context loss between a poll and its record, treat in-flight assignments as overdue: check panes and artifacts, recover bodies with `message show MESSAGE_ID --json`, or ask the member to restate its status.
-
-| Observed state | Director response |
-|---|---|
-| Live handle, empty read | Retain it and read again when appropriate |
-| Clean `closed` with `timeout` | Establish task exit, then renew while the fleet exists |
-| `member_inactive` / `fleet_deleted` | Retire the handle; resume only with an explicitly established new task/identity |
-| Host tool timeout before a `closed` record | The host deadline is shorter than the lease; replace the receiver with the recipe's invocation and deadline |
-| Unexpected EOF, failed native call or receiver exit | Inspect output/exit, then replace the receiver |
-| Fatal database/schema error | Surface the cause; restart only after its named repair is authorized and complete |
-| Truncated output or incomplete JSONL | Keep complete records and run one `message poll --json` |
-| Old receiver liveness unknown | Preserve its handle and diagnose, or use manual reads |
-| Forwarded `closed` record (Codex `--codex-thread`) | Read the retained exec session once for its final output, then follow the row for the record's reason |
-| `closed` `session_exited` | The owning Codex session ended; a resumed or new session starts one fresh receiver |
-| `[cafleet listen closed]` turn | Inspect the diagnostic, then start one replacement |
-| `[cafleet listen closed] the extension runtime was replaced (<reason>); …` turn | Start one replacement in the current session |
-| Extension tool missing, or an `ok: false` naming `cafleet setup` | Run `cafleet doctor` and route the `cafleet setup --coding-agent <agent>` fix it names through the operator |
-| Extension tool permission refused | Route the backend's Note → applies at permission rule through the operator |
-| Any other extension `ok: false` | Surface its error text to the operator |
-| Native or extension receiver tool unavailable or denied at runtime | On a host meeting the [Director requirements](../reference/coding-agents.md#role-requirements), state the reception limit |
-
-Use manual reads while any extension or receiver-tool row above stays unresolved, and follow the backend's native receive lifecycle whether or not a host goal was supplied.
+After session or context loss between a poll and its record, treat in-flight assignments as overdue: check panes and artifacts, recover bodies with `message show MESSAGE_ID --json`, or ask the member to restate its status.
 
 ### Authorization-Scope Guard (CRITICAL)
 
@@ -333,9 +307,11 @@ Once evidence confirms a missing or dead pane, or an unusable-session replacemen
 
 For a multiplexer failure, diagnose the recorded placements and server before destructive recovery; registry existence proves no physical pane.
 
+When a goal or question extension tool is missing or returns an `ok: false` naming `cafleet setup`, run `cafleet doctor` and route the `cafleet setup --coding-agent <agent>` fix it names through the operator. Route a refused extension tool permission through the backend's Note → applies at rule, and surface any other `ok: false` text to the operator.
+
 ### Shutdown
 
-1. Consume the final inbox and complete the workflow's approval gates, then run `cafleet fleet delete <fleet-id>`, which ends every ordinary member and deregisters the fleet, leaving your pane open ([fleet commands](../reference/cli.md#fleet-commands)).
-2. When it exits 1, the fleet and reception stay active: run `cafleet member list <fleet-id>`, resolve the reported cause, and rerun `cafleet fleet delete <fleet-id>`.
-3. Collect the listener's `fleet_deleted` closure and native task exit and retire its handle; with no receiver running, run a final `cafleet message poll <director-member-id> --json`.
+1. Run a final `cafleet message poll <director-member-id> --json`, record every returned message and complete the workflow's approval gates.
+2. Run `cafleet fleet delete <fleet-id>`, which ends every ordinary member and deregisters the fleet, leaving your pane open ([fleet commands](../reference/cli.md#fleet-commands)).
+3. When it exits 1, the fleet stays active: run `cafleet member list <fleet-id>`, resolve the reported cause, and rerun `cafleet fleet delete <fleet-id>`.
 4. Confirm with `cafleet fleet list` that the fleet is absent, cleaning up only fleets this task authorizes.

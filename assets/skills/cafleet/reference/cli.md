@@ -22,7 +22,6 @@ Exact command facts for running CAFleet and interpreting its results.
 | `permission inspect` / `permission respond` | Inspect / answer the current native permission request or question | `INTERACTION_ID` | yes |
 | `message send` | Persist a point-to-point message for the recipient's runner to preview | Sender/recipient flags | yes |
 | `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
-| `message listen` | Notify pending messages through stdout | `MEMBER_ID` | JSONL only |
 | `message show` | Read one message | `MESSAGE_ID` | yes |
 
 `cafleet --version` prints `cafleet <version>` and exits 0.
@@ -68,7 +67,7 @@ Text rows list `member_id`, `name`, `kind`, `backend`, `window`, `pane_id` and `
 
 ## `permissions.allow` coverage
 
-`Bash(cafleet message *)` covers broker operations, including `cafleet message listen ID --timeout 300`; authorize Monitor separately. Claude members receive it at spawn, and setup installs the Codex and OpenCode allow rules. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each Director pane-input dispatch; ask outranks allow.
+`Bash(cafleet message *)` covers broker operations, including `cafleet message poll ID --json`. Claude members receive it at spawn, and setup installs the Codex and OpenCode allow rules. An operator may keep `Bash(cafleet member prompt *)`, `Bash(cafleet member exec *)` and `Bash(cafleet member press *)` under ask to confirm each Director pane-input dispatch; ask outranks allow.
 
 ## Text bodies
 
@@ -124,45 +123,11 @@ Each failure exits 1; only a member that cannot be ended leaves earlier members 
 
 `cafleet message send --from-member-id ID --to-member-id ID (TEXT | --file PATH) [--json]`
 
-Stores the message once and returns without pane input. An ordinary recipient's runner types pending previews oldest first and retries on its own; without a live runner, messages stay pending. A self-send is stored already notified; a root Director reads through its own reception. A storage failure before commit exits 1.
+Stores the message once and returns without pane input. An ordinary recipient's runner types pending previews oldest first and retries on its own; without a live runner, messages stay pending. A self-send is stored already notified; a message to the root Director is typed into its pane by a live member runner (§ Director previews). A storage failure before commit exits 1.
 
 ### `message poll`
 
-`cafleet message poll MEMBER_ID [--json]` returns every incoming `input_required` record, newest first, and consumes exactly those in one transaction: each shows `status_state` `completed`, and no later poll or listener notice returns it; concurrent polls never share a message. An empty inbox prints `[]` (text: `No messages found.`), exit 0. Unknown or inactive member: `Member ID not found`, exit 1, consuming nothing. A failure before commit consumes nothing; when output is lost after commit, `message show MESSAGE_ID --json` reads each message again.
-
-### `message listen`
-
-`cafleet message listen MEMBER_ID [--timeout SECONDS] [--codex-thread THREAD]`
-
-Notifies an active member's pending messages; it requires a live root Director with concrete placement and no multiplexer. Unknown or inactive member: `Member ID not found`, exit 1. `--timeout` is an integer lease of 1 through 1800 seconds from startup; omitted, the listener runs until closure, cancellation or failure.
-
-Stdout is UTF-8 JSONL, with no text mode or `--json`: `ready` (`member_id,fleet_id`) before replay, `pending` (`next`) and `closed` (`member_id,reason`). Closure reasons are `timeout`, `member_inactive`, `fleet_deleted`, and `session_exited` when forwarding. Normal closure exits 0, operational and output failures 1, usage errors 2; cancellation may omit `closed`.
-
-```json
-{"event":"pending","next":"cafleet message poll 1 --json"}
-```
-
-A `pending` notice is a wake signal, not a payload. Run its `next` command, `cafleet message poll <member-id> --json` plus the listener's `--database-url <url>` (single-quoted when needed), once per notice; it consumes every pending body, and `[]` means an earlier poll already consumed them.
-
-After a notice, the listener holds further notices until any poll; the next notice announces only messages committed after that poll. A hold lasting 300 s with newer messages re-sends one notice covering every unpolled message. A restarted listener notices every unpolled message right after `ready`. Listening changes no message state; concurrent listeners are independent. Preserve incomplete JSONL across native reads.
-
-`--codex-thread THREAD` forwards into a Codex thread under the same record, hold, replay and lease contracts:
-
-- Stdout carries only `ready` and the final `closed` record, for every reason.
-- Each `pending`, and each `closed` with reason `timeout`, `member_inactive` or `fleet_deleted`, is forwarded in order through `codex queue --thread THREAD --message '[cafleet listen record] <compact record JSON>'`, 10 s deadline each. Any non-zero exit, including `queue cannot contain more than 100 submissions`, ends forwarding without retry.
-- The listener pins its nearest ancestor whose argv[0] basename is `codex`; when it exits, stdout gets `closed` `session_exited` and the listener exits 0.
-
-| Condition | Result |
-|---|---|
-| `codex` not on `PATH` at startup | `Error: binary codex not found on PATH`, exit 1, before `ready` |
-| Process inspection fails at startup | The read error before `ready`, including macOS `cannot run ps: Operation not permitted (os error 1)` |
-| No Codex ancestor at startup | `Error: --codex-thread requires a codex ancestor process`, exit 1, before `ready` |
-| `codex queue` exits non-zero while the pinned session is alive | stderr `failed to forward record to codex thread <THREAD>: <codex stderr>`, exit 1 |
-| `codex queue` exceeds 10 s while the pinned session is alive | Killed; stderr `codex queue for thread <THREAD> did not finish within 10 s`, exit 1 |
-| `codex queue` fails or times out after the pinned session exited | stdout `closed` `session_exited`, exit 0 |
-| Any other failure after `ready` | Its usual diagnostic, exit 1 |
-
-For sandbox startup failures, confirm exit and follow the [Codex native reception recipe](coding-agents.md#codex-native-director-reception).
+`cafleet message poll MEMBER_ID [--json]` returns every incoming `input_required` record, newest first, and consumes exactly those in one transaction: each shows `status_state` `completed`, and no later poll returns it; concurrent polls never share a message. An empty inbox prints `[]` (text: `No messages found.`), exit 0. Unknown or inactive member: `Member ID not found`, exit 1, consuming nothing. A failure before commit consumes nothing; when output is lost after commit, `message show MESSAGE_ID --json` reads each message again.
 
 ### `message show`
 
@@ -173,6 +138,28 @@ For sandbox startup failures, confirm exit and follow the [Codex native receptio
 Profile previews are `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running.` Fallback delivery leads with Escape and appends ` [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.`
 
 Previews fold newlines to `⏎`, tabs to `␉` and other C0/DEL controls to `\xNN`; stored text stays exact. A body over 4000 Unicode scalars becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, never carrying `--database-url`. A preview leaves the message `input_required`.
+
+### Director previews
+
+Every live member runner types the root Director's pending messages into the Director's pane as profile previews, oldest first across senders, one per message. On each `[cafleet msg …]` preview, run `cafleet message poll <director-id> --json` once; `[]` means an earlier poll already consumed the message.
+
+A preview is typed only while the Director-screen profile verifies the composer empty with no open interaction, as a plain literal with no Escape and no bracketed paste. A body above the Director profile's plain limit arrives as the `poll` pointer. These hold the oldest Director message, and every newer one behind it, with no runtime event:
+
+- a draft or leftover literal in the Director composer, an unrecognized screen or a pane narrower than the profile's layouts;
+- an open permission dialog, question or unknown interaction in the Director pane;
+- an unavailable Director pane, multiplexer or storage;
+- no live member runner in the fleet.
+
+A key typed during a delivery leaves the literal in the composer unsubmitted; clearing or submitting it resumes delivery, and a submitted leftover may repeat a preview, so deduplicate by message ID. A Director backend or multiplexer without Director-screen coverage receives nothing in its pane and reads by manual poll. A delivering member's `cafleet member show MEMBER_ID --json` `diagnostics` show `director delivery: message <id> held: <reason>` after 3 minutes, `director delivery: message <id> uncertain: <cause>` (`storage_unavailable` when storage fails after a confirmed submission), `director delivery: pane <pane-id> unavailable: <cause>` and `director delivery: storage unavailable: <cause>`.
+
+Run a manual `cafleet message poll <director-id> --json` at these points:
+
+| Point | Reason |
+|---|---|
+| After a `member delete` that leaves the fleet with no active member | No runner delivers the deleted member's last report |
+| Before `fleet delete` | Final inbox consumption |
+| At each wake's overdue-assignment check | Catches an unexpected exit of the last runner |
+| After a Director session restart or context loss | Earlier previews may be missing from the new context |
 
 ### Wrapped delivery methods
 
@@ -426,9 +413,9 @@ A wrong-kind answer is a zero-byte `rejected` response (exit 1): `choice answers
 
 ## `setup` and `doctor`
 
-`cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline for each named backend, default every backend. The first failure exits 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>`, `failed to enable hermes plugin cafleet in <config path>: <cause>` or a config-path error.
+`cafleet setup [--coding-agent AGENT...]` initializes the version's database, then installs embedded skills, presets and extensions offline for each named backend, default every backend. The first failure exits 1: `failed to install skills into <skills_dir>: <error>`, `failed to install preset into <target>: <error>`, `failed to install extension into <target>: <error>` or a config-path error.
 
-Setup installs Codex `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; the OpenCode `cafleet` and `cafleet-ask` presets (shell rules for the four member broker commands, `"cafleet": "deny"` tool permission) and plugin `<preset base>/plugins/cafleet.ts`; the Hermes plugin under `<hermes home>/plugins/cafleet/`, enabled with gateway injection in the file `hermes config path` reports, refusing when `plugins.disabled` lists `cafleet`; and the pi extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record. Each plugin and extension runs only the `cafleet` its record names. `--coding-agent hermes` requires `hermes` on `PATH`; plain setup without it prints `hermes: skipped the plugin (binary hermes not found on PATH); run 'cafleet setup --coding-agent hermes' after installing Hermes`. `cafleet setup --coding-agent pi` prints:
+Setup installs Codex `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; the OpenCode `cafleet` and `cafleet-ask` presets (shell rules for the four member broker commands, `"cafleet": "deny"` tool permission) and plugin `<preset base>/plugins/cafleet.ts`; and the pi extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record. Each plugin and extension runs only the `cafleet` its record names. Setup runs no backend command; Claude and Hermes print only the skills line. `cafleet setup --coding-agent pi` prints:
 
 ```
 pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
@@ -464,9 +451,9 @@ The refusal body omits the `cafleet fleet create ` prefix.
 
 Each backend reports `<agent>.configuration`, `<agent>.executable`, its preset and extension checks, then `<agent>.skills`. An absent executable is `info` `<binary> is optional and absent from PATH`, and its later checks are `info` `unavailable: executable is absent`. `<agent>.skills` byte-compares installed skill files with the embedded copies: missing skills are `warn` `skills not installed at <skills dir>; run 'cafleet setup --coding-agent <agent>'`; a differing or unreadable file is `error` `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'`.
 
-`hermes.plugin_enabled` follows `hermes.extension`. An extension check is `info` `unavailable: configuration failed: <cause>` when its backend configuration fails, and both Hermes rows are `info` `unavailable: no Hermes home at <base>` when the Hermes base is absent. It is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable.
+An extension check is `info` `unavailable: configuration failed: <cause>` when its backend configuration fails. It is `ok` only when every embedded file equals its installed copy and the executable record names an existing executable.
 
-`opencode.extension`, `hermes.extension` and `pi.extension` report `ok` with the installed path, or `error` `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` or `<record path>: <cause>; run 'cafleet setup --coding-agent <agent>'`; `hermes.extension` also reports `cannot read hermes configuration through 'hermes config path': <cause>`. `hermes.plugin_enabled` reports `ok` `cafleet enabled with gateway injection` or `error` `cannot read hermes configuration through 'hermes config get': <cause>`, `hermes plugins.disabled lists cafleet; remove it, then run 'cafleet setup --coding-agent hermes'` or `hermes plugin cafleet is not enabled: <key>, …; run 'cafleet setup --coding-agent hermes'`.
+`opencode.extension` and `pi.extension` report `ok` with the installed path, or `error` `<path>: <cause or "differs from the embedded copy">; run 'cafleet setup --coding-agent <agent>'` or `<record path>: <cause>; run 'cafleet setup --coding-agent <agent>'`.
 
 ## Error messages
 

@@ -8,6 +8,7 @@ use crate::multiplexer::PLACEMENT_MISMATCH;
 use crate::multiplexer::PaneCleanup;
 use crate::multiplexer::PaneTarget;
 use crate::multiplexer::RunError;
+use crate::multiplexer::ScreenCapture;
 use crate::multiplexer::SpawnedPane;
 use crate::multiplexer::argv;
 use crate::multiplexer::layout::ColumnSide;
@@ -54,6 +55,31 @@ impl TmuxMultiplexer {
 
 fn unexpected_output(out: &str) -> MultiplexerError {
     MultiplexerError::new(format!("unexpected tmux display-message output: {out:?}"))
+}
+
+const SCREEN_METADATA: &str =
+    "#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}";
+const SCREEN_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+const LITERAL_CHUNK_CHARS: usize = 256;
+
+/// Parses a [`SCREEN_METADATA`] line into rows, columns, cursor and screen mode.
+fn screen_metadata(line: &str) -> Result<(u16, u16, (u16, u16), bool), MultiplexerError> {
+    let fields = line.split_whitespace().collect::<Vec<_>>();
+    let [rows, cols, cursor_y, cursor_x, alternate] = fields.as_slice() else {
+        return Err(unexpected_output(line));
+    };
+    let number = |field: &str| field.parse::<u16>().map_err(|_| unexpected_output(line));
+    let alternate = match *alternate {
+        "0" => false,
+        "1" => true,
+        _ => return Err(unexpected_output(line)),
+    };
+    Ok((
+        number(rows)?,
+        number(cols)?,
+        (number(cursor_y)?, number(cursor_x)?),
+        alternate,
+    ))
 }
 
 impl Multiplexer for TmuxMultiplexer {
@@ -223,6 +249,65 @@ impl Multiplexer for TmuxMultiplexer {
             &format!("-{fetch_depth}"),
         ]))?;
         Ok(crate::multiplexer::capture_window(&raw, lines))
+    }
+
+    /// Reads the metadata, the body, then the metadata again, and retries the whole capture
+    /// while the two metadata lines differ.
+    fn capture_screen(&self, pane: &str) -> Result<ScreenCapture, MultiplexerError> {
+        let body_argv = self
+            .core
+            .argv(&["tmux", "capture-pane", "-p", "-e", "-N", "-t", pane]);
+        loop {
+            let before = self.display(pane, SCREEN_METADATA)?;
+            let body = self.core.run(&body_argv)?;
+            let after = self.display(pane, SCREEN_METADATA)?;
+            if before == after {
+                let (rows, cols, cursor, alternate) = screen_metadata(&before)?;
+                return Ok(ScreenCapture {
+                    rows,
+                    cols,
+                    cursor: Some(cursor),
+                    alternate_screen: Some(alternate),
+                    body,
+                });
+            }
+            std::thread::sleep(SCREEN_RETRY_INTERVAL);
+        }
+    }
+
+    /// A failure after the first chunk's process started may leave a partial literal.
+    fn type_literal_until(
+        &self,
+        pane: &str,
+        literal: &str,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<bool, MultiplexerError> {
+        let characters = literal.chars().collect::<Vec<_>>();
+        for (index, chunk) in characters.chunks(LITERAL_CHUNK_CHARS).enumerate() {
+            if index > 0 && stopped() {
+                return Ok(false);
+            }
+            let chunk = chunk.iter().collect::<String>();
+            let argv = self
+                .core
+                .argv(&["tmux", "send-keys", "-t", pane, "-l", "--", &chunk]);
+            self.core
+                .acknowledged_run(&argv, "literal")
+                .map_err(|error| {
+                    if index > 0 {
+                        error.after_write()
+                    } else {
+                        error
+                    }
+                })?;
+        }
+        Ok(true)
+    }
+
+    fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError> {
+        let mut argv = self.core.argv(&["tmux", "send-keys", "-t", pane, "-H"]);
+        argv.extend(submit.iter().map(|byte| format!("{byte:02x}")));
+        self.core.acknowledged_run(&argv, "submit key")
     }
 
     fn close_pane(&self, target_pane_id: &str, window_id: &str) -> Result<(), MultiplexerError> {
@@ -1027,6 +1112,272 @@ mod tests {
             let runner = FakeRunner::with_binary("tmux");
             runner.respond(failed("server exited unexpectedly"));
             assert!(on_server(runner).close_pane("%7", "@4").is_err());
+        }
+    }
+
+    mod director_pane {
+        use crate::multiplexer::tmux::tests::*;
+        use crate::time::Deadline;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        const PANE: &str = "%5";
+        const METADATA: &str =
+            "#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}";
+
+        fn metadata_call() -> Vec<String> {
+            tmux(&["display-message", "-p", "-t", PANE, METADATA])
+        }
+
+        fn body_call() -> Vec<String> {
+            tmux(&["capture-pane", "-p", "-e", "-N", "-t", PANE])
+        }
+
+        fn literal_call(chunk: &str) -> Vec<String> {
+            tmux(&["send-keys", "-t", PANE, "-l", "--", chunk])
+        }
+
+        fn ok(reply: &str) -> Result<String, RunError> {
+            Ok(reply.into())
+        }
+
+        #[test]
+        fn capture_screen_reads_metadata_then_the_body_then_the_same_metadata() {
+            for (name, metadata, alternate) in [
+                ("primary screen", "24 80 23 2 0\n", false),
+                ("alternate screen", "24 80 23 2 1\n", true),
+            ] {
+                let body = "\x1b[1mtitle\x1b[0m\n› \n";
+                let runner = FakeRunner::with_binary("tmux");
+                for reply in [metadata, body, metadata] {
+                    runner.respond(ok(reply));
+                }
+                let capture = on_server(runner.clone()).capture_screen(PANE).unwrap();
+                assert_eq!((capture.rows, capture.cols), (24, 80), "{name}");
+                assert_eq!(capture.cursor, Some((23, 2)), "{name}");
+                assert_eq!(capture.alternate_screen, Some(alternate), "{name}");
+                assert_eq!(capture.body, body, "{name}");
+                assert_eq!(
+                    runner.run_argvs(),
+                    [metadata_call(), body_call(), metadata_call()],
+                    "{name}"
+                );
+            }
+        }
+
+        #[test]
+        fn capture_screen_retries_the_whole_capture_when_the_metadata_line_changes() {
+            let runner = FakeRunner::with_binary("tmux");
+            for reply in [
+                "24 80 23 2 0\n",
+                "stale body\n",
+                "30 100 29 4 0\n",
+                "30 100 29 4 0\n",
+                "settled body\n",
+                "30 100 29 4 0\n",
+            ] {
+                runner.respond(ok(reply));
+            }
+            let capture = on_server(runner.clone()).capture_screen(PANE).unwrap();
+            assert_eq!((capture.rows, capture.cols), (30, 100));
+            assert_eq!(capture.cursor, Some((29, 4)));
+            assert_eq!(capture.body, "settled body\n");
+            assert_eq!(
+                runner.run_argvs(),
+                [
+                    metadata_call(),
+                    body_call(),
+                    metadata_call(),
+                    metadata_call(),
+                    body_call(),
+                    metadata_call(),
+                ]
+            );
+        }
+
+        #[test]
+        fn capture_screen_fails_when_the_geometry_never_settles_within_the_deadline() {
+            let runner = FakeRunner::with_binary("tmux");
+            for round in 0..200 {
+                runner.respond(ok("24 80 23 2 0\n"));
+                runner.respond(ok("body\n"));
+                runner.respond(ok(&format!("24 80 23 {} 0\n", round % 7 + 3)));
+            }
+            let started = Instant::now();
+            let deadline = Deadline::until(started + Duration::from_millis(300));
+            let result = on_server(runner).bounded(deadline).capture_screen(PANE);
+            assert!(result.is_err(), "unstable geometry is a capture failure");
+            assert!(
+                started.elapsed() < Duration::from_secs(3),
+                "the retries stop at the deadline: {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn capture_screen_fails_on_a_malformed_metadata_line_or_a_failed_command() {
+            for (name, metadata) in [
+                ("non-numeric field", ok("24 80 x 2 0\n")),
+                ("missing field", ok("24 80 23 2\n")),
+                ("extra field", ok("24 80 23 2 0 9\n")),
+                ("empty line", ok("\n")),
+                ("missing pane", failed("can't find pane: %5")),
+                ("server error", failed("server exited unexpectedly")),
+            ] {
+                let runner = FakeRunner::with_binary("tmux");
+                runner.respond(metadata.clone());
+                runner.respond(ok("body\n"));
+                runner.respond(metadata);
+                assert!(
+                    on_server(runner).capture_screen(PANE).is_err(),
+                    "{name} is a capture failure"
+                );
+            }
+        }
+
+        #[test]
+        fn type_literal_sends_literal_chunks_of_at_most_256_characters_in_order() {
+            let literal = format!("{}{}", "あ".repeat(300), "-; tail");
+            let characters = literal.chars().collect::<Vec<_>>();
+            let chunks = characters
+                .chunks(256)
+                .map(|chunk| chunk.iter().collect::<String>())
+                .collect::<Vec<_>>();
+            assert_eq!(chunks.len(), 2);
+            let runner = FakeRunner::with_binary("tmux");
+            runner.succeed(chunks.len());
+            on_server(runner.clone())
+                .type_literal(PANE, &literal)
+                .unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                chunks
+                    .iter()
+                    .map(|chunk| literal_call(chunk))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        #[test]
+        fn type_literal_sends_a_short_literal_in_one_process() {
+            let runner = FakeRunner::with_binary("tmux");
+            runner.succeed(1);
+            on_server(runner.clone())
+                .type_literal(PANE, "[cafleet msg 7 from 3 2026-11-23T10:00:00+00:00] hi")
+                .unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                [literal_call(
+                    "[cafleet msg 7 from 3 2026-11-23T10:00:00+00:00] hi"
+                )]
+            );
+        }
+
+        #[test]
+        fn press_submit_sends_the_submit_bytes_as_hex_keys() {
+            for (submit, hex) in [
+                (&b"\r"[..], &["0d"][..]),
+                (&b"\x1b\r"[..], &["1b", "0d"][..]),
+            ] {
+                let runner = FakeRunner::with_binary("tmux");
+                runner.succeed(1);
+                on_server(runner.clone())
+                    .press_submit(PANE, submit)
+                    .unwrap();
+                let mut expected = tmux(&["send-keys", "-t", PANE, "-H"]);
+                expected.extend(argv(hex));
+                assert_eq!(runner.run_argvs(), [expected], "{hex:?}");
+            }
+        }
+
+        #[test]
+        fn type_literal_failures_report_whether_a_process_may_have_written() {
+            let long = "a".repeat(300);
+            for (name, literal, replies, written, calls) in [
+                (
+                    "spawn failure before the first process",
+                    "short",
+                    vec![Err(RunError::NotStarted("spawn failed".into()))],
+                    false,
+                    1,
+                ),
+                (
+                    "missing binary",
+                    "short",
+                    vec![Err(RunError::BinaryNotFound("tmux".into()))],
+                    false,
+                    1,
+                ),
+                (
+                    "first process failed",
+                    "short",
+                    vec![failed("server exited unexpectedly")],
+                    true,
+                    1,
+                ),
+                (
+                    "first process timed out",
+                    "short",
+                    vec![Err(RunError::Timeout)],
+                    true,
+                    1,
+                ),
+                (
+                    "unreadable acknowledgment",
+                    "short",
+                    vec![ok("unexpected output")],
+                    true,
+                    1,
+                ),
+                (
+                    "a later chunk not started",
+                    long.as_str(),
+                    vec![ok(""), Err(RunError::NotStarted("spawn failed".into()))],
+                    true,
+                    2,
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("tmux");
+                for reply in replies {
+                    runner.respond(reply);
+                }
+                let error = on_server(runner.clone())
+                    .type_literal(PANE, literal)
+                    .unwrap_err();
+                assert_eq!(error.submission_started(), written, "{name}: {error}");
+                assert_eq!(runner.run_argvs().len(), calls, "{name}");
+            }
+        }
+
+        #[test]
+        fn an_expired_deadline_writes_no_literal_and_no_submit_key() {
+            let runner = FakeRunner::with_binary("tmux");
+            let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
+            let mux = on_server(runner.clone()).bounded(expired);
+            let literal = mux.type_literal(PANE, "short").unwrap_err();
+            assert!(!literal.submission_started(), "{literal}");
+            let submit = mux.press_submit(PANE, b"\r").unwrap_err();
+            assert!(!submit.submission_started(), "{submit}");
+            assert!(runner.run_argvs().is_empty());
+        }
+
+        #[test]
+        fn press_submit_failures_report_whether_the_key_may_have_been_written() {
+            for (name, reply, written) in [
+                ("process failed", failed("server exited unexpectedly"), true),
+                ("process timed out", Err(RunError::Timeout), true),
+                ("unreadable acknowledgment", ok("unexpected output"), true),
+                (
+                    "process not started",
+                    Err(RunError::NotStarted("spawn failed".into())),
+                    false,
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("tmux");
+                runner.respond(reply);
+                let error = on_server(runner).press_submit(PANE, b"\r").unwrap_err();
+                assert_eq!(error.submission_started(), written, "{name}: {error}");
+            }
         }
     }
 }

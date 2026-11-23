@@ -67,18 +67,6 @@ pub(crate) fn message(row: &MessageRecord) -> Value {
         "status_timestamp":row.status_timestamp,"text":row.text})
 }
 
-pub(crate) fn listen_ready(member_id: i64, fleet_id: i64) -> Value {
-    json!({"event":"ready", "member_id":member_id, "fleet_id":fleet_id})
-}
-
-pub(crate) fn listen_pending(next: &str) -> Value {
-    json!({"event":"pending", "next":next})
-}
-
-pub(crate) fn listen_closed(member_id: i64, reason: &str) -> Value {
-    json!({"event":"closed", "member_id":member_id, "reason":reason})
-}
-
 pub(crate) fn message_envelope(row: &MessageRecord) -> Value {
     json!({"message":message(row)})
 }
@@ -158,18 +146,6 @@ pub(crate) fn permission_inspection(row: &crate::runtime::PermissionInspection) 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-
-    #[test]
-    fn listen_pending_is_exactly_the_event_then_the_given_next_command() {
-        let next = "cafleet message poll 4 --json --database-url 'sqlite:///tmp/my fleet.db'";
-        let value = crate::output::json::listen_pending(next);
-        crate::broker::runtime::test_support::assert_key_order(&value, &["event", "next"]);
-        assert_eq!(value, json!({"event":"pending","next":next}));
-        assert_eq!(
-            serde_json::to_string(&value).unwrap(),
-            r#"{"event":"pending","next":"cafleet message poll 4 --json --database-url 'sqlite:///tmp/my fleet.db'"}"#
-        );
-    }
 
     #[test]
     fn member_press_json_is_the_canonical_acknowledgment_without_effect_counts() {

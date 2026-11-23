@@ -154,8 +154,9 @@ CREATE TABLE member_input_operations (
         OR (deferred_at IS NOT NULL AND defer_reason IS NOT NULL
             AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
-        OR (stop_cause IN ('interaction_open','interaction_candidate','submit_unconfirmed',
-                          'deadline_expired','short_write','write_failed','runner_stopped')
+        OR (stop_cause IN ('interaction_open','interaction_candidate','literal_mismatch',
+                          'submit_unconfirmed','deadline_expired','short_write','write_failed',
+                          'runner_stopped')
             AND state IN ('uncertain','settled'))),
     UNIQUE(run_id, operation_key),
     CHECK((state = 'settled' AND disposition IS NOT NULL) OR (state != 'settled' AND disposition IS NULL))
@@ -164,7 +165,7 @@ CREATE TABLE member_input_operations (
 CREATE TABLE member_runner_diagnostics (
     diagnostic_id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER NOT NULL REFERENCES member_runs(run_id) ON DELETE RESTRICT,
-    source TEXT NOT NULL CHECK(source IN ('event_writer','observation','deferred_input','queue_housekeeping','preview_sweep','input_result','permission_answer','shutdown')),
+    source TEXT NOT NULL CHECK(source IN ('event_writer','observation','deferred_input','queue_housekeeping','preview_sweep','director_delivery','input_result','permission_answer','shutdown')),
     message TEXT NOT NULL CHECK(length(trim(message)) > 0 AND length(CAST(message AS BLOB)) <= 512),
     first_at TEXT NOT NULL,
     last_at TEXT NOT NULL,
@@ -1748,6 +1749,54 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(kind, "input_delivery_stalled");
+        }
+
+        #[test]
+        fn input_stop_causes_accept_literal_mismatch_on_an_uncertain_input() {
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            let input = fixture.input(run, "prompt:mismatch").unwrap();
+            fixture
+                .conn
+                .execute(
+                    "UPDATE member_input_operations SET state='uncertain',stop_cause='literal_mismatch' WHERE input_id=?1",
+                    [input],
+                )
+                .unwrap();
+            let cause: String = fixture
+                .conn
+                .query_row(
+                    "SELECT stop_cause FROM member_input_operations WHERE input_id=?1",
+                    [input],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(cause, "literal_mismatch");
+            assert!(
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET stop_cause='literal_garbled' WHERE input_id=?1",
+                        [input],
+                    )
+                    .is_err(),
+                "an unknown stop cause is refused"
+            );
+        }
+
+        #[test]
+        fn runner_diagnostics_accept_the_director_delivery_source() {
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            let insert = |source: &str| {
+                fixture.conn.execute(
+                    "INSERT INTO member_runner_diagnostics(run_id,source,message,first_at,last_at,count)
+                     VALUES(?1,?2,'director delivery: message 7 held: composer_busy',?3,?3,1)",
+                    params![run, source, NOW],
+                )
+            };
+            insert("director_delivery").unwrap();
+            assert!(insert("director_receiver").is_err());
         }
 
         #[test]

@@ -95,7 +95,11 @@
           "operation": null,
           "choices": []
         },
-        "verified_noninteraction": true
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "pi-1.5.2-director-idle-empty-herdr-120-1",
+          "pi-1.5.2-director-idle-empty-tmux-120-1"
+        ]
       },
       {
         "id": "pi-working-composer",
@@ -119,7 +123,45 @@
           "operation": null,
           "choices": []
         },
-        "verified_noninteraction": true
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "pi-1.5.2-director-busy-herdr-120-1",
+          "pi-1.5.2-director-busy-tmux-120-1"
+        ]
+      },
+      {
+        "id": "pi-composer-text",
+        "priority": 40,
+        "observation": "composer_text",
+        "region": {
+          "screen": "alternate",
+          "start_pattern": "^(?:─+|── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+) *$",
+          "end_pattern": "^─+ *$",
+          "max_rows": 40,
+          "cursor": "inside"
+        },
+        "matchers": [
+          {
+            "id": "editor",
+            "scope": "region",
+            "pattern": "\\A(?:─+|── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+) *\\n(?s:.*)\\n─+ *\\z"
+          }
+        ],
+        "extract": {
+          "operation": null,
+          "choices": []
+        },
+        "verified_noninteraction": true,
+        "fixture_ids": [
+          "pi-1.5.2-director-one-herdr-120-1",
+          "pi-1.5.2-director-one-tmux-120-1",
+          "pi-1.5.2-director-plain-474-herdr-81-1",
+          "pi-1.5.2-director-plain-474-tmux-80-1",
+          "pi-1.5.2-director-wrap-herdr-120-1",
+          "pi-1.5.2-director-wrap-tmux-120-1",
+          "pi-1.5.2-director-preview-after-turn-tmux-120-1",
+          "pi-1.5.2-director-preview-after-turn-herdr-120-1"
+        ]
       }
     ],
     "capabilities": {
@@ -201,6 +243,16 @@
           "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
           "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
         ],
+        "text": {
+          "rule_ids": [
+            "pi-composer-text"
+          ],
+          "first_prefix": "^",
+          "continuation_prefix": "^",
+          "wrap": "word",
+          "placeholders": [],
+          "framed": true
+        },
         "submission": {
           "prompt": {
             "prefix_hex": "",
@@ -243,10 +295,17 @@
               "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34",
               "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34",
               "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
-              "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33"
+              "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33",
+              "pi-1.5.2-composer-prompt-wrap-literal-tmux-120-1",
+              "pi-1.5.2-composer-prompt-words-literal-tmux-120-1",
+              "pi-1.5.2-composer-prompt-plain-474-literal-tmux-80-1",
+              "pi-1.5.2-composer-prompt-plain-474-literal-herdr-81-1"
             ],
             "literal_framing": "plain",
-            "plain_literal_limit": null
+            "plain_literal_limit": {
+              "unit": "scalars",
+              "max": 474
+            }
           },
           "exec": {
             "prefix_hex": "2120",
@@ -293,10 +352,16 @@
               "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-70",
               "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-70",
               "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69",
-              "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2"
+              "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2",
+              "pi-1.5.2-composer-exec-wrap-literal-tmux-120-1",
+              "pi-1.5.2-composer-exec-plain-474-literal-tmux-80-1",
+              "pi-1.5.2-composer-exec-plain-474-literal-herdr-81-1"
             ],
             "literal_framing": "plain",
-            "plain_literal_limit": null
+            "plain_literal_limit": {
+              "unit": "scalars",
+              "max": 474
+            }
           }
         }
       },
@@ -353,7 +418,37 @@
             "pi-1.5.0-deny-pre-stage-2-herdr-049-1"
           ]
         }
-      ]
+      ],
+      "director_delivery": {
+        "coverage": "tested",
+        "multiplexers": [
+          "tmux",
+          "herdr"
+        ],
+        "rule_ids": [
+          "pi-idle-composer",
+          "pi-working-composer",
+          "pi-composer-text"
+        ],
+        "plain_limit": {
+          "unit": "scalars",
+          "max": 474
+        },
+        "fixture_ids": [
+          "pi-1.5.2-director-busy-herdr-120-1",
+          "pi-1.5.2-director-busy-tmux-120-1",
+          "pi-1.5.2-director-idle-empty-herdr-120-1",
+          "pi-1.5.2-director-idle-empty-tmux-120-1",
+          "pi-1.5.2-director-one-herdr-120-1",
+          "pi-1.5.2-director-one-tmux-120-1",
+          "pi-1.5.2-director-plain-474-herdr-81-1",
+          "pi-1.5.2-director-plain-474-tmux-80-1",
+          "pi-1.5.2-director-wrap-herdr-120-1",
+          "pi-1.5.2-director-wrap-tmux-120-1",
+          "pi-1.5.2-director-preview-after-turn-tmux-120-1",
+          "pi-1.5.2-director-preview-after-turn-herdr-120-1"
+        ]
+      }
     }
   },
   "screens": {
@@ -7578,12 +7673,6 @@
           "operation": "exec",
           "multiplexer": "herdr",
           "kind": "post_submit"
-        },
-        {
-          "operation": "exec",
-          "multiplexer": "herdr",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
         }
       ],
       "rows": 40,
@@ -7654,12 +7743,6 @@
           "operation": "exec",
           "multiplexer": "tmux",
           "kind": "post_submit"
-        },
-        {
-          "operation": "exec",
-          "multiplexer": "tmux",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
         }
       ],
       "rows": 39,
@@ -8972,12 +9055,6 @@
           "operation": "prompt",
           "multiplexer": "herdr",
           "kind": "post_submit"
-        },
-        {
-          "operation": "prompt",
-          "multiplexer": "herdr",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
         }
       ],
       "rows": 40,
@@ -9048,12 +9125,6 @@
           "operation": "prompt",
           "multiplexer": "tmux",
           "kind": "post_submit"
-        },
-        {
-          "operation": "prompt",
-          "multiplexer": "tmux",
-          "kind": "plain_limit",
-          "plain_literal_limit": null
         }
       ],
       "rows": 39,
@@ -9229,7 +9300,8 @@
         {
           "operation": "exec",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -9293,7 +9365,8 @@
         {
           "operation": "prompt",
           "multiplexer": "herdr",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 40,
@@ -9357,7 +9430,8 @@
         {
           "operation": "prompt",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ],
       "rows": 39,
@@ -9420,7 +9494,8 @@
         {
           "operation": "exec",
           "multiplexer": "tmux",
-          "kind": "unsubmitted_literal"
+          "kind": "unsubmitted_literal",
+          "expected_literal": "! true CF228_RETAIN_exec_tmux_1794671923845862112"
         }
       ],
       "rows": 39,
@@ -9476,6 +9551,4765 @@
           "reason": "reviewed_privacy"
         }
       ]
+    },
+    "pi-1.5.2-director-idle-empty-tmux-120-1": {
+      "native_version": "1.5.2",
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 0,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                  ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "",
+        "[Context]                     ",
+        "",
+        "",
+        "[Skills]                      ",
+        "  cafleet, cafleet-design-doc, github-cli                   ",
+        "",
+        "[Extensions]                  ",
+        "  cafleet.ts                  ",
+        "",
+        "",
+        "",
+        " and restart tmux.            ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available             ",
+        " New version 1.6.0 is available. Run pi update              ",
+        " Changelog: https://pi.dev/changelog                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                              ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                              openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-director-one-tmux-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 31,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 41,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                  ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "",
+        "[Context]                     ",
+        "",
+        "",
+        "[Skills]                      ",
+        "  cafleet, cafleet-design-doc, github-cli                   ",
+        "",
+        "[Extensions]                  ",
+        "  cafleet.ts                  ",
+        "",
+        "",
+        "",
+        " and restart tmux.            ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available             ",
+        " New version 1.6.0 is available. Run pi update              ",
+        " Changelog: https://pi.dev/changelog                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                   ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                              openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-director-wrap-tmux-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 81,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                  ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "",
+        "[Context]                     ",
+        "",
+        "",
+        "[Skills]                      ",
+        "  cafleet, cafleet-design-doc, github-cli                   ",
+        "",
+        "[Extensions]                  ",
+        "  cafleet.ts                  ",
+        "",
+        "",
+        "",
+        " and restart tmux.            ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available             ",
+        " New version 1.6.0 is available. Run pi update              ",
+        " Changelog: https://pi.dev/changelog                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply OK.                     ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                       ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                              openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 18,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 32,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-director-busy-tmux-120-1": {
+      "native_version": "1.5.2",
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 0,
+      "lines": [
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "",
+        "[Context]                     ",
+        "",
+        "",
+        "[Skills]                      ",
+        "  cafleet, cafleet-design-doc, github-cli                   ",
+        "",
+        "[Extensions]                  ",
+        "  cafleet.ts                  ",
+        "",
+        "",
+        "",
+        " and restart tmux.            ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available             ",
+        " New version 1.6.0 is available. Run pi update              ",
+        " Changelog: https://pi.dev/changelog                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        " Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import time; time.sleep(60)'   ",
+        "",
+        "",
+        "",
+        " $ python3 -c 'import time; time.sleep(60)' (timeout 90s)   ",
+        "",
+        " Elapsed 6.0s                 ",
+        "",
+        "",
+        "── ⠋ Working ───────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                              ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "↑3 ↓34 W2.3k CH0.0% $0.000 0.2%/1.1M (auto)                                                   openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 15,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 16,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 43,
+          "end_col": 57,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 31,
+          "start_col": 1,
+          "end_col": 13,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 5,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-director-idle-empty-herdr-120-1": {
+      "native_version": "1.5.2",
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                           ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                  ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                          ",
+        "                                                                                                                       ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                 ",
+        "",
+        "",
+        "[Context]                                                                                                              ",
+        "",
+        "",
+        "[Skills]                                                                                                               ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                              ",
+        "",
+        "[Extensions]                                                                                                           ",
+        "  cafleet.ts                                                                                                           ",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                                                                      ",
+        " New version 1.6.0 is available. Run pi update                                                                         ",
+        " Changelog: https://pi.dev/changelog                                                                                   ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                                                                                                       ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                             openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 39,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "pi-1.5.2-director-one-herdr-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 31,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                           ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                  ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                          ",
+        "                                                                                                                       ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                 ",
+        "",
+        "",
+        "[Context]                                                                                                              ",
+        "",
+        "",
+        "[Skills]                                                                                                               ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                              ",
+        "",
+        "[Extensions]                                                                                                           ",
+        "  cafleet.ts                                                                                                           ",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                                                                      ",
+        " New version 1.6.0 is available. Run pi update                                                                         ",
+        " Changelog: https://pi.dev/changelog                                                                                   ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                                                              ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                             openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 39,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "pi-1.5.2-director-wrap-herdr-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                           ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                  ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                          ",
+        "                                                                                                                       ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                 ",
+        "",
+        "",
+        "[Context]                                                                                                              ",
+        "",
+        "",
+        "[Skills]                                                                                                               ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                              ",
+        "",
+        "[Extensions]                                                                                                           ",
+        "  cafleet.ts                                                                                                           ",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                                                                      ",
+        " New version 1.6.0 is available. Run pi update                                                                         ",
+        " Changelog: https://pi.dev/changelog                                                                                   ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply OK.                                                                                                              ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                     ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                             openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 33,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 39,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "pi-1.5.2-director-busy-herdr-120-1": {
+      "native_version": "1.5.2",
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                           ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                  ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                          ",
+        "                                                                                                                       ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                 ",
+        "",
+        "",
+        "[Context]                                                                                                              ",
+        "",
+        "",
+        "[Skills]                                                                                                               ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                              ",
+        "",
+        "[Extensions]                                                                                                           ",
+        "  cafleet.ts                                                                                                           ",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                                                                      ",
+        " New version 1.6.0 is available. Run pi update                                                                         ",
+        " Changelog: https://pi.dev/changelog                                                                                   ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "                                                                                                                       ",
+        " Run exactly this shell command in the foreground and wait for it to finish: python3 -c 'import time; time.sleep(60)'  ",
+        "                                                                                                                       ",
+        "",
+        "                                                                                                                       ",
+        " $ python3 -c 'import time; time.sleep(60)' (timeout 90s)                                                              ",
+        "                                                                                                                       ",
+        " Elapsed 9.0s                                                                                                          ",
+        "                                                                                                                       ",
+        "",
+        "",
+        "── ⠇ Working ──────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "                                                                                                                       ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "↑3 ↓34 W2.3k CH0.0% $0.000 0.2%/1.1M (auto)                                                  openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 29,
+          "start_col": 43,
+          "end_col": 57,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 31,
+          "start_col": 1,
+          "end_col": 13,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 5,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 39,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "pi-1.5.2-composer-prompt-wrap-literal-tmux-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 200,
+            "prefix": "Reply OK. "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 81,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                  ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "",
+        "[Context]                     ",
+        "",
+        "",
+        "[Skills]                      ",
+        "  cafleet, cafleet-design-doc, github-cli                   ",
+        "",
+        "[Extensions]                  ",
+        "  cafleet.ts                  ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf    ",
+        " and restart tmux.            ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available             ",
+        " New version 1.6.0 is available. Run pi update              ",
+        " Changelog: https://pi.dev/changelog                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply OK.                     ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                       ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                              openai/gpt-6-luna • medium",
+        "cafleet gate: cafleet-ask     "
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 1,
+          "end_col": 116,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-composer-exec-wrap-literal-tmux-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 195,
+            "prefix": "! true "
+          }
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 76,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                  ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "",
+        "[Context]                     ",
+        "",
+        "",
+        "[Skills]                      ",
+        "  cafleet, cafleet-design-doc, github-cli                   ",
+        "",
+        "[Extensions]                  ",
+        "  cafleet.ts                  ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf    ",
+        " and restart tmux.            ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available             ",
+        " New version 1.6.0 is available. Run pi update              ",
+        " Changelog: https://pi.dev/changelog                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "! true                        ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa                                            ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                              openai/gpt-6-luna • medium",
+        "cafleet gate: cafleet-ask     "
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 1,
+          "end_col": 116,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-composer-prompt-words-literal-tmux-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "Reply OK. abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij"
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 34,
+      "cursor_col": 10,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                  ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                   ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                           ",
+        "",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ",
+        "",
+        "",
+        "[Context]                     ",
+        "",
+        "",
+        "[Skills]                      ",
+        "  cafleet, cafleet-design-doc, github-cli                   ",
+        "",
+        "[Extensions]                  ",
+        "  cafleet.ts                  ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf    ",
+        " and restart tmux.            ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available             ",
+        " New version 1.6.0 is available. Run pi update              ",
+        " Changelog: https://pi.dev/changelog                        ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "Reply OK. abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij            ",
+        "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij           ",
+        "abcdefghij                    ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                                                              openai/gpt-6-luna • medium",
+        "cafleet gate: cafleet-ask     "
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 36,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 1,
+          "end_col": 116,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 24,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 24,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 25,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 31,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 35,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-composer-prompt-plain-474-literal-tmux-80-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 474,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 474
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 19,
+      "cursor_col": 79,
+      "lines": [
+        "[Extensions]        ",
+        "  cafleet.ts        ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set ",
+        " -g extended-keys on` to ~/.tmux.conf and restart tmux.                         ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        " Update Available   ",
+        " New version 1.6.0 is available. Run pi update                                  ",
+        " Changelog: https://pi.dev/changelog    ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                      openai/gpt-6-luna • medium",
+        "cafleet gate: cafleet-ask               "
+      ],
+      "masked_rows": [
+        {
+          "row": 21,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-composer-prompt-plain-474-literal-herdr-81-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 474,
+            "prefix": ""
+          }
+        },
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 474
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "[Skills]                                                                        ",
+        "  cafleet, cafleet-design-doc, github-cli                                       ",
+        "",
+        "[Extensions]                                                                    ",
+        "  cafleet.ts                                                                    ",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                               ",
+        " New version 1.6.0 is available. Run pi update                                  ",
+        " Changelog: https://pi.dev/changelog                                            ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                      openai/gpt-6-luna • medium",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 21,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "pi-1.5.2-composer-exec-plain-474-literal-tmux-80-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 467,
+            "prefix": "! true "
+          }
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "tmux",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 474
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 19,
+      "cursor_col": 72,
+      "lines": [
+        "  cafleet.ts        ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set ",
+        " -g extended-keys on` to ~/.tmux.conf and restart tmux.                         ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        " Update Available   ",
+        " New version 1.6.0 is available. Run pi update                                  ",
+        " Changelog: https://pi.dev/changelog    ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "! true              ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa        ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                      openai/gpt-6-luna • medium",
+        "cafleet gate: cafleet-ask               "
+      ],
+      "masked_rows": [
+        {
+          "row": 21,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 1,
+          "end_col": 55,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-composer-exec-plain-474-literal-herdr-81-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 467,
+            "prefix": "! true "
+          }
+        },
+        {
+          "operation": "exec",
+          "multiplexer": "herdr",
+          "kind": "plain_limit",
+          "plain_literal_limit": {
+            "unit": "scalars",
+            "max": 474
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "  cafleet, cafleet-design-doc, github-cli                                       ",
+        "",
+        "[Extensions]                                                                    ",
+        "  cafleet.ts                                                                    ",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                               ",
+        " New version 1.6.0 is available. Run pi update                                  ",
+        " Changelog: https://pi.dev/changelog                                            ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "! true                                                                          ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa        ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                      openai/gpt-6-luna • medium",
+        "cafleet gate: cafleet-ask"
+      ],
+      "masked_rows": [
+        {
+          "row": 21,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 2
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "pi-1.5.2-director-plain-474-tmux-80-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 474,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 80,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 20,
+      "cursor_col": 79,
+      "lines": [
+        "",
+        "[Extensions]        ",
+        "  cafleet.ts        ",
+        "",
+        "",
+        " Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set ",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        " Update Available   ",
+        " New version 1.6.0 is available. Run pi update                                  ",
+        " Changelog: https://pi.dev/changelog    ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                      openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 6,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 22,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 79,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-director-plain-474-herdr-81-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": {
+            "repeat": "a",
+            "count": 474,
+            "prefix": ""
+          }
+        }
+      ],
+      "rows": 24,
+      "cols": 81,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        "[Skills]                                                                        ",
+        "  cafleet, cafleet-design-doc, github-cli                                       ",
+        "",
+        "[Extensions]                                                                    ",
+        "  cafleet.ts                                                                    ",
+        "",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                               ",
+        " New version 1.6.0 is available. Run pi update                                  ",
+        " Changelog: https://pi.dev/changelog                                            ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
+        "────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "0.0%/1.1M (auto)                                      openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 22,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 11,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 23,
+          "start_col": 0,
+          "end_col": 80,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
+    },
+    "pi-1.5.2-director-preview-after-turn-tmux-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+        }
+      ],
+      "rows": 39,
+      "cols": 120,
+      "alternate_screen": true,
+      "screen_seq": 1,
+      "cursor_row": 35,
+      "cursor_col": 102,
+      "lines": [
+        " read it. [cafleet] Resume your work if something was still running.                                                    ",
+        "",
+        "",
+        "",
+        " $ cafleet message poll 1 --json --database-url sqlite:////tmp/cfp25/pi-tmux.db (timeout 120s)                          ",
+        "",
+        " [{\"message_id\":16,\"from_member_id\":2,\"to_member_id\":1,\"created_at\":\"2026-11-23T12:30:35.690696+00:00\",\"status_state\":\" ",
+        " completed\",\"status_timestamp\":\"2026-11-23T12:30:38.976764+00:00\",\"text\":\"probe long body 16                            ",
+        " bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ",
+        " bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ",
+        " bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}]            ",
+        "",
+        " Took 0.0s                    ",
+        "",
+        "",
+        " polled: 16                   ",
+        "",
+        "",
+        " [cafleet msg 17 from 2 2026-11-23T12:30:42.230616+00:00] settle race probe [cafleet] Resume your work if something was ",
+        " still running.               ",
+        "",
+        "",
+        "",
+        " $ cafleet message poll 1 --json --database-url sqlite:////tmp/cfp25/pi-tmux.db (timeout 120s)                          ",
+        "",
+        " [{\"message_id\":17,\"from_member_id\":2,\"to_member_id\":1,\"created_at\":\"2026-11-23T12:30:42.230616+00:00\",\"status_state\":\" ",
+        " completed\",\"status_timestamp\":\"2026-11-23T12:30:48.596696+00:00\",\"text\":\"settle race probe\"}]                          ",
+        "",
+        " Took 0.0s                    ",
+        "",
+        "",
+        " polled: 17                   ",
+        "",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and  ",
+        "reply with your findings when you are done. [cafleet] Resume your work if something was still running.                  ",
+        "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "↑81 ↓1.1k R108k W6.1k CH97.7% $0.002 0.6%/1.1M (auto)                                         openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 37,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 4,
+          "start_col": 79,
+          "end_col": 94,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 6,
+          "start_col": 1,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 7,
+          "start_col": 1,
+          "end_col": 92,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 1,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 9,
+          "start_col": 1,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 10,
+          "start_col": 1,
+          "end_col": 108,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 12,
+          "start_col": 1,
+          "end_col": 10,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 23,
+          "start_col": 79,
+          "end_col": 94,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 25,
+          "start_col": 1,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 26,
+          "start_col": 1,
+          "end_col": 94,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 28,
+          "start_col": 1,
+          "end_col": 10,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 33,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 36,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 38,
+          "start_col": 0,
+          "end_col": 120,
+          "faint": true,
+          "foreground": null
+        }
+      ]
+    },
+    "pi-1.5.2-director-preview-after-turn-herdr-120-1": {
+      "native_version": "1.5.2",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "herdr",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+        }
+      ],
+      "rows": 40,
+      "cols": 120,
+      "alternate_screen": null,
+      "screen_seq": 1,
+      "cursor_row": null,
+      "cursor_col": null,
+      "lines": [
+        "",
+        " ▀▀█  v1.5.2                                                                                                           ",
+        " █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                  ",
+        " Press ctrl+o to show full startup help and loaded resources.                                                          ",
+        "                                                                                                                       ",
+        " Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                 ",
+        "",
+        "",
+        "[Context]                                                                                                              ",
+        "",
+        "",
+        "[Skills]                                                                                                               ",
+        "  cafleet, cafleet-design-doc, github-cli                                                                              ",
+        "",
+        "[Extensions]                                                                                                           ",
+        "  cafleet.ts                                                                                                           ",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        " Update Available                                                                                                      ",
+        " New version 1.6.0 is available. Run pi update                                                                         ",
+        " Changelog: https://pi.dev/changelog                                                                                   ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "                                                                                                                       ",
+        " Reply with the single word OK.                                                                                        ",
+        "                                                                                                                       ",
+        "",
+        " OK                                                                                                                    ",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs     ",
+        "and reply with your findings when you are done. [cafleet] Resume your work if something was still running.             ",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "↑3 ↓5 W2.2k CH0.0% $0.000 0.2%/1.1M (auto)                                                   openai/gpt-6-luna • medium"
+      ],
+      "masked_rows": [
+        {
+          "row": 9,
+          "reason": "reviewed_privacy"
+        },
+        {
+          "row": 38,
+          "reason": "reviewed_privacy"
+        }
+      ],
+      "cell_backgrounds": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 2,
+          "bg": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        }
+      ],
+      "cell_styles": [
+        {
+          "row": 1,
+          "start_col": 1,
+          "end_col": 4,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 228,
+            "g": 138,
+            "b": 122
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 6,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 2,
+          "start_col": 1,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 79,
+            "g": 142,
+            "b": 179
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 234,
+            "g": 182,
+            "b": 93
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 6,
+          "end_col": 85,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 3,
+          "start_col": 1,
+          "end_col": 61,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 5,
+          "start_col": 1,
+          "end_col": 86,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 8,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 41,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 15,
+          "start_col": 0,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 18,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 1,
+          "end_col": 17,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 20,
+          "start_col": 1,
+          "end_col": 37,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 20,
+          "start_col": 37,
+          "end_col": 46,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 21,
+          "start_col": 1,
+          "end_col": 12,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 21,
+          "start_col": 12,
+          "end_col": 36,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 5
+          }
+        },
+        {
+          "row": 22,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 3
+          }
+        },
+        {
+          "row": 34,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 37,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 6
+          }
+        },
+        {
+          "row": 39,
+          "start_col": 0,
+          "end_col": 119,
+          "faint": true,
+          "foreground": null
+        }
+      ],
+      "multiplexer": "herdr"
     }
   }
 }

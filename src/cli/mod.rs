@@ -233,7 +233,7 @@ fn dispatch(settings: &Settings, command: Command) -> Result<(), CafleetError> {
             match command {
                 Command::Fleet(cmd) => fleet::run(&mut conn, settings, cmd, deadline),
                 Command::Member(cmd) => member::run(&mut conn, settings, cmd, deadline),
-                Command::Message(cmd) => message::run(&mut conn, settings, cmd),
+                Command::Message(cmd) => message::run(&mut conn, cmd),
                 Command::Event(cmd) => runtime::event(&conn, cmd),
                 Command::Input(cmd) => runtime::input(&mut conn, settings, cmd, deadline),
                 Command::Setup(_)
@@ -775,45 +775,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn listen_leases_validate_integer_bounds_and_optional_forwarding() {
-        assert!(matches!(
-            parse(&["message", "listen", "17"]),
-            Command::Message(message::MessageCommand::Listen {
-                member_id: 17,
-                timeout: None,
-                codex_thread: None,
-            })
-        ));
-        match parse(&["message", "listen", "17", "--codex-thread", "THREAD"]) {
-            Command::Message(message::MessageCommand::Listen {
-                member_id: 17,
-                timeout: None,
-                codex_thread,
-            }) => assert_eq!(codex_thread.as_deref(), Some("THREAD")),
-            _ => panic!("expected a forwarding listener"),
-        }
-        for seconds in ["1", "1800"] {
-            match parse(&["message", "listen", "17", "--timeout", seconds]) {
-                Command::Message(message::MessageCommand::Listen { timeout, .. }) => {
-                    assert_eq!(timeout, Some(seconds.parse::<u64>().unwrap()));
-                }
-                _ => panic!("expected a bounded listener"),
-            }
-        }
-        for seconds in ["0", "1801", "fraction", "1.5"] {
-            assert_error(
-                &["message", "listen", "17", "--timeout", seconds],
-                ErrorKind::ValueValidation,
-                seconds,
-            );
-        }
-        assert_error(
-            &["message", "listen", "17", "--json"],
-            ErrorKind::UnknownArgument,
-            "--json",
-        );
-    }
     #[test]
     fn member_runner_internal_command_accepts_an_absolute_descriptor_and_stays_hidden() {
         use clap::CommandFactory;

@@ -1,21 +1,16 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import { Type } from "typebox"
-import { execFile, spawn, type ChildProcess } from "node:child_process"
+import { execFile } from "node:child_process"
 import { accessSync, constants, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
 
-const RECORD_PREFIX = "[cafleet listen record] "
-const CLOSED_PREFIX = "[cafleet listen closed] "
 const GOAL_PREFIX = "[cafleet goal] "
-const LISTEN_TYPE = "cafleet-listen"
 const GOAL_TYPE = "cafleet-goal"
 const GOAL_NOTICE_TYPE = "cafleet-goal-notice"
 const MEMBER_REFUSAL = "cafleet tools run only in a Director session"
 const SETUP_FIX = "run 'cafleet setup --coding-agent pi'"
-const RECEIVER_STOPPED = Symbol.for("cafleet.pi.receiver-stopped")
 const IDLE_LIMIT = 3
 const CONTINUATION_LIMIT = 50
 const VERIFY_TIMEOUT_MS = 10_000
@@ -235,10 +230,6 @@ export default function (pi: ExtensionAPI) {
   let pendingContinuation = false
   let progressed = false
 
-  let receiver: ChildProcess | undefined
-  let receiverEnded = true
-  let receiverStopped = false
-
   const notify = (ctx: ExtensionContext, text: string, level: "info" | "warning" | "error" = "info") => {
     if (ctx.hasUI) ctx.ui.notify(text, level)
   }
@@ -286,64 +277,6 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  function receiverLive() {
-    return receiver !== undefined && !receiverEnded
-  }
-
-  function sendListen(content: string) {
-    pi.sendMessage({ customType: LISTEN_TYPE, content, display: true }, { triggerTurn: true, deliverAs: "followUp" })
-  }
-
-  function stopReceiver() {
-    if (!receiverLive()) return false
-    receiverStopped = true
-    receiver!.kill("SIGTERM")
-    return true
-  }
-
-  function startReceiver({ director_id, database_url }: DirectorInput): ChildProcess {
-    const child = spawn(recordedExecutable(), [...databaseArgs(database_url), "message", "listen", String(director_id)], {
-      stdio: ["ignore", "pipe", "pipe"],
-    })
-    receiver = child
-    receiverEnded = false
-    receiverStopped = false
-    let sawClosed = false
-    let noticeSent = false
-    let lastStderr = ""
-    const closedNotice = (detail: string) => {
-      if (noticeSent || receiverStopped || sawClosed) return
-      noticeSent = true
-      try {
-        sendListen(`${CLOSED_PREFIX}${detail}`)
-      } catch (error) {
-        console.error("[cafleet listen] closed notice failed:", error)
-      }
-    }
-    const end = (detail: string) => {
-      if (receiver === child) receiverEnded = true
-      closedNotice(detail)
-    }
-    createInterface({ input: child.stdout! }).on("line", (line) => {
-      if (!line || noticeSent) return
-      sawClosed ||= line.startsWith('{"event":"closed"')
-      try {
-        sendListen(RECORD_PREFIX + line)
-      } catch (error) {
-        child.kill("SIGTERM")
-        if (receiver === child) receiverEnded = true
-        sawClosed = false
-        closedNotice(`delivery failed: ${(error as Error).message}`)
-      }
-    })
-    createInterface({ input: child.stderr! }).on("line", (line) => {
-      if (line.trim()) lastStderr = line.trim()
-    })
-    child.on("error", (error: NodeJS.ErrnoException) => end(`exit ${error.code ?? "error"}: ${error.message}`))
-    child.on("close", (code, signal) => end(`exit ${code ?? signal}: ${lastStderr}`))
-    return child
-  }
-
   function readGate(): Gate {
     const value = pi.getFlag(GATE_FLAG)
     if (value === undefined) return { kind: "inert" }
@@ -372,12 +305,6 @@ export default function (pi: ExtensionAPI) {
     } catch (error) {
       console.error("[cafleet goal] restoring the goal failed:", error)
     }
-
-    const stopped = (globalThis as Record<symbol, unknown>)[RECEIVER_STOPPED] as { reason: string } | undefined
-    if (stopped) {
-      delete (globalThis as Record<symbol, unknown>)[RECEIVER_STOPPED]
-      sendListen(`${CLOSED_PREFIX}the extension runtime was replaced (${stopped.reason}); re-arm with cafleet_listen`)
-    }
   })
 
   pi.on("session_tree", async (_event, ctx) => {
@@ -385,12 +312,6 @@ export default function (pi: ExtensionAPI) {
       restoreGoal(ctx)
     } catch (error) {
       console.error("[cafleet goal] restoring the goal failed:", error)
-    }
-  })
-
-  pi.on("session_shutdown", async (event) => {
-    if (stopReceiver() && event.reason !== "quit") {
-      ;(globalThis as Record<symbol, unknown>)[RECEIVER_STOPPED] = { reason: event.reason }
     }
   })
 
@@ -436,34 +357,6 @@ export default function (pi: ExtensionAPI) {
         if (event.toolName.startsWith("cafleet_")) return { block: true, reason: MEMBER_REFUSAL }
         return { block: true, reason: `the CAFleet member gate allows only ${GATE_TOOLS}` }
     }
-  })
-
-  pi.registerTool({
-    name: "cafleet_listen",
-    label: "CAFleet listen",
-    description:
-      "Start CAFleet Director reception for this session: each message beginning '[cafleet listen record]' " +
-      "carries a pending notice; run the command in its 'next' field once, which consumes and returns " +
-      "every unpolled message, and an empty [] result means an earlier poll already consumed them.",
-    parameters: Type.Object(directorParameters),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const input = params as DirectorInput
-      const refusal = await directorRefusal(input)
-      if (refusal !== undefined) return result({ ok: false, error: refusal })
-      const sessionId = ctx.sessionManager.getSessionId()
-      if (receiverLive()) return result({ ok: true, pid: receiver!.pid, sessionId, existing: true })
-      try {
-        const child = startReceiver(input)
-        if (child.pid === undefined) {
-          receiverStopped = true
-          receiverEnded = true
-          return result({ ok: false, error: "cafleet message listen did not start" })
-        }
-        return result({ ok: true, pid: child.pid, sessionId })
-      } catch (error) {
-        return result({ ok: false, error: (error as Error).message })
-      }
-    },
   })
 
   pi.registerTool({

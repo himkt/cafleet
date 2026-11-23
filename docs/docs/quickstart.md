@@ -79,9 +79,8 @@ Keep an existing automatic reviewer that supports the needed escalation.
 [Codex configuration](concepts/coding-agents.md#codex-configuration) explains
 reviewer selection and conditional sandbox grants.
 
-Launch the Director with daemon support enabled. Registration may ask for its
-pane ID and server ([Director pane verification](concepts/members.md#director-pane-verification)).
-If listener startup fails, follow [Codex listener troubleshooting](concepts/coding-agents.md#codex-listener-startup).
+Registration may ask for the Director's pane ID and server
+([Director pane verification](concepts/members.md#director-pane-verification)).
 
 ### OpenCode
 
@@ -93,14 +92,14 @@ member permissions and the installed plugin.
 ### Hermes
 
 :::warning Start the Director with `hermes chat --tui`
-In the classic CLI, a Hermes Director still receives and answers member
-messages, but **neither the messages nor its replies appear in its pane**.
-Run the Director in the TUI client: `hermes chat --tui`, or set
-`display.interface: tui`. Hermes members keep the classic CLI.
+Previews of member messages are typed only into the Hermes TUI client, so a Director
+in the classic CLI **receives no previews in its pane** and reads messages
+only by manual poll. Run the Director in the TUI client: `hermes chat --tui`,
+or set `display.interface: tui`. Hermes members keep the classic CLI.
 :::
 
 Keep `approvals.mode` at its `smart` default.
-[Hermes configuration](concepts/coding-agents.md#hermes-configuration) covers plugin setup and troubleshooting.
+[Hermes configuration](concepts/coding-agents.md#hermes-configuration) covers troubleshooting.
 
 ### pi
 

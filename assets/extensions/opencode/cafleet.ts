@@ -1,11 +1,8 @@
 import { Plugin } from "@opencode/plugin"
-import { execFile, spawn, type ChildProcess } from "node:child_process"
+import { execFile } from "node:child_process"
 import { accessSync, constants, readFileSync, statSync } from "node:fs"
-import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
 
-const RECORD_PREFIX = "[cafleet listen record] "
-const CLOSED_PREFIX = "[cafleet listen closed] "
 const GOAL_PREFIX = "[cafleet goal] "
 const CONTINUE_PREFIX = `${GOAL_PREFIX}Continue working toward the active goal: `
 const MEMBER_REFUSAL = "cafleet tools run only in a Director session"
@@ -102,8 +99,6 @@ const directorProperties = {
 export default Plugin.define({
   id: "cafleet",
   async setup(ctx) {
-    const receivers = new Map<string, ChildProcess>()
-    const stoppedReceivers = new WeakSet<ChildProcess>()
     const continuationGenerations = new Map<string, number>()
     const turns = new Map<string, TurnState>()
     const touched = new Set<string>()
@@ -184,86 +179,7 @@ export default Plugin.define({
       return directorRefusal(input)
     }
 
-    function stopReceiver(child: ChildProcess) {
-      stoppedReceivers.add(child)
-      child.kill()
-    }
-
-    function startReceiver(sessionID: string, { director_id, database_url }: DirectorInput) {
-      const args = [...databaseArgs(database_url), "message", "listen", String(director_id)]
-      const child = spawn(recordedExecutable(), args, {
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-      receivers.set(sessionID, child)
-      let sawClosed = false
-      let ended = false
-      let lastStderr = ""
-      let delivery: Promise<unknown> = Promise.resolve()
-      const end = (cause: string, detail = lastStderr) => {
-        if (ended) return
-        ended = true
-        if (receivers.get(sessionID) === child) receivers.delete(sessionID)
-        if (sawClosed || stoppedReceivers.has(child)) return
-        delivery = delivery.then(() =>
-          ctx.session
-            .synthetic({ sessionID, text: `${CLOSED_PREFIX}${cause}: ${detail}`, delivery: "queue" })
-            .catch(() => undefined),
-        )
-      }
-      createInterface({ input: child.stdout! }).on("line", (line) => {
-        if (!line) return
-        sawClosed ||= line.startsWith('{"event":"closed"')
-        delivery = delivery.then(() =>
-          ctx.session
-            .synthetic({ sessionID, text: RECORD_PREFIX + line, delivery: "queue" })
-            .catch(() => stopReceiver(child)),
-        )
-      })
-      createInterface({ input: child.stderr! }).on("line", (line) => {
-        if (line.trim()) lastStderr = line.trim()
-      })
-      child.on("error", (error: NodeJS.ErrnoException) => end(`exit ${error.code ?? "error"}`, error.message))
-      child.on("close", (code, signal) => {
-        if (signal === "SIGTERM") stoppedReceivers.add(child)
-        end(`exit ${code ?? signal}`)
-      })
-      return child
-    }
-
     await ctx.tool.transform((editor) => {
-      editor.add({
-        name: "cafleet_listen",
-        description:
-          "Start CAFleet Director reception for this session: each turn beginning '[cafleet listen record]' " +
-          "carries a pending notice; run the command in its 'next' field once, which consumes and returns " +
-          "every unpolled message, and an empty [] result means an earlier poll already consumed them.",
-        input: {
-          type: "object",
-          properties: directorProperties,
-          required: ["director_id"],
-          additionalProperties: false,
-        },
-        execute: async (input, context) => {
-          const refusal = await authorize("cafleet_listen", input as DirectorInput, context)
-          if (refusal !== undefined) return result({ ok: false, error: refusal })
-          await serializeGoal(context.sessionID, () => touch(context.sessionID))
-          const existing = receivers.get(context.sessionID)
-          if (existing && existing.exitCode === null && existing.signalCode === null) {
-            return result({ ok: true, pid: existing.pid, sessionID: context.sessionID, existing: true })
-          }
-          try {
-            const child = startReceiver(context.sessionID, input as DirectorInput)
-            if (child.pid === undefined) {
-              stoppedReceivers.add(child)
-              receivers.delete(context.sessionID)
-              return result({ ok: false, error: "cafleet message listen did not start" })
-            }
-            return result({ ok: true, pid: child.pid, sessionID: context.sessionID })
-          } catch (error) {
-            return result({ ok: false, error: (error as Error).message })
-          }
-        },
-      })
       editor.add({
         name: "cafleet_goal_status",
         description: "Report the CAFleet goal of this session.",
@@ -459,10 +375,5 @@ export default Plugin.define({
         })
       }
     })()
-
-    return () => {
-      for (const child of receivers.values()) stopReceiver(child)
-      receivers.clear()
-    }
   },
 })

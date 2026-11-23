@@ -27,7 +27,7 @@ Consult directly, without a team, when the task needs it:
 
 ## Dispatch
 
-When a main-session request matches a row below, invoke this skill and run the linked workflow as a full CAFleet team at once, without waiting for the user to say "use cafleet". The Director registers its session with `cafleet fleet create`, spawns the team, drives review rounds through approval and keeps [Director wake](../cafleet/roles/director.md#director-wake) reception until fleet deletion; the workflow body owns its phase gates.
+When a main-session request matches a row below, invoke this skill and run the linked workflow as a full CAFleet team at once, without waiting for the user to say "use cafleet". The Director registers its session with `cafleet fleet create`, spawns the team, drives review rounds through approval and handles every preview under [Director wake](../cafleet/roles/director.md#director-wake) until fleet deletion; the workflow body owns its phase gates.
 
 | When the user wants to… | Run |
 |---|---|

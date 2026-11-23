@@ -1366,6 +1366,11 @@ pub(crate) mod native_capture {
         underline: Option<bool>,
         inverse: Option<bool>,
     }
+    fn runner_screen_mode(screen: &ScreenSnapshot) -> bool {
+        screen
+            .alternate_screen
+            .expect("a runner PTY snapshot carries its screen mode")
+    }
     fn same_capture_run(left: &RunRecord, right: &RunRecord) -> bool {
         left.run_id == right.run_id
             && left.database_identity_json == right.database_identity_json
@@ -1811,7 +1816,7 @@ pub(crate) mod native_capture {
                 || self.policy.sensitive.contains(&observation.rule_id);
             let layout = self.policy.masks.iter().any(|mask| {
                 (mask.screen == CaptureScreen::Either
-                    || (mask.screen == CaptureScreen::Alternate) == screen.alternate_screen)
+                    || (mask.screen == CaptureScreen::Alternate) == runner_screen_mode(screen))
                     && (mask.rows != screen.rows || mask.cols != screen.cols)
             });
             let metadata = self.policy.metadata || sensitive || layout;
@@ -1890,7 +1895,7 @@ pub(crate) mod native_capture {
                 for mask in &self.policy.masks {
                     capture_deadline(clock, deadline)?;
                     if mask.screen == CaptureScreen::Either
-                        || (mask.screen == CaptureScreen::Alternate) == screen.alternate_screen
+                        || (mask.screen == CaptureScreen::Alternate) == runner_screen_mode(screen)
                     {
                         for row in mask.region.top..mask.region.bottom {
                             capture_deadline(clock, deadline)?;
@@ -2008,6 +2013,9 @@ pub(crate) mod native_capture {
                     .ok_or_else(|| error("capture origin regressed"))?;
                 u64::try_from(duration.as_nanos()).map_err(io_error)
             };
+            let (cursor_row, cursor_col) = screen
+                .cursor
+                .expect("a runner PTY snapshot carries its cursor");
             let sample = NativeCaptureSample {
                 sample_index: self.samples.len(),
                 trigger,
@@ -2017,9 +2025,9 @@ pub(crate) mod native_capture {
                 screen_seq: screen.screen_seq,
                 rows: screen.rows,
                 cols: screen.cols,
-                cursor_row: screen.cursor_row,
-                cursor_col: screen.cursor_col,
-                alternate_screen: screen.alternate_screen,
+                cursor_row,
+                cursor_col,
+                alternate_screen: runner_screen_mode(screen),
                 title,
                 projection: if metadata { "metadata" } else { "redacted" },
                 unavailable_regions: unavailable,
@@ -10309,7 +10317,10 @@ mod tests {
 
         fn screen(id: &str) -> ScreenSnapshot {
             let document: Value = serde_json::from_str(&bundled_fixture(id)).unwrap();
-            replay(id, document["alternate_screen"].as_bool().unwrap())
+            replay(
+                id,
+                crate::coding_agent::detector::test_support::fixture_alternate(&document),
+            )
         }
 
         fn detector(catalog: &ProfileCatalog) -> Detector {
@@ -10368,7 +10379,7 @@ mod tests {
             let screen = replay_native_fixture(
                 &fixture,
                 |_| {},
-                document["alternate_screen"].as_bool().unwrap(),
+                crate::coding_agent::detector::test_support::fixture_alternate(&document),
                 None,
             );
             Detector::new(
@@ -10482,7 +10493,7 @@ mod tests {
             let screen = replay_native_fixture(
                 &fixture,
                 |_| {},
-                document["alternate_screen"].as_bool().unwrap(),
+                crate::coding_agent::detector::test_support::fixture_alternate(&document),
                 None,
             );
             Detector::new(

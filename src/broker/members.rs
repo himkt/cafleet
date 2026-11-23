@@ -372,19 +372,6 @@ pub(crate) fn active_member(
     let fleet_id = crate::broker::active_member_fleet(conn, member_id)?.ok_or_else(missing)?;
     crate::broker::get_member(conn, member_id, fleet_id)?.ok_or_else(missing)
 }
-pub(crate) fn require_pinned_fleet(
-    member_id: i64,
-    actual_fleet: i64,
-    expected_fleet: Option<i64>,
-    operation: &str,
-) -> Result<(), CafleetError> {
-    if expected_fleet.is_some_and(|expected| expected != actual_fleet) {
-        return Err(CafleetError::App(format!(
-            "Member {member_id} changed fleets during {operation}"
-        )));
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 pub(crate) mod test_support {

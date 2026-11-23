@@ -1,4 +1,3 @@
-use crate::assets::HermesSetup;
 use crate::assets::agent_paths;
 use crate::assets::install_agent;
 use crate::broker::runtime::RunRecord;
@@ -6,8 +5,6 @@ use crate::cli::member::ObservationProbe;
 use crate::cli::member::probe_observation;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::SpawnProbe;
-use crate::coding_agent::hermes::HermesCli;
-use crate::coding_agent::hermes::HermesConfig;
 use crate::config::EnvLookup;
 use crate::config::Settings;
 use crate::db;
@@ -27,13 +24,11 @@ use chrono::DateTime;
 use chrono::Utc;
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
-use std::time::Instant;
 
 #[derive(Args)]
 pub(crate) struct SetupArgs {
@@ -45,13 +40,7 @@ pub(crate) struct SetupArgs {
 pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetError> {
     prepare_database(settings)?;
     let home = crate::config::home_dir()?;
-    let hermes = SystemProbe.resolve_binary(CodingAgent::Hermes.name());
-    install_selected(
-        &args.coding_agent,
-        &crate::config::process_env,
-        &home,
-        hermes.as_deref(),
-    )
+    install_selected(&args.coding_agent, &crate::config::process_env, &home)
 }
 
 fn prepare_database(settings: &Settings) -> Result<(), CafleetError> {
@@ -93,20 +82,11 @@ fn install_selected(
     selected: &[CodingAgent],
     env: EnvLookup<'_>,
     home: &Path,
-    hermes_executable: Option<&Path>,
 ) -> Result<(), CafleetError> {
     for agent in CodingAgent::all() {
         if selected.is_empty() || selected.contains(agent) {
             let paths = agent_paths(env, home, *agent)?;
-            let cli = hermes_executable
-                .filter(|_| *agent == CodingAgent::Hermes)
-                .map(|executable| HermesCli::new(executable.to_path_buf(), paths.base().into()));
-            let hermes = match &cli {
-                Some(cli) => HermesSetup::Available(cli),
-                None if selected.contains(&CodingAgent::Hermes) => HermesSetup::MissingRequired,
-                None => HermesSetup::Absent,
-            };
-            install_agent(*agent, &paths, hermes, &mut std::io::stdout())?;
+            install_agent(*agent, &paths, &mut std::io::stdout())?;
         }
     }
     Ok(())
@@ -186,9 +166,6 @@ pub(crate) struct DoctorInputs<'a> {
     pub(crate) settings: &'a Settings,
     pub(crate) probe: &'a dyn SpawnProbe,
     pub(crate) home: &'a Result<PathBuf, CafleetError>,
-    /// The Hermes reader, present whenever `probe` resolves `hermes` and its configuration
-    /// resolves.
-    pub(crate) hermes: Option<&'a dyn HermesConfig>,
 }
 
 pub(crate) struct Report {
@@ -219,13 +196,11 @@ pub(crate) fn doctor_with(
     table: &dyn ProcessTable,
 ) -> Result<(), CafleetError> {
     let home = crate::config::home_dir();
-    let hermes = hermes_reader(&SystemProbe, &home);
     let report = gather(&DoctorInputs {
         caller: &|| detect_caller(table),
         settings,
         probe: &SystemProbe,
         home: &home,
-        hermes: hermes.as_ref().map(|cli| cli as &dyn HermesConfig),
     });
     let mode = if args.json { Mode::Json } else { Mode::Text };
     crate::cli::write_output(&render(&report, mode))?;
@@ -234,20 +209,6 @@ pub(crate) fn doctor_with(
     } else {
         Ok(())
     }
-}
-
-/// The Hermes reader, absent when the configuration or the executable is unusable; the
-/// `hermes.configuration` and `hermes.executable` rows report why.
-fn hermes_reader(
-    probe: &dyn SpawnProbe,
-    home: &Result<PathBuf, CafleetError>,
-) -> Option<HermesCli> {
-    let home = home.as_ref().ok()?;
-    let base = CodingAgent::Hermes
-        .config_dir(&|name| probe.env_var(name), home)
-        .ok()?;
-    let executable = probe.resolve_binary(CodingAgent::Hermes.name())?;
-    Some(HermesCli::new(executable, base))
 }
 
 /// The `fleet create` verification without `--pane`, as doctor reports it.
@@ -307,23 +268,10 @@ fn read_caller_pane(
     }
 }
 
-/// Runs every check: the Hermes batch starts first and overlaps the multiplexer, database and
-/// OpenCode checks, and the member probes overlap the backend checks; rows keep their order.
+/// Runs every check, the member probes overlapping the backend checks; rows keep their order.
 pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
     let backends = resolve_backends(inputs.probe, inputs.home);
-    let hermes = backends
-        .iter()
-        .find(|backend| backend.agent == CodingAgent::Hermes)
-        .expect("the registry includes hermes");
     std::thread::scope(|scope| {
-        let runs = hermes.executable.is_some() && hermes.paths.as_ref().is_ok_and(|b| b.exists());
-        let batch = runs.then(|| {
-            let reader = inputs
-                .hermes
-                .expect("doctor builds a Hermes reader whenever hermes and its base resolve");
-            let deadline = Instant::now() + HERMES_DOCTOR_BUDGET;
-            scope.spawn(move || crate::coding_agent::hermes::read_batch(reader, deadline))
-        });
         let mut checks = multiplexer_rows((inputs.caller)());
         let (database_check, runs) = database(inputs.settings);
         checks.push(database_check);
@@ -336,8 +284,7 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
                 })
             })
             .collect();
-        let hermes_reading = || batch.map(crate::coding_agent::hermes::joined);
-        let agents = agent_checks(&backends, hermes_reading);
+        let agents = agent_checks(&backends);
         let now = Utc::now();
         let database_url = inputs
             .settings
@@ -351,8 +298,6 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
         Report { checks }
     })
 }
-
-const HERMES_DOCTOR_BUDGET: Duration = Duration::from_secs(2);
 
 pub(crate) fn render(report: &Report, mode: Mode) -> String {
     match mode {
@@ -572,9 +517,6 @@ fn resolve_backends(probe: &dyn SpawnProbe, home: &Result<PathBuf, CafleetError>
         .collect()
 }
 
-/// The Hermes batch's `config path` and `plugins` results.
-type HermesReading = (Result<String, String>, Result<Option<Value>, String>);
-
 /// The `info` row of a check whose backend configuration failed or whose executable is absent.
 fn unavailable(
     name: &str,
@@ -589,26 +531,7 @@ fn unavailable(
     Some(Check::new(name, CheckStatus::Info, detail))
 }
 
-/// A Hermes row without a batch reading: unavailable, or no Hermes home at the base.
-fn hermes_row_without_reading(name: &str, hermes: &Backend) -> Check {
-    unavailable(name, &hermes.paths, hermes.executable.is_some()).unwrap_or_else(|| {
-        let base = hermes
-            .paths
-            .as_ref()
-            .expect("an available hermes has a base");
-        Check::new(
-            name,
-            CheckStatus::Info,
-            format!("unavailable: no Hermes home at {}", base.display()),
-        )
-    })
-}
-
-fn agent_checks(
-    backends: &[Backend],
-    hermes_reading: impl FnOnce() -> Option<HermesReading>,
-) -> Vec<Check> {
-    let mut hermes_reading = Some(hermes_reading);
+fn agent_checks(backends: &[Backend]) -> Vec<Check> {
     let mut checks = Vec::new();
     for backend in backends {
         let agent = backend.agent;
@@ -647,18 +570,6 @@ fn agent_checks(
         }
         if agent == CodingAgent::Pi {
             checks.push(pi_extension_check(paths, available));
-        }
-        if agent == CodingAgent::Hermes {
-            match hermes_reading.take().expect("one hermes backend")() {
-                Some((config_path, plugins)) => {
-                    checks.push(hermes_extension_check(config_path));
-                    checks.push(hermes_plugin_enabled_check(plugins));
-                }
-                None => checks.extend(
-                    ["hermes.extension", "hermes.plugin_enabled"]
-                        .map(|name| hermes_row_without_reading(name, backend)),
-                ),
-            }
         }
         checks.push(skills_check(name, &backend.skills, available));
     }
@@ -805,65 +716,6 @@ fn file_extension_check(
         .collect::<Vec<_>>()
         .join(", ");
     extension_check(name, &files, &dir.join(record), ok_detail)
-}
-
-fn hermes_extension_check(config_path: Result<String, String>) -> Check {
-    const NAME: &str = "hermes.extension";
-    let plugin_dir = config_path.and_then(|path| crate::coding_agent::hermes::plugin_dir(&path));
-    match plugin_dir {
-        Ok(plugin_dir) => extension_check(
-            NAME,
-            &extension_files(&plugin_dir, crate::assets::HERMES_EXTENSION_PREFIX),
-            &plugin_dir.join(crate::assets::HERMES_EXECUTABLE_RECORD),
-            plugin_dir.display().to_string(),
-        ),
-        Err(cause) => Check::new(
-            NAME,
-            CheckStatus::Error,
-            format!("cannot read hermes configuration through 'hermes config path': {cause}"),
-        ),
-    }
-}
-
-fn hermes_plugin_enabled_check(plugins: Result<Option<Value>, String>) -> Check {
-    use crate::coding_agent::hermes::PLUGIN_NAME;
-    use crate::coding_agent::hermes::PLUGINS_DISABLED_KEY;
-    const NAME: &str = "hermes.plugin_enabled";
-    let state = match plugins.and_then(crate::coding_agent::hermes::plugin_state) {
-        Ok(state) => state,
-        Err(cause) => {
-            return Check::new(
-                NAME,
-                CheckStatus::Error,
-                format!("cannot read hermes configuration through 'hermes config get': {cause}"),
-            );
-        }
-    };
-    if state.disabled_lists_cafleet {
-        return Check::new(
-            NAME,
-            CheckStatus::Error,
-            format!(
-                "hermes {PLUGINS_DISABLED_KEY} lists {PLUGIN_NAME}; remove it, then run 'cafleet setup --coding-agent hermes'"
-            ),
-        );
-    }
-    let missing = state.missing();
-    if missing.is_empty() {
-        return Check::new(
-            NAME,
-            CheckStatus::Ok,
-            "cafleet enabled with gateway injection",
-        );
-    }
-    Check::fixable(
-        NAME,
-        CheckStatus::Error,
-        format!(
-            "hermes plugin {PLUGIN_NAME} is not enabled: {}",
-            missing.join(", ")
-        ),
-    )
 }
 
 #[cfg(test)]
@@ -1122,15 +974,6 @@ mod tests {
         (extension, record)
     }
 
-    /// Returns every installed plugin file under `plugin_dir`.
-    fn install_hermes_plugin(plugin_dir: &Path) -> Vec<PathBuf> {
-        install_embedded_extension(
-            crate::assets::HERMES_EXTENSION_PREFIX,
-            plugin_dir,
-            &plugin_dir.join("executable"),
-        )
-    }
-
     fn install_skills(skills_dir: &Path) {
         for (relative, bytes) in crate::assets::SKILLS {
             let target = skills_dir.join(relative);
@@ -1178,7 +1021,6 @@ mod tests {
             &[],
             &|name| Ok((name == "CODEX_HOME").then(|| "relative".into())),
             home.path(),
-            Some(Path::new("/nonexistent/hermes")),
         )
         .unwrap_err();
         assert!(error.message().contains("CODEX_HOME"));
@@ -1198,12 +1040,11 @@ mod tests {
                 &[CodingAgent::Claude, CodingAgent::Claude],
                 &|name| Ok((name != "CLAUDE_CONFIG_DIR").then(|| "relative".into())),
                 home.path(),
-                Some(Path::new("/nonexistent/hermes")),
             )
             .unwrap();
             assert!(
                 !home.path().join(".hermes").exists(),
-                "an unselected hermes is not consulted"
+                "an unselected hermes gets no assets"
             );
         }
     }
@@ -1275,10 +1116,9 @@ mod tests {
             .expect("every diagnostic has its stable name")
     }
 
-    /// The backend rows for `probe`, with no Hermes batch read.
     fn checks_for(probe: &FakeProbe, home: &Path) -> Vec<Check> {
         let backends = resolve_backends(probe, &Ok(home.to_path_buf()));
-        agent_checks(&backends, || None)
+        agent_checks(&backends)
     }
 
     #[test]
@@ -1552,130 +1392,52 @@ mod tests {
     mod hermes {
         use crate::cli::setup::tests::*;
 
-        /// A `hermes` stub that logs `HERMES_HOME|ARGS` per call, answers `config path` with
-        /// `<profile>/config.yaml`, reports `plugins` as *not set* until gateway injection is
-        /// written, and accepts every set.
-        fn hermes_stub(bin: &Path, log: &Path, profile: &Path) -> PathBuf {
-            let state = profile.join("plugins.json");
-            crate::coding_agent::test_support::executable_stub(
-                bin,
-                "hermes",
-                &format!(
-                    "printf '%s|%s\\n' \"$HERMES_HOME\" \"$*\" >> '{log}'\n\
-                     case \"$*\" in\n\
-                     'config path') printf '%s\\n' '{config}' ;;\n\
-                     'config get --json plugins')\n\
-                       if [ -f '{state}' ]; then cat '{state}'; else\n\
-                         printf '%s\\n' 'install out of sync' 'Config key not set: plugins' >&2; exit 1; fi ;;\n\
-                     'config set plugins.enabled '*) ;;\n\
-                     'config set plugins.entries.cafleet.allow_gateway_injection true')\n\
-                       printf '%s' '{{\"enabled\":[\"cafleet\"],\"entries\":{{\"cafleet\":{{\"allow_gateway_injection\":true}}}}}}' > '{state}' ;;\n\
-                     *) exit 3 ;;\n\
-                     esac",
-                    log = log.display(),
-                    config = profile.join("config.yaml").display(),
-                    state = state.display(),
-                ),
-            )
-        }
-
         #[test]
-        fn plain_setup_without_hermes_on_path_installs_hermes_skills_and_skips_the_plugin() {
-            let home = tempfile::tempdir().unwrap();
-            install_selected(&[], &|_| Ok(None), home.path(), None).unwrap();
-            assert!(
-                home.path()
-                    .join(".hermes/skills/cafleet/SKILL.md")
-                    .is_file()
-            );
-            assert!(!home.path().join(".hermes/plugins").exists());
-        }
-
-        #[test]
-        fn setup_with_hermes_on_path_runs_it_against_the_resolved_home_and_enables_the_plugin() {
-            let home = tempfile::tempdir().unwrap();
-            let custom = home.path().join("hermes home");
-            let profile = home.path().join("profile");
-            std::fs::create_dir_all(&profile).unwrap();
-            let bin = tempfile::tempdir().unwrap();
-            let log = home.path().join("hermes.log");
-            let hermes = hermes_stub(bin.path(), &log, &profile);
-            crate::coding_agent::test_support::run_stub(|| {
-                install_selected(
-                    &[CodingAgent::Hermes],
-                    &|name| Ok((name == "HERMES_HOME").then(|| custom.display().to_string())),
-                    home.path(),
-                    Some(&hermes),
-                )
-            })
-            .unwrap();
-            let calls = std::fs::read_to_string(&log).unwrap();
-            let calls = calls.lines().collect::<Vec<_>>();
-            let mut batch = calls[..2].to_vec();
-            batch.sort_unstable();
-            let home_prefix = format!("{}|", custom.display());
-            assert_eq!(
-                batch,
-                [
-                    format!("{home_prefix}config get --json plugins"),
-                    format!("{home_prefix}config path"),
-                ]
-            );
-            assert_eq!(
-                calls[2..],
-                [
-                    format!("{home_prefix}config set plugins.enabled [\"cafleet\"]"),
-                    format!(
-                        "{home_prefix}config set plugins.entries.cafleet.allow_gateway_injection true"
-                    ),
-                    format!("{home_prefix}config get --json plugins"),
-                ]
-            );
-            assert_eq!(
-                std::fs::read_to_string(profile.join("plugins/cafleet/executable")).unwrap(),
-                running_cafleet_record()
-            );
-            assert!(custom.join("skills/cafleet/SKILL.md").is_file());
-        }
-
-        #[test]
-        fn explicit_hermes_setup_without_hermes_on_path_fails() {
-            let home = tempfile::tempdir().unwrap();
-            let failure =
-                install_selected(&[CodingAgent::Hermes], &|_| Ok(None), home.path(), None)
-                    .expect_err("explicit hermes setup requires the binary");
-            assert_eq!(failure.exit_code(), 1);
-            assert_eq!(
-                failure.message(),
-                format!(
-                    "failed to install extension into {}: binary hermes not found on PATH",
-                    home.path().join(".hermes").display()
-                )
-            );
-        }
-
-        #[test]
-        fn doctor_marks_the_hermes_plugin_rows_unavailable_without_the_executable_or_configuration()
-        {
-            let home = tempfile::tempdir().unwrap();
-            for (executable, invalid, prefix) in [
-                (false, None, "unavailable: executable is absent"),
-                (
-                    true,
-                    Some("HERMES_HOME"),
-                    "unavailable: configuration failed: ",
-                ),
+        fn hermes_setup_installs_only_the_skills_into_the_resolved_home_without_hermes_on_path() {
+            for (name, selected) in [
+                ("plain setup", &[][..]),
+                ("explicit hermes setup", &[CodingAgent::Hermes][..]),
             ] {
-                let probe = probe(home.path(), executable, invalid);
-                let checks = checks_for(&probe, home.path());
-                for name in ["hermes.extension", "hermes.plugin_enabled"] {
-                    let check = find(&checks, name);
-                    assert_eq!(check.status, CheckStatus::Info, "{name}");
-                    assert!(check.detail.starts_with(prefix), "{name}: {}", check.detail);
-                    if !executable {
-                        assert_eq!(check.detail, prefix, "{name}");
-                    }
+                let home = tempfile::tempdir().unwrap();
+                let custom = home.path().join("hermes home");
+                install_selected(
+                    selected,
+                    &|variable| {
+                        Ok((variable == "HERMES_HOME").then(|| custom.display().to_string()))
+                    },
+                    home.path(),
+                )
+                .unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+                for (relative, bytes) in crate::assets::SKILLS {
+                    assert_eq!(
+                        std::fs::read(custom.join("skills").join(relative)).unwrap(),
+                        *bytes,
+                        "{name}"
+                    );
                 }
+                let entries = std::fs::read_dir(&custom)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().file_name())
+                    .collect::<Vec<_>>();
+                assert_eq!(entries, ["skills"], "{name}: only the skills directory");
+            }
+        }
+
+        #[test]
+        fn doctor_reports_only_the_configuration_executable_and_skills_rows_for_hermes() {
+            let home = tempfile::tempdir().unwrap();
+            for executable in [true, false] {
+                let checks = checks_for(&probe(home.path(), executable, None), home.path());
+                let names = checks
+                    .iter()
+                    .map(|check| check.name.as_str())
+                    .filter(|name| name.starts_with("hermes."))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    names,
+                    ["hermes.configuration", "hermes.executable", "hermes.skills"],
+                    "executable={executable}"
+                );
             }
         }
     }
@@ -1725,7 +1487,6 @@ mod tests {
                     &[CodingAgent::Pi],
                     &|name| Ok((name == "PI_CODING_AGENT_DIR").then(|| base.display().to_string())),
                     home.path(),
-                    None,
                 )
                 .unwrap();
                 assert_installed_pi_assets(&base);
@@ -1735,7 +1496,7 @@ mod tests {
         #[test]
         fn plain_setup_installs_pi_assets_under_the_default_base() {
             let home = tempfile::tempdir().unwrap();
-            install_selected(&[], &|_| Ok(None), home.path(), None).unwrap();
+            install_selected(&[], &|_| Ok(None), home.path()).unwrap();
             assert_installed_pi_assets(&pi_base(home.path()));
         }
 
@@ -1746,7 +1507,6 @@ mod tests {
                 &[CodingAgent::Pi],
                 &|name| Ok((name == "PI_CODING_AGENT_DIR").then(|| "relative".into())),
                 home.path(),
-                None,
             )
             .unwrap_err();
             assert_eq!(
@@ -1893,11 +1653,6 @@ mod tests {
     }
 
     mod doctor_summary {
-        use crate::assets::test_support::ENABLED_KEY;
-        use crate::assets::test_support::FakeHermes;
-        use crate::assets::test_support::INJECTION_KEY;
-        use crate::assets::test_support::PLUGINS_KEY;
-        use crate::assets::test_support::Reply;
         use crate::broker::runtime::test_support::assert_key_order;
         use crate::cli::setup::tests::*;
         use crate::multiplexer::MuxBackend;
@@ -1912,6 +1667,7 @@ mod tests {
         use rusqlite::Connection;
         use serde_json::Value;
         use serde_json::json;
+        use std::time::Instant;
 
         const TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
 
@@ -1971,18 +1727,9 @@ mod tests {
             matching[0]
         }
 
-        const HERMES_FIX: &str = "run 'cafleet setup --coding-agent hermes'";
-
         const CHILD_CONFIG: &str = "CAFLEET_TEST_DOCTOR";
         const CHILD_STDOUT_MARKER: &str = "cafleet-doctor-child-stdout-begins";
         const CHILD_ANCESTOR: i64 = 4242;
-
-        fn ready_plugins() -> Value {
-            serde_json::json!({
-                "enabled": ["cafleet"],
-                "entries": {"cafleet": {"allow_gateway_injection": true}},
-            })
-        }
 
         struct Scenario {
             home: tempfile::TempDir,
@@ -1990,7 +1737,6 @@ mod tests {
             caller: fn() -> CallerReading,
             executables: Vec<&'static str>,
             environment: Vec<(&'static str, String)>,
-            hermes: FakeHermes,
         }
 
         impl Scenario {
@@ -2003,7 +1749,6 @@ mod tests {
                     caller: verified_caller,
                     executables: Vec::new(),
                     environment: Vec::new(),
-                    hermes: FakeHermes::new(),
                 }
             }
 
@@ -2023,21 +1768,6 @@ mod tests {
 
             fn executable(&mut self, name: &'static str) {
                 self.executables.push(name);
-            }
-
-            /// The plugin directory under the active-profile home that `hermes config path`
-            /// names, distinct from `HERMES_HOME`.
-            fn hermes_plugin_dir(&self) -> PathBuf {
-                self.hermes.plugin_dir()
-            }
-
-            /// Hermes on `PATH` with an existing home, an installed plugin and a ready
-            /// configuration.
-            fn hermes_ready(&mut self) {
-                self.executable("hermes");
-                std::fs::create_dir_all(self.config(CodingAgent::Hermes)).unwrap();
-                install_hermes_plugin(&self.hermes_plugin_dir());
-                self.hermes.put(PLUGINS_KEY, ready_plugins());
             }
 
             fn opencode_presets(&self) {
@@ -2081,7 +1811,6 @@ mod tests {
                     settings: &settings,
                     probe: &probe,
                     home: &home,
-                    hermes: Some(&self.hermes as &dyn HermesConfig),
                 })
             }
 
@@ -2317,9 +2046,6 @@ mod tests {
             let home = crate::runtime::test_support::short_tempdir();
             let conn = crate::db::test_support::initialized_file_conn(&home);
             let database = PathBuf::from(conn.path().unwrap());
-            let profile = home.path().join("hermes-profile");
-            std::fs::create_dir_all(home.path().join("hermes")).unwrap();
-            install_hermes_plugin(&profile.join("plugins/cafleet"));
             let opencode = home.path().join("opencode");
             let agents = opencode.join("agents");
             std::fs::create_dir_all(&agents).unwrap();
@@ -2332,19 +2058,9 @@ mod tests {
                 install_skills(&home.path().join(agent.name()).join("skills"));
             }
             install_skills(&crate::config::opencode_skills_base(home.path()).join("skills"));
-            let hermes = format!(
-                "case \"$*\" in\n\
-                 'config path') printf '%s\\n' '{}' ;;\n\
-                 'config get --json plugins') printf '%s\\n' '{}' ;;\n\
-                 *) exit 3 ;;\n\
-                 esac",
-                profile.join("config.yaml").display(),
-                ready_plugins()
-            );
-            let mut stubs = ["claude", "codex", "opencode", "pi"]
+            let stubs = ["claude", "codex", "opencode", "hermes", "pi"]
                 .map(|name| (name, "exit 0".to_owned()))
                 .to_vec();
-            stubs.push(("hermes", hermes));
             (home, database, stubs)
         }
 
@@ -2354,7 +2070,7 @@ mod tests {
         }
 
         #[test]
-        fn doctor_process_reads_a_real_hermes_and_prints_json_for_a_healthy_home() {
+        fn doctor_process_prints_json_for_a_healthy_home() {
             let (home, database, stubs) = healthy_home();
             let outcome = doctor_process(
                 home.path(),
@@ -2516,10 +2232,9 @@ mod tests {
         }
 
         fn healthy_backends(scenario: &mut Scenario) {
-            for name in ["claude", "codex", "opencode", "pi"] {
+            for name in ["claude", "codex", "opencode", "hermes", "pi"] {
                 scenario.executable(name);
             }
-            scenario.hermes_ready();
             scenario.opencode_presets();
             scenario.seed_opencode_extension();
             scenario.seed_pi_extension();
@@ -2776,15 +2491,13 @@ mod tests {
                 )
             );
             assert_eq!(
-                named_row(&views.text, "hermes.extension"),
+                named_row(&views.text, "hermes.skills"),
                 format!(
-                    "ok hermes.extension: {}",
-                    scenario.hermes_plugin_dir().display()
+                    "ok hermes.skills: {}",
+                    Path::new(&scenario.config(CodingAgent::Hermes))
+                        .join("skills")
+                        .display()
                 )
-            );
-            assert_eq!(
-                named_row(&views.text, "hermes.plugin_enabled"),
-                "ok hermes.plugin_enabled: cafleet enabled with gateway injection"
             );
             assert_eq!(
                 views.row("warn codex.skills: "),
@@ -2865,192 +2578,11 @@ mod tests {
         }
 
         #[test]
-        fn doctor_reports_an_unreadable_hermes_config_path_on_its_row() {
-            let (mut scenario, _conn) = healthy_scenario();
-            scenario.hermes.reply(
-                FakeHermes::path_call(),
-                Reply::Fail("no configuration found".into()),
-            );
-            let rows = scenario.rows(1);
-            let row = named_row(&rows, "hermes.extension");
-            let detail = row
-                .strip_prefix("error hermes.extension: ")
-                .unwrap_or_else(|| panic!("{row}"));
-            assert!(
-                detail
-                    .starts_with("cannot read hermes configuration through 'hermes config path': "),
-                "{row}"
-            );
-            assert_eq!(
-                named_row(&rows, "hermes.plugin_enabled"),
-                "ok hermes.plugin_enabled: cafleet enabled with gateway injection"
-            );
-        }
-
-        enum Enablement {
-            Ready,
-            Disabled,
-            Missing(String),
-            Unreadable,
-        }
-
-        #[test]
-        fn doctor_reports_each_hermes_plugin_enablement_state_on_its_row() {
-            let not_enabled = |keys: &str| format!("hermes plugin cafleet is not enabled: {keys}");
-            let both = format!("{ENABLED_KEY}, {INJECTION_KEY}");
-            let cases = [
-                (
-                    Reply::Value(Some(json!({
-                        "disabled": ["other"],
-                        "enabled": ["cafleet"],
-                        "entries": {"cafleet": {"allow_gateway_injection": true}},
-                    }))),
-                    Enablement::Ready,
-                ),
-                (
-                    Reply::Value(Some(json!({"disabled": ["other", "cafleet"]}))),
-                    Enablement::Disabled,
-                ),
-                (
-                    Reply::Value(Some(
-                        json!({"entries": {"cafleet": {"allow_gateway_injection": true}}}),
-                    )),
-                    Enablement::Missing(ENABLED_KEY.into()),
-                ),
-                (
-                    Reply::Value(Some(json!({
-                        "enabled": ["other"],
-                        "entries": {"cafleet": {"allow_gateway_injection": "true"}},
-                    }))),
-                    Enablement::Missing(both.clone()),
-                ),
-                (
-                    Reply::Value(Some(json!({"enabled": "cafleet"}))),
-                    Enablement::Unreadable,
-                ),
-            ];
-            for (reply, expected) in cases {
-                let (mut scenario, _conn) = healthy_scenario();
-                scenario
-                    .hermes
-                    .reply(FakeHermes::get_call(PLUGINS_KEY), reply);
-                let code = if matches!(expected, Enablement::Ready) {
-                    0
-                } else {
-                    1
-                };
-                let rows = scenario.rows(code);
-                let row = named_row(&rows, "hermes.plugin_enabled");
-                match expected {
-                    Enablement::Ready => {
-                        assert_eq!(
-                            row,
-                            "ok hermes.plugin_enabled: cafleet enabled with gateway injection"
-                        );
-                    }
-                    Enablement::Disabled => {
-                        assert_eq!(
-                            row,
-                            format!(
-                                "error hermes.plugin_enabled: hermes plugins.disabled lists cafleet; remove it, then {HERMES_FIX}"
-                            )
-                        );
-                    }
-                    Enablement::Missing(keys) => {
-                        assert_eq!(
-                            row,
-                            format!(
-                                "error hermes.plugin_enabled: {}; {HERMES_FIX}",
-                                not_enabled(&keys)
-                            )
-                        );
-                    }
-                    Enablement::Unreadable => {
-                        let detail = row
-                            .strip_prefix("error hermes.plugin_enabled: ")
-                            .unwrap_or_else(|| panic!("{row}"));
-                        assert!(
-                            detail.starts_with(
-                                "cannot read hermes configuration through 'hermes config get': "
-                            ),
-                            "{row}"
-                        );
-                    }
-                }
-                assert!(named_row(&rows, "hermes.extension").starts_with("ok "));
-            }
-        }
-
-        #[test]
-        fn doctor_without_a_hermes_home_reports_both_hermes_rows_without_running_hermes() {
+        fn doctor_reports_a_tampered_opencode_extension_on_its_row() {
             let (scenario, _conn) = healthy_scenario();
-            let base = scenario.path("hermes");
-            std::fs::remove_dir_all(&base).unwrap();
-            let rows = scenario.rows(0);
-            for name in ["hermes.extension", "hermes.plugin_enabled"] {
-                assert_eq!(
-                    named_row(&rows, name),
-                    format!(
-                        "info {name}: unavailable: no Hermes home at {}",
-                        base.display()
-                    )
-                );
-            }
-            assert!(
-                scenario.hermes.calls().is_empty(),
-                "{:?}",
-                scenario.hermes.calls()
-            );
-            assert!(!base.exists(), "doctor creates no Hermes home");
-        }
-
-        #[test]
-        fn doctor_overlaps_its_hermes_batch_with_the_other_checks_under_one_two_second_deadline() {
-            let (mut scenario, _conn) = healthy_scenario();
-            scenario.hermes = FakeHermes::new().rendezvous();
-            install_hermes_plugin(&scenario.hermes_plugin_dir());
-            scenario.hermes.put(PLUGINS_KEY, ready_plugins());
-            let started = Instant::now();
-            let views = scenario.views();
-            let finished = Instant::now();
-            views.assert_exit(0);
-            assert!(
-                finished - started < Duration::from_secs(2),
-                "a serial batch waits out the rendezvous: {:?}",
-                finished - started
-            );
-            let mut calls = scenario.hermes.calls();
-            calls.sort();
-            let mut expected = vec![FakeHermes::path_call(), FakeHermes::get_call(PLUGINS_KEY)];
-            expected.sort();
-            assert_eq!(calls, expected, "doctor makes exactly the two batch reads");
-            let deadlines = scenario.hermes.deadlines();
-            assert_eq!(deadlines[0], deadlines[1], "one deadline covers the batch");
-            assert!(
-                deadlines[0] >= started + Duration::from_secs(2)
-                    && deadlines[0] <= finished + Duration::from_secs(2),
-                "the batch gets two seconds"
-            );
-        }
-
-        #[test]
-        fn doctor_reports_each_tampered_hermes_and_opencode_extension_on_its_row() {
-            let (scenario, _conn) = healthy_scenario();
-            let file = install_hermes_plugin(&scenario.hermes_plugin_dir())
-                .into_iter()
-                .next()
-                .unwrap();
-            std::fs::write(&file, "tampered").unwrap();
             let (plugin, _) = scenario.seed_opencode_extension();
             std::fs::write(&plugin, "tampered").unwrap();
             let rows = scenario.rows(1);
-            assert_eq!(
-                named_row(&rows, "hermes.extension"),
-                format!(
-                    "error hermes.extension: {}: differs from the embedded copy; {HERMES_FIX}",
-                    file.display()
-                )
-            );
             assert_eq!(
                 named_row(&rows, "opencode.extension"),
                 format!(
@@ -3132,10 +2664,10 @@ mod tests {
                     r"error claude.configuration: CLAUDE_CONFIG_DIR must be an absolute path (got 'rel\nat\rive')".to_owned(),
                 ),
                 (
-                    "hermes.plugin_enabled",
+                    "hermes.executable",
                     "ok",
-                    "cafleet enabled with gateway injection".to_owned(),
-                    "ok hermes.plugin_enabled: cafleet enabled with gateway injection".to_owned(),
+                    "hermes is on PATH".to_owned(),
+                    "ok hermes.executable: hermes is on PATH".to_owned(),
                 ),
             ] {
                 assert_eq!(named_row(&views.text, name), row, "{name}");

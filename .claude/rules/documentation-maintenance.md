@@ -53,8 +53,8 @@ user-visible artifacts, never in terms of where the implementation lives.
 
 ### Describe behavior, not code locations
 
-- Name components by concept ("the broker", "the listener", "the finite
-  receive"), anchored to the Core terms table in the concepts
+- Name components by concept ("the broker", "Director delivery", "the
+  runner"), anchored to the Core terms table in the concepts
   overview — not by source file or module path.
 - When a page needs to say where a protocol or catalog is defined, attribute
   it to the shipping artifact the reader has ("part of the cafleet skill",
@@ -134,7 +134,7 @@ sections, with a `§` reference as the link.
 Two rules keep the non-owning mentions honest:
 
 - **Echo rule.** A non-owning page may describe an owned enumeration in
-  qualitative magnitude terms ("the ceiling re-notice arrives several minutes later"); it states no exact values.
+  qualitative magnitude terms ("the stalled-delivery event arrives several minutes later"); it states no exact values.
 - **Term tie-break.** When copies have drifted on what to call something, the
   term in the Core terms table of the concepts overview governs. The owning
   table and every linking mention adopt it.
@@ -164,9 +164,9 @@ Write CAFleet base instructions so they read the same on every backend: family `
 2. **Role defaults**: the concrete model and effort assignments for reviewers and other members; models come from the backend catalog (or are `—` when the backend has no maintained catalog) and effort matches its runtime capability.
 3. **Model catalog**: exact spawn tokens, aliases, reviewed capability classes/order, prices, context notes, and official provenance.
 4. **Note → applies at**: constraints bound to their tokens and consuming instructions.
-5. **Role eligibility**: a `Role | Eligible | Basis` table with a Director row and a Member row. Basis carries each requirement's source, delivery and checked native version plus the runtime caveats an agent acts on, while the evidence prose lives in `SPEC.md` § Role eligibility.
+5. **Role eligibility**: a `Role | Eligible | Basis` table with a Director row and a Member row. Basis carries each requirement's source and checked native version plus the runtime caveats an agent acts on, while the evidence prose lives in `SPEC.md` § Role eligibility.
 
-Backend-specific `####` subsections, such as a native reception recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `assets/skills/cafleet/roles/director.md` § Model selection, whose resolution procedures live in `assets/skills/cafleet/reference/model-selection.md`. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile or `Evidence:` line changes; structural reorganization preserves the model freshness date.
+Backend-specific `####` subsections, such as a Director launch and goal recipe, may follow Note → applies at and precede Role eligibility. Add a backend by copying the Template in this rule and supplying all five subsections. Keep each section complete for its own backend, with shared policy and supervision linked to their authoritative homes. Model selection belongs to `assets/skills/cafleet/roles/director.md` § Model selection, whose resolution procedures live in `assets/skills/cafleet/reference/model-selection.md`. The `cafleet-model-list-refresh` skill exclusively maintains model catalogs, provenance/context notes, canonical Role defaults and shared freshness metadata from official sources, refreshing model data at least every 30 days. Runtime documentation maintenance owns Runtime bindings, bound runtime notes, Role eligibility and worked resolutions, and re-checks eligibility whenever a bundled profile or `Evidence:` line changes; structural reorganization preserves the model freshness date.
 
 ### How the base and overlay connect
 
@@ -176,7 +176,7 @@ State shared operational facts in each home for its audience.
 
 ### Director verdict changes
 
-To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version. The goal requirement needs native goal lifecycle controls from official documentation or installed help, or a CAFleet extension verified live against the extension-goal minimum bar. The listen requirement records its highest established tier: the subscribe probe for a native or extension subscribe listen, or the stream probe for a built-in compromise listen together with tier-1 and tier-2 negative evidence, each source named with its version and check date. Record each requirement row's source, delivery, version and date in `SPEC.md` § Role eligibility and derive its `verdict` row, then update the backend's skill Role eligibility Eligible and Basis cells, and add a Director reception recipe or state the manual `poll` reception limit.
+To change a backend's Director verdict, a maintainer re-runs the Director requirements in `SPEC.md` §6.7 Role requirements for an installed native version. The goal requirement needs native goal lifecycle controls from official documentation or installed help, or a CAFleet extension verified live against the extension-goal minimum bar. The pane delivery requirement needs the bundled profile's `director_delivery` capability on tmux and herdr and a passing Director delivery probe on both for the shipped build, recorded with the native and multiplexer versions and the check date. Record each requirement row's source, version and date in `SPEC.md` § Role eligibility and derive its `verdict` row, then update the backend's skill Role eligibility Eligible and Basis cells.
 
 ### Template
 
@@ -200,4 +200,4 @@ Use a `Note | Applies at` table, one caveat per row. Every Applies-at cell names
 
 #### Role eligibility
 
-Use a `Role | Eligible | Basis` table with one Director row and one Member row. The Director row is `yes` only when [Role requirements](../../SPEC.md#role-requirements) establishes both `goal` and `listen`. Its Basis names each requirement's source (`native` or `extension`), the `listen` delivery (`subscribe` or `compromise`), each checked native version and every runtime caveat an agent acts on; a `no` names each unmet requirement with "not established" or the observed failure. The Member row's Basis names its bundled profile and runtime caveats instead of listing its capabilities. `SPEC.md` § Role eligibility carries the per-requirement rows with their mechanism, native version and check date.
+Use a `Role | Eligible | Basis` table with one Director row and one Member row. The Director row is `yes` only when [Role requirements](../../SPEC.md#role-requirements) establishes both `goal` and `pane delivery`. Its Basis names the `goal` source (`native` or `extension`), each checked native version and every runtime caveat an agent acts on; a `no` names each unmet requirement with "not established" or the observed failure. The Member row's Basis names its bundled profile and runtime caveats instead of listing its capabilities. `SPEC.md` § Role eligibility carries the per-requirement rows with their mechanism, native version and check date.

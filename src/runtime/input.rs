@@ -40,6 +40,7 @@ const DEFERRED_ATTEMPT_BUDGET: Duration = Duration::from_secs(5);
 const DEFERRED_FINALIZATION: Duration = Duration::from_secs(1);
 const STALL_BOUND: Duration = Duration::from_secs(180);
 const POST_SUBMIT_VERIFICATION: Duration = Duration::from_secs(2);
+pub(crate) const PRE_SUBMIT_WINDOW: Duration = Duration::from_secs(1);
 const PASTE_CLOSE_RESERVE: Duration = Duration::from_millis(250);
 const PASTE_OPEN: &[u8] = b"\x1b[200~";
 const PASTE_CLOSE: &[u8] = b"\x1b[201~";
@@ -180,6 +181,8 @@ pub(crate) struct InputCoordinator {
     preview_wait: Option<PreviewWait>,
     blocked_wait: Option<BlockedWait>,
     diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    /// Reads the composer text back for the pre-submit comparison.
+    composer_reader: crate::coding_agent::Detector,
 }
 
 /// The sweep's selected preview while the composer holds it; the stall watchdog runs from `since`.
@@ -3967,6 +3970,58 @@ impl InputCoordinator {
         Ok(None)
     }
 
+    /// Before a verified-composer submit key, the composer must render exactly the written
+    /// literal; every other stage, and a run whose profile reads no composer text, passes.
+    fn composer_renders_literal(&self, id: AttemptKey, transport: &Transport) -> Result<bool> {
+        let Some(composer) = self.pending.as_ref().and_then(PendingInput::composer) else {
+            return Ok(true);
+        };
+        let retained = self.operations.get(&id).expect("pending receipt remains");
+        let RetainedSelection::Composer {
+            stages, next_stage, ..
+        } = &retained.selection
+        else {
+            return Err(error("ordinary writer selection changed"));
+        };
+        let literal_index = usize::from(composer.method == storage::DeliveryMethod::Fallback);
+        if *next_stage + 1 != stages.len()
+            || *next_stage <= literal_index
+            || !self.verified_composer(composer.operation)
+        {
+            return Ok(true);
+        }
+        let prefix = composer.operation.prefix();
+        let literal = &stages[literal_index];
+        let body = literal
+            .strip_prefix(prefix)
+            .ok_or_else(|| error("composer literal stage lacks its operation prefix"))?;
+        let body = body
+            .strip_prefix(PASTE_OPEN)
+            .and_then(|framed| framed.strip_suffix(PASTE_CLOSE))
+            .unwrap_or(body);
+        let body = std::str::from_utf8(body).map_err(|_| error("composer literal is not UTF-8"))?;
+        let prefix = std::str::from_utf8(prefix).expect("operation prefixes are UTF-8");
+        let chunks = [prefix, body]
+            .into_iter()
+            .filter(|chunk| !chunk.is_empty())
+            .collect::<Vec<_>>();
+        Ok(self
+            .composer_reader
+            .composer_text(&transport.snapshot())?
+            .is_some_and(|text| text.matches(&chunks)))
+    }
+
+    /// A literal can render after the settle ends, so the composer is re-observed until the
+    /// pre-submit window after the settle closes; the attempt deadline closes it earlier, and
+    /// `arm_pending` then records the unmatched literal as `literal_mismatch`.
+    fn pre_submit_window_open(&self) -> bool {
+        self.pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .and_then(|composer| composer.settle_until)
+            .is_some_and(|until| self.services.clock.now() < until + PRE_SUBMIT_WINDOW)
+    }
+
     fn composer_interruption(
         &self,
         id: AttemptKey,
@@ -4020,6 +4075,13 @@ impl InputCoordinator {
             return Ok(None);
         }
         if let Some(cause) = self.composer_interruption(id, observation)? {
+            let cause = if cause == storage::StopCause::DeadlineExpired
+                && !self.composer_renders_literal(id, transport)?
+            {
+                storage::StopCause::LiteralMismatch
+            } else {
+                cause
+            };
             *terminal_bookkeeping = true;
             return self.interrupt_composer(conn, id, observation, effective, cause);
         }
@@ -4032,7 +4094,21 @@ impl InputCoordinator {
         {
             return Ok(None);
         }
-        let Some(output_seq) = self.fresh_drain(transport, observation, effective)? else {
+        let fresh = self.fresh_drain(transport, observation, effective)?;
+        if !self.composer_renders_literal(id, transport)? {
+            if self.pre_submit_window_open() {
+                return Ok(None);
+            }
+            *terminal_bookkeeping = true;
+            return self.interrupt_composer(
+                conn,
+                id,
+                observation,
+                effective,
+                storage::StopCause::LiteralMismatch,
+            );
+        }
+        let Some(output_seq) = fresh else {
             return Ok(None);
         };
         let retained = self
@@ -4973,7 +5049,9 @@ impl InputCoordinator {
             Ok(member.placement)
         })?;
         let backend = coding_agent(&run.backend).ok_or_else(|| error("unknown input backend"))?;
+        let composer_reader = crate::coding_agent::Detector::new(&services.catalog, backend, None);
         Ok(Self {
+            composer_reader,
             placement,
             operations: BTreeMap::new(),
             answered_interactions: BTreeSet::new(),
@@ -5979,7 +6057,7 @@ mod tests {
                         &crate::coding_agent::detector::test_support::replay_native_fixture(
                             &crate::digest::canonical_json(screen),
                             |_| {},
-                            screen["alternate_screen"].as_bool().unwrap(),
+                            crate::coding_agent::detector::test_support::fixture_alternate(screen),
                             None,
                         ),
                     )
@@ -5988,8 +6066,9 @@ mod tests {
                 };
                 let same_geometry: Vec<(&String, &Value)> = screens
                     .iter()
-                    .filter(|(_, candidate)| {
-                        candidate["native_version"] == fixture["native_version"]
+                    .filter(|(id, candidate)| {
+                        !id.contains("-director-")
+                            && candidate["native_version"] == fixture["native_version"]
                             && candidate["rows"] == fixture["rows"]
                             && candidate["cols"] == fixture["cols"]
                     })
@@ -6011,9 +6090,9 @@ mod tests {
                     assert!(fixture_id.contains("-composer-prompt-"), "{fixture_id}");
                     ComposerOperation::Prompt
                 };
-                let literal = "printf native-verification";
                 let catalog = ProfileCatalog::bundled().clone();
                 let plan = catalog.composer_plan(backend, operation).unwrap();
+                let literal = "printf native-verification";
                 assert!(plan.plain_literal_allowed(literal));
                 let expected = plan
                     .stages(literal, LiteralFraming::Plain)
@@ -6093,8 +6172,7 @@ mod tests {
                     "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-99",
                     "hermes-2026.9.24-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-100",
-                    "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-herdr-119-49",
-                    "hermes-2026.9.24-composer-prompt-plain-41-literal-tapped-v2-tmux-120-50",
+                    "hermes-2026.9.24-composer-prompt-one-literal-tmux-120-1",
                     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68",
                     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68",
                     "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33",
@@ -6150,9 +6228,10 @@ mod tests {
 
             /// Sends `body` to the run's member and drives the coordinator's receipt-free sweep
             /// preview of it to its reply, confirming each submit with the idle screen.
-            fn sweep_preview(
+            pub(super) fn sweep_preview(
                 host: &mut Host,
                 body: &str,
+                program: impl FnOnce(&crate::broker::MessageRecord) -> Vec<u8>,
             ) -> (crate::broker::MessageRecord, SubmissionResult) {
                 host.confirm_submissions = false;
                 let run = host.fixture.run.clone();
@@ -6163,6 +6242,7 @@ mod tests {
                     body,
                 )
                 .unwrap();
+                host.pty.expect_program(program(&message));
                 let until = host.until;
                 let reply = match host
                     .coordinator
@@ -6215,11 +6295,12 @@ mod tests {
                 ];
                 for (name, catalog, body, line, prefix, submit) in cases {
                     with_catalog_host(catalog, Vec::new(), |host| {
-                        let (message, reply) = sweep_preview(host, &body);
+                        let program = |message: &crate::broker::MessageRecord| {
+                            [prefix, line(message).as_bytes(), submit].concat()
+                        };
+                        let (message, reply) = sweep_preview(host, &body, program);
                         assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
-                        let mut expected = prefix.to_vec();
-                        expected.extend_from_slice(line(&message).as_bytes());
-                        expected.extend_from_slice(submit);
+                        let expected = program(&message);
                         assert_eq!(
                             String::from_utf8_lossy(&host.pty.written),
                             String::from_utf8_lossy(&expected),
@@ -6249,7 +6330,10 @@ mod tests {
                 definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(composer["codex"]["profile"]["rules"][0].clone());
+                    .extend([
+                        composer["codex"]["profile"]["rules"][0].clone(),
+                        crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                    ]);
                 definition["codex"]["profile"]["capabilities"]["composer"] =
                     composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 for operation in ["prompt", "exec"] {
@@ -6289,7 +6373,9 @@ mod tests {
                     .pending
                     .as_mut()
                     .and_then(PendingInput::composer_mut)
-                    && composer.settle_until.is_some()
+                    && composer
+                        .settle_until
+                        .is_some_and(|until| until > host.clock.now())
                 {
                     composer.settle_until = Some(host.clock.now());
                 }
@@ -6311,6 +6397,9 @@ mod tests {
                 panic!("the actual writer reaches its checkpoint within bounded turns");
             }
 
+            /// The virtual time a waiting helper lets pass between turns.
+            pub(super) const WAIT_STEP: Duration = Duration::from_millis(20);
+
             pub(super) fn finish(host: &mut Host, confirm: bool) -> SubmissionResult {
                 for _ in 0..256 {
                     if host.coordinator.pending.is_some()
@@ -6330,6 +6419,7 @@ mod tests {
                     if let Some(reply) = turn(host) {
                         return reply;
                     }
+                    host.clock.advance(WAIT_STEP);
                 }
                 panic!("the actual coordinator finishes within bounded turns");
             }
@@ -7095,6 +7185,303 @@ mod tests {
                     assert_eq!(host.pty.written, written);
                 });
             }
+
+            mod pre_submit {
+                use crate::runtime::input::tests::ordinary_prompt::composer_reliability::*;
+
+                /// Drives turns, letting virtual time pass so the pre-submit window can close.
+                fn reply_after(host: &mut Host) -> SubmissionResult {
+                    for _ in 0..256 {
+                        if let Some(reply) = turn(host) {
+                            return reply;
+                        }
+                        host.clock.advance(WAIT_STEP);
+                    }
+                    panic!("the coordinator replies within bounded turns");
+                }
+
+                fn erased(host: &Host) -> bool {
+                    host.pty
+                        .written
+                        .iter()
+                        .any(|byte| matches!(byte, 0x08 | 0x15 | 0x17 | 0x7f))
+                }
+
+                fn assert_mismatch_without_submit(host: &Host, reply: &SubmissionResult) {
+                    assert_uncertain(host, reply, storage::StopCause::LiteralMismatch);
+                    assert_eq!(reply.stage, SubmissionStage::Partial);
+                    assert!(
+                        host.pty.program.is_empty(),
+                        "no submit key completes the program"
+                    );
+                    assert!(!erased(host), "the mismatch erases nothing");
+                }
+
+                #[test]
+                fn a_composer_rendering_the_written_literal_continues_to_the_submit_key() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-match", LITERAL);
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(stored(host, &reply).stop_cause, None);
+                        assert_eq!(host.pty.written, encoded());
+                    });
+                }
+
+                /// The child repaints its composer empty, as a native CLI that has not yet rendered
+                /// the written literal shows it.
+                const UNRENDERED: &[u8] = b"[23;1H[2KSynthetic state
+[2KState end";
+
+                /// Drives turns for `span` of virtual time, asserting the pre-submit window holds
+                /// the write: no reply and no submit key.
+                fn hold_for(host: &mut Host, span: Duration) {
+                    let until = host.clock.now() + span;
+                    while host.clock.now() < until {
+                        assert!(turn(host).is_none(), "the pre-submit window is still open");
+                        host.clock.advance(WAIT_STEP);
+                    }
+                    assert!(
+                        host.pty.program.is_empty(),
+                        "no submit key inside the window"
+                    );
+                }
+
+                #[test]
+                fn a_literal_rendering_within_the_pre_submit_window_continues_to_the_submit_key() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-late-render", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.child_output(UNRENDERED);
+                        hold_for(host, crate::runtime::input::PRE_SUBMIT_WINDOW / 2);
+                        host.child_output(
+                            crate::coding_agent::catalog::test_support::synthetic_composer_echo(
+                                LITERAL,
+                            ),
+                        );
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(stored(host, &reply).stop_cause, None);
+                        assert_eq!(host.pty.written, encoded());
+                    });
+                }
+
+                #[test]
+                fn an_appended_key_records_literal_mismatch_when_the_pre_submit_window_closes() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-window-close", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.type_human(b"x");
+                        let opened = host.clock.now();
+                        hold_for(
+                            host,
+                            crate::runtime::input::PRE_SUBMIT_WINDOW - 5 * WAIT_STEP,
+                        );
+                        let reply = reply_after(host);
+                        assert!(
+                            host.clock.now() >= opened + crate::runtime::input::PRE_SUBMIT_WINDOW,
+                            "the mismatch is recorded once the window closes"
+                        );
+                        assert_mismatch_without_submit(host, &reply);
+                        assert_eq!(host.pty.written, [LITERAL.as_bytes(), b"x"].concat());
+                    });
+                }
+
+                #[test]
+                fn a_key_typed_during_the_settle_records_literal_mismatch_without_a_submit_key() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-appended", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.type_human(b"x");
+                        let reply = reply_after(host);
+                        assert_mismatch_without_submit(host, &reply);
+                        assert_eq!(
+                            host.pty.written,
+                            [LITERAL.as_bytes(), b"x"].concat(),
+                            "the literal and the typed key stay, with no submit key"
+                        );
+                    });
+                }
+
+                #[test]
+                fn a_collapsed_literal_matches_through_its_placeholder_count() {
+                    let literal = "λ".repeat(40);
+                    for (name, typed, accepted) in [
+                        ("the placeholder count", None, true),
+                        ("one extra scalar", Some(b"y".as_slice()), false),
+                    ] {
+                        with_catalog_host(catalog(), program(&literal, false), |host| {
+                            start(host, "prompt:pre-submit-placeholder", &literal);
+                            until_written(host, literal.len());
+                            if let Some(typed) = typed {
+                                host.type_human(typed);
+                            }
+                            let reply = if accepted {
+                                finish(host, true)
+                            } else {
+                                reply_after(host)
+                            };
+                            if accepted {
+                                assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
+                                assert_eq!(stored(host, &reply).stop_cause, None, "{name}");
+                            } else {
+                                assert_mismatch_without_submit(host, &reply);
+                            }
+                        });
+                    }
+                }
+
+                #[test]
+                fn an_unextractable_composer_records_literal_mismatch() {
+                    with_host(|host| {
+                        start(host, "prompt:pre-submit-unextractable", LITERAL);
+                        until_written(host, LITERAL.len());
+                        host.child_output(b"\x1b[2J\x1b[1;1Hunrelated output");
+                        let reply = reply_after(host);
+                        assert_mismatch_without_submit(host, &reply);
+                        assert_eq!(host.pty.written, LITERAL.as_bytes());
+                    });
+                }
+
+                fn exec_request(host: &Host, key: &str) -> InputControlRequest {
+                    let mut request = host.request(key);
+                    request.operation = InputControlOperation::SubmitExec(SubmitInput {
+                        operation_key: key.into(),
+                        input_kind: storage::InputKind::Exec,
+                        literal: LITERAL.into(),
+                    });
+                    request
+                }
+
+                #[test]
+                fn a_mismatched_prompt_or_exec_stays_uncertain_and_stops_the_fifo() {
+                    let both =
+                        crate::coding_agent::catalog::test_support::load(&catalog_definition())
+                            .unwrap();
+                    for exec in [false, true] {
+                        let (program, literal_stage) = if exec {
+                            (
+                                [b"! ", LITERAL.as_bytes(), b"\r"].concat(),
+                                2 + LITERAL.len(),
+                            )
+                        } else {
+                            (encoded(), LITERAL.len())
+                        };
+                        with_catalog_host(both.clone(), program, |host| {
+                            host.confirm_submissions = false;
+                            let first = if exec {
+                                exec_request(host, "exec:pre-submit-fifo")
+                            } else {
+                                request(host, "prompt:pre-submit-fifo", LITERAL)
+                            };
+                            assert!(host.handle(first).unwrap().is_none());
+                            until_written(host, literal_stage);
+                            let later = queued(
+                                host,
+                                request(host, "prompt:behind-mismatch", LITERAL),
+                                "earlier_input",
+                            );
+                            host.type_human(b"x");
+                            let reply = reply_after(host);
+                            assert_mismatch_without_submit(host, &reply);
+                            let written = host.pty.written.clone();
+                            for _ in 0..64 {
+                                let _ = turn(host);
+                            }
+                            assert_eq!(
+                                row(host, later).state,
+                                storage::InputState::Ready,
+                                "exec={exec}: the queued head waits behind the mismatch"
+                            );
+                            assert_eq!(host.pty.written, written, "exec={exec}");
+                        });
+                    }
+                }
+
+                /// The cause kind of the preview's receipt-free delivery result, once the event
+                /// writer has persisted it.
+                fn result_cause(host: &mut Host, message_id: i64) -> Option<String> {
+                    host.drain();
+                    let payloads: Vec<Value> = host
+                        .fixture
+                        .conn
+                        .prepare(
+                            "SELECT payload_json FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_result'",
+                        )
+                        .unwrap()
+                        .query_map([host.fixture.run.run_id], |row| row.get::<_, String>(0))
+                        .unwrap()
+                        .map(|text| serde_json::from_str(&text.unwrap()).unwrap())
+                        .collect();
+                    let result = payloads
+                        .iter()
+                        .find(|payload| payload["message_id"] == message_id)
+                        .unwrap_or_else(|| {
+                            panic!("a delivery result names message {message_id}: {payloads:?}")
+                        });
+                    result["cause"]["kind"].as_str().map(str::to_owned)
+                }
+
+                fn preview(
+                    host: &mut Host,
+                    message: &crate::broker::MessageRecord,
+                ) -> Option<InputControlReply> {
+                    let until = host.until;
+                    host.coordinator
+                        .handle_preview(&mut host.fixture.conn, message, &host.controller, until)
+                        .unwrap()
+                }
+
+                #[test]
+                fn a_mismatched_preview_is_typed_again_once_the_composer_is_cleared() {
+                    type Clear = fn(&mut Host);
+                    let cases: [(&str, Clear); 2] = [
+                        ("the user clears the composer", |_| {}),
+                        ("a member press clears the composer", |host| {
+                            host.type_human(b"\x15");
+                        }),
+                    ];
+                    for (name, clear) in cases {
+                        with_host(|host| {
+                            host.confirm_submissions = false;
+                            let run = host.fixture.run.clone();
+                            let message = crate::broker::send_message(
+                                &mut host.fixture.conn,
+                                run.director_member_id,
+                                run.member_id,
+                                "retyped after a mismatch",
+                            )
+                            .unwrap();
+                            let line = crate::runtime::preview::canonical_preview_line(&message);
+                            let program = [line.as_bytes(), b"~"].concat();
+                            host.pty.expect_program(program.clone());
+                            assert!(preview(host, &message).is_none(), "{name}");
+                            until_written(host, line.len());
+                            host.type_human(b"x");
+                            let reply = reply_after(host);
+                            assert_eq!(reply.status, SubmissionStatus::Uncertain, "{name}");
+                            assert_eq!(reply.stage, SubmissionStage::Partial, "{name}");
+                            assert!(host.pty.program.is_empty(), "{name}: no submit key");
+                            assert_eq!(
+                                result_cause(host, message.message_id).as_deref(),
+                                Some("literal_mismatch"),
+                                "{name}"
+                            );
+                            clear(host);
+                            host.pty.clear_composer();
+                            host.show(SCREEN.to_vec());
+                            host.pty.expect_program(program.clone());
+                            let reply = match preview(host, &message) {
+                                Some(reply) => submitted(reply),
+                                None => finish(host, true),
+                            };
+                            assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
+                            assert!(host.pty.written.ends_with(&program), "{name}");
+                            assert_eq!(host.pty.program, std::slice::from_ref(&program), "{name}");
+                        });
+                    }
+                }
+            }
         }
 
         mod staged_delivery {
@@ -7151,7 +7538,10 @@ mod tests {
                 definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(composer["codex"]["profile"]["rules"][0].clone());
+                    .extend([
+                        composer["codex"]["profile"]["rules"][0].clone(),
+                        crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                    ]);
                 definition["codex"]["profile"]["capabilities"]["composer"] =
                     composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 prompt_plan_catalog(&definition)
@@ -7520,7 +7910,7 @@ mod tests {
                         name: "a keystroke during the settle",
                         armed: false,
                         event: keystroke,
-                        cause: None,
+                        cause: Some(storage::StopCause::LiteralMismatch),
                     },
                     StagedEvent {
                         name: "a keystroke once the submit stage is armed",
@@ -7543,7 +7933,7 @@ mod tests {
                 ];
 
                 #[test]
-                fn only_an_appearing_interaction_stops_a_staged_write() {
+                fn only_an_appearing_interaction_or_a_literal_mismatch_stops_a_staged_write() {
                     for case in STAGED_EVENTS {
                         with_interaction_host(|host| {
                             host.confirm_submissions = false;
@@ -7608,25 +7998,13 @@ mod tests {
 
                 #[test]
                 fn post_submit_verification_detects_an_unsubmitted_result() {
-                    for (name, mixed_keystroke, verifies_empty) in [
-                        (
-                            "a composer that verifies empty after the submit key",
-                            false,
-                            true,
-                        ),
-                        ("a composer that never verifies empty", false, false),
-                        (
-                            "a keystroke mixed into the composer during the settle",
-                            true,
-                            false,
-                        ),
+                    for (name, verifies_empty) in [
+                        ("a composer that verifies empty after the submit key", true),
+                        ("a composer that never verifies empty", false),
                     ] {
                         with_interaction_host(|host| {
                             host.confirm_submissions = false;
                             until_literal_written(host, prompt_request(host, "prompt:post-submit"));
-                            if mixed_keystroke {
-                                keystroke(host);
-                            }
                             let reply =
                                 crate::runtime::input::tests::ordinary_prompt::composer_reliability::finish(
                                     host,
@@ -7777,7 +8155,13 @@ mod tests {
                 while !done(host) {
                     assert!(
                         host.clock.now() < host.until,
-                        "queued work resolves in time"
+                        "queued work resolves in time; offers {:?}; screen {:?}",
+                        host.pty
+                            .offers
+                            .iter()
+                            .map(|offer| String::from_utf8_lossy(offer).into_owned())
+                            .collect::<Vec<_>>(),
+                        host.transport.snapshot().screen.contents()
                     );
                     housekeep(host);
                     host.drain();
@@ -9194,7 +9578,10 @@ mod tests {
                 definition["codex"]["profile"]["rules"]
                     .as_array_mut()
                     .unwrap()
-                    .push(empty);
+                    .extend([
+                        empty,
+                        crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                    ]);
                 definition["codex"]["profile"]["capabilities"]["composer"] =
                     composer["codex"]["profile"]["capabilities"]["composer"].clone();
                 prompt_plan_catalog(&definition)
@@ -9776,6 +10163,9 @@ mod tests {
                         "submission":{"prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"7e","fixture_ids":["synthetic-prompt-plan"]},"exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-prompt-plan"]}}
                     }
                 });
+                crate::coding_agent::catalog::test_support::add_synthetic_composer_text(
+                    &mut value, "codex",
+                );
                 value
             }
 
@@ -9955,8 +10345,69 @@ mod tests {
                 database_url: String,
                 hooks: Arc<Hooks>,
                 clock: Arc<TestClock>,
+                /// How the child paints typed input into its composer, as a native composer shows
+                /// its unsubmitted literal before the submit key.
+                painter: Option<crate::coding_agent::catalog::test_support::ComposerPainter>,
+                typed: Vec<u8>,
             }
             impl Pty {
+                /// The child empties its composer: the partly written program is abandoned and
+                /// the next programmatic write starts a fresh one.
+                pub(crate) fn clear_composer(&mut self) {
+                    self.program_offset = 0;
+                    self.typed.clear();
+                }
+                /// The child redrew its empty composer after a submit key inside a longer program.
+                fn clear_typed(&mut self) {
+                    self.typed.clear();
+                }
+                /// Echoes accepted programmatic bytes; the program's completing stage is its
+                /// submit key, which empties the composer.
+                fn echo_program(&mut self, bytes: &[u8], starts_program: bool, completed: bool) {
+                    if self.painter.is_none() {
+                        return;
+                    }
+                    if starts_program || completed {
+                        self.typed.clear();
+                    }
+                    if completed {
+                        return;
+                    }
+                    self.typed.extend_from_slice(bytes);
+                    self.paint_composer();
+                }
+                /// Echoes typed characters that land in a composer already holding a literal;
+                /// escape sequences such as pointer reports paint nothing.
+                fn echo_manual(&mut self, bytes: &[u8]) {
+                    if self.painter.is_none()
+                        || self.typed.is_empty()
+                        || bytes.first() == Some(&0x1b)
+                    {
+                        return;
+                    }
+                    self.typed.extend(
+                        bytes
+                            .iter()
+                            .copied()
+                            .filter(|byte| !byte.is_ascii_control()),
+                    );
+                    self.paint_composer();
+                }
+                fn paint_composer(&mut self) {
+                    let mut shown = self.typed.clone();
+                    for marker in [b"\x1b[200~".as_slice(), b"\x1b[201~"] {
+                        while let Some(at) = shown
+                            .windows(marker.len())
+                            .position(|window| window == marker)
+                        {
+                            shown.drain(at..at + marker.len());
+                        }
+                    }
+                    let shown = shown.strip_prefix(b"\x1b").unwrap_or(&shown);
+                    let painter = self.painter.as_ref().expect("an echoing child paints");
+                    let echo = painter(&String::from_utf8_lossy(shown));
+                    queue(&mut self.child, &echo);
+                }
                 pub(crate) fn expect_program(&mut self, bytes: Vec<u8>) {
                     assert_eq!(self.program_offset, 0, "no partially written program");
                     self.expected_program = bytes;
@@ -10000,21 +10451,25 @@ mod tests {
                             "a programmatic stage writes only for an in-progress reservation"
                         );
                         assert!(self.hooks.count("before") > 0);
+                        let starts_program = belongs_to_program && self.program_offset == 0;
                         self.stages.push((self.clock.now(), bytes.to_vec()));
                         let accepted = self.short.unwrap_or(bytes.len()).min(bytes.len());
                         self.written.extend_from_slice(&bytes[..accepted]);
                         if belongs_to_program {
                             self.program_offset += accepted;
                         }
-                        if belongs_to_program && self.program_offset == self.expected_program.len()
-                        {
+                        let completed = belongs_to_program
+                            && self.program_offset == self.expected_program.len();
+                        if completed {
                             self.program.push(self.expected_program.clone());
                             self.program_offset = 0;
                         }
+                        self.echo_program(&bytes[..accepted], starts_program, completed);
                         Ok(accepted)
                     } else {
                         self.manual.extend_from_slice(bytes);
                         self.written.extend_from_slice(bytes);
+                        self.echo_manual(bytes);
                         Ok(bytes.len())
                     }
                 }
@@ -10157,6 +10612,8 @@ mod tests {
                 pub(crate) stage_settle: Duration,
                 pub(crate) confirm_submissions: bool,
                 confirmation_frame: Vec<u8>,
+                /// The empty-composer screen the host started on.
+                idle_frame: Vec<u8>,
                 confirmation_programs: std::collections::VecDeque<Vec<u8>>,
                 confirmed_bytes: usize,
                 expires: u64,
@@ -10228,6 +10685,16 @@ mod tests {
                         clock_lead,
                     } = profile;
                     let catalog = catalog();
+                    let painter = if screen == SCREEN {
+                        Some(
+                            crate::coding_agent::catalog::test_support::synthetic_composer_painter(
+                            ),
+                        )
+                    } else {
+                        crate::coding_agent::catalog::test_support::native_composer_painter(
+                            backend, size, &screen,
+                        )
+                    };
                     let composer_selected =
                         catalog.capabilities(backend).composer == storage::Coverage::Tested;
                     let RunnerFixture {
@@ -10291,6 +10758,8 @@ mod tests {
                         database_url: url,
                         hooks: hooks.clone(),
                         clock: clock.clone(),
+                        painter,
+                        typed: Vec::new(),
                     };
                     let mut host = Self {
                         fixture,
@@ -10306,6 +10775,7 @@ mod tests {
                         until,
                         stage_settle,
                         confirm_submissions: true,
+                        idle_frame: screen.clone(),
                         confirmation_frame: screen,
                         confirmation_programs: std::collections::VecDeque::new(),
                         confirmed_bytes: 0,
@@ -10345,9 +10815,13 @@ mod tests {
                 pub(crate) fn show(&mut self, bytes: Vec<u8>) {
                     self.child_output(&bytes);
                     self.drain();
+                    if bytes == self.idle_frame {
+                        self.pty.clear_composer();
+                    }
                     if self.controller.health(&self.writer).eligibility
                         == InputEligibility::ComposerEmpty
                     {
+                        self.pty.clear_composer();
                         self.confirmation_frame = bytes;
                     }
                 }
@@ -10443,6 +10917,7 @@ mod tests {
                     if ordinary && self.confirm_submissions && complete_program {
                         self.confirmation_programs.pop_front();
                         self.confirmed_bytes = self.pty.written.len();
+                        self.pty.clear_typed();
                         self.child_output(self.confirmation_frame.clone());
                     }
                     result
@@ -10747,7 +11222,10 @@ mod tests {
             definition["codex"]["profile"]["rules"]
                 .as_array_mut()
                 .unwrap()
-                .push(composer["codex"]["profile"]["rules"][0].clone());
+                .extend([
+                    composer["codex"]["profile"]["rules"][0].clone(),
+                    crate::coding_agent::catalog::test_support::synthetic_text_rule(),
+                ]);
             definition["codex"]["profile"]["capabilities"]["composer"] =
                 composer["codex"]["profile"]["capabilities"]["composer"].clone();
             with_profile_host(

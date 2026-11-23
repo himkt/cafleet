@@ -698,6 +698,7 @@ pub(crate) fn run_service(
         },
         shutdown_client: None,
         native_exit: None,
+        director_sweep: None,
     };
     let loop_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| runner.serve()));
     let RunnerLoop {
@@ -707,6 +708,7 @@ pub(crate) fn run_service(
         mut clients,
         shutdown_client,
         native_exit,
+        director_sweep,
         ..
     } = runner;
     let (loop_result, unwind) = match loop_result {
@@ -736,6 +738,9 @@ pub(crate) fn run_service(
             deadlines
         }
     };
+    if let Some(director_sweep) = director_sweep {
+        director_sweep.stop_and_join(deadlines.child_deadline());
+    }
     if let Some(coordinator) = coordinator.as_mut() {
         let fenced = coordinator.fence(deadlines.storage_deadline());
         coordinator.finish_pending_attempt();
@@ -867,6 +872,7 @@ struct RunnerLoop<'a> {
     turns: InputTurns,
     shutdown_client: Option<u64>,
     native_exit: Option<ChildExit>,
+    director_sweep: Option<DirectorSweepThread>,
 }
 
 impl RunnerLoop<'_> {
@@ -1151,6 +1157,18 @@ impl RunnerLoop<'_> {
         )?;
         coordinator.share_diagnostics(self.native.writer.diagnostics().clone());
         self.coordinator = Some(coordinator);
+        self.director_sweep = Some(DirectorSweepThread::start(
+            format!(
+                "sqlite:///{}",
+                self.conn
+                    .path()
+                    .ok_or_else(|| error("runner database has no file path"))?
+            ),
+            self.run.clone(),
+            self.catalog.clone(),
+            self.clock.clone(),
+            self.native.writer.diagnostics().clone(),
+        ));
         serde_json::to_value(Started {
             identity: ControlIdentity::from_run(&self.run),
             runner: self.process.clone(),
@@ -1306,6 +1324,592 @@ fn sweep_snapshot(conn: &mut Connection, run: &RunRecord) -> Result<Option<broke
     };
     tx.commit()?;
     Ok(message)
+}
+
+/// The Director sweep on its own runner thread, connection and multiplexer adapter.
+struct DirectorSweepThread {
+    stop: Arc<AtomicBool>,
+    shutdown: Arc<std::sync::Mutex<Option<Instant>>>,
+    handle: std::thread::JoinHandle<()>,
+}
+
+impl DirectorSweepThread {
+    fn start(
+        database_url: String,
+        run: RunRecord,
+        catalog: crate::coding_agent::ProfileCatalog,
+        clock: Arc<dyn crate::time::Clock>,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    ) -> Self {
+        Self::start_with_runner(database_url, run, catalog, clock, diagnostics, || {
+            std::rc::Rc::new(crate::runtime::system::SystemRunner)
+        })
+    }
+
+    /// Starts the sweep with the command runner `runner` builds on the sweep thread.
+    fn start_with_runner(
+        database_url: String,
+        run: RunRecord,
+        catalog: crate::coding_agent::ProfileCatalog,
+        clock: Arc<dyn crate::time::Clock>,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+        runner: impl FnOnce() -> std::rc::Rc<dyn crate::multiplexer::CommandRunner> + Send + 'static,
+    ) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let shutdown = Arc::new(std::sync::Mutex::new(None));
+        let (stopping, shutting_down) = (stop.clone(), shutdown.clone());
+        let handle = std::thread::spawn(move || {
+            let runner = std::rc::Rc::new(ShutdownBoundRunner {
+                inner: runner(),
+                shutdown: shutting_down.clone(),
+                clock: clock.clone(),
+            });
+            let mut sweep = DirectorSweep::new(run, catalog, runner, clock.clone(), diagnostics);
+            let mut conn = None;
+            while !stopping.load(Ordering::Acquire) {
+                let deadline = *shutting_down
+                    .lock()
+                    .expect("the shutdown deadline lock is never poisoned");
+                if conn.is_none() {
+                    conn = sweep.connect(&database_url);
+                }
+                if let Some(conn) = conn.as_mut()
+                    && let Err(cause) = sweep.tick(conn, &stopping, deadline)
+                {
+                    sweep.storage_unavailable(&cause);
+                }
+                clock.sleep(DIRECTOR_SWEEP_IDLE);
+            }
+        });
+        Self {
+            stop,
+            shutdown,
+            handle,
+        }
+    }
+
+    /// Clips every later attempt to `shutdown`, then stops the sweep before its next stage; a
+    /// stopped attempt starts no new writing stage.
+    fn stop_and_join(self, shutdown: Instant) {
+        *self
+            .shutdown
+            .lock()
+            .expect("the shutdown deadline lock is never poisoned") = Some(shutdown);
+        self.stop.store(true, Ordering::Release);
+        if self.handle.join().is_err() {
+            eprintln!("member runtime: director delivery: the sweep thread panicked");
+        }
+    }
+}
+
+/// Clips every subprocess of the sweep to the shutdown deadline once the runner hands it over,
+/// including a process of an attempt already in flight.
+struct ShutdownBoundRunner {
+    inner: std::rc::Rc<dyn crate::multiplexer::CommandRunner>,
+    shutdown: Arc<std::sync::Mutex<Option<Instant>>>,
+    clock: Arc<dyn crate::time::Clock>,
+}
+
+impl crate::multiplexer::CommandRunner for ShutdownBoundRunner {
+    fn binary_exists(&self, name: &str) -> bool {
+        self.inner.binary_exists(name)
+    }
+
+    fn run(&self, argv: &[String]) -> std::result::Result<String, crate::multiplexer::RunError> {
+        match self.remaining() {
+            None => self.inner.run(argv),
+            Some(remaining) => self.run_for(argv, remaining),
+        }
+    }
+
+    fn run_for(
+        &self,
+        argv: &[String],
+        timeout: Duration,
+    ) -> std::result::Result<String, crate::multiplexer::RunError> {
+        let timeout = self
+            .remaining()
+            .map_or(timeout, |remaining| timeout.min(remaining));
+        if timeout.is_zero() {
+            return Err(crate::multiplexer::RunError::deadline_expired());
+        }
+        self.inner.run_for(argv, timeout)
+    }
+}
+
+impl ShutdownBoundRunner {
+    fn remaining(&self) -> Option<Duration> {
+        self.shutdown
+            .lock()
+            .expect("the shutdown deadline lock is never poisoned")
+            .map(|shutdown| shutdown.saturating_duration_since(self.clock.now()))
+    }
+}
+
+const DIRECTOR_SWEEP_IDLE: Duration = Duration::from_millis(100);
+
+/// The root Director's oldest pending message and the placement the Director sweep types into.
+pub(crate) struct DirectorTarget {
+    pub(crate) message: broker::MessageRecord,
+    pub(crate) placement: broker::Placement,
+}
+
+/// One read transaction: the run's member is current, the fleet's root Director is active with a
+/// concrete pane whose backend declares Director delivery on its multiplexer, and its oldest
+/// unnotified pending message.
+pub(crate) fn director_sweep_snapshot(
+    conn: &mut Connection,
+    run: &RunRecord,
+    catalog: &crate::coding_agent::ProfileCatalog,
+) -> Result<Option<DirectorTarget>> {
+    let tx = conn.transaction()?;
+    let target = director_target(&tx, run, catalog)?;
+    tx.commit()?;
+    Ok(target)
+}
+
+fn director_target(
+    conn: &Connection,
+    run: &RunRecord,
+    catalog: &crate::coding_agent::ProfileCatalog,
+) -> Result<Option<DirectorTarget>> {
+    let Some(fleet_id) = broker::active_member_fleet(conn, run.member_id)? else {
+        return Ok(None);
+    };
+    let current = broker::get_member(conn, run.member_id, fleet_id)?.is_some_and(|member| {
+        member.kind == broker::MemberKind::Member
+            && member
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.run.run_id == run.run_id)
+    });
+    if !current || broker::active_member_fleet(conn, run.director_member_id)? != Some(fleet_id) {
+        return Ok(None);
+    }
+    let Some(director) = broker::get_member(conn, run.director_member_id, fleet_id)?
+        .filter(|director| director.kind == broker::MemberKind::Director)
+    else {
+        return Ok(None);
+    };
+    let placement = director.placement;
+    if placement.mux_pane_id.is_none() {
+        return Ok(None);
+    }
+    let backend = crate::coding_agent::coding_agent(&placement.coding_agent)
+        .ok_or_else(|| error("the Director placement names an unknown backend"))?;
+    let multiplexer = crate::multiplexer::MuxBackend::parse(&placement.backend)
+        .map_err(|cause| error(cause.to_string()))?;
+    if !catalog
+        .director_delivery(backend)
+        .is_some_and(|delivery| delivery.covers(multiplexer))
+    {
+        return Ok(None);
+    }
+    Ok(
+        broker::oldest_pending_preview(conn, run.director_member_id)?
+            .map(|message| DirectorTarget { message, placement }),
+    )
+}
+
+pub(crate) const DIRECTOR_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
+const DIRECTOR_ATTEMPT: Duration = Duration::from_secs(5);
+const DIRECTOR_SETTLE: Duration = Duration::from_millis(500);
+const DIRECTOR_VERIFICATION: Duration = Duration::from_secs(2);
+const DIRECTOR_VERIFICATION_POLL: Duration = Duration::from_millis(100);
+const DIRECTOR_WRITE_MARGIN: Duration = Duration::from_millis(250);
+const DIRECTOR_HELD_REPORT: Duration = Duration::from_secs(180);
+
+/// Why a Director preview waits with zero bytes written.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirectorHold {
+    ComposerBusy,
+    InteractionOpen,
+    PaneUnavailable,
+    StorageUnavailable,
+}
+
+impl DirectorHold {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::ComposerBusy => "composer_busy",
+            Self::InteractionOpen => "interaction_open",
+            Self::PaneUnavailable => "pane_unavailable",
+            Self::StorageUnavailable => "storage_unavailable",
+        }
+    }
+}
+
+/// How one locked Director attempt ended.
+enum DirectorOutcome {
+    Delivered,
+    Held(DirectorHold),
+    /// A capture or multiplexer failure before any byte, with its cause.
+    Unavailable(String),
+    /// Bytes may be in the Director composer and the message stays unnotified.
+    Uncertain(&'static str),
+    /// The stop signal or the attempt budget ended the attempt before its first byte.
+    NotStarted,
+}
+
+/// A held head's continuous hold, reported once when it reaches [`DIRECTOR_HELD_REPORT`].
+struct HeldHead {
+    message_id: i64,
+    since: Instant,
+    reported: bool,
+}
+
+/// Types the root Director's pending previews into its pane from one member runner; it owns no
+/// member PTY, receipt or runtime event.
+pub(crate) struct DirectorSweep {
+    run: RunRecord,
+    catalog: crate::coding_agent::ProfileCatalog,
+    runner: std::rc::Rc<dyn crate::multiplexer::CommandRunner>,
+    clock: Arc<dyn crate::time::Clock>,
+    diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    next_pass: Option<Instant>,
+    backoff: Duration,
+    backoff_until: Option<Instant>,
+    held: Option<HeldHead>,
+}
+
+impl DirectorSweep {
+    pub(crate) fn new(
+        run: RunRecord,
+        catalog: crate::coding_agent::ProfileCatalog,
+        runner: std::rc::Rc<dyn crate::multiplexer::CommandRunner>,
+        clock: Arc<dyn crate::time::Clock>,
+        diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
+    ) -> Self {
+        Self {
+            run,
+            catalog,
+            runner,
+            clock,
+            diagnostics,
+            next_pass: None,
+            backoff: SWEEP_BACKOFF_FLOOR,
+            backoff_until: None,
+            held: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn backoff_until(&self) -> Option<Instant> {
+        self.backoff_until
+    }
+
+    /// The sweep's connection, retried under the storage backoff with a diagnostic per failure.
+    fn connect(&mut self, database_url: &str) -> Option<Connection> {
+        let now = self.clock.now();
+        if self.backoff_until.is_some_and(|at| now < at) {
+            return None;
+        }
+        match crate::db::connect(database_url) {
+            Ok(conn) => Some(conn),
+            Err(cause) => {
+                self.storage_unavailable(&cause);
+                None
+            }
+        }
+    }
+
+    /// Records a storage failure that no selected message owns and backs off.
+    fn storage_unavailable(&mut self, cause: &CafleetError) {
+        self.record(&format!(
+            "director delivery: storage unavailable: {}",
+            cause.message()
+        ));
+        self.back_off(self.clock.now());
+    }
+
+    /// Holds `message_id` for storage and backs off.
+    fn storage_hold(&mut self, message_id: i64) {
+        self.note_hold(message_id, DirectorHold::StorageUnavailable);
+        self.back_off(self.clock.now());
+    }
+
+    /// One sweep pass at most once per interval and after the backoff; every storage step and
+    /// the attempt are clipped to `shutdown`.
+    pub(crate) fn tick(
+        &mut self,
+        conn: &mut Connection,
+        stop: &AtomicBool,
+        shutdown: Option<Instant>,
+    ) -> Result<()> {
+        let now = self.clock.now();
+        if self.next_pass.is_some_and(|at| now < at)
+            || self.backoff_until.is_some_and(|at| now < at)
+        {
+            return Ok(());
+        }
+        self.next_pass = Some(now + DIRECTOR_SWEEP_INTERVAL);
+        let clock = self.clock.clone();
+        let clipped = |at: Instant| shutdown.map_or(at, |shutdown| shutdown.min(at));
+        let storage_until =
+            |at: Instant| Instant::now() + at.saturating_duration_since(clock.now());
+        let snapshot = with_database_deadline(
+            conn,
+            storage_until(clipped(now + DIRECTOR_ATTEMPT)),
+            |conn| director_sweep_snapshot(conn, &self.run, &self.catalog),
+        );
+        let target = match snapshot {
+            Ok(Some(target)) => target,
+            Ok(None) => {
+                self.held = None;
+                return Ok(());
+            }
+            Err(cause) => {
+                match self.held.as_ref().map(|held| held.message_id) {
+                    Some(message_id) => self.storage_hold(message_id),
+                    None => self.storage_unavailable(&cause),
+                }
+                return Ok(());
+            }
+        };
+        let message_id = target.message.message_id;
+        let database_url = format!(
+            "sqlite:///{}",
+            conn.path()
+                .ok_or_else(|| error("the Director sweep database has no file path"))?
+        );
+        let lock = match crate::pane_lock::PaneLock::try_acquire(&database_url, &target.placement) {
+            Ok(Some(lock)) => lock,
+            Ok(None) => return Ok(()),
+            Err(_) => {
+                self.storage_hold(message_id);
+                return Ok(());
+            }
+        };
+        let deadline = clipped(self.clock.now() + DIRECTOR_ATTEMPT);
+        let rechecked = with_database_deadline(conn, storage_until(deadline), |conn| {
+            director_target(conn, &self.run, &self.catalog)
+        });
+        match rechecked {
+            Ok(current)
+                if current.as_ref().is_some_and(|current| {
+                    current.message.message_id == message_id
+                        && current.placement == target.placement
+                }) => {}
+            Ok(_) => return Ok(()),
+            Err(_) => {
+                self.storage_hold(message_id);
+                return Ok(());
+            }
+        }
+        match self.attempt(&target, deadline, stop) {
+            DirectorOutcome::Delivered => {
+                let stamped = with_database_deadline(conn, storage_until(deadline), |conn| {
+                    crate::broker::runtime::stamp_director_preview(
+                        conn,
+                        &self.run.owner(),
+                        message_id,
+                    )
+                });
+                if stamped.is_ok() {
+                    self.backoff = SWEEP_BACKOFF_FLOOR;
+                    self.backoff_until = None;
+                    self.held = None;
+                } else {
+                    self.record(&format!(
+                        "director delivery: message {message_id} uncertain: storage_unavailable"
+                    ));
+                    self.back_off(self.clock.now());
+                }
+            }
+            DirectorOutcome::Held(hold) => self.note_hold(message_id, hold),
+            DirectorOutcome::Unavailable(cause) => {
+                let pane = target
+                    .placement
+                    .mux_pane_id
+                    .as_deref()
+                    .expect("concrete pane");
+                self.record(&format!(
+                    "director delivery: pane {pane} unavailable: {cause}"
+                ));
+                self.note_hold(message_id, DirectorHold::PaneUnavailable);
+                self.back_off(now);
+            }
+            DirectorOutcome::Uncertain(cause) => {
+                self.record(&format!(
+                    "director delivery: message {message_id} uncertain: {cause}"
+                ));
+            }
+            DirectorOutcome::NotStarted => {}
+        }
+        drop(lock);
+        Ok(())
+    }
+
+    fn back_off(&mut self, now: Instant) {
+        self.backoff_until = Some(now + self.backoff);
+        self.backoff = (self.backoff * 2).min(SWEEP_BACKOFF_CAP);
+    }
+
+    fn record(&self, message: &str) {
+        self.diagnostics.record(
+            storage::RunnerDiagnosticSource::DirectorDelivery,
+            message,
+            &self.clock.wall_stamp(),
+        );
+    }
+
+    fn note_hold(&mut self, message_id: i64, hold: DirectorHold) {
+        let now = self.clock.now();
+        let held = match self.held.take() {
+            Some(held) if held.message_id == message_id => held,
+            _ => HeldHead {
+                message_id,
+                since: now,
+                reported: false,
+            },
+        };
+        let reached = now.saturating_duration_since(held.since) >= DIRECTOR_HELD_REPORT;
+        let reported = held.reported || reached;
+        if reached && !held.reported {
+            self.record(&format!(
+                "director delivery: message {message_id} held: {}",
+                hold.reason()
+            ));
+        }
+        self.held = Some(HeldHead { reported, ..held });
+    }
+
+    fn attempt(
+        &self,
+        target: &DirectorTarget,
+        deadline: Instant,
+        stop: &AtomicBool,
+    ) -> DirectorOutcome {
+        let placement = &target.placement;
+        let pane = placement.mux_pane_id.as_deref().expect("concrete pane");
+        let backend = crate::coding_agent::coding_agent(&placement.coding_agent)
+            .expect("the snapshot resolved the Director backend");
+        let delivery = self
+            .catalog
+            .director_delivery(backend)
+            .expect("the snapshot found Director delivery");
+        let plan = self
+            .catalog
+            .composer_plan(backend, crate::coding_agent::ComposerOperation::Prompt)
+            .expect("Director delivery requires a prompt plan");
+        let detector = crate::coding_agent::Detector::new(&self.catalog, backend, None);
+        let stopped = || stop.load(Ordering::Acquire);
+        let real_deadline = crate::time::Deadline::until(
+            Instant::now() + deadline.saturating_duration_since(self.clock.now()),
+        );
+        let mux = match crate::multiplexer::multiplexer_for_server(
+            &placement.backend,
+            &placement.mux_server,
+            self.runner.clone(),
+        ) {
+            Ok(mux) => mux.bounded(real_deadline),
+            Err(cause) => return DirectorOutcome::Unavailable(cause.to_string()),
+        };
+        if stopped() {
+            return DirectorOutcome::NotStarted;
+        }
+        let screen = match capture(mux.as_ref(), pane) {
+            Ok(screen) => screen,
+            Err(cause) => return DirectorOutcome::Unavailable(cause),
+        };
+        let observed = match detector.observe_director(&screen, delivery.rule_ids()) {
+            Ok(observed) => observed,
+            Err(cause) => return DirectorOutcome::Unavailable(cause.message().into_owned()),
+        };
+        match observed.kind {
+            crate::coding_agent::ObservationKind::ComposerEmpty
+                if observed.match_evidence == crate::coding_agent::MatchEvidence::Complete => {}
+            crate::coding_agent::ObservationKind::Interaction(_)
+            | crate::coding_agent::ObservationKind::PermissionContinuation => {
+                return DirectorOutcome::Held(DirectorHold::InteractionOpen);
+            }
+            _ => return DirectorOutcome::Held(DirectorHold::ComposerBusy),
+        }
+        let canonical = crate::runtime::preview::canonical_preview_line(&target.message);
+        let line = if delivery.plain_literal_allowed(&canonical) {
+            canonical
+        } else {
+            crate::runtime::preview::pointer_preview_line(&target.message)
+        };
+        let [literal, submit] = plan
+            .stages(&line, crate::coding_agent::catalog::LiteralFraming::Plain)
+            .expect("a measured Director prompt plan encodes a plain preview line");
+        let literal = String::from_utf8(literal).expect("an encoded preview is UTF-8");
+        let required = DIRECTOR_SETTLE + DIRECTOR_VERIFICATION + DIRECTOR_WRITE_MARGIN;
+        if stopped() || deadline.saturating_duration_since(self.clock.now()) < required {
+            return DirectorOutcome::NotStarted;
+        }
+        match mux.type_literal_until(pane, &literal, &stopped) {
+            Ok(true) => {}
+            Ok(false) => return DirectorOutcome::Uncertain("runner_stopped"),
+            Err(failure) if failure.submission_started() => {
+                return DirectorOutcome::Uncertain("write_failed");
+            }
+            Err(failure) => return DirectorOutcome::Unavailable(failure.to_string()),
+        }
+        if stopped() {
+            return DirectorOutcome::Uncertain("runner_stopped");
+        }
+        self.clock.sleep(DIRECTOR_SETTLE);
+        if stopped() {
+            return DirectorOutcome::Uncertain("runner_stopped");
+        }
+        let window_until = (self.clock.now() + crate::runtime::input::PRE_SUBMIT_WINDOW)
+            .min(deadline - (DIRECTOR_VERIFICATION + DIRECTOR_WRITE_MARGIN));
+        loop {
+            let rendered = capture(mux.as_ref(), pane)
+                .ok()
+                .and_then(|screen| detector.composer_text(&screen).ok().flatten())
+                .is_some_and(|text| text.matches(&[literal.as_str()]));
+            if rendered {
+                break;
+            }
+            if self.clock.now() + DIRECTOR_VERIFICATION_POLL > window_until {
+                return DirectorOutcome::Uncertain("literal_mismatch");
+            }
+            self.clock.sleep(DIRECTOR_VERIFICATION_POLL);
+            if stopped() {
+                return DirectorOutcome::Uncertain("runner_stopped");
+            }
+        }
+        if stopped() {
+            return DirectorOutcome::Uncertain("runner_stopped");
+        }
+        if mux.press_submit(pane, &submit).is_err() {
+            return DirectorOutcome::Uncertain("write_failed");
+        }
+        let verify_until = (self.clock.now() + DIRECTOR_VERIFICATION).min(deadline);
+        loop {
+            if stopped() {
+                return DirectorOutcome::Uncertain("runner_stopped");
+            }
+            let empty = capture(mux.as_ref(), pane)
+                .ok()
+                .and_then(|screen| detector.observe_director(&screen, delivery.rule_ids()).ok())
+                .is_some_and(|observed| {
+                    observed.kind == crate::coding_agent::ObservationKind::ComposerEmpty
+                        && observed.match_evidence == crate::coding_agent::MatchEvidence::Complete
+                });
+            if empty {
+                return DirectorOutcome::Delivered;
+            }
+            if self.clock.now() + DIRECTOR_VERIFICATION_POLL > verify_until {
+                return DirectorOutcome::Uncertain("submit_unconfirmed");
+            }
+            self.clock.sleep(DIRECTOR_VERIFICATION_POLL);
+        }
+    }
+}
+
+/// The Director pane's screen as a replayed snapshot, or the capture failure's text.
+fn capture(
+    mux: &dyn crate::multiplexer::Multiplexer,
+    pane: &str,
+) -> std::result::Result<ScreenSnapshot, String> {
+    let capture = mux
+        .capture_screen(pane)
+        .map_err(|cause| cause.to_string())?;
+    crate::runtime::TerminalState::replay(&capture).map_err(|cause| cause.message().into_owned())
 }
 
 /// The in-flight immediate input attempt that later turns drive to its reply.
@@ -2606,6 +3210,10 @@ pub(crate) mod test_support {
                     "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-service-submission"]}
                 }
             }});
+            crate::coding_agent::catalog::test_support::add_synthetic_composer_text(
+                &mut catalog,
+                "codex",
+            );
             let coverage = if detecting {
                 let fixture_id = crate::coding_agent::catalog::test_support::FIXTURE;
                 catalog["codex"]["profile"]["rules"]
@@ -3054,6 +3662,7 @@ pub(crate) mod test_support {
                 let mut input = stdin.lock();
                 let mut pending = Vec::new();
                 let mut form_mid_write_shown = false;
+                let mut composer_shown = true;
                 loop {
                     assert!(
                         crate::time::Clock::monotonic_sample(&Clock)
@@ -3063,17 +3672,30 @@ pub(crate) mod test_support {
                         "original owned native lifetime"
                     );
                     let mut bytes = [0; 4096];
-                    match input.read(&mut bytes) {
+                    let received = match input.read(&mut bytes) {
                         Ok(0) => return,
-                        Ok(count) => pending.extend_from_slice(&bytes[..count]),
+                        Ok(count) => {
+                            pending.extend_from_slice(&bytes[..count]);
+                            true
+                        }
                         Err(cause)
                             if matches!(
                                 cause.kind(),
                                 ErrorKind::WouldBlock | ErrorKind::Interrupted
-                            ) => {}
+                            ) =>
+                        {
+                            false
+                        }
                         Err(cause) => panic!("owned synthetic native input: {cause}"),
-                    }
+                    };
                     assert!(pending.len() <= 65536);
+                    if received
+                        && composer_shown
+                        && let Some(echo) = composer_echo(&pending)
+                    {
+                        output.write_all(&echo).unwrap();
+                        output.flush().unwrap();
+                    }
                     if !form_mid_write_shown
                         && !pending.contains(&b'\n')
                         && pending
@@ -3081,6 +3703,7 @@ pub(crate) mod test_support {
                             .any(|window| window == FORM_MID_WRITE.as_bytes())
                     {
                         form_mid_write_shown = true;
+                        composer_shown = false;
                         output.write_all(FORM).unwrap();
                         output.flush().unwrap();
                     }
@@ -3095,11 +3718,13 @@ pub(crate) mod test_support {
                             return;
                         }
                         if line == FORM_LINE {
+                            composer_shown = false;
                             output.write_all(FORM).unwrap();
                             output.flush().unwrap();
                             continue;
                         }
                         if line == DRAFT_LINE {
+                            composer_shown = false;
                             output.write_all(DRAFT).unwrap();
                             output.flush().unwrap();
                             continue;
@@ -3117,9 +3742,37 @@ pub(crate) mod test_support {
                             .unwrap();
                         output.write_all(SCREEN).unwrap();
                         output.flush().unwrap();
+                        composer_shown = true;
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
+            }
+
+            /// The synthetic composer painting the unsubmitted line, or nothing while no
+            /// printable text is pending; paste markers and a leading Escape are not text.
+            fn composer_echo(pending: &[u8]) -> Option<Vec<u8>> {
+                if pending.contains(&b'\n') {
+                    return None;
+                }
+                let mut text = pending.to_vec();
+                for marker in [b"\x1b[200~".as_slice(), b"\x1b[201~"] {
+                    while let Some(at) = text
+                        .windows(marker.len())
+                        .position(|window| window == marker)
+                    {
+                        text.drain(at..at + marker.len());
+                    }
+                }
+                let text: Vec<u8> = text
+                    .into_iter()
+                    .skip_while(|byte| *byte == 0x1b)
+                    .filter(|byte| !byte.is_ascii_control())
+                    .collect();
+                (!text.is_empty()).then(|| {
+                    crate::coding_agent::catalog::test_support::synthetic_composer_echo(
+                        &String::from_utf8_lossy(&text),
+                    )
+                })
             }
         }
     }
@@ -3716,7 +4369,14 @@ pub(crate) mod test_support {
                     runner.step(*step);
                 }
                 runner.settle();
-                assert_eq!(runner.event_kinds(), self.events, "{}", self.name);
+                assert_eq!(
+                    runner.event_kinds(),
+                    self.events,
+                    "{}: delivery results {:?}, child received {:?}",
+                    self.name,
+                    runner.payloads("input_delivery_result"),
+                    String::from_utf8_lossy(&runner.child.written)
+                );
                 runner
             }
         }
@@ -3742,19 +4402,51 @@ pub(crate) mod test_support {
         }
 
         /// The native child behind the PTY: it draws queued screens, records every byte the
-        /// runner writes to it, and draws the `redraw` screen after each write that ends with
-        /// its submit key.
+        /// runner writes to it, paints the text written since the last submit key into its
+        /// composer, and draws the `redraw` screen after each write that ends with its submit
+        /// key.
         pub(crate) struct NativeChild {
             screens: FakeInput,
             pub(crate) written: Vec<u8>,
             redraw: Option<(Vec<u8>, Vec<u8>)>,
             interrupt: Option<(Vec<u8>, Vec<u8>)>,
+            painter: Option<crate::coding_agent::catalog::test_support::ComposerPainter>,
+            typed: Vec<u8>,
+            /// Whether the runner's input coordinator, rather than the human, is writing.
+            programmatic: bool,
         }
 
         impl NativeChild {
             fn draw(&mut self, screen: Vec<u8>) {
                 assert!(!screen.is_empty(), "an empty read is end of file");
                 self.screens.chunks.push_back(screen);
+            }
+
+            /// Adds the printable text of `bytes` to the composer; escape sequences such as a
+            /// lone Escape or a pointer report paint nothing, and paste markers frame text.
+            fn echo(&mut self, bytes: &[u8]) {
+                let Some(painter) = &self.painter else {
+                    return;
+                };
+                let mut text = bytes.to_vec();
+                for marker in [b"\x1b[200~".as_slice(), b"\x1b[201~"] {
+                    while let Some(at) = text
+                        .windows(marker.len())
+                        .position(|window| window == marker)
+                    {
+                        text.drain(at..at + marker.len());
+                    }
+                }
+                if text.is_empty()
+                    || text[0] == 0x1b
+                    || (!self.programmatic && self.typed.is_empty())
+                {
+                    return;
+                }
+                self.typed
+                    .extend(text.into_iter().filter(|byte| !byte.is_ascii_control()));
+                let echo = painter(&String::from_utf8_lossy(&self.typed));
+                self.screens.chunks.push_back(echo);
             }
         }
 
@@ -3777,7 +4469,10 @@ pub(crate) mod test_support {
                 } else if let Some((submit, screen)) = &self.redraw
                     && self.written.ends_with(submit)
                 {
+                    self.typed.clear();
                     self.screens.chunks.push_back(screen.clone());
+                } else {
+                    self.echo(bytes);
                 }
                 Ok(bytes.len())
             }
@@ -3855,9 +4550,12 @@ pub(crate) mod test_support {
                 conn: &mut rusqlite::Connection,
                 deadline: Instant,
             ) -> Result<Option<InputControlReply>> {
-                coordinator
+                self.child.programmatic = true;
+                let advanced = coordinator
                     .advance(conn, self.transport, self.child, self.controller, deadline)
-                    .map_err(CafleetError::from)
+                    .map_err(CafleetError::from);
+                self.child.programmatic = false;
+                advanced
             }
             fn terminate_requested(&self) -> bool {
                 false
@@ -4002,6 +4700,13 @@ pub(crate) mod test_support {
                     written: Vec::new(),
                     redraw,
                     interrupt: None,
+                    painter: crate::coding_agent::catalog::test_support::native_composer_painter(
+                        native.backend,
+                        native.size,
+                        &screen_bytes(screen),
+                    ),
+                    typed: Vec::new(),
+                    programmatic: false,
                 };
                 child.draw(screen_bytes(screen));
                 Self {
@@ -5226,7 +5931,7 @@ mod tests {
         fn an_unverified_run_stamps_an_uncertain_preview_before_publishing_it_and_never_retypes_it()
         {
             with_sweeping_input_service_catalog(
-                Duration::from_secs(30),
+                Duration::from_secs(120),
                 true,
                 without_composer_verification,
                 |fixture, until| {
@@ -6315,6 +7020,1420 @@ mod tests {
             assert_eq!(runner.typed(&line), 1, "the held preview is typed once");
             assert!(runner.notified(body));
             runner.finish();
+        }
+    }
+
+    mod director_sweep {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        use serde_json::Value;
+        use serde_json::json;
+
+        use crate::broker::runtime as storage;
+        use crate::coding_agent::ProfileCatalog;
+        use crate::coding_agent::catalog::test_support as profiles;
+        use crate::multiplexer::CommandRunner;
+        use crate::multiplexer::RunError;
+        use crate::runtime::diagnostics::RunnerDiagnostics;
+        use crate::runtime::service::DirectorSweep;
+        use crate::runtime::service::director_sweep_snapshot;
+        use crate::runtime::test_support::Fixture;
+        use crate::time::Clock;
+        use crate::time::test_support::TestClock;
+
+        const ROWS: u16 = 24;
+        const COLS: u16 = 80;
+        const TMUX_LIMIT: &str = "director-tmux-limit";
+        const HERDR_LIMIT: &str = "director-herdr-limit";
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum PaneEvent {
+            Capture,
+            Type(String),
+            Submit(Vec<u8>),
+        }
+
+        #[derive(Clone, Copy, PartialEq)]
+        enum Shown {
+            Composer,
+            Permission,
+            Plain,
+        }
+
+        #[derive(Clone, Copy, PartialEq)]
+        enum StopAt {
+            Capture,
+            FirstType,
+        }
+
+        /// The Director's tmux pane behind a fake `tmux` binary: it answers the capture
+        /// commands from its modelled screen, appends literal keys to its composer and empties
+        /// the composer on the submit key.
+        struct PaneState {
+            cols: u16,
+            shown: Shown,
+            typed: String,
+            submit_clears: bool,
+            capture_failure: Option<String>,
+            human_key_after_type: Option<&'static str>,
+            /// A database the pane locks exclusively when the submit key arrives, as a
+            /// concurrent writer that takes the lock between submission and the stamp.
+            lock_on_submit: Option<String>,
+            held_lock: Option<rusqlite::Connection>,
+            /// How many captures after each typed chunk still show the composer without it, as
+            /// a native composer that renders its input late.
+            render_delay: usize,
+            unrendered: usize,
+            stop_at: Option<(StopAt, Arc<AtomicBool>)>,
+            events: Vec<PaneEvent>,
+            calls: usize,
+        }
+
+        impl PaneState {
+            /// Each logical row split into rows of the pane width, as tmux shows wrapped text.
+            fn rows(&self) -> Vec<String> {
+                let logical: Vec<String> = match self.shown {
+                    Shown::Composer if self.typed.is_empty() => {
+                        vec!["Synthetic state".into(), "State end".into()]
+                    }
+                    Shown::Composer => vec![
+                        profiles::synthetic_composer_line(&self.typed),
+                        "State end".into(),
+                    ],
+                    Shown::Permission => [
+                        "Synthetic permission request",
+                        "Operation: rm -rf build",
+                        "> Allow once",
+                        "  Deny once",
+                        "Request form: synthetic-only",
+                        "Selection: ",
+                    ]
+                    .map(String::from)
+                    .to_vec(),
+                    Shown::Plain => vec!["plain output".into()],
+                };
+                let width = usize::from(self.cols);
+                let mut rows: Vec<String> = logical
+                    .iter()
+                    .flat_map(|line| {
+                        let chars: Vec<char> = line.chars().collect();
+                        if chars.is_empty() {
+                            return vec![String::new()];
+                        }
+                        chars
+                            .chunks(width)
+                            .map(|chunk| chunk.iter().collect())
+                            .collect::<Vec<String>>()
+                    })
+                    .collect();
+                let blank = usize::from(ROWS).saturating_sub(rows.len());
+                let mut screen = vec![String::new(); blank];
+                screen.append(&mut rows);
+                screen
+            }
+
+            fn metadata(&self) -> String {
+                let rows = self.rows();
+                let last = rows.len() - 1;
+                let cursor_col = rows[last].chars().count().min(usize::from(self.cols));
+                format!("{ROWS} {} {last} {cursor_col} 0\n", self.cols)
+            }
+
+            fn stop(&self, stage: StopAt) {
+                if let Some((at, flag)) = &self.stop_at
+                    && *at == stage
+                {
+                    flag.store(true, Ordering::Release);
+                }
+            }
+        }
+
+        #[derive(Clone)]
+        struct FakePane(Rc<RefCell<PaneState>>);
+
+        impl FakePane {
+            fn new() -> Self {
+                Self(Rc::new(RefCell::new(PaneState {
+                    cols: COLS,
+                    shown: Shown::Composer,
+                    typed: String::new(),
+                    submit_clears: true,
+                    capture_failure: None,
+                    human_key_after_type: None,
+                    lock_on_submit: None,
+                    held_lock: None,
+                    render_delay: 0,
+                    unrendered: 0,
+                    stop_at: None,
+                    events: Vec::new(),
+                    calls: 0,
+                })))
+            }
+
+            fn state(&self) -> std::cell::RefMut<'_, PaneState> {
+                self.0.borrow_mut()
+            }
+
+            fn events(&self) -> Vec<PaneEvent> {
+                self.0.borrow().events.clone()
+            }
+
+            fn typed_literals(&self) -> String {
+                self.events()
+                    .into_iter()
+                    .filter_map(|event| match event {
+                        PaneEvent::Type(chunk) => Some(chunk),
+                        _ => None,
+                    })
+                    .collect()
+            }
+
+            fn submits(&self) -> usize {
+                self.events()
+                    .iter()
+                    .filter(|event| matches!(event, PaneEvent::Submit(_)))
+                    .count()
+            }
+
+            fn captures(&self) -> usize {
+                self.events()
+                    .iter()
+                    .filter(|event| **event == PaneEvent::Capture)
+                    .count()
+            }
+        }
+
+        impl CommandRunner for FakePane {
+            fn binary_exists(&self, name: &str) -> bool {
+                name == "tmux"
+            }
+
+            fn run(&self, argv: &[String]) -> Result<String, RunError> {
+                let mut state = self.0.borrow_mut();
+                state.calls += 1;
+                assert_eq!(
+                    argv[0], "tmux",
+                    "the Director pane is a tmux pane: {argv:?}"
+                );
+                let command: Vec<&str> = argv[3..].iter().map(String::as_str).collect();
+                match command.as_slice() {
+                    ["display-message", "-p", "-t", _, format] => {
+                        assert!(format.contains("#{pane_height}"), "{argv:?}");
+                        if let Some(cause) = &state.capture_failure {
+                            return Err(RunError::Failed {
+                                stderr: cause.clone(),
+                            });
+                        }
+                        Ok(state.metadata())
+                    }
+                    ["capture-pane", "-p", "-e", "-N", "-t", _] => {
+                        state.events.push(PaneEvent::Capture);
+                        state.stop(StopAt::Capture);
+                        let mut body = if state.unrendered > 0 {
+                            state.unrendered -= 1;
+                            let typed = std::mem::take(&mut state.typed);
+                            let rows = state.rows();
+                            state.typed = typed;
+                            rows
+                        } else {
+                            state.rows()
+                        }
+                        .join("\n");
+                        body.push('\n');
+                        Ok(body)
+                    }
+                    ["send-keys", "-t", _, "-l", "--", chunk] => {
+                        let first = !state
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, PaneEvent::Type(_)));
+                        state.events.push(PaneEvent::Type((*chunk).to_owned()));
+                        state.typed.push_str(chunk);
+                        state.unrendered = state.render_delay;
+                        if let Some(key) = state.human_key_after_type.take() {
+                            state.typed.push_str(key);
+                        }
+                        if first {
+                            state.stop(StopAt::FirstType);
+                        }
+                        Ok(String::new())
+                    }
+                    ["send-keys", "-t", _, "-H", hex @ ..] => {
+                        let bytes = hex
+                            .iter()
+                            .map(|byte| u8::from_str_radix(byte, 16).unwrap())
+                            .collect();
+                        state.events.push(PaneEvent::Submit(bytes));
+                        if state.submit_clears {
+                            state.typed.clear();
+                        }
+                        if let Some(path) = state.lock_on_submit.take() {
+                            state.held_lock = Some(exclusive_lock(&path));
+                        }
+                        Ok(String::new())
+                    }
+                    other => panic!("unexpected tmux command for the Director pane: {other:?}"),
+                }
+            }
+
+            fn run_for(&self, argv: &[String], _: Duration) -> Result<String, RunError> {
+                self.run(argv)
+            }
+        }
+
+        fn limit_screen(multiplexer: &str, max: u64) -> Value {
+            json!({"native_version":profiles::VERSION,"composer_evidence":[
+                {"operation":"prompt","multiplexer":multiplexer,"kind":"unsubmitted_literal",
+                 "expected_literal":{"repeat":"a","count":max,"prefix":""}}
+            ]})
+        }
+
+        /// The synthetic codex profile with a permission request rule and, when `multiplexers`
+        /// is given, Director delivery on them with a `max`-scalar plain limit.
+        fn catalog(multiplexers: Option<&[&str]>, max: u64) -> ProfileCatalog {
+            let mut value = profiles::definition(Some("0d"), Some("0d"));
+            let permission =
+                profiles::synthetic_definitions()["codex"]["profile"]["rules"][0].clone();
+            value["codex"]["profile"]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .push(permission);
+            value["codex"]["profile"]["capabilities"]["detection"] =
+                json!({"rule_ids":[profiles::RULE],"fixture_ids":[profiles::FIXTURE]});
+            if let Some(multiplexers) = multiplexers {
+                value["codex"]["screens"][TMUX_LIMIT] = limit_screen("tmux", max);
+                value["codex"]["screens"][HERDR_LIMIT] = limit_screen("herdr", max);
+                value["codex"]["profile"]["capabilities"]["director_delivery"] = json!({
+                    "coverage":"tested",
+                    "multiplexers":multiplexers,
+                    "rule_ids":[profiles::EMPTY, profiles::SYNTHETIC_TEXT_RULE],
+                    "plain_limit":{"unit":"scalars","max":max},
+                    "fixture_ids":[TMUX_LIMIT, HERDR_LIMIT]
+                });
+            }
+            profiles::load(&value).unwrap_or_else(|error| panic!("{}", error.message()))
+        }
+
+        fn delivering() -> ProfileCatalog {
+            catalog(Some(&["tmux", "herdr"]), 1024)
+        }
+
+        /// A running member run whose fleet's root Director runs codex in a tmux pane.
+        struct DirectorRun {
+            fixture: Fixture,
+            clock: Arc<TestClock>,
+            pane: FakePane,
+            diagnostics: RunnerDiagnostics,
+            stop: Arc<AtomicBool>,
+        }
+
+        impl DirectorRun {
+            fn new() -> Self {
+                let mut fixture = Fixture::new();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_runs SET status='running',owner_kind='runner' WHERE run_id=?1",
+                        [fixture.run.run_id],
+                    )
+                    .unwrap();
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_placements SET coding_agent='codex' WHERE member_id=?1",
+                        [fixture.run.director_member_id],
+                    )
+                    .unwrap();
+                fixture.run = storage::get_run(&fixture.conn, fixture.run.run_id).unwrap();
+                Self {
+                    fixture,
+                    clock: Arc::new(TestClock::starting_at(
+                        Instant::now() + crate::runtime::test_support::VIRTUAL_LEAD,
+                    )),
+                    pane: FakePane::new(),
+                    diagnostics: RunnerDiagnostics::default(),
+                    stop: Arc::new(AtomicBool::new(false)),
+                }
+            }
+
+            fn sweep(&self, catalog: ProfileCatalog) -> DirectorSweep {
+                DirectorSweep::new(
+                    self.fixture.run.clone(),
+                    catalog,
+                    Rc::new(self.pane.clone()) as Rc<dyn CommandRunner>,
+                    self.clock.clone() as Arc<dyn Clock>,
+                    self.diagnostics.clone(),
+                )
+            }
+
+            fn tick(&mut self, sweep: &mut DirectorSweep) {
+                sweep
+                    .tick(&mut self.fixture.conn, &self.stop, None)
+                    .unwrap();
+            }
+
+            /// Ticks once per second for `seconds` of virtual time.
+            fn tick_for(&mut self, sweep: &mut DirectorSweep, seconds: u64) {
+                for _ in 0..seconds {
+                    self.tick(sweep);
+                    self.clock.advance(Duration::from_secs(1));
+                }
+            }
+
+            fn send(&mut self, from: i64, body: &str) -> crate::broker::MessageRecord {
+                let director = self.fixture.run.director_member_id;
+                crate::broker::send_message(&mut self.fixture.conn, from, director, body).unwrap()
+            }
+
+            fn report(&mut self, body: &str) -> crate::broker::MessageRecord {
+                self.send(self.fixture.run.member_id, body)
+            }
+
+            fn notified(&self, message_id: i64) -> bool {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT notified_at IS NOT NULL FROM messages WHERE message_id=?1",
+                        [message_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            fn director_placement(&self) -> crate::broker::Placement {
+                crate::broker::get_member(
+                    &self.fixture.conn,
+                    self.fixture.run.director_member_id,
+                    self.fixture.run.fleet_id,
+                )
+                .unwrap()
+                .unwrap()
+                .placement
+            }
+
+            fn url(&self) -> String {
+                format!("sqlite:///{}", self.fixture.conn.path().unwrap())
+            }
+
+            fn director_diagnostics(&self) -> Vec<(String, i64)> {
+                self.diagnostics
+                    .snapshot()
+                    .0
+                    .into_iter()
+                    .filter(|entry| {
+                        entry.source == storage::RunnerDiagnosticSource::DirectorDelivery
+                    })
+                    .map(|entry| (entry.message, entry.count))
+                    .collect()
+            }
+
+            fn runtime_events(&self) -> i64 {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1",
+                        [self.fixture.run.run_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            fn second_member(&mut self) -> i64 {
+                crate::broker::members::test_support::register(
+                    &mut self.fixture.conn,
+                    self.fixture.run.fleet_id,
+                    "second",
+                    Some("%7"),
+                )
+            }
+
+            /// Moves the message's creation time and returns the stored message.
+            fn set_created_at(
+                &self,
+                message_id: i64,
+                created_at: &str,
+            ) -> crate::broker::MessageRecord {
+                self.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET created_at=?1 WHERE message_id=?2",
+                        rusqlite::params![created_at, message_id],
+                    )
+                    .unwrap();
+                crate::broker::get_message(&self.fixture.conn, message_id).unwrap()
+            }
+        }
+
+        fn line(message: &crate::broker::MessageRecord) -> String {
+            crate::runtime::preview::canonical_preview_line(message)
+        }
+
+        /// A second connection holding the exclusive SQLite lock, as a concurrent writer does.
+        fn exclusive_lock(path: &str) -> rusqlite::Connection {
+            let holder = rusqlite::Connection::open(path).unwrap();
+            holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
+            holder
+        }
+
+        fn database_path(run: &DirectorRun) -> String {
+            run.fixture
+                .conn
+                .path()
+                .expect("the fixture database is a file")
+                .to_owned()
+        }
+
+        /// Every stored Director diagnostic takes one of the specified forms.
+        fn assert_contract_diagnostics(run: &DirectorRun) {
+            for (message, _) in run.director_diagnostics() {
+                assert!(
+                    ["held: ", "uncertain: ", "unavailable: "]
+                        .iter()
+                        .any(|form| message.contains(form)),
+                    "{message}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_stop_after_the_first_tmux_literal_chunk_writes_no_further_chunk() {
+            let mut run = DirectorRun::new();
+            let message = run.report(&"c".repeat(400));
+            let preview = line(&message);
+            assert!(
+                preview.chars().count() > 256,
+                "the literal spans two chunks"
+            );
+            run.pane.state().stop_at = Some((StopAt::FirstType, run.stop.clone()));
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            let chunks: Vec<String> = run
+                .pane
+                .events()
+                .into_iter()
+                .filter_map(|event| match event {
+                    PaneEvent::Type(chunk) => Some(chunk),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(chunks, [preview.chars().take(256).collect::<String>()]);
+            assert_eq!(run.pane.submits(), 0, "no submit key");
+            assert!(!run.notified(message.message_id));
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} uncertain: runner_stopped",
+                        message.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        mod storage_busy {
+            use super::*;
+
+            #[test]
+            fn a_busy_snapshot_holds_under_the_doubling_backoff_and_writes_nothing() {
+                let mut run = DirectorRun::new();
+                let message = run.report("waits for storage");
+                let mut sweep = run.sweep(delivering());
+                let lock = exclusive_lock(&database_path(&run));
+                for backoff in [1, 2] {
+                    let now = run.clock.now();
+                    run.tick(&mut sweep);
+                    assert_eq!(
+                        sweep.backoff_until(),
+                        Some(now + Duration::from_secs(backoff)),
+                        "a {backoff} s backoff"
+                    );
+                    assert!(
+                        run.pane.events().is_empty(),
+                        "no capture and no byte while storage is busy"
+                    );
+                    run.clock.advance(Duration::from_secs(backoff));
+                }
+                drop(lock);
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.typed_literals(), line(&message));
+                assert_eq!(run.pane.submits(), 1);
+                assert!(run.notified(message.message_id));
+                assert_eq!(
+                    sweep.backoff_until(),
+                    None,
+                    "a confirmed submission resets the backoff"
+                );
+                assert_contract_diagnostics(&run);
+            }
+
+            #[test]
+            fn a_hold_continued_by_busy_storage_reports_storage_unavailable_after_three_minutes() {
+                let mut run = DirectorRun::new();
+                let message = run.report("held behind a draft, then by busy storage");
+                run.pane.state().typed = "a draft".into();
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.submits(), 0, "the draft holds the preview");
+                run.clock.advance(Duration::from_secs(180));
+                let lock = exclusive_lock(&database_path(&run));
+                run.tick(&mut sweep);
+                drop(lock);
+                assert_eq!(
+                    run.director_diagnostics(),
+                    [(
+                        format!(
+                            "director delivery: message {} held: storage_unavailable",
+                            message.message_id
+                        ),
+                        1
+                    )]
+                );
+                assert!(!run.notified(message.message_id));
+                assert_eq!(run.pane.state().typed, "a draft", "nothing is typed");
+            }
+
+            #[test]
+            fn busy_storage_at_the_stamp_after_submission_is_an_uncertain_preview() {
+                let mut run = DirectorRun::new();
+                let message = run.report("stamped while storage is busy");
+                run.pane.state().lock_on_submit = Some(database_path(&run));
+                let mut sweep = run.sweep(delivering());
+                let now = run.clock.now();
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.submits(), 1, "the preview was submitted");
+                drop(run.pane.state().held_lock.take());
+                assert!(
+                    !run.notified(message.message_id),
+                    "the stamp did not commit"
+                );
+                assert_eq!(
+                    run.director_diagnostics(),
+                    [(
+                        format!(
+                            "director delivery: message {} uncertain: storage_unavailable",
+                            message.message_id
+                        ),
+                        1
+                    )]
+                );
+                assert!(
+                    sweep.backoff_until().is_some_and(|until| until > now),
+                    "the storage failure backs off"
+                );
+            }
+        }
+
+        mod sweep_thread {
+            use std::cell::RefCell;
+            use std::sync::Mutex;
+            use std::sync::mpsc;
+
+            use super::*;
+            use crate::runtime::service::DirectorSweepThread;
+
+            /// The Director pane whose first metadata read blocks until released and whose
+            /// capture then hangs for its whole timeout, as a stuck tmux client does.
+            struct HungPane {
+                pane: FakePane,
+                entered: RefCell<Option<mpsc::Sender<()>>>,
+                release: mpsc::Receiver<()>,
+                timeouts: Arc<Mutex<Vec<(String, Duration)>>>,
+            }
+
+            impl CommandRunner for HungPane {
+                fn binary_exists(&self, name: &str) -> bool {
+                    self.pane.binary_exists(name)
+                }
+
+                fn run(&self, argv: &[String]) -> Result<String, RunError> {
+                    self.pane.run(argv)
+                }
+
+                fn run_for(&self, argv: &[String], timeout: Duration) -> Result<String, RunError> {
+                    let command = argv[3].clone();
+                    self.timeouts
+                        .lock()
+                        .unwrap()
+                        .push((command.clone(), timeout));
+                    match command.as_str() {
+                        "display-message" => {
+                            if let Some(entered) = self.entered.borrow_mut().take() {
+                                entered.send(()).unwrap();
+                                self.release.recv().unwrap();
+                            }
+                            self.pane.run(argv)
+                        }
+                        "capture-pane" => {
+                            std::thread::sleep(timeout);
+                            Err(RunError::Timeout)
+                        }
+                        _ => self.pane.run(argv),
+                    }
+                }
+            }
+
+            /// Joins `thread` on another thread so a sweep that never stops fails the test
+            /// instead of hanging it.
+            fn join_within(thread: DirectorSweepThread, shutdown: Instant, limit: Duration) {
+                let (joined, done) = mpsc::channel();
+                std::thread::spawn(move || {
+                    thread.stop_and_join(shutdown);
+                    joined.send(()).unwrap();
+                });
+                done.recv_timeout(limit)
+                    .expect("the sweep thread stops and joins");
+            }
+
+            /// The capture timeout and join instant of a sweep handed the shutdown deadline
+            /// `shutdown` builds while its first capture is in flight: the pane's first metadata
+            /// read blocks until after the handoff, then its capture hangs for its timeout.
+            fn shutdown_mid_capture(
+                run: &DirectorRun,
+                clock: Arc<dyn Clock>,
+                shutdown: impl FnOnce() -> Instant,
+            ) -> (Duration, Instant) {
+                let (entered_tx, entered) = mpsc::channel();
+                let (release, release_rx) = mpsc::channel();
+                let timeouts = Arc::new(Mutex::new(Vec::new()));
+                let recorded = timeouts.clone();
+                let thread = DirectorSweepThread::start_with_runner(
+                    format!("sqlite:///{}", database_path(run)),
+                    run.fixture.run.clone(),
+                    delivering(),
+                    clock,
+                    run.diagnostics.clone(),
+                    move || {
+                        Rc::new(HungPane {
+                            pane: FakePane::new(),
+                            entered: RefCell::new(Some(entered_tx)),
+                            release: release_rx,
+                            timeouts: recorded,
+                        }) as Rc<dyn CommandRunner>
+                    },
+                );
+                entered
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("the attempt reaches its first capture");
+                let shutdown = shutdown();
+                let (joined, done) = mpsc::channel();
+                std::thread::spawn(move || {
+                    thread.stop_and_join(shutdown);
+                    joined.send(Instant::now()).unwrap();
+                });
+                std::thread::sleep(Duration::from_millis(100));
+                release.send(()).unwrap();
+                let joined_at = done
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("the sweep thread stops and joins");
+                let capture = timeouts
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|(command, _)| command == "capture-pane")
+                    .map(|(_, timeout)| *timeout)
+                    .expect("the in-flight capture ran");
+                (capture, joined_at)
+            }
+
+            #[test]
+            fn stop_and_join_returns_by_the_shutdown_deadline_with_the_in_flight_attempt_clipped() {
+                let mut run = DirectorRun::new();
+                let message = run.report("in flight at shutdown");
+                let shutdown = Instant::now() + Duration::from_millis(600);
+                let (capture, joined_at) = shutdown_mid_capture(
+                    &run,
+                    Arc::new(crate::time::SystemClock) as Arc<dyn Clock>,
+                    || shutdown,
+                );
+                assert!(
+                    joined_at <= shutdown + Duration::from_millis(250),
+                    "joined {:?} after the shutdown deadline",
+                    joined_at.saturating_duration_since(shutdown)
+                );
+                assert!(
+                    capture <= Duration::from_millis(500),
+                    "the in-flight capture runs under the clipped deadline: {capture:?}"
+                );
+                assert!(!run.notified(message.message_id));
+            }
+
+            #[test]
+            fn the_subprocess_clip_measures_the_shutdown_deadline_on_the_injected_clock() {
+                let mut run = DirectorRun::new();
+                let message = run.report("in flight at a virtual shutdown");
+                let clock = run.clock.clone();
+                let (capture, _) =
+                    shutdown_mid_capture(&run, run.clock.clone() as Arc<dyn Clock>, move || {
+                        clock.now() + Duration::from_millis(600)
+                    });
+                assert!(
+                    !capture.is_zero() && capture <= Duration::from_millis(600),
+                    "the capture timeout is the virtual time left before the shutdown deadline: \
+                     {capture:?}"
+                );
+                assert!(!run.notified(message.message_id));
+            }
+
+            #[test]
+            fn a_connect_failure_retries_under_the_doubling_backoff_and_stores_a_diagnostic() {
+                let run = DirectorRun::new();
+                let blocker = run.fixture._dir.path().join("blocker");
+                std::fs::write(&blocker, b"").unwrap();
+                let clock = Arc::new(TestClock::starting_at(Instant::now()));
+                let thread = DirectorSweepThread::start(
+                    format!("sqlite:///{}/cafleet.db", blocker.display()),
+                    run.fixture.run.clone(),
+                    delivering(),
+                    clock.clone() as Arc<dyn Clock>,
+                    run.diagnostics.clone(),
+                );
+                let waited = Instant::now() + Duration::from_secs(10);
+                while clock.elapsed() < Duration::from_secs(62) {
+                    assert!(
+                        Instant::now() < waited,
+                        "the sweep thread keeps running: {:?}",
+                        clock.elapsed()
+                    );
+                    std::thread::yield_now();
+                }
+                join_within(
+                    thread,
+                    clock.now() + Duration::from_secs(1),
+                    Duration::from_secs(10),
+                );
+                let attempts_by = |elapsed: Duration| {
+                    let (mut at, mut backoff, mut attempts) =
+                        (Duration::ZERO, Duration::from_secs(1), 0);
+                    while at <= elapsed {
+                        attempts += 1;
+                        at += backoff;
+                        backoff = (backoff * 2).min(Duration::from_secs(30));
+                    }
+                    attempts
+                };
+                let elapsed = clock.elapsed();
+                let expected = [
+                    attempts_by(elapsed.saturating_sub(Duration::from_millis(100))),
+                    attempts_by(elapsed),
+                ];
+                let diagnostics = run.director_diagnostics();
+                assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+                assert!(
+                    diagnostics[0]
+                        .0
+                        .starts_with("director delivery: storage unavailable: "),
+                    "{diagnostics:?}"
+                );
+                assert!(
+                    expected.contains(&diagnostics[0].1),
+                    "one connect attempt at 0, 1, 3, 7, 15, 31, 61 s and every 30 s after, \
+                     {expected:?} by {elapsed:?}: {diagnostics:?}"
+                );
+            }
+        }
+
+        mod snapshot {
+            use crate::runtime::service::tests::director_sweep::*;
+
+            #[test]
+            fn the_snapshot_selects_the_oldest_unnotified_pending_director_message_across_senders()
+            {
+                let mut run = DirectorRun::new();
+                let second = run.second_member();
+                let newer = run.report("newer report");
+                let older = run.send(second, "older report from another member");
+                run.set_created_at(newer.message_id, "2026-11-23T10:00:02+00:00");
+                run.set_created_at(older.message_id, "2026-11-23T10:00:01+00:00");
+                let consumed = run.report("consumed report");
+                run.set_created_at(consumed.message_id, "2026-11-23T09:00:00+00:00");
+                run.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                        [consumed.message_id],
+                    )
+                    .unwrap();
+                let stamped = run.report("stamped report");
+                run.set_created_at(stamped.message_id, "2026-11-23T09:00:01+00:00");
+                run.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET notified_at='2026-11-23T09:00:02+00:00' WHERE message_id=?1",
+                        [stamped.message_id],
+                    )
+                    .unwrap();
+                let target =
+                    director_sweep_snapshot(&mut run.fixture.conn, &run.fixture.run, &delivering())
+                        .unwrap()
+                        .expect("an eligible run selects the Director head");
+                assert_eq!(target.message.message_id, older.message_id);
+                assert_eq!(target.placement, run.director_placement());
+            }
+
+            #[test]
+            fn the_snapshot_selects_nothing_without_an_eligible_run_director_or_coverage() {
+                type Change = fn(&mut DirectorRun);
+                let cases: [(&str, Change, Option<&[&str]>); 5] = [
+                    (
+                        "the member is inactive",
+                        |run| {
+                            run.fixture
+                                .conn
+                                .execute(
+                                    "UPDATE members SET status='deregistered' WHERE member_id=?1",
+                                    [run.fixture.run.member_id],
+                                )
+                                .unwrap();
+                        },
+                        Some(&["tmux", "herdr"]),
+                    ),
+                    (
+                        "the member records another run",
+                        |run| {
+                            run.fixture.run.run_id += 1000;
+                        },
+                        Some(&["tmux", "herdr"]),
+                    ),
+                    (
+                        "the Director has no concrete pane",
+                        |run| {
+                            run.fixture
+                                .conn
+                                .execute(
+                                    "UPDATE member_placements SET mux_pane_id=NULL,mux_window_id=NULL,mux_window_name=NULL WHERE member_id=?1",
+                                    [run.fixture.run.director_member_id],
+                                )
+                                .unwrap();
+                        },
+                        Some(&["tmux", "herdr"]),
+                    ),
+                    (
+                        "the Director backend has no Director delivery",
+                        |_| {},
+                        None,
+                    ),
+                    (
+                        "the Director multiplexer is not listed",
+                        |_| {},
+                        Some(&["herdr"]),
+                    ),
+                ];
+                for (name, change, multiplexers) in cases {
+                    let mut run = DirectorRun::new();
+                    run.report("pending report");
+                    change(&mut run);
+                    let catalog = catalog(multiplexers, 1024);
+                    let target =
+                        director_sweep_snapshot(&mut run.fixture.conn, &run.fixture.run, &catalog);
+                    assert!(!matches!(target, Ok(Some(_))), "{name}: no Director target");
+                }
+            }
+        }
+
+        #[test]
+        fn a_verified_empty_composer_receives_the_canonical_preview_then_its_message_is_stamped() {
+            let mut run = DirectorRun::new();
+            let message = run.report("results are ready");
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.typed_literals(), line(&message));
+            assert_eq!(run.pane.submits(), 1);
+            assert!(
+                run.pane.events().contains(&PaneEvent::Submit(vec![0x0d])),
+                "the prompt plan's submit bytes"
+            );
+            assert!(run.notified(message.message_id));
+            assert!(run.director_diagnostics().is_empty());
+        }
+
+        #[test]
+        fn director_messages_are_delivered_strictly_oldest_first_across_senders() {
+            let mut run = DirectorRun::new();
+            let second = run.second_member();
+            let newer = run.report("newer report");
+            let older = run.send(second, "older report");
+            let newer = run.set_created_at(newer.message_id, "2026-11-23T10:00:02+00:00");
+            let older = run.set_created_at(older.message_id, "2026-11-23T10:00:01+00:00");
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert!(run.notified(older.message_id));
+            assert!(!run.notified(newer.message_id));
+            run.clock.advance(Duration::from_secs(1));
+            run.tick(&mut sweep);
+            assert!(run.notified(newer.message_id));
+            let typed = run.pane.typed_literals();
+            assert!(typed.find(&line(&older)).unwrap() < typed.find(&line(&newer)).unwrap());
+        }
+
+        #[test]
+        fn the_sweep_runs_at_most_once_per_interval() {
+            let mut run = DirectorRun::new();
+            run.pane.state().typed = "draft".into();
+            run.report("held report");
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            let captures = run.pane.captures();
+            assert!(captures > 0);
+            run.clock.advance(Duration::from_millis(500));
+            run.tick(&mut sweep);
+            assert_eq!(
+                run.pane.captures(),
+                captures,
+                "no second pass within the interval"
+            );
+            run.clock.advance(Duration::from_millis(500));
+            run.tick(&mut sweep);
+            assert!(run.pane.captures() > captures);
+        }
+
+        #[test]
+        fn a_busy_director_pane_lock_ends_the_tick_without_capture_or_backoff() {
+            let mut run = DirectorRun::new();
+            let message = run.report("waits for the lock");
+            let held =
+                crate::pane_lock::PaneLock::try_acquire(&run.url(), &run.director_placement())
+                    .unwrap()
+                    .expect("the Director pane lock is free");
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert!(run.pane.events().is_empty());
+            assert_eq!(sweep.backoff_until(), None);
+            assert!(!run.notified(message.message_id));
+            drop(held);
+            run.clock.advance(Duration::from_secs(1));
+            run.tick(&mut sweep);
+            assert!(run.notified(message.message_id));
+        }
+
+        #[test]
+        fn a_consumed_or_already_stamped_message_is_never_typed() {
+            for state in ["consumed", "stamped"] {
+                let mut run = DirectorRun::new();
+                let message = run.report("read before delivery");
+                let update = if state == "consumed" {
+                    "UPDATE messages SET status_state='completed' WHERE message_id=?1"
+                } else {
+                    "UPDATE messages SET notified_at='2026-11-23T10:00:00+00:00' WHERE message_id=?1"
+                };
+                run.fixture
+                    .conn
+                    .execute(update, [message.message_id])
+                    .unwrap();
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                assert!(run.pane.events().is_empty(), "{state}");
+            }
+        }
+
+        #[test]
+        fn a_draft_an_interaction_or_a_narrow_pane_holds_the_preview_until_the_composer_clears() {
+            type Hold = fn(&mut PaneState);
+            let cases: [(&str, Hold); 4] = [
+                ("a draft", |pane| pane.typed = "draft".into()),
+                ("an open approval", |pane| pane.shown = Shown::Permission),
+                ("an unrecognized screen", |pane| pane.shown = Shown::Plain),
+                ("a narrow pane", |pane| pane.cols = 10),
+            ];
+            for (name, hold) in cases {
+                let mut run = DirectorRun::new();
+                let message = run.report("held while the pane is busy");
+                hold(&mut run.pane.state());
+                let mut sweep = run.sweep(delivering());
+                run.tick_for(&mut sweep, 5);
+                assert!(run.pane.captures() > 0, "{name}: the sweep captures");
+                assert_eq!(run.pane.typed_literals(), "", "{name}: nothing is typed");
+                assert_eq!(
+                    sweep.backoff_until(),
+                    None,
+                    "{name}: a hold arms no backoff"
+                );
+                assert!(!run.notified(message.message_id), "{name}");
+                {
+                    let mut pane = run.pane.state();
+                    pane.typed.clear();
+                    pane.shown = Shown::Composer;
+                    pane.cols = COLS;
+                }
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.typed_literals(), line(&message), "{name}");
+                assert!(run.notified(message.message_id), "{name}");
+            }
+        }
+
+        #[test]
+        fn a_held_head_blocks_newer_director_messages() {
+            let mut run = DirectorRun::new();
+            run.pane.state().typed = "draft".into();
+            let head = run.report("held head");
+            let newer = run.report("newer report");
+            run.set_created_at(head.message_id, "2026-11-23T10:00:01+00:00");
+            run.set_created_at(newer.message_id, "2026-11-23T10:00:02+00:00");
+            let mut sweep = run.sweep(delivering());
+            run.tick_for(&mut sweep, 3);
+            assert!(!run.notified(head.message_id));
+            assert!(!run.notified(newer.message_id));
+            assert_eq!(run.pane.typed_literals(), "");
+        }
+
+        #[test]
+        fn a_capture_failure_holds_with_a_doubling_backoff_capped_at_thirty_seconds() {
+            let mut run = DirectorRun::new();
+            let message = run.report("waits for the pane");
+            run.pane.state().capture_failure = Some("can't find pane: %0".into());
+            let mut sweep = run.sweep(delivering());
+            let mut expected = Duration::from_secs(1);
+            for _ in 0..7 {
+                let now = run.clock.now();
+                run.tick(&mut sweep);
+                assert_eq!(sweep.backoff_until(), Some(now + expected));
+                run.clock.advance(expected - Duration::from_millis(1));
+                let before = run.pane.state().calls;
+                run.tick(&mut sweep);
+                assert_eq!(
+                    run.pane.state().calls,
+                    before,
+                    "no pass before the backoff expires"
+                );
+                run.clock.advance(Duration::from_millis(1));
+                expected = (expected * 2).min(Duration::from_secs(30));
+            }
+            assert_eq!(expected, Duration::from_secs(30));
+            assert!(!run.notified(message.message_id));
+            let unavailable = run.director_diagnostics();
+            assert!(
+                unavailable
+                    .iter()
+                    .any(|(text, _)| text.starts_with("director delivery: pane ")
+                        && text.contains(" unavailable: ")),
+                "{unavailable:?}"
+            );
+            run.pane.state().capture_failure = None;
+            run.tick(&mut sweep);
+            assert!(run.notified(message.message_id));
+            run.clock.advance(Duration::from_secs(1));
+            let next = run.report("after the recovery");
+            run.tick(&mut sweep);
+            assert!(
+                run.notified(next.message_id),
+                "a confirmed submission resets the backoff"
+            );
+        }
+
+        #[test]
+        fn director_delivery_creates_no_input_receipt_and_publishes_no_runtime_event() {
+            let mut run = DirectorRun::new();
+            let events = run.runtime_events();
+            run.report("delivered silently");
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            run.pane.state().typed = "draft".into();
+            run.report("held silently");
+            run.clock.advance(Duration::from_secs(1));
+            run.tick_for(&mut sweep, 200);
+            assert_eq!(run.runtime_events(), events);
+            let receipts: i64 = run
+                .fixture
+                .conn
+                .query_row("SELECT COUNT(*) FROM member_input_operations", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(receipts, 0);
+        }
+
+        #[test]
+        fn a_held_message_records_one_diagnostic_when_its_hold_reaches_three_minutes() {
+            let mut run = DirectorRun::new();
+            run.pane.state().typed = "draft".into();
+            let message = run.report("held for minutes");
+            let mut sweep = run.sweep(delivering());
+            run.tick_for(&mut sweep, 179);
+            assert!(
+                run.director_diagnostics().is_empty(),
+                "no diagnostic before three minutes"
+            );
+            run.tick_for(&mut sweep, 360);
+            assert_eq!(
+                run.director_diagnostics(),
+                [(
+                    format!(
+                        "director delivery: message {} held: composer_busy",
+                        message.message_id
+                    ),
+                    1
+                )],
+                "one diagnostic per runner and held message"
+            );
+            run.pane.state().typed.clear();
+            run.tick(&mut sweep);
+            assert!(run.notified(message.message_id));
+            run.pane.state().shown = Shown::Permission;
+            let next = run.report("held behind an approval");
+            run.clock.advance(Duration::from_secs(1));
+            run.tick_for(&mut sweep, 181);
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} held: interaction_open",
+                        next.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        #[test]
+        fn a_director_without_coverage_or_on_an_unlisted_multiplexer_gets_no_capture() {
+            for (name, catalog) in [
+                ("no Director delivery", catalog(None, 1024)),
+                ("tmux is not listed", catalog(Some(&["herdr"]), 1024)),
+            ] {
+                let mut run = DirectorRun::new();
+                let message = run.report("never typed");
+                let mut sweep = run.sweep(catalog);
+                run.tick_for(&mut sweep, 3);
+                assert!(run.pane.events().is_empty(), "{name}");
+                assert!(!run.notified(message.message_id), "{name}");
+            }
+        }
+
+        #[test]
+        fn a_preview_above_the_director_plain_limit_types_the_pointer_form_without_a_paste() {
+            let mut run = DirectorRun::new();
+            let message = run.report(&"a".repeat(300));
+            let mut sweep = run.sweep(catalog(Some(&["tmux", "herdr"]), 120));
+            run.tick(&mut sweep);
+            let typed = run.pane.typed_literals();
+            assert_eq!(
+                typed,
+                crate::runtime::preview::pointer_preview_line(&message)
+            );
+            assert!(!typed.contains("\x1b[200~"), "no bracketed paste");
+            assert!(run.notified(message.message_id));
+        }
+
+        #[test]
+        fn a_preview_at_the_director_plain_limit_types_inline() {
+            let mut run = DirectorRun::new();
+            let probe = run.report("x");
+            let overhead = line(&probe).chars().count() - 1;
+            run.fixture
+                .conn
+                .execute(
+                    "UPDATE messages SET notified_at='2026-11-23T10:00:00+00:00' WHERE message_id=?1",
+                    [probe.message_id],
+                )
+                .unwrap();
+            let message = run.report(&"b".repeat(200 - overhead));
+            assert_eq!(line(&message).chars().count(), 200);
+            let mut sweep = run.sweep(catalog(Some(&["tmux", "herdr"]), 200));
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.typed_literals(), line(&message));
+        }
+
+        /// The captures taken between the first typed chunk and the submit key.
+        fn pre_submit_captures(pane: &FakePane) -> usize {
+            pane.events()
+                .into_iter()
+                .skip_while(|event| !matches!(event, PaneEvent::Type(_)))
+                .take_while(|event| !matches!(event, PaneEvent::Submit(_)))
+                .filter(|event| matches!(event, PaneEvent::Capture))
+                .count()
+        }
+
+        #[test]
+        fn a_preview_rendering_within_the_pre_submit_window_is_submitted_and_notified() {
+            let mut run = DirectorRun::new();
+            let message = run.report("renders after the settle");
+            run.pane.state().render_delay = 4;
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.typed_literals(), line(&message));
+            assert_eq!(
+                pre_submit_captures(&run.pane),
+                5,
+                "the composer is re-observed until the literal renders"
+            );
+            assert_eq!(run.pane.submits(), 1, "the submit key follows the render");
+            assert!(run.notified(message.message_id));
+            assert!(
+                !run.director_diagnostics()
+                    .iter()
+                    .any(|(text, _)| text.contains("literal_mismatch")),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        #[test]
+        fn an_appended_key_records_literal_mismatch_when_the_pre_submit_window_closes() {
+            let mut run = DirectorRun::new();
+            let message = run.report("races a human key past the window");
+            run.pane.state().human_key_after_type = Some("x");
+            let mut sweep = run.sweep(delivering());
+            let started = run.clock.elapsed();
+            run.tick(&mut sweep);
+            let waited = run.clock.elapsed() - started;
+            assert!(
+                waited
+                    >= super::super::DIRECTOR_SETTLE + crate::runtime::input::PRE_SUBMIT_WINDOW
+                        - super::super::DIRECTOR_VERIFICATION_POLL,
+                "the mismatch waits for the window to close: {waited:?}"
+            );
+            assert!(
+                pre_submit_captures(&run.pane) > 1,
+                "the composer is re-observed inside the window"
+            );
+            assert_eq!(run.pane.submits(), 0, "no submit key after the mismatch");
+            assert!(!run.notified(message.message_id));
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} uncertain: literal_mismatch",
+                        message.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        #[test]
+        fn a_key_typed_during_the_settle_leaves_the_preview_unnotified_and_it_is_typed_again() {
+            let mut run = DirectorRun::new();
+            let message = run.report("races a human key");
+            run.pane.state().human_key_after_type = Some("x");
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.submits(), 0, "no submit key after the mismatch");
+            assert!(!run.notified(message.message_id));
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} uncertain: literal_mismatch",
+                        message.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
+            run.clock.advance(Duration::from_secs(1));
+            run.tick(&mut sweep);
+            assert_eq!(
+                run.pane.submits(),
+                0,
+                "the leftover literal holds the composer"
+            );
+            run.pane.state().typed.clear();
+            run.clock.advance(Duration::from_secs(1));
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.submits(), 1);
+            assert!(run.notified(message.message_id));
+        }
+
+        #[test]
+        fn an_unconfirmed_submission_is_never_stamped() {
+            let mut run = DirectorRun::new();
+            let message = run.report("submitted but not confirmed");
+            run.pane.state().submit_clears = false;
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.submits(), 1);
+            assert!(!run.notified(message.message_id));
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} uncertain: submit_unconfirmed",
+                        message.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        #[test]
+        fn a_stop_signal_starts_no_new_writing_stage() {
+            for (name, stop_at, typed) in [
+                ("a stop at the capture", StopAt::Capture, false),
+                (
+                    "a stop after the first literal chunk",
+                    StopAt::FirstType,
+                    true,
+                ),
+            ] {
+                let mut run = DirectorRun::new();
+                let message = run.report("stopped mid-delivery");
+                run.pane.state().stop_at = Some((stop_at, run.stop.clone()));
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                assert_eq!(!run.pane.typed_literals().is_empty(), typed, "{name}");
+                assert_eq!(run.pane.submits(), 0, "{name}: no submit key");
+                assert!(!run.notified(message.message_id), "{name}");
+                if typed {
+                    assert!(
+                        run.director_diagnostics().contains(&(
+                            format!(
+                                "director delivery: message {} uncertain: runner_stopped",
+                                message.message_id
+                            ),
+                            1
+                        )),
+                        "{name}: {:?}",
+                        run.director_diagnostics()
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn the_attempt_ends_within_the_clipped_shutdown_deadline() {
+            let mut run = DirectorRun::new();
+            let message = run.report("delivered past the shutdown deadline");
+            let mut sweep = run.sweep(delivering());
+            let shutdown = run.clock.now() + Duration::from_millis(200);
+            sweep
+                .tick(&mut run.fixture.conn, &run.stop, Some(shutdown))
+                .unwrap();
+            assert!(
+                run.clock.now() <= shutdown,
+                "the attempt never outlives the shutdown deadline"
+            );
+            assert_eq!(
+                run.pane.submits(),
+                0,
+                "the 500 ms settle cannot finish in time"
+            );
+            assert!(!run.notified(message.message_id));
+        }
+
+        #[test]
+        fn a_message_sent_while_no_runner_is_live_is_delivered_by_a_later_runner() {
+            let mut run = DirectorRun::new();
+            let message = run.report("sent while no runner sweeps");
+            run.clock.advance(Duration::from_secs(60));
+            assert!(
+                !run.notified(message.message_id),
+                "nothing delivers without a live runner"
+            );
+            assert!(run.pane.events().is_empty());
+            let mut later = run.sweep(delivering());
+            run.tick(&mut later);
+            assert_eq!(run.pane.typed_literals(), line(&message));
+            assert!(run.notified(message.message_id));
         }
     }
 }

@@ -10,10 +10,10 @@ Model data is refreshed at least every 30 days (last refreshed: 2026-11-17). Pri
 
 A role is eligible (`yes`) only when evidence establishes every requirement; otherwise `no`, naming each unmet one. A Director needs:
 
-- **Listen**, by tier: native subscribe (the backend pushes each listen record into the session as a turn), extension subscribe (a plugin `cafleet setup` installs does the same) or built-in compromise (the model reads listener output, spending turns and needing heartbeat wake). A subscribe listen starts a turn on an idle session and delivers by the end of a busy turn, in emission order.
+- **Pane delivery**: the bundled profile declares Director-screen coverage on tmux and herdr, and a live Director delivery probe passed on both for the installed native version. The fleet's member runners then type each pending message's preview into the Director's pane only while its composer is verified empty with no dialog open; a preview starts a turn on an idle session and arrives no later than the end of a busy turn.
 - **Goal**: native goal lifecycle controls, or a CAFleet extension verified live for lifecycle, persistence and continuation.
 
-Eligible Directors without verified reception follow [receiver recovery](../roles/director.md#receiver-recovery).
+An eligible Director whose delivery is held or unavailable reads by manual poll ([Director wake](../roles/director.md#director-wake)).
 
 A Member needs a runner-compatible PTY and a default mode classed `auto` or `manual` whose bundled profile declares its coverage, detects every approval form (a native permission request blocking the member) and answers allow and deny per request. Renderings past the profile's layout limits are answered manually; a backend without a bundled profile launches with `coverage=unknown`.
 
@@ -64,9 +64,8 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | Note | Applies at |
 |---|---|
 | `AskUserQuestion` offers up to four options plus a free-text Other. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
-| A separate evaluator checks the goal against the transcript; native background work defers it. | [Director wake](../roles/director.md#director-wake); [native reception](#claude-native-director-reception) |
-| Every Monitor arm, renewal and replacement passes the `"timeout_ms":1800000` cap with `cafleet message listen <director-id> --timeout 1770`, so the CLI lease closes first. | [Spawn Protocol](../roles/director.md#spawn-protocol) step 4; [receiver recovery](../roles/director.md#receiver-recovery); [native reception](#claude-native-director-reception) |
-| Monitor merges lines arriving within 200 ms, truncates long lines and rate-limits bursts with `[N events suppressed — …]`, stopping after 30 s of suppression. | [Native reception](#claude-native-director-reception); [Director wake](../roles/director.md#director-wake) |
+| A separate evaluator checks the goal against the transcript; native background work defers it. | [Director wake](../roles/director.md#director-wake) |
+| A preview typed into the Director pane during a running turn waits for the end of the turn. An open tool approval or `AskUserQuestion` form in the Director pane holds every preview until it closes. | [Director wake](../roles/director.md#director-wake) |
 | Native `!` shell probes showed the output followed by a model turn; its trigger and permission check are unestablished. | [Command authorization](../roles/director.md#director-side-dispatch) |
 | Default `auto` (class `auto`, as are `dontAsk` and `bypassPermissions`; `manual`: `default`, `manual`, `acceptEdits`, `plan`) runs spawn-allowed broker tools and host allows, and its classifier reviews other calls; route refused calls. `manual`-class forms (`Read file`, `Edit file`, `Create file`, three-choice Bash) and outside-workspace file access wait for a request-bound answer. | `{permission_flags}`; [routing](../roles/member.md#reconsider-then-route); [runtime handling](../roles/director.md#runtime-events) |
 | Resolve native folder trust before unattended startup. | `{permission_flags}`; [observed interactions](../roles/director.md#consume-observed-interactions) |
@@ -77,23 +76,11 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | An AskUserQuestion form (numbered options, `Chat about this`, `Enter to select · … · Esc to cancel` or `Review your answers`) opens a `question` with `review_question` and no listed choice. | [Observed interactions](../roles/director.md#consume-observed-interactions) |
 | `The user doesn't want to proceed with this tool use.` is delivery-caused only when an Escape-dismissal preview follows. | [Command execution](../roles/member.md#command-execution) |
 
-#### Claude native Director reception
-
-Discover Monitor and authorize it separately from Bash. After registration, start one Monitor with the literal Director ID (`Bash(run_in_background=true)` reports only completion):
-
-```json
-{"command":"cafleet message listen 1 --timeout 1770","description":"CAFleet Director inbox","timeout_ms":1800000}
-```
-
-Require `ready` and retain the Monitor task ID as the receiver handle while the fleet exists. Handle each `pending` line under [Director wake](../roles/director.md#director-wake) steps 1–4 and 6.
-
-On `closed` or stream completion, verify task and child exit, then renew with the same invocation, reconciling replay and deduplicating by task ID. A host timeout before CLI closure, or unavailable or denied Monitor, follows [receiver recovery](../roles/director.md#receiver-recovery), cancelling a Monitor only to replace it. After `closed` `fleet_deleted`, start no replacement.
-
 ### Role eligibility
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `native` (2.1.296); `listen` `native` `subscribe` through one Monitor task (2.1.319, checked 2026-11-17) |
+| Director | `yes` | `goal` `native` (2.1.296); `pane delivery` on tmux 3.8 and herdr 0.9.5 (2.1.325, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact |
 | Member | `yes` | Omitted `auto` automatic review; the bundled Claude profile |
 
 ## codex
@@ -137,29 +124,20 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [C
 
 | Note | Applies at |
 |---|---|
-| Director notices arrive as queued user turns from the `--codex-thread` forwarder, interleaved with native goal turns. | [Director wake](../roles/director.md#director-wake); [native reception](#codex-native-director-reception) |
-| A refusal at the 100-submission thread queue cap ends the forwarder with exit 1; replace it through receiver recovery. | [Native reception](#codex-native-director-reception); [receiver recovery](../roles/director.md#receiver-recovery) |
+| A preview typed into the Director pane during a running turn joins that turn without interrupting it; previews interleave with native goal continuation turns. | [Director wake](../roles/director.md#director-wake) |
 | Native `!` shell shows command, exit code and output; its sandbox boundary and permission check are unestablished. | [Native authorization and continuation](../roles/director.md#director-side-dispatch) |
 | Default `approve-for-me` (class `auto`, as is `never`; `on-request` is `manual`): run host-permitted workspace commands; automatic review decides escalations; route a necessary refused command. Explicit `on-request` uses the native form and runtime-event procedure. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
-| Restart Codex to load the installed `<codex home>/rules/cafleet.rules`, whose allows run outside the sandbox. Run one CAFleet command per invocation; wrappers and variable expansion can affect matching. | `{permission_flags}`; [command execution](../roles/member.md#command-execution); [native reception](#codex-native-director-reception) |
-| The Director's approval policy permits escalation requests, with `approvals_reviewer` selecting user or automatic review; `never` cannot obtain a new approval. Member `--permission-mode` sets only that member's policy. | `{permission_flags}`; [native reception](#codex-native-director-reception); [Member launch policy](../roles/director.md#member-launch-policy) |
-| A Director keeps the shared daemon (no `--no-daemon`) the forwarder needs, so tool commands run under `codex app-server` and `fleet create` needs Director pane identification. | Director launch; [Director pane identification](../roles/director.md#director-pane-identification) |
+| Restart Codex to load the installed `<codex home>/rules/cafleet.rules`, whose allows run outside the sandbox. Run one CAFleet command per invocation; wrappers and variable expansion can affect matching. | `{permission_flags}`; [command execution](../roles/member.md#command-execution) |
+| The Director's approval policy permits escalation requests, with `approvals_reviewer` selecting user or automatic review; `never` cannot obtain a new approval. Member `--permission-mode` sets only that member's policy. | `{permission_flags}`; [Member launch policy](../roles/director.md#member-launch-policy) |
+| A Director's tool commands run under the shared `codex app-server` daemon, so `fleet create` needs Director pane identification. | Director launch; [Director pane identification](../roles/director.md#director-pane-identification) |
 | Three consecutive automatic denials interrupt the turn; ask a member idle without a report whether refused operations are still needed. | `{permission_flags}`; [Member launch policy](../roles/director.md#member-launch-policy) |
 | Resolve native `Trust this folder?` before unattended startup; worktree trust follows the native repository scope. | `{permission_flags}`; [observed interactions](../roles/director.md#consume-observed-interactions) |
-
-#### Codex native Director reception
-
-1. After registration in a restarted, daemon-backed Codex session, start one forwarder through native `exec_command`: `cafleet message listen <director-id> --codex-thread "$CODEX_THREAD_ID"` ([`message listen`](cli.md#message-listen)), with a 1,000 ms initial yield, no `--timeout` and any non-default `--database-url`.
-2. If sandbox startup fails before `ready` (`cannot run ps: Operation not permitted (os error 1)`, bwrap namespace errors, `--codex-thread requires a codex ancestor process`), retry with `sandbox_permissions: "require_escalated"`; if refused, report the error and effective policy and follow [receiver recovery](../roles/director.md#receiver-recovery).
-3. Require `ready`, retain the exec `session_id`, and confirm a member message yields a queued notice.
-4. Handle each queued `[cafleet listen record]` turn under [Director wake](../roles/director.md#director-wake) steps 3–4.
-5. On closure, follow [receiver recovery](../roles/director.md#receiver-recovery); fleet deletion ends reception.
 
 ### Role eligibility
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `native` (0.162.1); `listen` `native` `subscribe` through `codex queue` on the escalated path (0.167.0, checked 2026-11-17); the sandboxed path is unverified |
+| Director | `yes` | `goal` `native` (0.162.1); `pane delivery` on tmux 3.8 and herdr 0.9.5 (0.169.0, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact |
 | Member | `yes` | Omitted `--approve-for-me` automatic review; the bundled Codex profile |
 
 ## opencode
@@ -325,33 +303,31 @@ Sources: [OpenCode Go models endpoint](https://opencode.ai/inference/go/v1/model
 
 | Note | Applies at |
 |---|---|
-| [Setup](cli.md#setup-and-doctor) installs the plugin `<preset base>/plugins/cafleet.ts`, providing `cafleet_listen`, `/cafleet-goal`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`. | setup; [native reception](#opencode-native-director-reception) |
+| [Setup](cli.md#setup-and-doctor) installs the plugin `<preset base>/plugins/cafleet.ts`, providing `/cafleet-goal`, `cafleet_goal_status`, `cafleet_goal_progress` and `cafleet_goal_complete`. | setup; [Director launch and goal](#opencode-director-launch-and-goal) |
 | Plugin tools need the `cafleet` permission action, allowed by default on a Director and denied by member presets; an operator `ask`/`deny` override needs `{ "action": "cafleet", "resource": "*", "effect": "allow" }`. Each tool takes the literal `director_id` (plus `database_url` when non-default) and otherwise refuses with `cafleet tools run only in a Director session: <stderr>`. | [Director wake](../roles/director.md#director-wake); [member routing](../roles/member.md#reconsider-then-route) |
-| An active goal continues through queued `[cafleet goal]` turns; pause, resume, clear and complete drop undelivered continuations, though one queued at a pause may still run. The goal pauses after 3 continuations without `cafleet_goal_progress` or `cafleet_goal_complete`, after 50, or on a user interrupt, queuing `[cafleet goal] paused: …`; `/cafleet-goal resume` resets both counts. Spawning a member queues nothing into the Director. | [Director wake](../roles/director.md#director-wake); [native reception](#opencode-native-director-reception) |
+| An active goal continues through queued `[cafleet goal]` turns; pause, resume, clear and complete drop undelivered continuations, though one queued at a pause may still run. The goal pauses after 3 continuations without `cafleet_goal_progress` or `cafleet_goal_complete`, after 50, or on a user interrupt, queuing `[cafleet goal] paused: …`; `/cafleet-goal resume` resets both counts. Spawning a member queues nothing into the Director. | [Director wake](../roles/director.md#director-wake); [Director launch and goal](#opencode-director-launch-and-goal) |
 | OpenCode loads presets from `~/.config/opencode` and `OPENCODE_CONFIG_DIR`, which `member create` forwards when set; same-name agents can merge, so inspect the effective configuration when customizing a preset. | `{permission_flags}`; preset discovery; member spawn |
 | Presets allow `cafleet message send *`, `poll *` and `show *`, with any `--database-url <url>` after the subcommand. MCP permission evaluation and compound-shell matching are unverified: keep MCP servers out of loaded configurations and submit one command per invocation. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [command isolation](../SKILL.md#one-shot-command-isolation) |
-| Mini receives notifications and prompts as submitted user turns, one queued notice per turn boundary. Captures may show only the status bar; check session records for input/output and `message show` `completed` for consumption. | [Push notifications](cli.md#push-notifications); [prompt dispatch](cli.md#member-prompt); [native reception](#opencode-native-director-reception) |
+| Mini receives previews and prompts as submitted user turns; a preview typed during a running turn waits for the end of the turn, and the Director's own agent name in the status line is recognized. Captures may show only the status bar; check session records for input/output and `message show` `completed` for consumption. | [Push notifications](cli.md#push-notifications); [prompt dispatch](cli.md#member-prompt); [Director wake](../roles/director.md#director-wake) |
 | Leading-`!` runs a native shell command in `mini`; its permission boundary is unestablished. | [Native dispatch](../roles/director.md#director-side-dispatch) |
 | Default `cafleet-ask` asks for every shell command beyond the broker allows; the member waits while the Director answers through the [runtime procedure](../roles/director.md#runtime-events). A `message send --file` naming a `.env` file copies its contents despite `.env` file-tool denials. | `{permission_flags}`; [runtime procedure](../roles/director.md#consume-observed-interactions) |
 | Explicit `cafleet` denies every shell command beyond the broker allows without a form; route required denials, and relay any permission popup as an issue. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route) |
 | A deny submits an empty reason and ends the member's turn with `Step interrupted`. The bundled profile detects the form at widths of at least `W_min` = 36 columns (rules `opencode-shell-permission`, `opencode-shell-permission-compact`, `opencode-reject-reason-compact`); a narrower pane or a clipped command opens no `interaction_opened` and is answered manually, as is any reason. | [Runtime procedure](../roles/director.md#consume-observed-interactions) step 7 |
 
-#### OpenCode native Director reception
+#### OpenCode Director launch and goal
 
 1. Launch the Director with `opencode mini --standalone` (2.2.0+) from the project directory with the default agent.
-2. After registration, call `cafleet_listen`; require `ok` and the `ready` record. A repeat call returns `existing: true`.
-3. Handle each `[cafleet listen record]` turn under [Director wake](../roles/director.md#director-wake) steps 3–4.
-4. The operator manages the goal with `/cafleet-goal <objective>` and its `pause`, `resume`, `clear` and `status` subcommands; `cafleet_goal_status` also reports it.
-5. Report each step toward an active goal with `cafleet_goal_progress`; finish with `cafleet_goal_complete`.
-6. A `[cafleet listen closed]` turn, `ok: false` or a missing tool follows [receiver recovery](../roles/director.md#receiver-recovery); rerun `cafleet setup --coding-agent opencode` for a missing tool or executable-record error.
+2. The operator manages the goal with `/cafleet-goal <objective>` and its `pause`, `resume`, `clear` and `status` subcommands; `cafleet_goal_status` also reports it.
+3. Report each step toward an active goal with `cafleet_goal_progress`; finish with `cafleet_goal_complete`.
+4. Rerun `cafleet setup --coding-agent opencode` for a missing tool or an executable-record error.
 
-After a restart, re-arm `cafleet_listen` on the first turn, which also restores an active goal. Exiting the client ends the receiver.
+After a restart, the session's next event restores an active goal.
 
 ### Role eligibility
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `extension` through the `cafleet` plugin and `listen` `extension` `subscribe` through `cafleet_listen`, both under `opencode mini --standalone` (2.2.0 minimum; `listen` 2.2.6, checked 2026-11-17) |
+| Director | `yes` | `goal` `extension` through the `cafleet` plugin under `opencode mini --standalone` (2.2.0 minimum); `pane delivery` on tmux 3.8 and herdr 0.9.5 (2.3.0, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact |
 | Member | `yes` | Omitted `cafleet-ask`, whose form the bundled OpenCode profile detects and answers; runner acceptance on herdr only |
 
 ## hermes
@@ -384,8 +360,7 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 | Note | Applies at |
 |---|---|
 | `clarify` adds a free-text Other and waits up to an hour; only `status` `answered` records a decision. | `{decision_surface}`; [user relay](../roles/director.md#user-delegation-protocol) |
-| A Director runs the TUI client (`hermes chat --tui` or `display.interface: tui`), where injected turns render; members use the classic CLI. Continuations queued before `/goal clear` still run. | Director launch; [Director wake](../roles/director.md#director-wake) |
-| [Setup](cli.md#setup-and-doctor) installs and enables the plugin with gateway injection. `cafleet_listen` verifies its literal `director_id`, otherwise returning `cafleet_listen runs only in a Director session: <stderr>`. | setup; [member routing](../roles/member.md#reconsider-then-route) |
+| A Director runs the TUI client (`hermes chat --tui` or `display.interface: tui`), whose composer and approval form the bundled profile recognizes for previews; members use the classic CLI. A preview typed during a running turn waits for the end of the turn, and continuations queued before `/goal clear` still run. | Director launch; [Director wake](../roles/director.md#director-wake) |
 | Default `smart`: the guardian reviews commands matching Hermes's dangerous-command patterns and may open an ESCALATE or, after DENY, an owner-override once/deny prompt for the Director to answer. An unanswered prompt fails closed at `approvals.timeout` (default 300 s) as BLOCKED; route it and hardline, sudo-guard or `approvals.deny` blocks as refusals. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [runtime procedure](../roles/director.md#consume-observed-interactions) |
 | CAFleet needs no `approvals.deny` entries; a `cafleet …` glob there also blocks the Director with `BLOCKED: … user-defined deny rule '<glob>'`, and the Director asks the operator to remove it. | `{decision_surface}`; `{permission_flags}`; [Director dispatch](../roles/director.md#director-side-dispatch) |
 | Each pane runs the [member create](cli.md#member-create) Hermes argv as a fresh conversation under the forwarded `HERMES_HOME`. | `{permission_flags}`; member spawn |
@@ -394,23 +369,11 @@ No maintained catalog. `--model VALUE` passes through verbatim as Hermes's `--mo
 | Session work can outlive the pane's client; [member delete](cli.md#member-delete) owns settlement. After its client-already-exited warning, stop leftover work with `hermes sessions list --source tool`, then `hermes chat --cli --resume <session id> --in <cwd>` and `/stop`. | [Member Delete](../roles/director.md#member-delete); [Shutdown](../roles/director.md#shutdown) |
 | Leading-`!` runs a native shell command in the classic CLI and the TUI. | [Native dispatch](../roles/director.md#director-side-dispatch) |
 
-#### Hermes native Director reception
-
-1. Run the Director in the TUI client.
-2. Register through [Director pane identification](../roles/director.md#director-pane-identification).
-3. Call `cafleet_listen` with the literal `director_id` (plus `database_url` when non-default); require `ok: true` and the `ready` record. A repeat call returns `existing: true`.
-4. Handle each `[cafleet listen record]` turn under [Director wake](../roles/director.md#director-wake) steps 3–4.
-5. A `[cafleet listen closed]` turn, `ok: false` or a missing tool follows [receiver recovery](../roles/director.md#receiver-recovery); rerun `cafleet setup --coding-agent hermes` for a missing tool or executable-record error.
-
-`cafleet_listen` returns `ok: false` naming `cafleet setup --coding-agent hermes` unless `plugins.entries.cafleet.allow_gateway_injection` is `true`. The gateway-hosted receiver keeps emission order and retries a refused injection every 1 s.
-
-The receiver ends silently when the session finalizes or no client is attached for 30 s; with a `[cafleet listen closed]` turn when an injection raises, exceeds 10 s or stays refused for 600 s; with `[cafleet listen closed] the plugin unloaded: …` after `hermes plugins install` or `enable`; and normally on `closed` `fleet_deleted`.
-
 ### Role eligibility
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `native` `/goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both on the TUI client (2026.9.24; `listen` checked 2026-11-17) |
+| Director | `yes` | `goal` `native` `/goal` on the TUI client (2026.9.24); `pane delivery` on tmux 3.8 and herdr 0.9.5 (2026.9.24, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact; the Director runs the TUI client, whose screen the Director rules read |
 | Member | `yes` | Default `smart` approval-prompt coverage (ESCALATE and override); the bundled Hermes profile |
 
 ## pi
@@ -442,7 +405,7 @@ No maintained catalog. `--model VALUE` passes through verbatim as pi's `--model 
 
 | Note | Applies at |
 |---|---|
-| The CAFleet pi extension (`<pi base>/extensions/cafleet.ts`) auto-loads in every pi session, providing `cafleet_listen`, `cafleet_ask`, `/cafleet-goal` and the goal tools; each takes the literal `director_id`, plus `database_url` for a non-default database, refusing outside a Director with `cafleet tools run only in a Director session: <stderr>`. | `{decision_surface}`; [setup and doctor](cli.md#setup-and-doctor); [Director wake](../roles/director.md#director-wake); [member routing](../roles/member.md#reconsider-then-route) |
+| The CAFleet pi extension (`<pi base>/extensions/cafleet.ts`) auto-loads in every pi session, providing `cafleet_ask`, `/cafleet-goal` and the goal tools; each takes the literal `director_id`, plus `database_url` for a non-default database, refusing outside a Director with `cafleet tools run only in a Director session: <stderr>`. | `{decision_surface}`; [setup and doctor](cli.md#setup-and-doctor); [Director wake](../roles/director.md#director-wake); [member routing](../roles/member.md#reconsider-then-route) |
 | In both modes the member gate runs only `cafleet message send`, `poll` and `show`, each as one simple command with any `--database-url <url>` after the subcommand. A simple command has no unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)` or backtick, no backtick inside double quotes, no unterminated quote or trailing unquoted backslash, and no `$` outside single quotes except before a name (`$NAME`). Explicit `cafleet` mode blocks other bash with `the CAFleet member gate runs only cafleet message send, poll and show; route the command to the Director if it is required`. Both modes block tools other than bash, read, grep, find, ls, edit and write, and block without a form any command holding a control character (C0 except tab, DEL or C1) with `the CAFleet member gate refuses a command holding a control character; route the command to the Director if it is required`. `read`, `edit` and `write` need a non-empty `path`; file-tool refusals end in `route the read …` or `route the change …`. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [Director dispatch](../roles/director.md#director-side-dispatch) |
 | Both modes block `edit` and `write` below the directories named (case-insensitive) in `the CAFleet member gate protects .git, .pi, .agents, .claude, .codex and .opencode from edit and write; route the change to the Director if it is required`; project-root files such as `AGENTS.md` stay writable. Paths resolve as in pi's file tools, without following symlinks. A `file:` path is refused with `the CAFleet member gate refuses a file: URL path for <tool>; route the read …` or `route the change …`; pass a plain path. The case-insensitive `.env` rule refuses only file-tool calls naming a `.env` file; searches, `message send --file` and Director-allowed commands still read `.env` contents. | `{permission_flags}`; [member routing](../roles/member.md#reconsider-then-route); [Director dispatch](../roles/director.md#director-side-dispatch) |
 | The gate refuses newlines, so send a one-line body as positional `TEXT` and a multi-line body with `--file PATH` written inside the working directory. | [Send](../SKILL.md#send-unicast); [message send](cli.md#message-send) |
@@ -451,23 +414,20 @@ No maintained catalog. `--model VALUE` passes through verbatim as pi's `--model 
 | Each pane runs the [member create](cli.md#member-create) pi argv as a fresh session under the forwarded `PI_CODING_AGENT_DIR`; an extension that cannot register `--cafleet-gate` exits at startup (`runner_exited`). | `{permission_flags}`; [member create](cli.md#member-create) |
 | Leading-`!` runs the command and stores its output without starting a turn; after `member exec`, send an explicit continuation. | [Director dispatch](../roles/director.md#director-side-dispatch); [member exec](cli.md#member-exec) |
 | Escape interrupts a running turn and dismisses an open gate form; Enter during work queues a steering message. | [Command execution](../roles/member.md#command-execution); [member prompt](cli.md#member-prompt) |
-| pi 1.5.0 queues `followUp` notices uncapped and delivers one per agent stop. | [Native reception](#pi-native-director-reception); [Director wake](../roles/director.md#director-wake) |
-| After `/reload`, `/new`, `/resume` or `/fork`, the runtime-replaced notice calls for a new receiver. | [Spawn Protocol](../roles/director.md#spawn-protocol); [receiver recovery](../roles/director.md#receiver-recovery) |
+| A preview typed into the Director pane during a running turn waits for the end of the turn. | [Director wake](../roles/director.md#director-wake) |
 
-#### pi native Director reception
+#### pi Director launch and goal
 
 1. Launch the Director with plain `pi` from the project directory and register with plain `cafleet fleet create`.
-2. After registration, call `cafleet_listen`; require `ok` and the `ready` record. A repeat call returns `existing: true`.
-3. Handle each `[cafleet listen record]` message under [Director wake](../roles/director.md#director-wake) steps 3–4.
-4. The operator manages the goal with `/cafleet-goal <objective>` and its `pause`, `resume`, `clear` and `status` subcommands; `cafleet_goal_status` also reports it.
-5. Report each step toward an active goal with `cafleet_goal_progress`; finish with `cafleet_goal_complete`.
-6. A `[cafleet listen closed]` message (the runtime-replaced notice included), `ok: false` or a missing tool follows [receiver recovery](../roles/director.md#receiver-recovery); rerun `cafleet setup --coding-agent pi` for a missing tool or executable-record error.
+2. The operator manages the goal with `/cafleet-goal <objective>` and its `pause`, `resume`, `clear` and `status` subcommands; `cafleet_goal_status` also reports it.
+3. Report each step toward an active goal with `cafleet_goal_progress`; finish with `cafleet_goal_complete`.
+4. Rerun `cafleet setup --coding-agent pi` for a missing tool or an executable-record error.
 
-After `pi --continue`, re-arm `cafleet_listen` on the first turn, which also continues an active goal. Quitting pi ends the receiver.
+After `pi --continue`, the session's next turn continues an active goal.
 
 ### Role eligibility
 
 | Role | Eligible | Basis |
 |---|---|---|
-| Director | `yes` | `goal` `extension` `/cafleet-goal` and `listen` `extension` `subscribe` through `cafleet_listen`, both from the CAFleet pi extension under plain `pi` (1.5.0; `listen` checked 2026-11-17); re-arm after session replacement or `pi --continue` |
+| Director | `yes` | `goal` `extension` `/cafleet-goal` from the CAFleet pi extension under plain `pi` (1.5.0); `pane delivery` on tmux 3.8 and herdr 0.9.5 (1.5.2, checked 2026-11-23); a Director pane of at least 80 columns keeps a preview at the plain limit intact; pi has no native approval dialog, so the interaction hold is `—` |
 | Member | `yes` | Omitted `cafleet-ask`, whose gate form the bundled pi profile detects and answers |

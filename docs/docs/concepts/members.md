@@ -39,7 +39,7 @@ Member creations and deletions in one fleet wait for each other, up to 60 second
 
 ## Assignment and receiving
 
-Messages are point-to-point: send one to each selected recipient. Runner-managed members receive previews through their runner, which delivers, queues or holds each one as [Deliver generated input](#deliver-generated-input) describes. The root Director receives replies through its listener; [run a fleet](../mixed-backend-team.md#manual-lifecycle) explains reception and consumption.
+Messages are point-to-point: send one to each selected recipient. Runner-managed members receive previews through their runner, which delivers, queues or holds each one as [Deliver generated input](#deliver-generated-input) describes. The root Director receives replies as previews that the fleet's member runners type into its pane; [run a fleet](../mixed-backend-team.md#receive-results) explains delivery and consumption.
 
 ## Command routing
 
@@ -75,7 +75,7 @@ Launchability, permission detection, composer input and permission answers have 
 
 The Director's poll consumes the inbox record; the Director records the unfinished action at once, then verifies its durable event association with `event show EVENT_ID --json`. It then runs `permission inspect` for a fresh snapshot and answer capability, establishes the operation's arguments, cwd, environment, targets and effects from authorized evidence, and resolves its own session's effective mode: in verified auto mode it decides allow/deny or picks a listed question choice itself; otherwise it obtains your request-specific permission or choice. It answers with a request-bound `permission respond` (`--decision` or `--choice`), or presents that command for you to run; without answer capability the request stays on the member's native surface. Afterward it inspects the durable receipt, actual output and resumed work — a submitted hotkey, closed form or consumed message proves no execution result. Input queued during the request is delivered once it closes and reported as `input_delivery_result` events, with no further send. The [Director consumption contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#director-consumption-and-continuation) and the [permission command contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#permission-commands) own the exact steps, flags and outputs.
 
-The listener produces stdout records under the [Director receive lifecycle](../mixed-backend-team.md#receive-results). Host interruption, goal activation and model consumption timing remain host-owned.
+Runtime events reach the Director through Director delivery under the [Director receive lifecycle](../mixed-backend-team.md#receive-results). Host interruption, goal activation and model consumption timing remain host-owned.
 
 ### Preserve a native request
 
