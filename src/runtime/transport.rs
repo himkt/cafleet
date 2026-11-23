@@ -1289,10 +1289,7 @@ mod tests {
                 expected.screen.contents(),
                 "width={width}"
             );
-            assert_eq!(
-                (actual.cursor_row, actual.cursor_col),
-                (expected.cursor_row, expected.cursor_col)
-            );
+            assert_eq!(actual.cursor, expected.cursor);
             assert_eq!(actual.title, expected.title);
         }
     }
@@ -1306,13 +1303,13 @@ mod tests {
             terminal.feed(&[*byte]).unwrap();
         }
         let alternate = terminal.snapshot();
-        assert!(alternate.alternate_screen);
+        assert_eq!(alternate.alternate_screen, Some(true));
         assert!(alternate.screen.contents().contains("alternate request"));
         assert!(!alternate.screen.contents().contains("primary composer"));
         assert_eq!(alternate.title, "Action Required");
         terminal.feed(b"\x1b[?1049l").unwrap();
         let restored = terminal.snapshot();
-        assert!(!restored.alternate_screen);
+        assert_eq!(restored.alternate_screen, Some(false));
         assert_eq!(restored.screen.contents(), primary.screen.contents());
         assert!(restored.screen_seq > alternate.screen_seq);
     }
@@ -1337,7 +1334,7 @@ mod tests {
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
         terminal.feed(b"\x1b[4;7Hchoice").unwrap();
         let before = terminal.snapshot();
-        assert_eq!((before.cursor_row, before.cursor_col), (3, 12));
+        assert_eq!(before.cursor, Some((3, 12)));
         terminal
             .resize(TerminalSize {
                 rows: 40,
@@ -1363,6 +1360,102 @@ mod tests {
             assert_eq!((snapshot.rows, snapshot.cols), (24, 80));
         }
     }
+
+    mod capture_replay {
+        use crate::multiplexer::ScreenCapture;
+        use crate::runtime::transport::*;
+
+        fn capture(
+            (rows, cols): (u16, u16),
+            cursor: Option<(u16, u16)>,
+            alternate_screen: Option<bool>,
+            body: &str,
+        ) -> ScreenCapture {
+            ScreenCapture {
+                rows,
+                cols,
+                cursor,
+                alternate_screen,
+                body: body.to_owned(),
+            }
+        }
+
+        fn rows_of(snapshot: &ScreenSnapshot) -> Vec<String> {
+            snapshot.screen.rows(0, snapshot.cols).collect()
+        }
+
+        #[test]
+        fn a_tmux_capture_replays_every_row_at_its_position_with_its_cursor_and_screen_mode() {
+            for alternate in [false, true] {
+                let snapshot = TerminalState::replay(&capture(
+                    (4, 20),
+                    Some((3, 8)),
+                    Some(alternate),
+                    "row one\nrow two\n\nlast row\n",
+                ))
+                .unwrap();
+                assert_eq!((snapshot.rows, snapshot.cols), (4, 20), "{alternate}");
+                assert_eq!(
+                    rows_of(&snapshot),
+                    ["row one", "row two", "", "last row"],
+                    "{alternate}"
+                );
+                assert_eq!(snapshot.cursor, Some((3, 8)), "{alternate}");
+                assert_eq!(snapshot.alternate_screen, Some(alternate));
+                assert_eq!(
+                    snapshot.screen.alternate_screen(),
+                    alternate,
+                    "the replay enters the alternate screen exactly when the capture is on it"
+                );
+            }
+        }
+
+        #[test]
+        fn a_full_width_row_leaves_the_next_row_at_its_own_position() {
+            let full = "0123456789";
+            let snapshot = TerminalState::replay(&capture(
+                (3, 10),
+                Some((2, 0)),
+                Some(false),
+                &format!("{full}\nnext\nlast\n"),
+            ))
+            .unwrap();
+            assert_eq!(rows_of(&snapshot), [full, "next", "last"]);
+        }
+
+        #[test]
+        fn a_herdr_capture_replays_crlf_styled_rows_without_cursor_or_screen_mode() {
+            let snapshot = TerminalState::replay(&capture(
+                (3, 30),
+                None,
+                None,
+                "› \x1b[2mAsk anything\x1b[0m\r\n\r\nstatus line\r\n",
+            ))
+            .unwrap();
+            assert_eq!((snapshot.rows, snapshot.cols), (3, 30));
+            assert_eq!(rows_of(&snapshot), ["› Ask anything", "", "status line"]);
+            assert!(
+                snapshot.screen.cell(0, 2).unwrap().dim(),
+                "the replay keeps the captured cell styles"
+            );
+            assert!(!snapshot.screen.cell(2, 0).unwrap().dim());
+            assert_eq!(snapshot.cursor, None);
+            assert_eq!(snapshot.alternate_screen, None);
+            assert!(!snapshot.screen.alternate_screen());
+        }
+
+        #[test]
+        fn every_runner_snapshot_carries_its_cursor_and_screen_mode() {
+            let mut terminal = TerminalState::new(TerminalSize { rows: 5, cols: 20 }).unwrap();
+            terminal.feed(b"\x1b[2;4Hx").unwrap();
+            let primary = terminal.snapshot();
+            assert_eq!(primary.cursor, Some((1, 4)));
+            assert_eq!(primary.alternate_screen, Some(false));
+            terminal.feed(b"\x1b[?1049h").unwrap();
+            assert_eq!(terminal.snapshot().alternate_screen, Some(true));
+        }
+    }
+
     #[test]
     fn runner_transport_visits_a_transient_screen_before_a_later_clear_in_one_fragment() {
         let mut terminal = TerminalState::new(TerminalSize { rows: 24, cols: 80 }).unwrap();
@@ -2856,8 +2949,7 @@ mod tests {
             assert_eq!(h.observations.health_reads.get(), 0);
             assert_eq!(drain_transport.snapshot().screen_seq, 5);
             assert_eq!(drain_transport.snapshot().screen.contents(), "head");
-            assert_eq!(drain_transport.snapshot().cursor_row, 0);
-            assert_eq!(drain_transport.snapshot().cursor_col, 0);
+            assert_eq!(drain_transport.snapshot().cursor, Some((0, 0)));
             assert_eq!(*h.observations.screens.borrow(), vec![4, 5]);
             assert_eq!(
                 *h.trace.borrow(),

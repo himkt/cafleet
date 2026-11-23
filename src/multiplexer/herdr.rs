@@ -1828,4 +1828,206 @@ mod tests {
             }
         }
     }
+
+    mod director_pane {
+        use crate::multiplexer::herdr::tests::*;
+        use crate::time::Deadline;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        const PANE: &str = "w1:p2";
+
+        fn snapshot_reply(panes_by_layout: serde_json::Value) -> Result<String, RunError> {
+            Ok(serde_json::json!({
+                "id": 1,
+                "type": "response",
+                "result": {"snapshot": {"layouts": panes_by_layout}},
+            })
+            .to_string())
+        }
+
+        fn director_layouts() -> serde_json::Value {
+            json!([
+                {"panes": [pane("w1:p1", 0, 0, 60, 40)]},
+                {"panes": [pane("w2:p1", 0, 0, 120, 40), pane(PANE, 0, 0, 97, 30)]},
+            ])
+        }
+
+        fn assert_visible_read(call: &[String]) {
+            assert_eq!(call[..6], herdr(&["pane", "read", PANE]));
+            let options: std::collections::BTreeMap<_, _> = call[6..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| (pair[0].as_str(), pair[1].as_str()))
+                .collect();
+            assert_eq!(
+                options,
+                std::collections::BTreeMap::from([("--source", "visible"), ("--format", "ansi")])
+            );
+            assert_eq!(call.len(), 10);
+        }
+
+        #[test]
+        fn capture_screen_takes_the_width_from_the_snapshot_and_the_rows_from_the_visible_read() {
+            let body = "› \x1b[2mAsk anything\x1b[0m\r\n\r\nstatus line\r\n";
+            let runner = FakeRunner::with_binary("herdr");
+            runner.respond(snapshot_reply(director_layouts()));
+            runner.respond(Ok(body.to_owned()));
+            let capture = on_server(runner.clone()).capture_screen(PANE).unwrap();
+            assert_eq!((capture.rows, capture.cols), (3, 97));
+            assert_eq!(capture.cursor, None, "herdr exposes no cursor position");
+            assert_eq!(
+                capture.alternate_screen, None,
+                "herdr exposes no alternate-screen flag"
+            );
+            assert_eq!(capture.body, body);
+            let calls = runner.run_argvs();
+            assert_eq!(calls.len(), 2);
+            assert_eq!(calls[0], herdr(&["api", "snapshot"]));
+            assert_visible_read(&calls[1]);
+        }
+
+        #[test]
+        fn capture_screen_fails_for_a_pane_absent_from_the_snapshot_or_an_unreadable_reply() {
+            for (name, snapshot) in [
+                (
+                    "pane absent",
+                    snapshot_reply(json!([{"panes": [pane("w1:p1", 0, 0, 60, 40)]}])),
+                ),
+                ("non-JSON snapshot", Ok("not json".to_owned())),
+                (
+                    "missing layouts",
+                    Ok(herdr_envelope(json!({"snapshot": {}}))),
+                ),
+                (
+                    "server error",
+                    Err(RunError::Failed {
+                        stderr: herdr_error_stderr("server_unavailable"),
+                    }),
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(snapshot);
+                runner.respond(Ok("body\r\n".to_owned()));
+                assert!(
+                    on_server(runner).capture_screen(PANE).is_err(),
+                    "{name} is a capture failure"
+                );
+            }
+        }
+
+        #[test]
+        fn type_literal_sends_the_whole_literal_in_one_send_text() {
+            for literal in [
+                "[cafleet msg 7 from 3 2026-11-23T10:00:00+00:00] hi".to_owned(),
+                "あ".repeat(600),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.succeed(1);
+                on_server(runner.clone())
+                    .type_literal(PANE, &literal)
+                    .unwrap();
+                assert_eq!(
+                    runner.run_argvs(),
+                    [herdr(&["pane", "send-text", PANE, &literal])]
+                );
+            }
+        }
+
+        #[test]
+        fn press_submit_maps_the_carriage_return_to_the_enter_key() {
+            let runner = FakeRunner::with_binary("herdr");
+            runner.succeed(1);
+            on_server(runner.clone()).press_submit(PANE, b"\r").unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                [herdr(&["pane", "send-keys", PANE, "enter"])]
+            );
+        }
+
+        #[test]
+        fn press_submit_refuses_bytes_without_a_key_mapping_before_any_process() {
+            let runner = FakeRunner::with_binary("herdr");
+            let error = on_server(runner.clone())
+                .press_submit(PANE, b"\xff")
+                .unwrap_err();
+            assert!(!error.submission_started(), "{error}");
+            assert!(runner.run_argvs().is_empty());
+        }
+
+        #[test]
+        fn write_failures_report_whether_a_process_may_have_written() {
+            type WriteStage =
+                fn(&dyn Multiplexer) -> Result<(), crate::multiplexer::MultiplexerError>;
+            let literal: WriteStage = |mux| mux.type_literal(PANE, "short");
+            let submit: WriteStage = |mux| mux.press_submit(PANE, b"\r");
+            for (name, write, reply, written) in [
+                (
+                    "send-text failed",
+                    literal,
+                    Err(RunError::Failed {
+                        stderr: herdr_error_stderr("server_unavailable"),
+                    }),
+                    true,
+                ),
+                ("send-text timed out", literal, Err(RunError::Timeout), true),
+                (
+                    "send-text unreadable acknowledgment",
+                    literal,
+                    Ok("unexpected output".to_owned()),
+                    true,
+                ),
+                (
+                    "send-text not started",
+                    literal,
+                    Err(RunError::NotStarted("spawn failed".into())),
+                    false,
+                ),
+                (
+                    "send-text binary missing",
+                    literal,
+                    Err(RunError::BinaryNotFound("herdr".into())),
+                    false,
+                ),
+                (
+                    "send-keys failed",
+                    submit,
+                    Err(RunError::Failed {
+                        stderr: herdr_error_stderr("server_unavailable"),
+                    }),
+                    true,
+                ),
+                (
+                    "send-keys not started",
+                    submit,
+                    Err(RunError::NotStarted("spawn failed".into())),
+                    false,
+                ),
+            ] {
+                let runner = FakeRunner::with_binary("herdr");
+                runner.respond(reply);
+                let error = write(&on_server(runner)).unwrap_err();
+                assert_eq!(error.submission_started(), written, "{name}: {error}");
+            }
+        }
+
+        #[test]
+        fn an_expired_deadline_writes_no_text_and_no_key() {
+            let runner = FakeRunner::with_binary("herdr");
+            let expired = Deadline::until(Instant::now() - Duration::from_millis(1));
+            let mux = on_server(runner.clone()).bounded(expired);
+            assert!(
+                !mux.type_literal(PANE, "short")
+                    .unwrap_err()
+                    .submission_started()
+            );
+            assert!(
+                !mux.press_submit(PANE, b"\r")
+                    .unwrap_err()
+                    .submission_started()
+            );
+            assert!(runner.run_argvs().is_empty());
+        }
+    }
 }

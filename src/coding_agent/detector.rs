@@ -2001,8 +2001,8 @@ mod tests {
             |_| {},
         );
         assert_eq!(
-            (screen.cursor_row, screen.cursor_col),
-            (35, 120),
+            screen.cursor,
+            Some((35, 120)),
             "the live terminal reports the pending-wrap column"
         );
         let observation = observe_bundled(CodingAgent::Codex, CODEX_VERSION, &screen);
@@ -4074,7 +4074,7 @@ mod tests {
         let mut rows = lines("write disposable.txt");
         *rows.last_mut().unwrap() = "Selection界: ".into();
         let mut state = terminal(&rows, 80, false);
-        assert_eq!(state.snapshot().cursor_col, 13);
+        assert_eq!(state.snapshot().cursor.map(|(_, col)| col), Some(13));
         assert_permission(&observation(&definition, &state.snapshot()));
         state.feed(b"\x1b[24;13H").unwrap();
         assert_incomplete(&observation(&definition, &state.snapshot()));
@@ -5814,6 +5814,224 @@ mod tests {
                     Some((0, 0)),
                 ));
                 assert_not_idle(&away, &format!("{capture}: cursor outside the editor"));
+            }
+        }
+    }
+
+    mod cursor_free {
+        use crate::coding_agent::detector::tests::*;
+
+        const EMPTY_RULE: &str = "synthetic-composer_empty";
+
+        fn detector(definition: &Value) -> Detector {
+            Detector::new(
+                &load(definition).unwrap(),
+                CodingAgent::Codex,
+                Some(VERSION),
+            )
+        }
+
+        fn without(mut screen: ScreenSnapshot, cursor: bool, alternate: bool) -> ScreenSnapshot {
+            if !cursor {
+                screen.cursor = None;
+            }
+            if !alternate {
+                screen.alternate_screen = None;
+            }
+            screen
+        }
+
+        fn cursor_free(screen: ScreenSnapshot) -> ScreenSnapshot {
+            without(screen, false, false)
+        }
+
+        fn composer_definition(cursor: &str, screen: &str) -> Value {
+            let mut value = simple_definition("composer_empty", true);
+            value["codex"]["profile"]["rules"][0]["region"]["cursor"] = json!(cursor);
+            value["codex"]["profile"]["rules"][0]["region"]["screen"] = json!(screen);
+            value
+        }
+
+        const STATE_REGION_WITH_CURSOR_AWAY: &[u8] =
+            b"\x1b[2J\x1b[10;1HSynthetic state\r\nState end\x1b[1;1H";
+
+        #[test]
+        fn a_capture_without_a_cursor_treats_every_cursor_condition_as_any() {
+            for cursor in ["at_end", "after_prompt", "inside"] {
+                let detector = detector(&composer_definition(cursor, "either"));
+                let screen = screen_of(STATE_REGION_WITH_CURSOR_AWAY);
+                let with_cursor = detector.observe(&screen).unwrap();
+                assert_ne!(
+                    with_cursor.rule_id, EMPTY_RULE,
+                    "{cursor}: a cursor outside the condition keeps the region unqualified"
+                );
+                for (name, screen) in [
+                    ("no cursor or screen mode", cursor_free(screen.clone())),
+                    ("no cursor", without(screen.clone(), false, true)),
+                ] {
+                    let observation = detector.observe(&screen).unwrap();
+                    assert_eq!(
+                        observation.kind,
+                        ObservationKind::ComposerEmpty,
+                        "{cursor}: {name}"
+                    );
+                    assert_eq!(observation.rule_id, EMPTY_RULE, "{cursor}: {name}");
+                }
+            }
+        }
+
+        #[test]
+        fn a_capture_without_a_cursor_or_screen_mode_ignores_the_screen_selector() {
+            let primary = screen_of(b"\x1b[2J\x1b[10;1HSynthetic state\r\nState end");
+            let alternate = screen_of(b"\x1b[?1049h\x1b[2J\x1b[10;1HSynthetic state\r\nState end");
+            for (selector, screen) in [("primary", alternate), ("alternate", primary)] {
+                let detector = detector(&composer_definition("any", selector));
+                assert_ne!(
+                    detector.observe(&screen).unwrap().rule_id,
+                    EMPTY_RULE,
+                    "{selector}: a known screen mode keeps the selector"
+                );
+                for (name, screen) in [
+                    ("no cursor or screen mode", cursor_free(screen.clone())),
+                    ("no screen mode", without(screen.clone(), true, false)),
+                    ("no cursor", without(screen.clone(), false, true)),
+                ] {
+                    assert_eq!(
+                        detector.observe(&screen).unwrap().rule_id,
+                        EMPTY_RULE,
+                        "{selector}: {name}"
+                    );
+                }
+            }
+        }
+
+        fn prompt_row_definition(cursor: &str) -> Value {
+            let mut value = composer_definition(cursor, "either");
+            let rule = &mut value["codex"]["profile"]["rules"][0];
+            rule["region"]["start_pattern"] = json!("^> ");
+            rule["region"]["end_pattern"] = json!("^> ");
+            rule["region"]["max_rows"] = json!(1);
+            rule["matchers"] =
+                json!([{"id":"idle","scope":"line","pattern":"^> Idle placeholder$"}]);
+            value
+        }
+
+        fn prompt_rows(history: &str) -> ScreenSnapshot {
+            screen_of(
+                format!("\x1b[2J\x1b[4;1H> {history}\x1b[21;1H> Idle placeholder\x1b[1;1H")
+                    .as_bytes(),
+            )
+        }
+
+        #[test]
+        fn without_a_cursor_exactly_one_candidate_must_satisfy_the_region_matchers() {
+            let detector = detector(&prompt_row_definition("at_end"));
+            let observation = detector
+                .observe(&cursor_free(prompt_rows("history entry")))
+                .unwrap();
+            assert_eq!(
+                observation.kind,
+                ObservationKind::ComposerEmpty,
+                "the one candidate satisfying its matchers is the region"
+            );
+            assert_eq!(observation.rule_id, EMPTY_RULE);
+            assert_ne!(
+                detector
+                    .observe(&cursor_free(prompt_rows("Idle placeholder")))
+                    .unwrap()
+                    .rule_id,
+                EMPTY_RULE,
+                "two candidates satisfying the matchers stay ambiguous"
+            );
+        }
+
+        #[test]
+        fn a_capture_with_a_cursor_keeps_uniqueness_before_the_matchers() {
+            let detector = detector(&prompt_row_definition("any"));
+            assert_ne!(
+                detector
+                    .observe(&prompt_rows("history entry"))
+                    .unwrap()
+                    .rule_id,
+                EMPTY_RULE,
+                "two qualifying candidates match nothing when the cursor is known"
+            );
+        }
+
+        struct BundledComposer {
+            backend: CodingAgent,
+            fixture: &'static str,
+            draft: &'static [u8],
+        }
+
+        const BUNDLED_COMPOSERS: &[BundledComposer] = &[
+            BundledComposer {
+                backend: CodingAgent::Claude,
+                fixture: "claude-2.1.302-idle-composer-1",
+                draft: b"\x1b[32;3H\x1b[0mdraft text",
+            },
+            BundledComposer {
+                backend: CodingAgent::Codex,
+                fixture: "codex-0.167.0-composer-idle-empty-tmux-120-1",
+                draft: b"\x1b[36;3H\x1b[0m\x1b[Kdraft text",
+            },
+            BundledComposer {
+                backend: CodingAgent::Opencode,
+                fixture: "opencode-2.1.4-idle-composer-1",
+                draft: b"\x1b[12;3H\x1b[0mdraft text",
+            },
+            BundledComposer {
+                backend: CodingAgent::Pi,
+                fixture: "pi-1.5.0-idle-composer-tmux-120-1",
+                draft: b"\x1b[32;1H\x1b[0mdraft text",
+            },
+        ];
+
+        fn bundled_cursor_free(fixture: &str, extra: &[u8]) -> ScreenSnapshot {
+            let mut terminal = TerminalState::new(fixture_size(fixture)).unwrap();
+            let mut bytes = native_fixture_bytes(&bundled_screen(fixture));
+            bytes.extend_from_slice(extra);
+            terminal.feed(&bytes).unwrap();
+            cursor_free(terminal.snapshot())
+        }
+
+        #[test]
+        fn bundled_idle_composers_stay_empty_and_drafts_stay_not_empty_without_a_cursor() {
+            for case in BUNDLED_COMPOSERS {
+                let detector = Detector::new(ProfileCatalog::bundled(), case.backend, None);
+                let idle = detector
+                    .observe(&bundled_cursor_free(case.fixture, b""))
+                    .unwrap();
+                assert_eq!(
+                    idle.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{}: idle composer",
+                    case.fixture
+                );
+                let drafted = detector
+                    .observe(&bundled_cursor_free(case.fixture, case.draft))
+                    .unwrap();
+                assert_ne!(
+                    drafted.kind,
+                    ObservationKind::ComposerEmpty,
+                    "{}: a drafted composer is not empty",
+                    case.fixture
+                );
+            }
+        }
+
+        #[test]
+        fn an_observation_without_a_native_version_records_a_null_version() {
+            for case in BUNDLED_COMPOSERS {
+                let observation = Detector::new(ProfileCatalog::bundled(), case.backend, None)
+                    .observe(&bundled_cursor_free(case.fixture, b""))
+                    .unwrap();
+                assert_eq!(
+                    observation.raw_evidence["native_version"],
+                    Value::Null,
+                    "{}",
+                    case.fixture
+                );
             }
         }
     }
