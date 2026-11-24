@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -10,9 +11,131 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/himkt/cafleet"
+	"golang.org/x/sys/unix"
 )
+
+// descriptorProbe reports whether descriptor 3 reached the shell.
+const descriptorProbe = `if { true >&3; } 2>/dev/null; then echo fd3=open; else echo fd3=closed; fi`
+
+//nolint:paralleltest // changes process-wide signal handling and descriptor flags inside its own child process
+func TestMain_ProcessStartupChild(t *testing.T) {
+	skipUnlessChildTest(t)
+	flags, err := unix.FcntlInt(3, unix.F_GETFD, 0)
+	if err != nil {
+		t.Fatalf("the parent passes descriptor 3: %v", err)
+	}
+	if flags&unix.FD_CLOEXEC != 0 {
+		t.Fatal("the inherited descriptor 3 starts without FD_CLOEXEC")
+	}
+	if err := processStartup(); err != nil {
+		t.Fatal(err)
+	}
+	if flags, err = unix.FcntlInt(3, unix.F_GETFD, 0); err != nil || flags&unix.FD_CLOEXEC == 0 {
+		t.Fatalf("startup marks descriptor 3 FD_CLOEXEC: flags=%#x err=%v", flags, err)
+	}
+	output, err := exec.Command("/bin/sh", "-c", descriptorProbe).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Print(string(output))
+	sleeper, err := startedSleeper(plainStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignored, readErr := processSignalSet(sleeper.Process.Pid, "SigIgn", "sigignore")
+	if err := errors.Join(readErr, endSleeper(sleeper)); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("ignored=%x\n", uint64(ignored))
+}
+
+func TestMain_ProcessStartupKeepsInheritedDescriptorsFromChildrenAndLeavesSigpipeAtDefault(t *testing.T) {
+	t.Parallel()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := errors.Join(reader.Close(), writer.Close()); err != nil {
+			t.Error(err)
+		}
+	}()
+	child := childTestCommand(TestMain_ProcessStartupChild, "-test.v")
+	child.ExtraFiles = []*os.File{reader}
+	output, err := child.CombinedOutput()
+	if err != nil {
+		t.Fatalf("startup child failed: %v\n%s", err, output)
+	}
+	text := string(output)
+	if !strings.Contains(text, "fd3=closed\n") {
+		t.Fatalf("an inherited descriptor above 2 reached a child (F1):\n%s", text)
+	}
+	_, after, found := strings.Cut(text, "ignored=")
+	if !found {
+		t.Fatalf("the probe printed no ignored set:\n%s", text)
+	}
+	line, _, _ := strings.Cut(after, "\n")
+	ignored, err := strconv.ParseUint(strings.TrimSpace(line), 16, 64)
+	if err != nil {
+		t.Fatalf("ignored set %q: %v", line, err)
+	}
+	if signalSet(ignored).contains(syscall.SIGPIPE) {
+		t.Fatalf("a child starts with SIGPIPE ignored (F3): %#x", ignored)
+	}
+}
+
+// TestMain_MainChild runs Main with the arguments after `--` and exits with its code.
+func TestMain_MainChild(t *testing.T) {
+	t.Parallel()
+	skipUnlessChildTest(t)
+	os.Exit(Main(append([]string{"cafleet"}, flag.Args()...), cafleet.Assets))
+}
+
+func TestMain_ABrokenStdoutPipeEndsOutputQuietlyWithTheCommandsOwnResult(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "help", args: []string{"--help"}},
+		{name: "version", args: []string{"--version"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := reader.Close(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := writer.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			database := databaseURLFor(filepath.Join(t.TempDir(), "absent.db"))
+			child := childTestCommand(TestMain_MainChild, append([]string{"--", "--database-url", database}, tc.args...)...)
+			child.Env = append(child.Env, "HOME="+t.TempDir())
+			var stderr bytes.Buffer
+			child.Stdout = writer
+			child.Stderr = &stderr
+			if err := child.Run(); err != nil {
+				t.Fatalf("%s: a closed stdout reader ends the command with %v, want its own exit 0: %s", tc.name, err, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("%s: stderr %q, want nothing", tc.name, stderr.String())
+			}
+		})
+	}
+}
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite each golden test's generated block from the current output")
 
