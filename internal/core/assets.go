@@ -3,8 +3,10 @@ package core
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +21,69 @@ const (
 	piExtensionPrefix        = "pi/"
 	piExecutableRecord       = "cafleet.executable"
 )
+
+type agentPaths struct {
+	skillsDir string
+	presets   []presetTarget
+	extension opt[fileExtension]
+}
+
+// presetTarget is an embedded preset, by its path in the presets tree, and its install target.
+type presetTarget struct {
+	source string
+	target string
+}
+
+// fileExtension is a backend whose extension is a set of embedded files installed beside one
+// executable record.
+type fileExtension struct {
+	prefix string
+	dir    string
+	record string
+}
+
+// assetsAgentPaths is the Rust agent_paths, prefixed because it collides with the agentPaths type.
+func assetsAgentPaths(env envLookup, home string, agent codingAgent) (agentPaths, error) {
+	base, err := agent.configDir(env, home)
+	if err != nil {
+		return agentPaths{}, err
+	}
+	var presets []presetTarget
+	switch agent {
+	case codingAgentClaude, codingAgentHermes, codingAgentPi:
+	case codingAgentCodex:
+		presets = []presetTarget{{source: "codex/cafleet.rules", target: joinPath(base, "rules/cafleet.rules")}}
+	case codingAgentOpencode:
+		for _, mode := range agent.policyChoices() {
+			target, set := agent.requiredPreset(base, mode).get()
+			if !set {
+				panic("OpenCode requires a preset for every launch policy")
+			}
+			presets = append(presets, presetTarget{source: "opencode/" + mode + ".md", target: target})
+		}
+	default:
+		panic("invalid codingAgent")
+	}
+	extension := none[fileExtension]()
+	switch agent {
+	case codingAgentOpencode:
+		extension = some(fileExtension{prefix: opencodeExtensionPrefix, dir: opencodePluginsDir(base), record: opencodeExecutableRecord})
+	case codingAgentPi:
+		extension = some(fileExtension{prefix: piExtensionPrefix, dir: piExtensionsDir(base), record: piExecutableRecord})
+	case codingAgentClaude, codingAgentCodex, codingAgentHermes:
+	default:
+		panic("invalid codingAgent")
+	}
+	return agentPaths{skillsDir: skillsDir(agent, base, home), presets: presets, extension: extension}, nil
+}
+
+// skillsDir is where setup installs agent's skills, given its resolved configuration base.
+func skillsDir(agent codingAgent, base, home string) string {
+	if agent == codingAgentOpencode {
+		return joinPath(opencodeSkillsBase(home), "skills")
+	}
+	return joinPath(base, "skills")
+}
 
 type embeddedFile struct {
 	path string
@@ -87,6 +152,122 @@ func embeddedExtension(prefix string) []embeddedFile {
 		panic(fmt.Sprintf("the %s extension is embedded", prefix))
 	}
 	return files
+}
+
+func installAgent(agent codingAgent, paths agentPaths, out io.Writer) error {
+	report := func(line string) error {
+		_, err := io.WriteString(out, line+"\n")
+		return outputResult(err)
+	}
+	fail := func(err error) error {
+		return appErrorf("failed to install skills into %s: %s", paths.skillsDir, ioErrorText(err))
+	}
+	var roots []string
+	for _, file := range embeddedSkills() {
+		if root, ok := strings.CutSuffix(file.path, "/SKILL.md"); ok && !strings.Contains(root, "/") {
+			roots = append(roots, root)
+		}
+	}
+	if len(roots) == 0 {
+		panic("embedded skills have top-level manifests")
+	}
+	for _, skill := range roots {
+		if err := removeExistingTarget(joinPath(paths.skillsDir, skill)); err != nil {
+			return fail(err)
+		}
+		for _, file := range embeddedSkills() {
+			if !strings.HasPrefix(file.path, skill+"/") {
+				continue
+			}
+			target := joinPath(paths.skillsDir, file.path)
+			if err := os.MkdirAll(filepath.Dir(target), 0o777); err != nil {
+				return fail(err)
+			}
+			if err := os.WriteFile(target, file.data, 0o666); err != nil {
+				return fail(err)
+			}
+		}
+	}
+	if err := report(fmt.Sprintf("%s: installed %s (v%s) -> %s", agent.name(), strings.Join(roots, ", "), Version, paths.skillsDir)); err != nil {
+		return err
+	}
+	for _, installed := range paths.presets {
+		failPreset := func(err error) error {
+			return appErrorf("failed to install preset into %s: %s", installed.target, ioErrorText(err))
+		}
+		data, set := preset(installed.source).get()
+		if !set {
+			panic("embedded preset exists")
+		}
+		if err := os.MkdirAll(filepath.Dir(installed.target), 0o777); err != nil {
+			return failPreset(err)
+		}
+		if err := removeExistingTarget(installed.target); err != nil {
+			return failPreset(err)
+		}
+		if err := os.WriteFile(installed.target, []byte(data), 0o666); err != nil {
+			return failPreset(err)
+		}
+		if err := report(fmt.Sprintf("%s: installed preset (v%s) -> %s", agent.name(), Version, installed.target)); err != nil {
+			return err
+		}
+	}
+	if extension, set := paths.extension.get(); set {
+		installed, err := installFileExtension(extension)
+		if err != nil {
+			return err
+		}
+		for _, target := range installed {
+			if err := report(fmt.Sprintf("%s: installed extension (v%s) -> %s", agent.name(), Version, target)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func extensionFailure(target, cause string) error {
+	return appErrorf("failed to install extension into %s: %s", target, cause)
+}
+
+// installFileExtension writes each embedded extension file, then the executable record, and
+// returns the files.
+func installFileExtension(extension fileExtension) ([]string, error) {
+	var installed []string
+	for _, file := range embeddedExtension(extension.prefix) {
+		target := joinPath(extension.dir, file.path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o777); err != nil {
+			return nil, extensionFailure(target, ioErrorText(err))
+		}
+		if err := removeExistingTarget(target); err != nil {
+			return nil, extensionFailure(target, ioErrorText(err))
+		}
+		if err := os.WriteFile(target, file.data, 0o666); err != nil {
+			return nil, extensionFailure(target, ioErrorText(err))
+		}
+		installed = append(installed, target)
+	}
+	if err := writeExecutableRecord(joinPath(extension.dir, extension.record)); err != nil {
+		return nil, err
+	}
+	return installed, nil
+}
+
+func writeExecutableRecord(record string) error {
+	executable, err := os.Executable()
+	if err == nil {
+		executable, err = canonicalizePath(executable)
+	}
+	if err != nil {
+		return extensionFailure(record, "cannot resolve the running cafleet: "+ioErrorText(err))
+	}
+	if err := removeExistingTarget(record); err != nil {
+		return extensionFailure(record, ioErrorText(err))
+	}
+	if err := os.WriteFile(record, []byte(executable+"\n"), 0o666); err != nil {
+		return extensionFailure(record, ioErrorText(err))
+	}
+	return nil
 }
 
 // executableRecordProblem is why an installed executable record is unusable, or none when it
