@@ -808,6 +808,15 @@ func (c *dbConn) begin(behavior transactionBehavior) error {
 	return c.executeBatch(sql)
 }
 
+// refuseBusyWait makes every lock wait of the enclosing database scope fail at once with
+// databaseBusy, as Rust's busy_handler(Some(|_| false)); the scope restores its handler.
+func (c *dbConn) refuseBusyWait() error {
+	if err := c.raw.BusyHandler(func(context.Context, int) bool { return false }); err != nil {
+		return sqliteError(err)
+	}
+	return nil
+}
+
 // isAutocommit reports whether no transaction is open, including after SQLite ended one itself.
 func (c *dbConn) isAutocommit() bool {
 	return c.raw.GetAutocommit()

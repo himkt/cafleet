@@ -497,6 +497,40 @@ func (t *transport) discardDisplayTail() int {
 	return count
 }
 
+func (t *transport) writeProgrammatic(pty ptyIo, bytes []byte, guard *inputGuard, deadline time.Time) (programmaticWrite, error) {
+	effective, err := guard.beginWrite(t, bytes, deadline)
+	if err != nil {
+		return nil, err
+	}
+	t.invalidateInputDrain()
+	if err := runtimeCheckDeadline(t.clock.now(), effective); err != nil {
+		return nil, err
+	}
+	guard.markIoPossible()
+	count, writeErr := pty.tryWrite(bytes)
+	if recording := guard.recordWriteResult(count, writeErr, len(bytes)); recording != nil {
+		if writeErr != nil {
+			return nil, transportIoError(writeErr).withDiagnostic(cafleetErrorOf(recording).message())
+		}
+		return nil, recording
+	}
+	if err := runtimeCheckDeadline(t.clock.now(), effective); err != nil {
+		return nil, err
+	}
+	switch {
+	case writeErr == nil && count == len(bytes):
+		return programmaticWriteComplete{bytes: count}, nil
+	case writeErr == nil && count == 0:
+		return nil, runtimeError("native input write returned zero bytes")
+	case writeErr == nil:
+		return programmaticWritePartial{bytes: count}, nil
+	case wouldBlockOrInterrupted(writeErr):
+		return programmaticWritePending{}, nil
+	default:
+		return nil, transportIoError(writeErr)
+	}
+}
+
 const roundLimit = 8
 
 type drainBudget struct {
