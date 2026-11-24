@@ -2,6 +2,8 @@ package core
 
 import (
 	"cmp"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -23,6 +25,30 @@ import (
 type processIdentity struct {
 	pid           int64
 	startIdentity string
+}
+
+type processIdentityWire struct {
+	PID           int64  `json:"pid"`
+	StartIdentity string `json:"start_identity"`
+}
+
+func (*processIdentityWire) ignoresUnknownFields() {}
+
+func (p processIdentity) MarshalJSONTo(encoder *jsontext.Encoder) error {
+	return json.MarshalEncode(encoder, processIdentityWire{PID: p.pid, StartIdentity: p.startIdentity})
+}
+
+func (p *processIdentity) UnmarshalJSONFrom(decoder *jsontext.Decoder) error {
+	value, err := decoder.ReadValue()
+	if err != nil {
+		return err
+	}
+	var wire processIdentityWire
+	if err := decodeStrict(value, &wire); err != nil {
+		return err
+	}
+	*p = processIdentity{pid: wire.PID, startIdentity: wire.StartIdentity}
+	return nil
 }
 
 func processIdentityCurrent() (processIdentity, error) {

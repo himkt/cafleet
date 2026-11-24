@@ -1,9 +1,93 @@
 package core
 
 import (
+	"context"
+	"encoding/json/jsontext"
 	"math"
 	"time"
 )
+
+func inspectionAssociation(ctx context.Context, conn *dbConn, run runRecord, input permissionInspectInput) (runtimeEventView, error) {
+	if err := ensure(
+		input.EventID > 0 && input.InteractionID > 0 && input.DirectorMemberID == run.directorMemberID,
+		"permission inspection identity mismatch",
+	); err != nil {
+		return runtimeEventView{}, err
+	}
+	view, err := getEvent(ctx, conn, input.EventID)
+	if err != nil {
+		return runtimeEventView{}, err
+	}
+	messageID, messaged := view.event.messageID.get()
+	interaction, interacted := view.interaction.get()
+	if err := ensure(
+		view.event.runID == run.runID &&
+			view.event.interactionID == some(input.InteractionID) &&
+			view.event.kind == runtimeEventKindInteractionOpened &&
+			view.event.notificationState == notificationStateInbox &&
+			messaged && messageID > 0 &&
+			interacted &&
+			interaction.runID == run.runID &&
+			(interaction.classification == interactionClassPermissionRequest || interaction.classification == interactionClassQuestion) &&
+			!interaction.closedAt.set,
+		"permission inspection current event/interaction/message mismatch",
+	); err != nil {
+		return runtimeEventView{}, err
+	}
+	director, err := getMember(ctx, conn, run.directorMemberID, run.fleetID)
+	if err != nil {
+		return runtimeEventView{}, err
+	}
+	record, found := director.get()
+	if !found {
+		return runtimeEventView{}, runtimeError("permission Director is absent")
+	}
+	fleet, err := activeMemberFleet(ctx, conn, run.directorMemberID)
+	if err != nil {
+		return runtimeEventView{}, err
+	}
+	if err := ensure(record.kind == memberKindDirector && fleet == some(run.fleetID), "permission Director is inactive"); err != nil {
+		return runtimeEventView{}, err
+	}
+	live, err := queryRow(conn,
+		"SELECT EXISTS(SELECT 1 FROM fleets WHERE fleet_id=?1 AND director_member_id=?2 AND deleted_at IS NULL)",
+		[]any{run.fleetID, run.directorMemberID},
+		func(row sqlRow) (bool, error) { return row.bool(0) })
+	if err != nil {
+		return runtimeEventView{}, err
+	}
+	if err := ensure(live, "permission fleet/Director changed"); err != nil {
+		return runtimeEventView{}, err
+	}
+	return view, nil
+}
+
+// interactionMissingEvidence is the operation-centred facts an inspected interaction lacks; a
+// question lacks none of them.
+func interactionMissingEvidence(classification interactionClass, evidence jsontext.Value) ([]missingEvidence, error) {
+	if classification == interactionClassQuestion {
+		if err := validateEvidence(evidence); err != nil {
+			return nil, err
+		}
+		return []missingEvidence{}, nil
+	}
+	return inspectionMissingEvidence(evidence)
+}
+
+func inspectionMissingEvidence(evidence jsontext.Value) ([]missingEvidence, error) {
+	if err := validateEvidence(evidence); err != nil {
+		return nil, err
+	}
+	return []missingEvidence{
+		missingEvidenceOperation,
+		missingEvidenceArguments,
+		missingEvidenceCwd,
+		missingEvidenceEnvironment,
+		missingEvidenceTargets,
+		missingEvidenceEffects,
+		missingEvidenceChoiceScope,
+	}, nil
+}
 
 func combineManualProgress[T any](progress T, progressErr, accounting error) (T, error) {
 	switch {

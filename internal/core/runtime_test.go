@@ -97,6 +97,29 @@ func (f *runnerFixture) artifacts(t *testing.T) *runArtifacts {
 	return artifacts
 }
 
+const runnerFixtureStartedAt = "2026-10-27T14:00:00.000000+00:00"
+
+// runningOwner creates the run's artifacts, transfers its lock to this process as the runner and
+// marks the run running.
+func (f *runnerFixture) runningOwner(t *testing.T) (*runArtifacts, *runLock, runOwner) {
+	t.Helper()
+	artifacts := f.artifacts(t)
+	lock := acquireRunLock(t, f.conn, f.run.owner())
+	owner, err := lock.transferToRunner(context.Background(), f.conn, f.run.owner(), currentProcess(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := sqlExecute(f.conn, "UPDATE member_runs SET status='running',started_at=?1 WHERE run_id=?2", runnerFixtureStartedAt, owner.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed != 1 {
+		t.Fatalf("marking the run running changed %d rows", changed)
+	}
+	f.refresh(t)
+	return artifacts, lock, owner
+}
+
 func (f *runnerFixture) spec() spawnSpec {
 	return spawnSpec{
 		argv: []string{"/usr/bin/env", "literal assignment 世界 '$x' `text`"},
