@@ -418,7 +418,7 @@ A wrong-kind answer is a zero-byte `rejected` response (exit 1): `choice answers
 Setup installs Codex `<codex home>/rules/cafleet.rules`, allowing every `cafleet` command; the OpenCode `cafleet` and `cafleet-ask` presets (shell rules for the four member broker commands, `"cafleet": "deny"` tool permission) and plugin `<preset base>/plugins/cafleet.ts`; and the pi extension `<pi base>/extensions/cafleet.ts` with its `cafleet.executable` record. Each plugin and extension runs only the `cafleet` its record names. Setup runs no backend command; Claude and Hermes print only the skills line. `cafleet setup --coding-agent pi` prints:
 
 ```
-pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
+pi: installed cafleet-design-doc, cafleet (v<version>) -> <pi base>/skills
 pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 ```
 

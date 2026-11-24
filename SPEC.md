@@ -301,10 +301,10 @@ The *executable record* is a one-line file holding the absolute path of the runn
 
 Skills-operation errors retain `failed to install skills into <skills_dir>: <error>`, preset-operation errors `failed to install preset into <target>: <error>`, and extension-operation errors, including the executable record, `failed to install extension into <target>: <error>`. A failure on any preset or extension step fails setup.
 
-Setup prints each success line after its operation completes: the skills line, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written. Claude and Hermes print only the skills line; pi prints the skills line and the extension line:
+Setup prints each success line after its operation completes: the skills line, which lists the skill names in bytewise order of their full relative paths, one preset line per installed preset target in install order, then one extension line per extension target once the target and its executable record are written. Claude and Hermes print only the skills line; pi prints the skills line and the extension line:
 
 ```
-<agent>: installed cafleet, cafleet-design-doc (v<version>) -> <skills dir>
+<agent>: installed cafleet-design-doc, cafleet (v<version>) -> <skills dir>
 <agent>: installed preset (v<version>) -> <target>
 <agent>: installed extension (v<version>) -> <target>
 ```
@@ -312,7 +312,7 @@ Setup prints each success line after its operation completes: the skills line, o
 `cafleet setup --coding-agent pi` prints:
 
 ```
-pi: installed cafleet, cafleet-design-doc (v<version>) -> <pi base>/skills
+pi: installed cafleet-design-doc, cafleet (v<version>) -> <pi base>/skills
 pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 ```
 
@@ -1792,7 +1792,7 @@ Each preset body has three blank-line-separated paragraphs after the heading, wi
 
 #### Hermes availability preflight
 
-After the config-dir and PATH checks, `member create` for hermes runs one concurrent batch: `hermes config path`, which resolves the effective Hermes home for settlement (§ Hermes work settlement), and the native version probe (§6.9 Native version probe). Both run the resolved executable with null stdin, the member's `HERMES_HOME` (the forwarded value, or unset) and output captured and bounded like the native version probe, under one deadline of the smaller of two seconds and the ten-second creation deadline. The `config path` result is evaluated first, then the version probe. Each `config path` failure exits 1 before registration with its § Contract error strings error.
+After the config-dir and PATH checks, `member create` for hermes runs one concurrent batch: `hermes config path`, which resolves the effective Hermes home for settlement (§ Hermes work settlement), and the native version probe (§6.9 Native version probe). Both run the resolved executable with null stdin, the member's `HERMES_HOME` (the forwarded value, or unset) and output captured like the native version probe. `hermes config path` runs under the smaller of five seconds and the remaining ten-second creation deadline; the version probe keeps its own bound of the smaller of two seconds and that deadline. The `config path` result is evaluated first, then the version probe. Each `config path` failure exits 1 before registration with its § Contract error strings error.
 
 #### Hermes work settlement
 
@@ -2118,7 +2118,7 @@ The probe yields a version only when it exits with status `0` and the first stdo
 | `v2.1.4 2.1.5` | Probe failure: several version tokens |
 | `tool 2.1` | Probe failure: no version token |
 
-Hermes replaces the one-token rule with its own first-line rule. The first stdout line must match `^Hermes Agent v\S+ \((?P<version>[^)]+)\)$` (§ Pattern syntax), and the captured value must parse as canonical SemVer; that value is the recorded `native_version`. A non-matching line, or a capture that is not canonical SemVer, is a probe failure:
+Hermes replaces the one-token rule with its own first-line rule. The first stdout line must match `^Hermes Agent v[^\t\n\v\f\r ]+ \((?P<version>[^)]+)\)$` (§ Pattern syntax), and the captured value must parse as canonical SemVer; that value is the recorded `native_version`. A non-matching line, or a capture that is not canonical SemVer, is a probe failure:
 
 | First stdout line (hermes) | Recorded `native_version` |
 |---|---|
@@ -2127,7 +2127,7 @@ Hermes replaces the one-token rule with its own first-line rule. The first stdou
 | `Hermes Agent 2026.9.24` | Probe failure: no Hermes version line |
 | `Hermes Agent vunknown (2026.09.24)` | Probe failure: not canonical SemVer |
 
-For hermes the probe runs concurrently with `hermes config path` under their shared deadline (§6.7 Hermes availability preflight).
+For hermes the probe runs concurrently with `hermes config path`, which has its own bound (§6.7 Hermes availability preflight).
 
 A probe that fails a rule above, cannot start, times out or prints non-UTF-8 output records `native_version` null, and creation continues with the backend's bundled profile and its coverage. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE.`, and leaves its stdout text and JSON unchanged.
 
@@ -2504,6 +2504,8 @@ A digit selects and confirms its choice whatever the focus, so the answer stages
 
 The idle rule keeps its classic REPL prefix and rotating placeholder. The working rule has priority 50, uses a primary-screen single-row region with `cursor=at_end`, starts at `^☤ ❯ type to redirect this turn · Tab queues it for after *$` and ends at the prefix pattern `^☤ ❯ `; its line matcher `prompt` requires the same full placeholder as the start pattern. This binds the cursor to prefix column 4 while requiring the measured working placeholder, independently of submitted `❯ ...` history above it. A typed suffix, paste token, arbitrary working literal, cursor away from the prefix or multi-row retained draft supplies no empty-composer observation. Both operations cite native working/idle post-submit and unsubmitted-literal fixtures under § Bundled profiles and native screen fixtures.
 
+The classic-CLI composer-text rule `hermes-composer-text` reads from the `❯ ` row to the next row that begins with the `─` separator or with the ` ☤ ` status line; a narrow pane, such as 30 columns, draws the status line directly below the composer without a closing separator. Its text wraps by `word`: the classic CLI wraps by character, and a space it writes into a row's last column is removed with that row's trailing blanks.
+
 The Director answers single-request choices only: allow once or deny, on both the ESCALATE and the override prompt. The session and always choices have no choice entry. When the guardian model is unavailable, Hermes shows the same human prompt, detected by the same rule. An unanswered prompt fails closed after `approvals.timeout` (default 300 seconds): Hermes prints its timeout notice and returns a BLOCKED result to the model, the form disappears, and the runner closes the episode with the `not_visible` close reason. A later bound response then fails request-token revalidation.
 
 A Hermes Director runs the TUI client (§6.7 Host evidence and native-input authorization), whose screen differs from the classic CLI that members run. Members keep the classic CLI rules; the TUI rules serve Director delivery (§ Director delivery capability):
@@ -2618,7 +2620,7 @@ Each profile file has `schema_version` `1` and a `backend` equal to its file nam
 
 Each file and screen parses with exactly its fields above. Every row declared in `masked_rows` is in range and empty. Every `cell_backgrounds` run lies inside the geometry and outside masked rows, has `start_col` below `end_col`, overlaps no other run and carries a valid non-default colour. Every `cell_styles` run satisfies the same placement rules against the other `cell_styles` runs and carries at least one non-default attribute with a valid colour.
 
-Every bundled catalog pattern spells its classes explicitly: it contains no Perl class or boundary (`\s \S \d \D \w \W \b \B`) and no escape outside the syntax (§ Pattern syntax).
+Every bundled catalog pattern spells its classes explicitly: it contains no escape outside § Pattern syntax, including the Perl classes and boundaries `\s \S \d \D \w \W \b \B`.
 
 A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts) as standing on the last cell of its row, both in fixtures and on live screens. A region spanning the full width therefore counts a cursor at column `cols` on one of its rows as inside the region.
 
@@ -2713,7 +2715,7 @@ Every observation that carries both keeps the cursor and screen conditions and t
 
 ###### Pattern syntax
 
-Profile patterns, frame guards and region matchers of the bundled catalog and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; flags `i m s U` in `(?flags)` and `(?flags:…)`; and the Perl classes `\s \S \d \D \w \W` and boundaries `\b \B`. Perl classes have Unicode meaning: `\s` is White_Space (U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000), `\d` is general category Nd, `\w` is Alphabetic, M, Nd, Pc and Join_Control, `\b` is a boundary between `\w` and non-`\w`, and the capitals negate. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
+Profile patterns, frame guards and region matchers of the bundled catalog and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; and flags `i m s U` in `(?flags)` and `(?flags:…)`. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
 
 ##### Interaction frame guard
 
@@ -2949,7 +2951,7 @@ Only the current lock/epoch owner allocates event sequences. Confirmed loss and 
 
 ##### Screen model facts
 
-The runner reconstructs the child's screen as a grid of rows × columns of cells and offers detection a snapshot of it after each step. A cell holds one base scalar plus any following zero-width scalars. A wide scalar (width 2; East Asian Ambiguous scalars are width 1) occupies a leading cell and a continuation cell, and writing it resets the continuation cell to the default background and style. Each row records whether its text continued onto the next row by automatic wrap. After a write into the last column the cursor reports column `cols` (pending wrap). A cell's colours are default, one of 256 indexed colours (SGR 30–37/40–47 and 90–97/100–107 denote indexed colours 0–15, equal to their `38;5;n`/`48;5;n` forms) or RGB, and its style includes faint. The model tracks the primary and alternate screens, the OSC window title and the bracketed-paste mode (DEC private mode 2004), resizes with the PTY, and never answers a terminal query itself.
+The runner reconstructs the child's screen as a grid of rows × columns of cells and offers detection a snapshot of it after each step. The screen model is at least two columns wide: a one-column terminal is modelled as two columns, while the child PTY keeps the pane's size. A cell holds one base scalar plus any following zero-width scalars. A wide scalar (width 2; East Asian Ambiguous scalars are width 1) occupies a leading cell and a continuation cell, and writing it resets the continuation cell to the default background and style. Each row records whether its text continued onto the next row by automatic wrap. After a write into the last column the cursor reports column `cols` (pending wrap). A cell's colours are default, one of 256 indexed colours (SGR 30–37/40–47 and 90–97/100–107 denote indexed colours 0–15, equal to their `38;5;n`/`48;5;n` forms) or RGB, and its style includes faint. The model tracks the primary and alternate screens, the OSC window title and the bracketed-paste mode (DEC private mode 2004), resizes with the PTY, and never answers a terminal query itself.
 
 ##### Terminal reply classification
 
