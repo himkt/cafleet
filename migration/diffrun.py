@@ -12,11 +12,13 @@ emulator  Hashes the canonical screen dump after every observation step on both 
 widths    Compares the width of every Unicode scalar value and of N seeded strings rich in emoji,
           ZWJ, variation-selector, regional-indicator, tag and ligature-trigger characters.
 
-The Go side is the environment-driven test GO_TEST in GO_PACKAGE. It reads
+The Go side is an environment-driven test, GO_TESTS[mode] (package and test name): the emulator
+modes run in internal/vt and the width modes in internal/vt/unicodewidth. It reads
   VTPARITY_MODE   hash | dump | strwidth | charwidths
-  VTPARITY_INPUT  the case or string file (for charwidths, the output file)
+  VTPARITY_INPUT  the case or string file (unused for charwidths)
   VTPARITY_ARGS   for dump, "<case name> <step>"
-  VTPARITY_OUT    the file it writes, byte-identical in format to `vtoracle MODE INPUT ARGS` stdout
+  VTPARITY_OUT    the file it writes, byte-identical to `vtoracle MODE INPUT ARGS` stdout (for
+                  charwidths, to the table vtoracle writes)
 and skips when VTPARITY_MODE is unset. While GO_EMULATOR_DIR is absent the Go side does not exist
 yet: the run prints SKIP for the comparison and checks only that the oracle replays every case.
 --go-binary PATH replaces the Go test with a standalone dumper taking vtoracle's command line, such
@@ -36,8 +38,9 @@ import cases  # noqa: E402
 import fuzz  # noqa: E402
 
 GO_EMULATOR_DIR = cases.REPO / "internal" / "vt"
-GO_PACKAGE = "./internal/core"
-GO_TEST = "TestRuntimeTransport_VtOracleParity"
+EMULATOR_TEST = ("./internal/vt", "TestParser_OracleParity")
+WIDTH_TEST = ("./internal/vt/unicodewidth", "TestWidth_OracleParity")
+GO_TESTS = {"hash": EMULATOR_TEST, "dump": EMULATOR_TEST, "final": EMULATOR_TEST, "strwidth": WIDTH_TEST, "charwidths": WIDTH_TEST}
 STRWIDTH_SEED = 7
 STRWIDTH_POOL = (
     [0x23, 0x2A, 0x30, 0x39, 0x41, 0x0A, 0x0D, 0xA9, 0x200D, 0xFE0F, 0xFE0E, 0xFE01, 0x20E3, 0x2018, 0x201C, 0x2764, 0x263A, 0x270C, 0x1F3F4, 0x1F3F3]
@@ -60,16 +63,19 @@ def go_side_present():
 
 
 def run_go(mode, input_path, *args):
-    if GO_BINARY is not None:
-        if mode == "charwidths":
-            subprocess.run([GO_BINARY, mode, str(input_path)], check=True)
-            return b""
-        return subprocess.run([GO_BINARY, mode, str(input_path), *map(str, args)], check=True, capture_output=True).stdout
+    """The Go side's output for `vtoracle MODE INPUT ARGS`; for charwidths, the table it writes."""
     with tempfile.TemporaryDirectory() as tmp:
         out = os.path.join(tmp, "out")
-        env = {**os.environ, "VTPARITY_MODE": mode, "VTPARITY_INPUT": str(input_path), "VTPARITY_ARGS": " ".join(map(str, args)), "VTPARITY_OUT": out}
-        subprocess.run(["go", "test", GO_PACKAGE, "-run", f"^{GO_TEST}$", "-count=1"], check=True, cwd=cases.REPO, env=env, stdout=subprocess.DEVNULL)
-        assert os.path.exists(out), f"{GO_TEST} wrote no {mode} output; is the parity test missing?"
+        if GO_BINARY is not None:
+            if mode == "charwidths":
+                subprocess.run([GO_BINARY, mode, out], check=True)
+            else:
+                return subprocess.run([GO_BINARY, mode, str(input_path), *map(str, args)], check=True, capture_output=True).stdout
+        else:
+            package, test = GO_TESTS[mode]
+            env = {**os.environ, "VTPARITY_MODE": mode, "VTPARITY_INPUT": str(input_path), "VTPARITY_ARGS": " ".join(map(str, args)), "VTPARITY_OUT": out}
+            subprocess.run(["go", "test", package, "-run", f"^{test}$", "-count=1"], check=True, cwd=cases.REPO, env=env, stdout=subprocess.DEVNULL)
+        assert os.path.exists(out), f"the Go side wrote no {mode} output; is its parity test missing?"
         with open(out, "rb") as f:
             return f.read()
 
@@ -181,10 +187,7 @@ def widths(args):
             print(f"widths: {len(rust_table)} scalars and {args.strings} strings measured by the oracle; Go comparison SKIP (no internal/vt)")
             return 0
         go_str = run_go("strwidth", strings).decode().split()
-        go_chars = os.path.join(tmp, "go-widths.bin")
-        run_go("charwidths", go_chars)
-        with open(go_chars, "rb") as f:
-            go_table = f.read()
+        go_table = run_go("charwidths", "")
     bad_chars = [cp for cp in range(0x110000) if cp >= len(go_table) or rust_table[cp] != go_table[cp]]
     bad_strs = [i for i in range(args.strings) if i >= len(go_str) or rust_str[i] != go_str[i]]
     print(f"widths: {len(bad_chars)}/{len(rust_table)} scalars differ, {len(bad_strs)}/{args.strings} strings differ")
