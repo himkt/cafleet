@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 29/80 tasks complete
+**Progress**: 29/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
