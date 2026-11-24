@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRuntimeObservation_InputEligibilityRendersComposerEmptyOrHoldWithItsReason(t *testing.T) {
 	t.Parallel()
@@ -20,4 +23,16 @@ func TestRuntimeObservation_InputEligibilityRendersComposerEmptyOrHoldWithItsRea
 			t.Fatalf("%s: rendering = %q", tc.expected, got)
 		}
 	}
+}
+
+const observationFixtureNow = "2026-10-26T16:40:00.000000+00:00"
+
+// observationFixtureClock is a virtual clock whose wall time starts at observationFixtureNow.
+func observationFixtureClock(t *testing.T) *testClock {
+	t.Helper()
+	origin, ok := parseLenient(observationFixtureNow)
+	if !ok {
+		t.Fatal("the fixture stamp is canonical")
+	}
+	return testClockStartingAt(time.Now()).withWallOrigin(origin)
 }
