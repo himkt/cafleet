@@ -37,6 +37,19 @@ SRC = REPO / "src"
 GO_CORE = REPO / "internal" / "core"
 BRANCH_ONLY = {"coding_agent::detector::capture_golden::export"}
 OMISSIONS = """
+coding_agent::detector::tests::composer_reliability::measured_pi_working_editors_are_verified_empty_after_submit -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::composer_reliability::measured_hermes_working_placeholders_verify_only_the_live_editor -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::pi_profile::pi_detects_each_captured_gate_form_on_both_multiplexers_and_widths -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::pi_profile::pi_idle_editor_is_a_verified_empty_composer_after_every_captured_boundary -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::pi_profile::pi_captured_working_post_submit_editors_are_verified_empty -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::pi_profile::pi_allow_plan_is_one_enter_gated_on_the_allow_once_focus -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_PiProfile_PiStageGatesHoldOnTheirCapturedPreStageScreens
+coding_agent::detector::tests::pi_profile::pi_deny_plan_moves_with_j_then_enters_without_any_escape_byte -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_PiProfile_PiStageGatesHoldOnTheirCapturedPreStageScreens
+coding_agent::detector::tests::hermes_profile::hermes_detects_each_captured_form_at_every_width_on_both_multiplexers -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::hermes_profile::hermes_continuation_timeout_and_submitted_screens_are_the_idle_composer -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::claude_ask_user_question::every_form_state_of_one_call_shares_the_single_form_fingerprint -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::claude_ask_user_question::the_pending_notice_and_the_form_share_one_fingerprint -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::bundled_claude_detector_replays_the_native_permission_fixture_from_unmasked_rows -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::bundled_claude_detects_the_wrapped_native_form_and_reports_its_displayed_operation_rows -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
 """
 GO_TEST_RE = re.compile(r"^func (Test\w+)\(t \*testing\.T\)", re.MULTILINE)
 OS_SUFFIX = {"linux": "Linux", "darwin": "Darwin"}

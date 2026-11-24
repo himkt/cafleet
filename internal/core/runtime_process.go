@@ -146,6 +146,127 @@ func liveGroupMembers(group int32) ([]int64, error) {
 	return live, nil
 }
 
+// recoverDescendants ends the recorded child's process group when the recorded child generation
+// still anchors it, escalating from SIGTERM to SIGKILL.
+func recoverDescendants(run runRecord, deadlines shutdownDeadlines, c clock) (shutdownOutcome, error) {
+	outcome := shutdownOutcomeComplete(none[childExit]())
+	recorded, err := run.childProcess()
+	if err != nil {
+		return shutdownOutcome{}, err
+	}
+	child, set := recorded.get()
+	if !set {
+		return outcome, nil
+	}
+	group, err := pidGroup(child.pid)
+	if err != nil {
+		return shutdownOutcome{}, err
+	}
+	alive, err := child.isAlive()
+	if err != nil {
+		return shutdownOutcome{}, err
+	}
+	if !alive {
+		live, err := liveGroupMembers(group)
+		if err != nil {
+			return shutdownOutcome{}, err
+		}
+		if len(live) > 0 {
+			outcome.fail("descendant ownership cannot be anchored to the recorded child generation")
+		}
+		return outcome, nil
+	}
+	owned := map[int64]processIdentity{child.pid: child}
+	inOrder := func() []processIdentity {
+		processes := make([]processIdentity, 0, len(owned))
+		for _, pid := range slices.Sorted(maps.Keys(owned)) {
+			processes = append(processes, owned[pid])
+		}
+		return processes
+	}
+	anyProcess := func(test func(processIdentity) (bool, error)) (bool, error) {
+		for _, process := range inOrder() {
+			found, err := test(process)
+			if err != nil || found {
+				return found, err
+			}
+		}
+		return false, nil
+	}
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL} {
+		anchored, err := anyProcess(processIdentity.matches)
+		if err != nil {
+			return shutdownOutcome{}, err
+		}
+		if !anchored {
+			live, err := liveGroupMembers(group)
+			if err != nil {
+				return shutdownOutcome{}, err
+			}
+			if len(live) > 0 {
+				outcome.fail("descendant ownership lost its recorded process generation")
+			}
+			break
+		}
+		members, err := groupMembers(group)
+		if err != nil {
+			return shutdownOutcome{}, err
+		}
+		for _, pid := range members {
+			process, present, err := processIdentityRead(pid)
+			if err != nil {
+				return shutdownOutcome{}, err
+			}
+			if !present {
+				continue
+			}
+			if previous, known := owned[pid]; known {
+				if err := ensure(previous == process, "recovery descendant PID generation changed"); err != nil {
+					return shutdownOutcome{}, err
+				}
+			} else {
+				owned[pid] = process
+			}
+		}
+		for _, process := range inOrder() {
+			alive, err := process.isAlive()
+			if err != nil {
+				return shutdownOutcome{}, err
+			}
+			if alive {
+				if err := signalPID(process.pid, sig); err != nil {
+					return shutdownOutcome{}, err
+				}
+			}
+		}
+		until := deadlines.storageDeadline()
+		if sig == syscall.SIGTERM {
+			until = deadlines.childDeadline()
+		}
+		for c.now().Before(until) {
+			alive, err := anyProcess(processIdentity.isAlive)
+			if err != nil {
+				return shutdownOutcome{}, err
+			}
+			if !alive {
+				break
+			}
+			napUntil(c, until)
+		}
+	}
+	for _, process := range inOrder() {
+		alive, err := process.isAlive()
+		if err != nil {
+			return shutdownOutcome{}, err
+		}
+		if alive {
+			outcome.fail("verified descendants remain after the original cleanup deadline")
+			break
+		}
+	}
+	return outcome, nil
+}
+
 // ptySession owns the native child, its process group and its shutdown clock. child is the
 // PID of the direct child until it is reaped; owned pins every process generation of the
 // native's group the session has observed.
