@@ -1,11 +1,37 @@
 package core
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
 	"time"
 )
+
+// muxForPlacement is the multiplexer that targets p's recorded backend and server, bounded by d
+// when one is given.
+func muxForPlacement(p placement, d opt[deadline]) (multiplexer, error) {
+	mux, err := multiplexerForServer(p.backend, p.muxServer, systemRunner{})
+	if err != nil {
+		return nil, appError(err.Error())
+	}
+	if bound, set := d.get(); set {
+		mux = mux.bounded(bound)
+	}
+	if err := mux.ensureAvailable(); err != nil {
+		return nil, appError(err.Error())
+	}
+	return mux, nil
+}
+
+// muxForFleet is the multiplexer built from fleetID's recorded Director placement.
+func muxForFleet(ctx context.Context, conn *dbConn, fleetID int64, d opt[deadline]) (multiplexer, error) {
+	director, err := directorPlacement(ctx, conn, fleetID)
+	if err != nil {
+		return nil, err
+	}
+	return muxForPlacement(director, d)
+}
 
 func runtimeError(message string) *cafleetError { return appError(message) }
 

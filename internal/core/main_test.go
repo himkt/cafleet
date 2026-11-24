@@ -176,8 +176,10 @@ func skipUnlessChildTest(t *testing.T) {
 	}
 }
 
+// generatedBegin is testName's BEGIN GENERATED marker, which names the command that regenerates
+// its block: the internal/core test binary alone, because the -update-golden flag exists only there.
 func generatedBegin(testName string) string {
-	return generatedOpen + " mise //:test -- -run '" + testName + "' -update-golden"
+	return generatedOpen + " go test ./internal/core -run '^" + testName + "$' -update-golden"
 }
 
 // rewriteGeneratedBlock replaces the lines between testName's BEGIN GENERATED marker and the
@@ -357,6 +359,14 @@ func TestMain_ReexecutedChildRunsOnlyUnderItsGuard(t *testing.T) {
 
 func generatedSource(blocks ...string) []byte {
 	return []byte(strings.Join(blocks, ""))
+}
+
+func TestMain_GeneratedBeginNamesTheCoreOnlyRegenerateCommand(t *testing.T) {
+	t.Parallel()
+	const want = "// BEGIN GENERATED: go test ./internal/core -run '^TestOwn$' -update-golden"
+	if got := generatedBegin("TestOwn"); got != want {
+		t.Fatalf("generatedBegin = %q, want %q", got, want)
+	}
 }
 
 func TestMain_RewriteGeneratedBlockReplacesOnlyTheNamedBlock(t *testing.T) {

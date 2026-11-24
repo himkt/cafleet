@@ -249,3 +249,14 @@ func outputJSONPermissionInspection(row permissionInspection) jsonObject {
 		{"missing_evidence", row.MissingEvidence},
 	}}}
 }
+
+func outputJSONMemberCapture(capture memberCapture) jsonObject {
+	return jsonObject{
+		{"member_id", capture.memberID},
+		{"pane_id", capture.paneID},
+		{"lines", capture.lines},
+		{"content", capture.snapshot.content},
+		{"captured_at", capture.snapshot.capturedAt},
+		{"content_sha256", capture.snapshot.contentSHA256},
+	}
+}
