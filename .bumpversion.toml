@@ -16,3 +16,8 @@ version = \"{current_version}\""""
 replace   = """
 name = \"cafleet\"
 version = \"{new_version}\""""
+
+[[tool.bumpversion.files]]
+filename = "internal/core/version.go"
+search   = "const Version = \"{current_version}\""
+replace  = "const Version = \"{new_version}\""
