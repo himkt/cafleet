@@ -1,17 +1,28 @@
 package core
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 )
+
+// hermesCli runs hermes with HERMES_HOME=<base>.
+type hermesCli struct {
+	executable string
+	base       string
+}
 
 // hermesConfig runs `hermes config path`; calls of one concurrent batch pass the same deadline.
 type hermesConfig interface {
@@ -37,6 +48,71 @@ func succeeded(output hermesOutput) (string, error) {
 	default:
 		return "", appError(stderr)
 	}
+}
+
+func newHermesCli(executable, base string) hermesCli {
+	return hermesCli{executable: executable, base: base}
+}
+
+func (h hermesCli) run(args []string, until time.Time) (hermesOutput, error) {
+	output, err := runBoundedOutput(h.executable, args, []string{"HERMES_HOME=" + h.base}, until)
+	if err != nil {
+		return hermesOutput{}, err
+	}
+	command := strings.Join(args, " ")
+	if !output.status.Exited() {
+		return hermesOutput{}, appError("hermes " + command + " ended by " + exitStatusText(output.status))
+	}
+	if !utf8.Valid(output.stdout) {
+		return hermesOutput{}, appError("hermes " + command + " printed non-UTF-8 output")
+	}
+	return hermesOutput{exitCode: output.status.ExitStatus(), stdout: string(output.stdout), stderr: lossyUTF8(output.stderr)}, nil
+}
+
+func (h hermesCli) configPath(until time.Time) (string, error) {
+	output, err := h.run([]string{"config", "path"}, until)
+	if err != nil {
+		return "", err
+	}
+	stdout, err := succeeded(output)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimFunc(stdout, unicode.IsSpace), nil
+}
+
+// scopedJoinHandle is the result of work running on its own goroutine, with the panic it raised.
+type scopedJoinHandle[T any] struct {
+	done     chan struct{}
+	value    T
+	panicked any
+	failed   bool
+}
+
+func scopedSpawn[T any](work func() T) *scopedJoinHandle[T] {
+	handle := &scopedJoinHandle[T]{done: make(chan struct{})}
+	go func() {
+		defer close(handle.done)
+		defer func() {
+			if handle.failed {
+				handle.panicked = recover()
+			}
+		}()
+		handle.failed = true
+		handle.value = work()
+		handle.failed = false
+	}()
+	return handle
+}
+
+// joined waits for handle's work and returns its value, re-raising in the caller a panic the work
+// raised.
+func joined[T any](handle *scopedJoinHandle[T]) T {
+	<-handle.done
+	if handle.failed {
+		panic(handle.panicked)
+	}
+	return handle.value
 }
 
 // nativeSession is the member run's Hermes session identity, stored in
@@ -561,4 +637,123 @@ func rustParent(path string) string {
 	default:
 		return strings.TrimRight(trimmed[:index], "/")
 	}
+}
+
+// settleRun stops and verifies a Hermes run's session work through its pane.
+func settleRun(ctx context.Context, conn *dbConn, mux multiplexer, run runRecord, paneID string, d deadline) error {
+	stored, err := brokerRuntimeNativeSession(ctx, conn, run.runID)
+	if err != nil {
+		return err
+	}
+	session, recorded := stored.get()
+	if !recorded {
+		return appErrorf("hermes work for member %d could not be verified as stopped: member run %d has no Hermes session record; member was not deleted.", run.memberID, run.runID)
+	}
+	host := &paneSettlementHost{ctx: ctx, conn: conn, mux: mux, paneID: paneID, runID: run.runID, deadline: d}
+	outcome, err := codingAgentHermesSettle(run.memberID, &session, host, d.instant())
+	if err != nil {
+		return err
+	}
+	if outcome == settlementClientAlreadyExited {
+		fmt.Fprintln(os.Stderr, alreadyExitedWarning(run.memberID))
+	}
+	return nil
+}
+
+const (
+	captureLines int64 = 400
+	pollInterval       = 200 * time.Millisecond
+)
+
+// paneSettlementHost settles through the member's live pane while the deletion holds its pane
+// lock.
+type paneSettlementHost struct {
+	ctx      context.Context
+	conn     *dbConn
+	mux      multiplexer
+	paneID   string
+	runID    int64
+	deadline deadline
+}
+
+func (h *paneSettlementHost) clientExited() (bool, error) {
+	run, err := getRun(h.ctx, h.conn, h.runID)
+	if err != nil {
+		return false, err
+	}
+	return run.status.terminal(), nil
+}
+
+func (h *paneSettlementHost) sendKeys(keys []string) error {
+	parsed, err := pressKeysParse(keys)
+	if err != nil {
+		return err
+	}
+	if err := h.mux.sendKeys(h.paneID, parsed, h.deadline); err != nil {
+		return err.cafleet()
+	}
+	return nil
+}
+
+func (h *paneSettlementHost) capture() (string, error) {
+	screen, err := h.mux.capturePane(h.paneID, captureLines)
+	if err != nil {
+		return "", err.cafleet()
+	}
+	return screen, nil
+}
+
+func (h *paneSettlementHost) recordSessionID(sessionID string) error {
+	stored, err := brokerRuntimeNativeSession(h.ctx, h.conn, h.runID)
+	if err != nil {
+		return err
+	}
+	session, recorded := stored.get()
+	if !recorded {
+		return appErrorf("member run %d has no Hermes session record", h.runID)
+	}
+	session.sessionID = some(sessionID)
+	return setNativeSession(h.ctx, h.conn, h.runID, session)
+}
+
+func (h *paneSettlementHost) processesJSON(home string) (string, bool, error) {
+	path := joinPath(home, "processes.json")
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "", false, nil
+	case err != nil:
+		return "", false, appError("cannot read " + lossyUTF8([]byte(path)) + ": " + ioErrorText(err))
+	case !utf8.Valid(data):
+		return "", false, appError("cannot read " + lossyUTF8([]byte(path)) + ": stream did not contain valid UTF-8")
+	default:
+		return string(data), true, nil
+	}
+}
+
+func (h *paneSettlementHost) registeredProcessRunning(pid uint32, hostStartTime uint64) (bool, error) {
+	identity, exists, err := processIdentityRead(int64(pid))
+	if err != nil || !exists {
+		return false, err
+	}
+	if runtime.GOOS == "darwin" {
+		return true, nil
+	}
+	index := strings.LastIndex(identity.startIdentity, ":")
+	if index < 0 {
+		panic("a Linux process identity ends with its stat start field")
+	}
+	started, parseErr := strconv.ParseUint(identity.startIdentity[index+1:], 10, 64)
+	if parseErr != nil {
+		panic("a Linux process identity ends with its stat start field")
+	}
+	return started == hostStartTime, nil
+}
+
+func (h *paneSettlementHost) pause() {
+	time.Sleep(pollInterval)
+}
+
+func (h *paneSettlementHost) now() time.Time {
+	return time.Now()
 }

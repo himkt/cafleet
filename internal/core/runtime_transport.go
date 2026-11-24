@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 
 	"github.com/himkt/cafleet/internal/vt"
 	"golang.org/x/sys/unix"
@@ -123,6 +124,38 @@ func (t *terminalState) resize(size terminalSize) error {
 	}
 	t.parser.SetSize(size.rows, screenCols(size))
 	return nil
+}
+
+// terminalStateReplay is a fresh terminal of the capture's size with each captured row written at
+// its row position, carrying exactly the cursor and screen mode the capture reports.
+func terminalStateReplay(capture *screenCapture) (screenSnapshot, error) {
+	terminal, err := newTerminalState(terminalSize{rows: capture.rows, cols: capture.cols})
+	if err != nil {
+		return screenSnapshot{}, err
+	}
+	var bytes []byte
+	if alternate, known := capture.alternateScreen.get(); known && alternate {
+		bytes = append(bytes, "\x1b[?1049h"...)
+	}
+	body := strings.TrimSuffix(capture.body, "\n")
+	for row, line := range strings.Split(body, "\n") {
+		if row >= int(capture.rows) {
+			break
+		}
+		bytes = fmt.Appendf(bytes, "\x1b[%d;1H", row+1)
+		bytes = append(bytes, strings.TrimSuffix(line, "\r")...)
+		bytes = append(bytes, "\x1b[0m"...)
+	}
+	if cursor, known := capture.cursor.get(); known {
+		bytes = fmt.Appendf(bytes, "\x1b[%d;%dH", int(cursor[0])+1, int(cursor[1])+1)
+	}
+	if err := terminal.feed(bytes); err != nil {
+		return screenSnapshot{}, err
+	}
+	snapshot := terminal.snapshot()
+	snapshot.cursor = capture.cursor
+	snapshot.alternateScreen = capture.alternateScreen
+	return snapshot, nil
 }
 
 // view is the current screen without a copy; it is valid until the next feed or resize.

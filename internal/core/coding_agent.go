@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -501,6 +502,69 @@ func codingAgentNativeLaunchIdentity(backend codingAgent, version string, probeE
 		}
 	}
 	return nativeLaunchIdentity{nativeVersion: some(version), coverage: cover, warning: none[string]()}
+}
+
+const outputBytes = 4096
+
+// runBounded runs a native command with null stdin and bounded output, returning its UTF-8 stdout
+// or the failure detail that callers prefix with the command.
+func runBounded(executable string, args []string, environment []string, until time.Time) (string, error) {
+	output, err := runBoundedOutput(executable, args, environment, until)
+	if err != nil {
+		return "", err
+	}
+	if !output.status.Exited() || output.status.ExitStatus() != 0 {
+		status := exitStatusText(output.status)
+		if first := lines(lossyUTF8(output.stderr)); len(first) > 0 && strings.TrimFunc(first[0], unicode.IsSpace) != "" {
+			return "", appError("exited with " + status + ": " + first[0])
+		}
+		return "", appError("exited with " + status)
+	}
+	if !utf8.Valid(output.stdout) {
+		return "", appError("printed non-UTF-8 output")
+	}
+	return string(output.stdout), nil
+}
+
+// runBoundedOutput runs a native command like runBounded and returns its exit status and both
+// output streams; only a start failure or the deadline is an error.
+func runBoundedOutput(executable string, args []string, environment []string, until time.Time) (boundedOutput, error) {
+	output, failure := runUntilExit(executable, args, environment, until, outputBytes)
+	if failure == nil {
+		return output, nil
+	}
+	switch failure.kind {
+	case boundedFailureNotStarted:
+		return boundedOutput{}, appError("could not start: " + failure.cause())
+	case boundedFailureDeadline:
+		if failure.exited {
+			return boundedOutput{}, appError("output did not close within its deadline")
+		}
+		return boundedOutput{}, appError("did not finish within its deadline")
+	case boundedFailureIO:
+		return boundedOutput{}, appError("output could not be read: " + failure.cause())
+	default:
+		panic("invalid boundedFailureKind")
+	}
+}
+
+func (a codingAgent) probeNativeVersion(executable string, until time.Time) (string, error) {
+	fail := func(detail error) error {
+		return appError(a.name() + " --version " + cafleetErrorOf(detail).message())
+	}
+	text, err := runBounded(executable, []string{"--version"}, nil, until)
+	if err != nil {
+		return "", fail(err)
+	}
+	all := lines(text)
+	if len(all) == 0 {
+		return "", fail(appError("printed no output"))
+	}
+	version, err := a.versionFromLine(all[0])
+	if err != nil {
+		return "", fail(err)
+	}
+	return version, nil
 }
 
 func (a codingAgent) versionFromLine(line string) (string, error) {
