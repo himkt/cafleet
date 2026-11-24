@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 3/69 tasks complete
+**Progress**: 8/69 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -418,11 +418,11 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 
 ### Step 3: Pre-baseline Rust fixes on main
 
-- [ ] R1: SPEC amendment A9 and the separate `hermes config path` bound, with its tests; confirm that `cli.md` carries no A9 fact <!-- completed: -->
-- [ ] R2: hermes narrow-composer profile fix with a captured 30x20 fixture, or a recorded hermes layout limit in the profile and SPEC <!-- completed: -->
-- [ ] R3: SPEC amendment A10 and the two-column screen floor in `TerminalState`, with the 1×1 repro test <!-- completed: -->
-- [ ] R4: SPEC amendment A8 (pattern syntax and the quoted Hermes version line), then explicit ASCII classes in `hermes.rs:312`, `hermes.rs:320` and `mod.rs:677` <!-- completed: -->
-- [ ] SPEC amendment A5 (setup skills-line order) <!-- completed: -->
+- [x] R1: SPEC amendment A9 and the separate `hermes config path` bound, with its tests; confirm that `cli.md` carries no A9 fact <!-- completed: 2026-11-24T10:20 -->
+- [x] R2: hermes narrow-composer profile fix with a captured 30x20 fixture, or a recorded hermes layout limit in the profile and SPEC <!-- completed: 2026-11-24T10:20 -->
+- [x] R3: SPEC amendment A10 and the two-column screen floor in `TerminalState`, with the 1×1 repro test <!-- completed: 2026-11-24T10:20 -->
+- [x] R4: SPEC amendment A8 (pattern syntax and the quoted Hermes version line), then explicit ASCII classes in `hermes.rs:312`, `hermes.rs:320` and `mod.rs:677` <!-- completed: 2026-11-24T10:20 -->
+- [x] SPEC amendment A5 (setup skills-line order) <!-- completed: 2026-11-24T10:20 -->
 
 ### Step 4: Branch, migration tooling and baseline
 
