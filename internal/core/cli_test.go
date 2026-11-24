@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -869,4 +871,112 @@ func TestCli_DirectorOnlyGuard_RunArgsRefusesAMemberCallerWithExitOneAndNothingO
 			}
 		})
 	}
+}
+
+const (
+	isolatedCliDatabaseEnv = "CAFLEET_TEST_ISOLATED_CLI_DATABASE"
+	isolatedCliArgsEnv     = "CAFLEET_TEST_ISOLATED_CLI_ARGS"
+	isolatedCliTimeout     = 10 * time.Second
+)
+
+type isolatedCliOutput struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+// isolatedCliWith runs args as the cafleet CLI against s in a re-executed child whose PATH holds
+// only the executables (name, `/bin/sh` body) and whose pane calls each executable may append to
+// $CAFLEET_TEST_PANE_LOG; it returns the child's outcome and that log.
+func isolatedCliWith(t *testing.T, s settings, args []string, executables, environment [][2]string) (isolatedCliOutput, string) {
+	t.Helper()
+	dir := t.TempDir()
+	paneLog := filepath.Join(dir, "pane.log")
+	for _, executable := range executables {
+		executableStub(t, dir, executable[0], executable[1])
+	}
+	encodedArgs, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := childTestCommand(TestCli_IsolatedCliChild)
+	overridden := map[string]bool{"PATH": true, "TMUX": true, "HERDR_ENV": true, "CAFLEET_TEST_PANE_LOG": true, "HOME": true}
+	for _, pair := range environment {
+		overridden[pair[0]] = true
+	}
+	inherited := command.Env
+	command.Env = nil
+	for _, entry := range inherited {
+		name, _, _ := strings.Cut(entry, "=")
+		if !overridden[name] {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	for _, pair := range environment {
+		command.Env = append(command.Env, pair[0]+"="+pair[1])
+	}
+	command.Env = append(command.Env,
+		isolatedCliDatabaseEnv+"="+s.databaseURL,
+		isolatedCliArgsEnv+"="+string(encodedArgs),
+		"CAFLEET_TEST_PANE_LOG="+paneLog,
+		"PATH="+dir,
+		"HOME="+t.TempDir(),
+		"TMUX=cafleet-test,1,0")
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- command.Wait() }()
+	var waited error
+	select {
+	case waited = <-finished:
+	case <-time.After(isolatedCliTimeout):
+		if err := command.Process.Kill(); err != nil {
+			t.Error(err)
+		}
+		if waitErr := <-finished; waitErr == nil {
+			t.Error("the killed child reports its signal")
+		}
+		t.Fatalf("the isolated CLI %q did not finish within %v: %s", args, isolatedCliTimeout, stderr.String())
+	}
+	code := 0
+	if waited != nil {
+		var exit *exec.ExitError
+		if !errors.As(waited, &exit) {
+			t.Fatal(waited)
+		}
+		code = exit.ExitCode()
+	}
+	calls, err := os.ReadFile(paneLog)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return isolatedCliOutput{code: code, stdout: stdout.String(), stderr: stderr.String()}, string(calls)
+}
+
+// TestCli_IsolatedCliChild is isolatedCliWith's child: it dispatches its configured arguments and
+// exits with the command's own status, as the binary's main does.
+func TestCli_IsolatedCliChild(t *testing.T) {
+	t.Parallel()
+	skipUnlessChildTest(t)
+	path, err := databasePath(os.Getenv(isolatedCliDatabaseEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(os.Getenv(isolatedCliArgsEnv)), &args); err != nil {
+		t.Fatal(err)
+	}
+	parsed, exit := parseCli(args...)
+	if exit != nil {
+		t.Fatalf("the isolated arguments %q parse: %v", args, exit)
+	}
+	if err := dispatch(settingsForDatabase(path), parsed.command); err != nil {
+		failure := cafleetErrorOf(err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", failure.message())
+		syscall.Exit(failure.exitCode())
+	}
+	syscall.Exit(0)
 }

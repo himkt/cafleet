@@ -1030,3 +1030,37 @@ func TestRuntimeArtifacts_RecoveryDescriptor_RecoveryDescriptorPinRefusesAnInval
 		})
 	}
 }
+
+func TestRuntimeArtifacts_RunnerDescriptorRecordsTheForwardedConfigLocationInOrder(t *testing.T) {
+	t.Parallel()
+	fixture := newRunnerFixture(t)
+	artifacts := fixture.artifacts(t)
+	spec := fixture.spec()
+	for _, agent := range codingAgentAll() {
+		location := "/cfg/" + agent.name()
+		forwarded, err := agent.forwardedConfig(func(name string) (opt[string], error) {
+			if name == agent.configVariable() {
+				return some(location), nil
+			}
+			return none[string](), nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.environment = nil
+		if entry, ok := forwarded.get(); ok {
+			spec.environment = [][2]string{entry}
+		}
+		writeFixtureDescriptor(t, fixture, artifacts, spec)
+		read, err := loadDescriptor(context.Background(), fixture.conn, artifacts.paths.descriptor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := [][2]string{{agent.configVariable(), location}}; !slices.Equal(read.Spawn.environment, want) {
+			t.Fatalf("%s: environment %q, want %q", agent.name(), read.Spawn.environment, want)
+		}
+		if err := artifacts.removeDescriptor(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

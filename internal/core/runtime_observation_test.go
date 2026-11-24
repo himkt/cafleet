@@ -191,7 +191,7 @@ func (b *parserAlgorithmBridge) observe(screen *screenSnapshot) error {
 	return nil
 }
 
-func TestRuntimeObservation_ContinuationEpisodes_RuntimeDetectorParserBridgeVisitsATransientCandidateBeforeALaterClear(t *testing.T) {
+func TestRuntimeObservation_RuntimeDetectorParserBridgeVisitsATransientCandidateBeforeALaterClear(t *testing.T) {
 	t.Parallel()
 	catalog := mustLoadCatalog(t, syntheticDefinitions())
 	bridge := &parserAlgorithmBridge{t: t, detector: newDetector(catalog, codingAgentCodex, some(syntheticVersion)), tracker: newTestTracker(t), now: time.Now()}
@@ -352,7 +352,7 @@ type timelineStep struct {
 	checks []timelineCheck
 }
 
-func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeTimelinesOpenHoldAndCloseOnTheirBoundaries(t *testing.T) {
+func TestRuntimeObservation_RuntimeEpisodeTimelinesOpenHoldAndCloseOnTheirBoundaries(t *testing.T) {
 	t.Parallel()
 	if _, err := newEpisodeTracker(0); err == nil {
 		t.Fatal("a tracker numbering episodes from zero is refused")
@@ -505,7 +505,7 @@ func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeTimelinesOpenHold
 	}
 }
 
-func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeClassAndStableChoiceChangesSupersedeAfterStability(t *testing.T) {
+func TestRuntimeObservation_RuntimeEpisodeClassAndStableChoiceChangesSupersedeAfterStability(t *testing.T) {
 	t.Parallel()
 	for _, change := range []string{"operation", "class", "choice"} {
 		origin := time.Now()
@@ -555,7 +555,7 @@ func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeClassAndStableCho
 	}
 }
 
-func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeEquivalentRedrawSchedulesNoRefreshAndNoOpening(t *testing.T) {
+func TestRuntimeObservation_RuntimeEpisodeEquivalentRedrawSchedulesNoRefreshAndNoOpening(t *testing.T) {
 	t.Parallel()
 	origin := time.Now()
 	tracker := newTestTracker(t)
@@ -573,7 +573,7 @@ func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeEquivalentRedrawS
 	}
 }
 
-func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeMetadataRemovesEachScreenFieldAndLeavesNoRedrawRefresh(t *testing.T) {
+func TestRuntimeObservation_RuntimeEpisodeMetadataRemovesEachScreenFieldAndLeavesNoRedrawRefresh(t *testing.T) {
 	t.Parallel()
 	const secret = "synthetic-secret-194"
 	origin := time.Now()
@@ -608,7 +608,7 @@ func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeMetadataRemovesEa
 	}
 }
 
-func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeMetadataDigestContainsNoHashOfHiddenSemantics(t *testing.T) {
+func TestRuntimeObservation_RuntimeEpisodeMetadataDigestContainsNoHashOfHiddenSemantics(t *testing.T) {
 	t.Parallel()
 	origin := time.Now()
 	first := sequenced(permissionObservation(t, "write first-secret.txt"), 1)
@@ -622,7 +622,7 @@ func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeMetadataDigestCon
 	assertJSONEqual(t, jsonAt(t, a, "evidence_digest"), jsonAt(t, b, "evidence_digest"), "the digest")
 }
 
-func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeMaterializeNumbersTheDraftAndRefusesANonPositiveSequence(t *testing.T) {
+func TestRuntimeObservation_RuntimeEpisodeMaterializeNumbersTheDraftAndRefusesANonPositiveSequence(t *testing.T) {
 	t.Parallel()
 	update := openEpisode(t, newTestTracker(t), permissionObservation(t, "write disposable.txt"), time.Now())
 	draft := update.transitions[0]
@@ -710,7 +710,7 @@ func TestRuntimeObservation_BundledClaudeAutoTracker_TrackerOpensOnePermissionEp
 	}
 }
 
-func TestRuntimeObservation_BundledClaude2_1_312Tracker_TrackerReplacesThePendingNoticeWithDialogAAfterTheDraftIsCleared(t *testing.T) {
+func TestRuntimeObservation_BundledClaude21312Tracker_TrackerReplacesThePendingNoticeWithDialogAAfterTheDraftIsCleared(t *testing.T) {
 	t.Parallel()
 	run := newTrackerRun(t, bundledObserver(codingAgentClaude, "2.1.312"))
 	notice := run.episode("claude-2.1.312-question-pending-notice-1", 0, 300)
@@ -727,7 +727,7 @@ func TestRuntimeObservation_BundledClaude2_1_312Tracker_TrackerReplacesThePendin
 	}
 }
 
-func TestRuntimeObservation_BundledClaude2_1_312Tracker_TrackerClosesThePendingNoticeWithoutDialogAAfterTheDraftIsSent(t *testing.T) {
+func TestRuntimeObservation_BundledClaude21312Tracker_TrackerClosesThePendingNoticeWithoutDialogAAfterTheDraftIsSent(t *testing.T) {
 	t.Parallel()
 	run := newTrackerRun(t, bundledObserver(codingAgentClaude, "2.1.312"))
 	notice := run.episode("claude-2.1.312-question-pending-send-notice-1", 0, 300)
@@ -743,7 +743,7 @@ func TestRuntimeObservation_BundledClaude2_1_312Tracker_TrackerClosesThePendingN
 	assertDrafts(t, run.episode("claude-2.1.312-question-pending-after-send-idle-1", 950, 1400), 0, "no Dialog A episode opens")
 }
 
-func TestRuntimeObservation_BundledClaude2_1_312Tracker_TrackerClosesDialogAOnceItsDeclineReturnsTheComposer(t *testing.T) {
+func TestRuntimeObservation_BundledClaude21312Tracker_TrackerClosesDialogAOnceItsDeclineReturnsTheComposer(t *testing.T) {
 	t.Parallel()
 	run := newTrackerRun(t, bundledObserver(codingAgentClaude, "2.1.312"))
 	opened := run.episode("claude-2.1.312-auto-default-decline-pre-stage-1", 0, 300)
@@ -756,7 +756,7 @@ func TestRuntimeObservation_BundledClaude2_1_312Tracker_TrackerClosesDialogAOnce
 	}
 }
 
-func TestRuntimeObservation_BundledClaude2_1_312Tracker_TrackerSupersedesTheFirstBatchedReadWithTheSecondAfterItsAllow(t *testing.T) {
+func TestRuntimeObservation_BundledClaude21312Tracker_TrackerSupersedesTheFirstBatchedReadWithTheSecondAfterItsAllow(t *testing.T) {
 	t.Parallel()
 	run := newTrackerRun(t, bundledObserver(codingAgentClaude, "2.1.312"))
 	first := run.episode("claude-2.1.312-read-file-batched-permission-1", 0, 300)
@@ -1294,7 +1294,7 @@ func assertOpenEpisode(t *testing.T, l *liveCase) {
 	}
 }
 
-func TestRuntimeObservation_ObservationFailures_RunnerQuietDetectorFailureReturnsTypedHeldStatusAndPreservesTheEpisode(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_FailureHandling_ObservationFailures_RunnerQuietDetectorFailureReturnsTypedHeldStatusAndPreservesTheEpisode(t *testing.T) {
 	t.Parallel()
 	fault := &detectorFault{site: observationPhaseQuietTimer}
 	l := newLiveCase(t, fault)
@@ -1316,7 +1316,7 @@ func TestRuntimeObservation_ObservationFailures_RunnerQuietDetectorFailureReturn
 	assertOpenEpisode(t, l)
 }
 
-func TestRuntimeObservation_ObservationFailures_RunnerOrderedAdapterPreservesDetectorAttributionAndBoundedMetadata(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_FailureHandling_ObservationFailures_RunnerOrderedAdapterPreservesDetectorAttributionAndBoundedMetadata(t *testing.T) {
 	t.Parallel()
 	fault := &detectorFault{site: observationPhaseChildOutput}
 	l := newLiveCase(t, fault)
@@ -1335,7 +1335,7 @@ func TestRuntimeObservation_ObservationFailures_RunnerOrderedAdapterPreservesDet
 	assertOpenEpisode(t, l)
 }
 
-func TestRuntimeObservation_ObservationFailures_RunnerClockAndOutputSequenceInvariantsPropagateOutsideRecoverableFailures(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_FailureHandling_ObservationFailures_RunnerClockAndOutputSequenceInvariantsPropagateOutsideRecoverableFailures(t *testing.T) {
 	t.Parallel()
 	for _, invariant := range []string{"clock", "sequence"} {
 		l := newLiveCase(t, &detectorFault{site: observationPhaseChildOutput})
@@ -1370,7 +1370,7 @@ func controllerTimestamp(t *testing.T, millis int) string {
 	return formatUTC(origin.Add(time.Duration(millis) * time.Millisecond))
 }
 
-func TestRuntimeObservation_ObservationFailures_HealthReportsNoWriterDiagnosticOrGapStartWhileHealthy(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_FailureHandling_HealthReportsNoWriterDiagnosticOrGapStartWhileHealthy(t *testing.T) {
 	t.Parallel()
 	l := newLiveCase(t, nil)
 	health := l.controller.health(l.writer)
@@ -1382,7 +1382,7 @@ func TestRuntimeObservation_ObservationFailures_HealthReportsNoWriterDiagnosticO
 	}
 }
 
-func TestRuntimeObservation_ObservationFailures_HealthReportsTheSanitizedWriterDiagnosticAndThePendingGapStart(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_FailureHandling_HealthReportsTheSanitizedWriterDiagnosticAndThePendingGapStart(t *testing.T) {
 	t.Parallel()
 	l := newLiveCase(t, nil)
 	l.hooks.mu.Lock()
@@ -1409,7 +1409,7 @@ func TestRuntimeObservation_ObservationFailures_HealthReportsTheSanitizedWriterD
 	l.hooks.releaseForCleanup()
 }
 
-func TestRuntimeObservation_ObservationFailures_HealthReportsATerminalFencedGapWithoutAGapStart(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_FailureHandling_HealthReportsATerminalFencedGapWithoutAGapStart(t *testing.T) {
 	t.Parallel()
 	l := newLiveCase(t, nil)
 	l.exit(300)
@@ -1427,7 +1427,7 @@ func TestRuntimeObservation_ObservationFailures_HealthReportsATerminalFencedGapW
 	}
 }
 
-func TestRuntimeObservation_ObservationFailures_RunnerFailureAfterTerminalEnqueueNeverAppendsALivePostTerminalGap(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_FailureHandling_RunnerFailureAfterTerminalEnqueueNeverAppendsALivePostTerminalGap(t *testing.T) {
 	t.Parallel()
 	l := newLiveCase(t, nil)
 	l.hooks.mu.Lock()
@@ -1463,7 +1463,7 @@ func TestRuntimeObservation_ObservationFailures_RunnerFailureAfterTerminalEnqueu
 	}
 }
 
-func TestRuntimeObservation_ControllerQuietPollOpensOneEpisodeWithTheUnchangedParserSequence(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerQuietPollOpensOneEpisodeWithTheUnchangedParserSequence(t *testing.T) {
 	t.Parallel()
 	f := newWriterFixture(t)
 	configureController(t, f)
@@ -1498,7 +1498,7 @@ func TestRuntimeObservation_ControllerQuietPollOpensOneEpisodeWithTheUnchangedPa
 	writer.finish(realDeadline())
 }
 
-func TestRuntimeObservation_ControllerActualAdapterObservesTransientFormBeforeClearWithoutOpening(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerActualAdapterObservesTransientFormBeforeClearWithoutOpening(t *testing.T) {
 	t.Parallel()
 	f := newWriterFixture(t)
 	configureController(t, f)
@@ -1514,7 +1514,7 @@ func TestRuntimeObservation_ControllerActualAdapterObservesTransientFormBeforeCl
 	writer.finish(realDeadline())
 }
 
-func TestRuntimeObservation_ControllerTypedFailuresKeepMetadataOnlyDiagnosticsAndHoldInput(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerTypedFailuresKeepMetadataOnlyDiagnosticsAndHoldInput(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		reason observationFailure
@@ -1533,7 +1533,7 @@ func TestRuntimeObservation_ControllerTypedFailuresKeepMetadataOnlyDiagnosticsAn
 	}
 }
 
-func TestRuntimeObservation_ControllerStartedValidatesCurrentIdentityAndIsSingleUse(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerStartedValidatesCurrentIdentityAndIsSingleUse(t *testing.T) {
 	t.Parallel()
 	f := newWriterFixture(t)
 	configureController(t, f)
@@ -1560,7 +1560,7 @@ func TestRuntimeObservation_ControllerStartedValidatesCurrentIdentityAndIsSingle
 	writer.finish(realDeadline())
 }
 
-func TestRuntimeObservation_ControllerExitClosesTheOpenEpisodeBeforeRecordingTheRealNativeSignal(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerExitClosesTheOpenEpisodeBeforeRecordingTheRealNativeSignal(t *testing.T) {
 	t.Parallel()
 	f := newWriterFixture(t)
 	configureController(t, f)
@@ -1607,7 +1607,7 @@ func assertRetainedPressure(t *testing.T, err error, status observationStatus) {
 	}
 }
 
-func TestRuntimeObservation_ControllerRetainsBothSupersededOriginalsWhenTheFirstSubmitHitsPressure(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerRetainsBothSupersededOriginalsWhenTheFirstSubmitHitsPressure(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newWriterFixture(t)
@@ -1715,7 +1715,7 @@ func TestRuntimeObservation_ControllerRetainsBothSupersededOriginalsWhenTheFirst
 
 var idleComposer = []byte("\x1b[0m\x1b[2J\x1b[23;1HSynthetic state\r\nState end")
 
-func TestRuntimeObservation_ControllerGapRecoveryReobservesTheUnchangedScreenAfterPublishingADelivery(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerGapRecoveryReobservesTheUnchangedScreenAfterPublishingADelivery(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -1764,7 +1764,7 @@ func TestRuntimeObservation_ControllerGapRecoveryReobservesTheUnchangedScreenAft
 	}
 }
 
-func TestRuntimeObservation_PublishDeliveryResultQueuesBlockedRecordsPerBlockerAndDropsAQueuedRepeat(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_PublishDeliveryResultQueuesBlockedRecordsPerBlockerAndDropsAQueuedRepeat(t *testing.T) {
 	t.Parallel()
 	f := newWriterFixture(t)
 	configureController(t, f)
@@ -1782,7 +1782,7 @@ func TestRuntimeObservation_PublishDeliveryResultQueuesBlockedRecordsPerBlockerA
 	assertJSONEqual(t, controller.deliveryResults[1], blocked(12), "the second blocker")
 }
 
-func TestRuntimeObservation_ControllerReplacesAnEvidenceInvalidRefusalWithItsRejectionAndOpensNoGap(t *testing.T) {
+func TestRuntimeObservation_ControllerTests_ControllerReplacesAnEvidenceInvalidRefusalWithItsRejectionAndOpensNoGap(t *testing.T) {
 	t.Parallel()
 	f := newWriterFixture(t)
 	configureController(t, f)
