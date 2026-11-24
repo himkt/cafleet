@@ -155,7 +155,7 @@ extensions:
 6. **Apply** — the Director relays approval; scanners apply only their slice's
    approved rows exactly as written, including reviewer REVISE wording. Use
    full-file staging for a denied write.
-7. **Verify** — pass the repository's Rust validation tasks
+7. **Verify** — pass the repository's validation tasks
    (`.claude/rules/commands.md`) and the selected workflow verification below.
 8. **Report + teardown** — report the applied set and escalated observations,
    commit only when the user asks, close owned ordinary members, verify the

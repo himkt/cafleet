@@ -8,11 +8,11 @@ Load relevant skills through the executing backend's supported loader. Assigned 
 
 ## Project: CAFleet
 
-CAFleet multiplexes coding-agent sessions and coordinates them through durable point-to-point messages. The Rust package at the repository root builds the unified CLI with clap, rusqlite and an embedded SQL schema. The binary embeds its data files from `assets/`; the documentation site retains its own Node/pnpm toolchain.
+CAFleet multiplexes coding-agent sessions and coordinates them through durable point-to-point messages. The Go module at the repository root builds the unified CLI with the standard library, ncruces go-sqlite3 and an embedded SQL schema. The binary embeds its data files from `assets/`; the documentation site retains its own Node/pnpm toolchain.
 
 ## Commands
 
-Use full mise monorepo task paths and discover available operations with `mise tasks --all`. The root `mise.toml` owns the Rust tasks and selects the documentation site's task file through `monorepo.config_roots`; see `.claude/rules/commands.md` for invocation conventions.
+Use full mise monorepo task paths and discover available operations with `mise tasks --all`. The root `mise.toml` owns the Go tasks and selects the documentation site's task file through `monorepo.config_roots`; see `.claude/rules/commands.md` for invocation conventions.
 
 ## Development models
 
@@ -26,4 +26,4 @@ Launch these backends with the model below for development sessions, experiments
 
 ## Tests
 
-Write every Rust test as a unit test in a `#[cfg(test)] mod tests` block of the implementation file it exercises; never add a test-only file or folder. `.claude/rules/code-quality.md` § Test placement owns the convention.
+Write every Go test in the `_test.go` file beside the implementation file it exercises, in the same package; never add a test data file or directory. `.claude/rules/code-quality.md` § Test placement owns the convention.
