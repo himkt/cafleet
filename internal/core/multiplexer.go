@@ -1,5 +1,33 @@
 package core
 
+import "time"
+
+type runErrorKind uint8
+
+const (
+	runErrorBinaryNotFound runErrorKind = iota + 1
+	runErrorNotStarted
+	runErrorTimeout
+	runErrorFailed
+)
+
+// runError is a subprocess failure below the backend's message mapping. detail is the cause of
+// a binary-not-found or not-started failure and the stderr of a failed run.
+type runError struct {
+	kind   runErrorKind
+	detail string
+}
+
+func runErrorDeadlineExpired() *runError {
+	return &runError{kind: runErrorNotStarted, detail: "command deadline expired before launch"}
+}
+
+type commandRunner interface {
+	binaryExists(name string) bool
+	run(argv []string) (string, *runError)
+	runFor(argv []string, timeout time.Duration) (string, *runError)
+}
+
 type muxBackend uint8
 
 const (
