@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/himkt/cafleet/internal/vt"
 	"golang.org/x/sys/unix"
 )
 
@@ -1417,6 +1418,9 @@ func (l *liveShutdown) clock() clock {
 
 func (l *liveShutdown) gateProgrammaticInput() {
 	l.writer.setDeadline(l.deadlines.storageDeadline())
+	if l.controller.capture != nil {
+		l.controller.capture.beginShutdown(l.deadlines.storageDeadline())
+	}
 }
 
 func (l *liveShutdown) termVerifiedDescendants() error {
@@ -1568,6 +1572,18 @@ type runnerDependencies struct {
 	writerHooks      writerHooks
 	observationHooks observationHooks
 	previewSweep     bool
+	capture          runnerCapture
+	// terminalCallbacks receives the native screen model's events, such as window titles, in
+	// tests; production runners leave it nil.
+	terminalCallbacks vt.Callbacks
+}
+
+// runnerCapture is the test-only native capture port the runner binds at start; production
+// runners have none.
+type runnerCapture interface {
+	observationCapture
+	bindServicePrepared(run runRecord, place placement, spawn spawnSpec, c clock) error
+	finalizeSource(run runRecord, place placement, child processIdentity) error
 }
 
 func runnerRun(s settings, descriptorPath string) (int32, error) {
@@ -1615,6 +1631,7 @@ type runnerLoop struct {
 	shutdownClient    opt[uint64]
 	nativeExit        opt[childExit]
 	directorSweep     *directorSweepThread
+	capture           runnerCapture
 }
 
 func (r *runnerLoop) shutdownDeadlines() shutdownDeadlines {
@@ -1838,6 +1855,10 @@ func (r *runnerLoop) start(clientID uint64, pane string, acceptedStartup *bool) 
 	}); err != nil {
 		return nil, err
 	}
+	capturePlacement, err := r.bindCapture(ctx)
+	if err != nil {
+		return nil, err
+	}
 	child, err := r.native.pty.spawn(r.descriptor.Spawn)
 	if err != nil {
 		return nil, err
@@ -1863,6 +1884,9 @@ func (r *runnerLoop) start(clientID uint64, pane string, acceptedStartup *bool) 
 	}
 	r.run = run
 	r.started = true
+	if err := r.attachCapture(capturePlacement, child); err != nil {
+		return nil, err
+	}
 	screen := r.native.transport.snapshot()
 	if err := r.native.controller.start(r.run, &screen, r.native.writer, r.native.clock); err != nil {
 		return nil, err
@@ -1879,6 +1903,61 @@ func (r *runnerLoop) start(clientID uint64, pane string, acceptedStartup *bool) 
 	}
 	r.directorSweep = directorSweepThreadStart("sqlite:///"+path, r.run, r.catalog, r.clock, r.native.writer.runnerDiagnostics())
 	return jsonValue(started{Identity: controlIdentityFromRun(r.run), Runner: r.process, Child: child}), nil
+}
+
+// bindCapture binds a test capture port to the prepared run and its placement before the native
+// spawns, returning the placement it bound; none without a port.
+func (r *runnerLoop) bindCapture(ctx context.Context) (opt[placement], error) {
+	if r.capture == nil {
+		return none[placement](), nil
+	}
+	type preparedPlacement struct {
+		run   runRecord
+		place placement
+	}
+	bound, err := withDatabaseDeadline(ctx, r.conn, r.handshakeDeadline, func(ctx context.Context, conn *dbConn) (preparedPlacement, error) {
+		prepared, err := getRun(ctx, conn, r.run.runID)
+		if err != nil {
+			return preparedPlacement{}, err
+		}
+		member, err := getMember(ctx, conn, r.run.memberID, r.run.fleetID)
+		if err != nil {
+			return preparedPlacement{}, err
+		}
+		record, found := member.get()
+		if !found {
+			return preparedPlacement{}, runtimeError("capture prepared placement missing")
+		}
+		return preparedPlacement{run: prepared, place: record.placement}, nil
+	})
+	if err != nil {
+		return none[placement](), err
+	}
+	if err := r.capture.bindServicePrepared(bound.run, bound.place, r.descriptor.Spawn, r.native.clock); err != nil {
+		return none[placement](), err
+	}
+	return some(bound.place), nil
+}
+
+// attachCapture finalizes a bound capture port's source and hands the port to the controller.
+func (r *runnerLoop) attachCapture(bound opt[placement], child processIdentity) error {
+	port := r.capture
+	if port == nil {
+		return nil
+	}
+	r.capture = nil
+	place, set := bound.get()
+	if !set {
+		panic("a bound capture retains its placement")
+	}
+	if err := port.finalizeSource(r.run, place, child); err != nil {
+		return err
+	}
+	if err := ensure(r.native.controller.capture == nil, "capture port already attached"); err != nil {
+		return err
+	}
+	r.native.controller.capture = port
+	return nil
 }
 
 func (r *runnerLoop) health() (jsontext.Value, error) {
@@ -2180,6 +2259,9 @@ func runService(s settings, descriptorPath string, services runnerDependencies) 
 	if err != nil {
 		return 0, err
 	}
+	if services.terminalCallbacks != nil {
+		transport.terminal.parser = vt.NewParser(initialSize.rows, screenCols(initialSize), services.terminalCallbacks)
+	}
 	listener, err := bindControlListener(artifacts.paths.controlSocket)
 	if err != nil {
 		return 0, err
@@ -2231,6 +2313,7 @@ func runService(s settings, descriptorPath string, services runnerDependencies) 
 		handshakeDeadline: handshakeDeadline,
 		nextClient:        1,
 		turns:             turns,
+		capture:           services.capture,
 	}
 	defer func() {
 		for _, open := range runner.clients {
