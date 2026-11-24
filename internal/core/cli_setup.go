@@ -61,7 +61,7 @@ func prepareDatabase(s settings) error {
 		return appError("database URL has no file path")
 	}
 	if parent, set := pathParent(path).get(); set && parent != "" {
-		if err := os.MkdirAll(parent, 0o777); err != nil {
+		if err := createDirAll(parent); err != nil {
 			return appErrorf("cannot create %s: %s", parent, ioErrorText(err))
 		}
 	}

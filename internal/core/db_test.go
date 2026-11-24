@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1803,5 +1804,43 @@ func TestDb_TestSupport_WalSnapshotReadsTheDatabaseAndItsSidecars(t *testing.T) 
 	}
 	if len(snapshot[1].bytes) == 0 {
 		t.Fatal("the WAL holds the uncheckpointed write")
+	}
+}
+
+func TestCreateDirAll(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	file := filepath.Join(root, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		path  string
+		errno syscall.Errno
+	}{
+		{name: "missing ancestors", path: filepath.Join(root, "a", "b", "c")},
+		{name: "existing directory", path: root},
+		{name: "trailing separator", path: filepath.Join(root, "d", "e") + "/"},
+		{name: "regular file in the way", path: file, errno: syscall.EEXIST},
+		{name: "regular file as an ancestor", path: filepath.Join(file, "x"), errno: syscall.ENOTDIR},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			err := createDirAll(c.path)
+			if c.errno != 0 {
+				if !errors.Is(err, c.errno) {
+					t.Fatalf("%s: want %v, got %v", c.name, c.errno, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			if !isDirectory(c.path) {
+				t.Fatalf("%s: %s is not a directory", c.name, c.path)
+			}
+		})
 	}
 }

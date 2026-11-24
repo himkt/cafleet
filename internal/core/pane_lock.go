@@ -58,7 +58,7 @@ func canonicalPath(path string) (string, error) {
 // path; false means another holder has it.
 func openAndTryLock(path, label string) (*os.File, bool, error) {
 	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o777); err != nil {
+	if err := createDirAll(directory); err != nil {
 		return nil, false, appErrorf("cannot create %s-lock directory %s: %s", label, directory, ioErrorText(err))
 	}
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)

@@ -180,7 +180,7 @@ func installAgent(agent codingAgent, paths agentPaths, out io.Writer) error {
 				continue
 			}
 			target := joinPath(paths.skillsDir, file.path)
-			if err := os.MkdirAll(filepath.Dir(target), 0o777); err != nil {
+			if err := createDirAll(filepath.Dir(target)); err != nil {
 				return fail(err)
 			}
 			if err := os.WriteFile(target, file.data, 0o666); err != nil {
@@ -199,7 +199,7 @@ func installAgent(agent codingAgent, paths agentPaths, out io.Writer) error {
 		if !set {
 			panic("embedded preset exists")
 		}
-		if err := os.MkdirAll(filepath.Dir(installed.target), 0o777); err != nil {
+		if err := createDirAll(filepath.Dir(installed.target)); err != nil {
 			return failPreset(err)
 		}
 		if err := removeExistingTarget(installed.target); err != nil {
@@ -236,7 +236,7 @@ func installFileExtension(extension fileExtension) ([]string, error) {
 	var installed []string
 	for _, file := range embeddedExtension(extension.prefix) {
 		target := joinPath(extension.dir, file.path)
-		if err := os.MkdirAll(filepath.Dir(target), 0o777); err != nil {
+		if err := createDirAll(filepath.Dir(target)); err != nil {
 			return nil, extensionFailure(target, ioErrorText(err))
 		}
 		if err := removeExistingTarget(target); err != nil {

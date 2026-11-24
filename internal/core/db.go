@@ -889,6 +889,41 @@ func pathExists(path string) (bool, error) {
 	}
 }
 
+// createDirAll creates path and every missing ancestor as Rust's fs::create_dir_all: a failed
+// mkdir succeeds only when path is already a directory, so a regular file in the way reports
+// the mkdir error (EEXIST) rather than ENOTDIR.
+func createDirAll(path string) error {
+	if path == "" {
+		return nil
+	}
+	err := os.Mkdir(path, 0o777)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, fs.ErrNotExist):
+	case isDirectory(path):
+		return nil
+	default:
+		return err
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return errors.New("failed to create whole tree")
+	}
+	if err := createDirAll(parent); err != nil {
+		return err
+	}
+	if err := os.Mkdir(path, 0o777); err != nil && !isDirectory(path) {
+		return err
+	}
+	return nil
+}
+
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 // bindArgs binds args to the statement's positional parameters ?1, ?2, ….
 func bindArgs(stmt *sqlite3.Stmt, args []any) error {
 	if stmt.BindCount() != len(args) {
