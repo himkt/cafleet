@@ -196,7 +196,7 @@ func TestBrokerRuntimeInputs_FailedInputReservationAndCorruptReceiptReadsSurface
 	}
 }
 
-func deferredAttempt(t *testing.T, fixture *brokerRuntimeFixture, owner runOwner, key string) inputOperation {
+func testDeferredAttempt(t *testing.T, fixture *brokerRuntimeFixture, owner runOwner, key string) inputOperation {
 	t.Helper()
 	ctx := context.Background()
 	input := fixture.input(t, owner, key, inputKindPrompt)
@@ -343,11 +343,11 @@ func TestBrokerRuntimeInputs_StopCause_UnpublishedDeliveryResultsReturnTheReceip
 	ctx := context.Background()
 	fixture := newBrokerRuntimeFixture(t)
 	owner := fixture.activate(t)
-	uncertain := deferredAttempt(t, fixture, owner, "prompt:deferred-uncertain")
+	uncertain := testDeferredAttempt(t, fixture, owner, "prompt:deferred-uncertain")
 	mustInput(t)(recordInputUncertain(ctx, fixture.conn, owner, uncertain.inputID, stopCauseWriteFailed))
-	submitted := deferredAttempt(t, fixture, owner, "prompt:deferred-submitted")
+	submitted := testDeferredAttempt(t, fixture, owner, "prompt:deferred-submitted")
 	mustInput(t)(recordInputState(ctx, fixture.conn, owner, submitted.inputID, inputStateInProgress, inputStateAccepted))
-	abandoned := deferredAttempt(t, fixture, owner, "prompt:deferred-abandoned")
+	abandoned := testDeferredAttempt(t, fixture, owner, "prompt:deferred-abandoned")
 	mustInput(t)(recordInputUncertain(ctx, fixture.conn, owner, abandoned.inputID, stopCauseRunnerStopped))
 	mustInput(t)(settleInput(ctx, fixture.conn, owner, abandoned.inputID, inputStateUncertain, inputDispositionAbandonedUncertain, "audit:abandoned"))
 	expected := []unpublishedDeliveryResult{
@@ -363,7 +363,7 @@ func TestBrokerRuntimeInputs_StopCause_UnpublishedDeliveryResultsReturnTheReceip
 		{"prompt:reconciled-submitted", inputDispositionSubmitted, "submitted"},
 		{"prompt:reconciled-not-submitted", inputDispositionNotSubmitted, "zero_bytes"},
 	} {
-		input := deferredAttempt(t, fixture, owner, reconciled.key)
+		input := testDeferredAttempt(t, fixture, owner, reconciled.key)
 		mustInput(t)(recordInputUncertain(ctx, fixture.conn, owner, input.inputID, stopCauseWriteFailed))
 		settled := mustInput(t)(settleInput(ctx, fixture.conn, owner, input.inputID, inputStateUncertain, reconciled.disposition, "audit:inspected"))
 		if settled.stopCause != some(stopCauseWriteFailed) {
@@ -371,7 +371,7 @@ func TestBrokerRuntimeInputs_StopCause_UnpublishedDeliveryResultsReturnTheReceip
 		}
 		expected = append(expected, unpublishedDeliveryResult{inputID: input.inputID, stage: reconciled.stage, stopCause: none[stopCause]()})
 	}
-	lost := deferredAttempt(t, fixture, owner, "prompt:deferred-lost")
+	lost := testDeferredAttempt(t, fixture, owner, "prompt:deferred-lost")
 	expected = append(expected, unpublishedDeliveryResult{inputID: lost.inputID, stage: "unknown", stopCause: none[stopCause]()})
 	assertUnpublished(t, fixture, owner.runID, expected)
 }

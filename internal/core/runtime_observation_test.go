@@ -1,12 +1,22 @@
 package core
 
 import (
+	"context"
+	"encoding/json/jsontext"
 	"fmt"
+	"math"
+	"os"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestRuntimeObservation_InputEligibilityRendersComposerEmptyOrHoldWithItsReason(t *testing.T) {
@@ -302,7 +312,7 @@ const (
 	checkTransitions timelineCheckKind = iota + 1
 	checkHold
 	checkComposerEmpty
-	checkDeadline
+	checkNextDeadline
 	checkOpened
 	checkClosed
 	checkRefused
@@ -323,7 +333,7 @@ func holdCheck(reason gateReason) timelineCheck {
 	return timelineCheck{kind: checkHold, reason: reason}
 }
 func deadlineCheck(millis int64) timelineCheck {
-	return timelineCheck{kind: checkDeadline, value: millis}
+	return timelineCheck{kind: checkNextDeadline, value: millis}
 }
 func openedCheck(episode int64) timelineCheck {
 	return timelineCheck{kind: checkOpened, value: episode}
@@ -475,7 +485,7 @@ func TestRuntimeObservation_ContinuationEpisodes_RuntimeEpisodeTimelinesOpenHold
 					if update.eligibility != (inputEligibilityComposerEmpty{}) {
 						t.Fatalf("%s: eligibility %v", context, update.eligibility)
 					}
-				case checkDeadline:
+				case checkNextDeadline:
 					if update.nextDeadline != some(origin.Add(time.Duration(check.value)*time.Millisecond)) {
 						t.Fatalf("%s: deadline %v", context, update.nextDeadline)
 					}
@@ -801,4 +811,1028 @@ func TestRuntimeObservation_BundledClaudeAskUserQuestionTracker_TrackerContinues
 		t.Fatalf("notice = %+v", notice[0])
 	}
 	assertDrafts(t, run.episode("claude-2.1.322-ask-pending-tmux-120-1", 350, 900), 0, "the form continues the notice's episode")
+}
+
+const controllerFixtureVersion = "0.0.1-synthetic"
+
+func refreshWriterRun(t *testing.T, f *writerFixture) {
+	t.Helper()
+	f.run = mustRun(t, f.conn, f.run.runID)
+}
+
+// configureController records the synthetic native version, tested coverage and this process as
+// the runner.
+func configureController(t *testing.T, f *writerFixture) {
+	t.Helper()
+	if _, err := f.conn.execute("UPDATE member_runs SET native_version=?1,coverage='tested',runner_pid=owner_pid,runner_start_identity=owner_start_identity WHERE run_id=?2", controllerFixtureVersion, f.run.runID); err != nil {
+		t.Fatal(err)
+	}
+	refreshWriterRun(t, f)
+}
+
+func markRunning(t *testing.T, f *writerFixture, child processIdentity) {
+	t.Helper()
+	if _, err := f.conn.execute("UPDATE member_runs SET status='running',child_pid=?1,child_start_identity=?2,started_at=?3 WHERE run_id=?4", child.pid, child.startIdentity, observationFixtureNow, f.run.runID); err != nil {
+		t.Fatal(err)
+	}
+	refreshWriterRun(t, f)
+}
+
+func controllerForm(operation string) []byte {
+	return []byte("\x1b[2J\x1b[19;1HSynthetic permission request\r\nOperation: " + operation + "\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: ")
+}
+
+// testChild is a /bin/cat native child this test owns, reaped by a waiter goroutine.
+type testChild struct {
+	cmd      *exec.Cmd
+	identity processIdentity
+	exited   chan *os.ProcessState
+}
+
+func spawnCat(t *testing.T) *testChild {
+	t.Helper()
+	cmd := exec.Command("/bin/cat")
+	if _, err := cmd.StdinPipe(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	child := &testChild{cmd: cmd, exited: make(chan *os.ProcessState, 1)}
+	go func() {
+		state, _ := cmd.Process.Wait()
+		child.exited <- state
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-child.exited
+	})
+	child.identity = requireIdentity(t, int64(cmd.Process.Pid))
+	return child
+}
+
+func (c *testChild) alive(t *testing.T) bool {
+	t.Helper()
+	alive, err := c.identity.matches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return alive
+}
+
+// terminate sends SIGTERM and waits for the signal exit, keeping the state for the cleanup.
+func (c *testChild) terminate(t *testing.T) {
+	t.Helper()
+	if err := c.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case state := <-c.exited:
+		c.exited <- state
+		if status, ok := state.Sys().(syscall.WaitStatus); !ok || !status.Signaled() || status.Signal() != syscall.SIGTERM {
+			t.Fatalf("exit = %v", state)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("owned child signal exit")
+	}
+}
+
+func newController(t *testing.T, run runRecord, catalog *profileCatalog) *observationController {
+	t.Helper()
+	controller, err := newObservationController(run, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return controller
+}
+
+// startedController is a controller started for a running /bin/cat native child on a 24x80
+// terminal.
+func startedController(t *testing.T, f *writerFixture, writer *eventWriter, c clock, catalog *profileCatalog) (*observationController, *testChild, *terminalState) {
+	t.Helper()
+	controller := newController(t, f.run, catalog)
+	child := spawnCat(t)
+	markRunning(t, f, child.identity)
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: 80})
+	snapshot := terminal.snapshot()
+	if err := controller.start(f.run, &snapshot, writer, c); err != nil {
+		t.Fatal(err)
+	}
+	return controller, child, terminal
+}
+
+func observeSnapshot(t *testing.T, controller *observationController, writer *eventWriter, c clock, terminal *terminalState) {
+	t.Helper()
+	snapshot := terminal.snapshot()
+	if err := controller.observer(writer, c).observe(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func pollStatus(t *testing.T, controller *observationController, writer *eventWriter, c clock, terminal *terminalState) observationStatus {
+	t.Helper()
+	snapshot := terminal.snapshot()
+	status, err := controller.poll(&snapshot, writer, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func feedObservedBy(t *testing.T, terminal *terminalState, data []byte, controller *observationController, writer *eventWriter, c clock) {
+	t.Helper()
+	if err := terminal.feedObserved(data, controller.observer(writer, c)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runEvents(t *testing.T, f *writerFixture) []runtimeEventView {
+	t.Helper()
+	var views []runtimeEventView
+	for _, row := range tableRows(t, f.conn, "SELECT event_id FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq", f.run.runID) {
+		views = append(views, readEvent(t, f.conn, row[0].(int64)))
+	}
+	return views
+}
+
+func eventKinds(t *testing.T, f *writerFixture) []string {
+	t.Helper()
+	var kinds []string
+	for _, row := range tableRows(t, f.conn, "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq", f.run.runID) {
+		kinds = append(kinds, row[0].(string))
+	}
+	return kinds
+}
+
+func openedCount(t *testing.T, f *writerFixture) int64 {
+	t.Helper()
+	return queryInt64(t, f.conn, "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='interaction_opened'", f.run.runID)
+}
+
+func eventViewAt(t *testing.T, f *writerFixture, sequence int64) runtimeEventView {
+	t.Helper()
+	return readEvent(t, f.conn, queryInt64(t, f.conn, "SELECT event_id FROM member_runtime_events WHERE run_id=?1 AND event_seq=?2", f.run.runID, sequence))
+}
+
+func observerInitialized(t *testing.T, backend string, nativeVersion opt[string], cov coverage) error {
+	t.Helper()
+	f := newWriterFixture(t)
+	if _, err := f.conn.execute("UPDATE member_runs SET backend=?1,native_version=?2,coverage=?3 WHERE run_id=?4", backend, nativeVersion, cov.asStr(), f.run.runID); err != nil {
+		t.Fatal(err)
+	}
+	refreshWriterRun(t, f)
+	_, err := newObservationController(f.run, mustLoadCatalog(t, inspectionFixtureDefinition()))
+	return err
+}
+
+func TestRuntimeObservation_ObserverInitialization_ObserverInitializationRequiresTheBackendsProfileDetectionCoverage(t *testing.T) {
+	t.Parallel()
+	synthetic := some(controllerFixtureVersion)
+	cases := []struct {
+		backend  string
+		version  opt[string]
+		coverage coverage
+		accepted bool
+	}{
+		{"codex", synthetic, coverageTested, true},
+		{"codex", some("0.0.2-synthetic"), coverageTested, true},
+		{"codex", some("0.0.0-below"), coverageTested, true},
+		{"codex", none[string](), coverageTested, true},
+		{"codex", synthetic, coverageUnknown, false},
+		{"codex", none[string](), coverageUnknown, false},
+		{"claude", synthetic, coverageUnknown, true},
+		{"claude", none[string](), coverageUnknown, true},
+		{"claude", synthetic, coverageTested, false},
+		{"claude", none[string](), coverageTested, false},
+	}
+	for _, tc := range cases {
+		if err := observerInitialized(t, tc.backend, tc.version, tc.coverage); (err == nil) != tc.accepted {
+			t.Fatalf("%s %v %s: %v", tc.backend, tc.version, tc.coverage.asStr(), err)
+		}
+	}
+}
+
+func assertAuthorityFence(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		message := cafleetErrorOf(err).message()
+		if !strings.Contains(message, "generation") && !strings.Contains(message, "exhaust") {
+			t.Fatalf("explicit authority fence: %v", err)
+		}
+	}
+}
+
+func TestRuntimeObservation_InspectionTests_PermissionInspectionRequestGenerationExhaustionInvalidatesWithoutWrap(t *testing.T) {
+	t.Parallel()
+	until := time.Now().Add(5 * time.Second)
+	c := observationFixtureClock(t)
+	nowMs := 0
+	f := newWriterFixture(t)
+	if _, err := f.conn.execute("UPDATE member_runs SET native_version='0.0.1-synthetic',coverage='tested' WHERE run_id=?1", f.run.runID); err != nil {
+		t.Fatal(err)
+	}
+	refreshWriterRun(t, f)
+	catalog := mustLoadCatalog(t, inspectionFixtureDefinition())
+	controller := newController(t, f.run, catalog)
+	writer, err := f.start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.setDeadline(until)
+	child := spawnCat(t)
+	markRunning(t, f, child.identity)
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: 80})
+	initial := terminal.snapshot()
+	if err := controller.start(f.run, &initial, writer, c); err != nil {
+		t.Fatal(err)
+	}
+	mustFeed(t, terminal, inspectionFixtureForm("overflow current request", "synthetic-only"))
+	observeSnapshot(t, controller, writer, c, terminal)
+	for {
+		pollStatus(t, controller, writer, c, terminal)
+		if controller.currentRequest != nil {
+			break
+		}
+		if !time.Now().Before(until) {
+			t.Fatal("actual current authority before the original fixture deadline")
+		}
+		nowMs += 2
+		c.setElapsed(time.Duration(nowMs) * time.Millisecond)
+	}
+	if controller.tracker.activeEpisode() == none[episodeRef]() {
+		t.Fatal("an episode is active")
+	}
+	controller.requestGeneration = math.MaxUint64
+	if controller.observerFailed(observationFailureParser, c) == nil {
+		t.Fatal("an exhausted generation refuses the failure")
+	}
+	if controller.requestGeneration != math.MaxUint64 || controller.currentRequest != nil {
+		t.Fatal("the exhausted generation clears the authority without wrapping")
+	}
+	mustFeed(t, terminal, inspectionFixtureForm("overflow current request", "synthetic-only"))
+	snapshot := terminal.snapshot()
+	observed, err := newDetector(catalog, codingAgentCodex, some(controllerFixtureVersion)).observe(&snapshot)
+	if err != nil || observed.matchEvidence != matchEvidenceComplete || observed.kind != observationKindPermissionRequest {
+		t.Fatalf("observed %+v %v", observed, err)
+	}
+	assertAuthorityFence(t, controller.observer(writer, c).observe(&snapshot))
+	if controller.requestGeneration != math.MaxUint64 || controller.currentRequest != nil {
+		t.Fatal("a later genuine complete screen cannot restore exhausted authority")
+	}
+	nowMs += 110
+	c.setElapsed(time.Duration(nowMs) * time.Millisecond)
+	_, err = controller.poll(&snapshot, writer, c)
+	assertAuthorityFence(t, err)
+	if controller.requestGeneration != math.MaxUint64 || controller.currentRequest != nil {
+		t.Fatal("stable later complete evidence stays fenced")
+	}
+	if controller.observerFailed(observationFailureDetector, c) == nil || controller.requestGeneration != math.MaxUint64 || controller.currentRequest != nil {
+		t.Fatal("a later detector failure stays fenced")
+	}
+	pending, unsaved := writer.finish(until)
+	if status := writer.status(); pending != 0 || unsaved != 0 || status.diagnostic != none[string]() {
+		t.Fatalf("writer cleanup (%d, %d) %+v", pending, unsaved, status)
+	}
+}
+
+// opencodeForm is the bundled OpenCode fixture id with its command rows replaced by command, each
+// padded to the command box with the scrollbar column trailerCol cells in.
+func resizedOpencodeForm(t *testing.T, id string, firstRow int, command [2]string, trailerCol int) []byte {
+	t.Helper()
+	screen := parseTestJSON(bundledScreen(id))
+	number, ok := jget(screen, "cols").(jsonNumber)
+	if !ok {
+		t.Fatal("the fixture names its columns")
+	}
+	cols, err := strconv.Atoi(string(number))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for offset, text := range command {
+		row := text + strings.Repeat(" ", trailerCol-utf8.RuneCountInString(text)) + "█" + strings.Repeat(" ", cols-trailerCol-1)
+		jset(screen, row, "lines", firstRow+offset)
+	}
+	return nativeFixtureBytes(testJSONText(screen))
+}
+
+func TestRuntimeObservation_InspectionTests_OpencodeResizeAcrossWSplitStartsANewGenerationAndARewrapANewEpisode(t *testing.T) {
+	t.Parallel()
+	until := time.Now().Add(5 * time.Second)
+	c := observationFixtureClock(t)
+	nowMs := 0
+	f := newWriterFixture(t)
+	if _, err := f.conn.execute("UPDATE member_runs SET backend='opencode',native_version='2.1.4',coverage='tested' WHERE run_id=?1", f.run.runID); err != nil {
+		t.Fatal(err)
+	}
+	refreshWriterRun(t, f)
+	controller := newController(t, f.run, profileCatalogBundled())
+	writer, err := f.start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.setDeadline(until)
+	child := spawnCat(t)
+	markRunning(t, f, child.identity)
+	command := [2]string{"  $ /tmp/x/permission-probe allow", ""}
+	wide := resizedOpencodeForm(t, "opencode-2.1.4-ask-permission-1", 14, command, 116)
+	split := resizedOpencodeForm(t, "opencode-2.1.4-narrow-permission-057-1", 27, command, 53)
+	rewrapped := resizedOpencodeForm(t, "opencode-2.1.4-narrow-permission-057-1", 27, [2]string{"  $ /tmp/x/", "  permission-probe allow"}, 53)
+	terminal := mustTerminalState(t, terminalSize{rows: 36, cols: 120})
+	initial := terminal.snapshot()
+	if err := controller.start(f.run, &initial, writer, c); err != nil {
+		t.Fatal(err)
+	}
+	activeSequence := func() opt[int64] {
+		if episode, ok := controller.tracker.activeEpisode().get(); ok {
+			return some(episode.sequence)
+		}
+		return none[int64]()
+	}
+	show := func(data []byte, settled func() bool) (uint64, opt[int64]) {
+		mustFeed(t, terminal, data)
+		observeSnapshot(t, controller, writer, c, terminal)
+		for {
+			pollStatus(t, controller, writer, c, terminal)
+			if settled() {
+				break
+			}
+			if !time.Now().Before(until) {
+				t.Fatal("the observed state settles in time")
+			}
+			nowMs += 2
+			c.setElapsed(time.Duration(nowMs) * time.Millisecond)
+		}
+		return controller.requestGeneration, activeSequence()
+	}
+	wideGeneration, wideEpisode := show(wide, func() bool { return controller.currentRequest != nil })
+	wideSequence, ok := wideEpisode.get()
+	if !ok {
+		t.Fatal("the wide form opens an episode")
+	}
+	mustResize(t, terminal, terminalSize{rows: 36, cols: 57})
+	splitGeneration, splitEpisode := show(split, func() bool {
+		return controller.currentRequest != nil && controller.requestGeneration > wideGeneration
+	})
+	if splitGeneration <= wideGeneration || splitEpisode != wideEpisode {
+		t.Fatalf("the resize starts a new request generation and keeps the episode: %d/%d %v/%v", splitGeneration, wideGeneration, splitEpisode, wideEpisode)
+	}
+	rewrapGeneration, rewrapEpisode := show(rewrapped, func() bool {
+		sequence, active := activeSequence().get()
+		return controller.currentRequest != nil && active && sequence > wideSequence
+	})
+	rewrapSequence, _ := rewrapEpisode.get()
+	if rewrapGeneration <= splitGeneration || rewrapSequence <= wideSequence {
+		t.Fatalf("a moved row break opens a new episode: %d %v", rewrapGeneration, rewrapEpisode)
+	}
+	if pending, unsaved := writer.finish(until); pending != 0 || unsaved != 0 {
+		t.Fatalf("writer cleanup (%d, %d)", pending, unsaved)
+	}
+}
+
+// detectorFault fails the next detector call at site once armed.
+type detectorFault struct {
+	site  observationPhase
+	armed atomic.Bool
+	calls atomic.Uint64
+}
+
+func (f *detectorFault) before(site observationPhase, operation observationOperation) error {
+	if site == f.site && operation == observationOperationDetector {
+		f.calls.Add(1)
+		if f.armed.Swap(false) {
+			return runtimeError("private detector failure canary")
+		}
+	}
+	return nil
+}
+
+func (f *detectorFault) orderShutdownParsingAfterNativeExit(time.Time) bool {
+	return false
+}
+
+type liveCase struct {
+	t          *testing.T
+	writer     *eventWriter
+	controller *observationController
+	hooks      *writerTestHooks
+	child      *testChild
+	terminal   *terminalState
+	clock      *testClock
+	fixture    *writerFixture
+}
+
+func newLiveCase(t *testing.T, hooks observationHooks) *liveCase {
+	t.Helper()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	writerHooks := &writerTestHooks{}
+	writer := startReal(t, f, writerHooks)
+	controller := newController(t, f.run, syntheticCatalog(t))
+	if hooks != nil {
+		controller.observationHooks = hooks
+	}
+	child := spawnCat(t)
+	markRunning(t, f, child.identity)
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: 80})
+	c := observationFixtureClock(t)
+	initial := terminal.snapshot()
+	if err := controller.start(f.run, &initial, writer, c); err != nil {
+		t.Fatal(err)
+	}
+	feedObservedBy(t, terminal, controllerForm("write terminal-order.txt"), controller, writer, c)
+	c.setElapsed(100 * time.Millisecond)
+	pollStatus(t, controller, writer, c, terminal)
+	yieldUntil(t, func() bool { return committed(t, f) == 1 && writer.status().pendingCount == 0 })
+	live := &liveCase{t: t, writer: writer, controller: controller, hooks: writerHooks, child: child, terminal: terminal, clock: c, fixture: f}
+	t.Cleanup(func() {
+		writerHooks.releaseForCleanup()
+		writer.finish(time.Now().Add(250 * time.Millisecond))
+	})
+	return live
+}
+
+func (l *liveCase) exit(millis int) uint64 {
+	l.t.Helper()
+	if !l.child.alive(l.t) {
+		l.t.Fatal("the child runs")
+	}
+	l.child.terminate(l.t)
+	l.clock.setElapsed(time.Duration(millis) * time.Millisecond)
+	snapshot := l.terminal.snapshot()
+	if err := l.controller.childExited(childExitSignal{signal: 15}, &snapshot, l.writer, l.clock); err != nil {
+		l.t.Fatal(err)
+	}
+	return snapshot.screenSeq
+}
+
+func (l *liveCase) drain(until time.Time) (uint64, uint64) {
+	l.t.Helper()
+	l.writer.setDeadline(until)
+	for time.Now().Before(until) {
+		pollStatus(l.t, l.controller, l.writer, l.clock, l.terminal)
+		if !l.controller.hasPending() && l.writer.status().pendingCount == 0 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return l.writer.finish(until)
+}
+
+func assertDetectorGap(t *testing.T, status observationStatus) {
+	t.Helper()
+	_, held := status.eligibility.(inputEligibilityHold)
+	if status.diagnostic != some("detector_unavailable") || !held || status.gapCount == 0 {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func assertOpenEpisode(t *testing.T, l *liveCase) {
+	t.Helper()
+	interaction, ok := runEvents(t, l.fixture)[0].interaction.get()
+	if !ok || interaction.episodeSeq != 1 || interaction.closedAt != none[string]() {
+		t.Fatalf("interaction = %+v", interaction)
+	}
+}
+
+func TestRuntimeObservation_ObservationFailures_RunnerQuietDetectorFailureReturnsTypedHeldStatusAndPreservesTheEpisode(t *testing.T) {
+	t.Parallel()
+	fault := &detectorFault{site: observationPhaseQuietTimer}
+	l := newLiveCase(t, fault)
+	l.clock.setElapsed(200 * time.Millisecond)
+	mustFeed(t, l.terminal, controllerForm("write candidate-after-open.txt"))
+	observeSnapshot(t, l.controller, l.writer, l.clock, l.terminal)
+	sequence := l.terminal.snapshot().screenSeq
+	calls := fault.calls.Load()
+	fault.armed.Store(true)
+	l.clock.setElapsed(300 * time.Millisecond)
+	status := pollStatus(t, l.controller, l.writer, l.clock, l.terminal)
+	if fault.calls.Load() != calls+1 || fault.armed.Load() {
+		t.Fatal("the armed fault fired once")
+	}
+	assertDetectorGap(t, status)
+	if l.terminal.snapshot().screenSeq != sequence || openedCount(t, l.fixture) != 1 || !l.child.alive(t) {
+		t.Fatal("the episode and the child are preserved")
+	}
+	assertOpenEpisode(t, l)
+}
+
+func TestRuntimeObservation_ObservationFailures_RunnerOrderedAdapterPreservesDetectorAttributionAndBoundedMetadata(t *testing.T) {
+	t.Parallel()
+	fault := &detectorFault{site: observationPhaseChildOutput}
+	l := newLiveCase(t, fault)
+	fault.armed.Store(true)
+	l.clock.setElapsed(200 * time.Millisecond)
+	calls := fault.calls.Load()
+	snapshot := l.terminal.snapshot()
+	_ = l.controller.observer(l.writer, l.clock).observe(&snapshot) //nolint:errcheck // the attempt's outcome is the status read next
+	if fault.calls.Load() != calls+1 || fault.armed.Load() {
+		t.Fatal("the armed fault fired once")
+	}
+	assertDetectorGap(t, l.controller.status())
+	if openedCount(t, l.fixture) != 1 || !l.child.alive(t) {
+		t.Fatal("the episode and the child are preserved")
+	}
+	assertOpenEpisode(t, l)
+}
+
+func TestRuntimeObservation_ObservationFailures_RunnerClockAndOutputSequenceInvariantsPropagateOutsideRecoverableFailures(t *testing.T) {
+	t.Parallel()
+	for _, invariant := range []string{"clock", "sequence"} {
+		l := newLiveCase(t, &detectorFault{site: observationPhaseChildOutput})
+		before := l.controller.status().gapCount
+		var err error
+		if invariant == "clock" {
+			l.clock.setElapsed(99 * time.Millisecond)
+			snapshot := l.terminal.snapshot()
+			_, err = l.controller.poll(&snapshot, l.writer, l.clock)
+		} else {
+			l.clock.setElapsed(200 * time.Millisecond)
+			stale := l.terminal.snapshot()
+			stale.screenSeq = 0
+			err = l.controller.observer(l.writer, l.clock).observe(&stale)
+		}
+		if err == nil || !strings.Contains(cafleetErrorOf(err).message(), "regress") {
+			t.Fatalf("%s: clock/sequence corruption remains an explicit invariant error: %v", invariant, err)
+		}
+		if status := l.controller.status(); status.gapCount != before || status.diagnostic != none[string]() {
+			t.Fatalf("%s: status %+v", invariant, status)
+		}
+		assertOpenEpisode(t, l)
+	}
+}
+
+func controllerTimestamp(t *testing.T, millis int) string {
+	t.Helper()
+	origin, ok := parseLenient(observationFixtureNow)
+	if !ok {
+		t.Fatal("the fixture stamp is canonical")
+	}
+	return formatUTC(origin.Add(time.Duration(millis) * time.Millisecond))
+}
+
+func TestRuntimeObservation_ObservationFailures_HealthReportsNoWriterDiagnosticOrGapStartWhileHealthy(t *testing.T) {
+	t.Parallel()
+	l := newLiveCase(t, nil)
+	health := l.controller.health(l.writer)
+	if health.Degraded || health.WriterDiagnostic != none[string]() || health.GapOpenSince != none[string]() {
+		t.Fatalf("health = %+v", health)
+	}
+	if err := health.validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeObservation_ObservationFailures_HealthReportsTheSanitizedWriterDiagnosticAndThePendingGapStart(t *testing.T) {
+	t.Parallel()
+	l := newLiveCase(t, nil)
+	l.hooks.mu.Lock()
+	l.hooks.busy[writerBoundarySlot(writerBoundaryPersist)] = true
+	l.hooks.mu.Unlock()
+	l.clock.setElapsed(200 * time.Millisecond)
+	mustFeed(t, l.terminal, controllerForm("write second.txt"))
+	observeSnapshot(t, l.controller, l.writer, l.clock, l.terminal)
+	l.clock.setElapsed(300 * time.Millisecond)
+	pollStatus(t, l.controller, l.writer, l.clock, l.terminal)
+	waitUntilWithin(t, 10*time.Second, func() bool { return l.writer.status().diagnostic != none[string]() })
+	l.clock.setElapsed(400 * time.Millisecond)
+	openedAt := wallStamp(l.clock)
+	pollStatus(t, l.controller, l.writer, l.clock, l.terminal)
+	health := l.controller.health(l.writer)
+	writerDiagnostic, _ := l.writer.status().diagnostic.get()
+	if health.Eligibility != (inputEligibilityHold{reason: gateReasonGap}) || !health.Degraded || health.Diagnostic != some("sink_unavailable") ||
+		health.WriterDiagnostic != some(diagnosticText(writerDiagnostic)) || health.GapOpenSince != some(openedAt) {
+		t.Fatalf("health = %+v", health)
+	}
+	if err := health.validate(); err != nil {
+		t.Fatal(err)
+	}
+	l.hooks.releaseForCleanup()
+}
+
+func TestRuntimeObservation_ObservationFailures_HealthReportsATerminalFencedGapWithoutAGapStart(t *testing.T) {
+	t.Parallel()
+	l := newLiveCase(t, nil)
+	l.exit(300)
+	waitUntilWithin(t, 10*time.Second, func() bool { return committed(t, l.fixture) == 3 && l.writer.status().pendingCount == 0 })
+	l.clock.setElapsed(400 * time.Millisecond)
+	if err := l.controller.observerFailed(observationFailureParser, l.clock); err != nil {
+		t.Fatal(err)
+	}
+	health := l.controller.health(l.writer)
+	if health.Eligibility != (inputEligibilityHold{reason: gateReasonGap}) || !health.Degraded || health.WriterDiagnostic != none[string]() || health.GapOpenSince != none[string]() {
+		t.Fatalf("health = %+v", health)
+	}
+	if err := health.validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeObservation_ObservationFailures_RunnerFailureAfterTerminalEnqueueNeverAppendsALivePostTerminalGap(t *testing.T) {
+	t.Parallel()
+	l := newLiveCase(t, nil)
+	l.hooks.mu.Lock()
+	l.hooks.busy[writerBoundarySlot(writerBoundaryPersist)] = true
+	l.hooks.mu.Unlock()
+	l.exit(300)
+	l.hooks.wait(t, writerBoundaryPersist, 2)
+	waitUntilWithin(t, 2*time.Second, func() bool { return l.writer.status().diagnostic != none[string]() })
+	l.clock.setElapsed(500 * time.Millisecond)
+	pollStatus(t, l.controller, l.writer, l.clock, l.terminal)
+	l.clock.setElapsed(700 * time.Millisecond)
+	l.hooks.releaseForCleanup()
+	pending, unsaved := l.drain(realDeadline())
+	events := runEvents(t, l.fixture)
+	if pending != 0 || unsaved != 0 || l.controller.hasPending() || l.controller.unsavedGapCount() != 0 || l.controller.status().gapCount != 0 {
+		t.Fatalf("drain (%d, %d) pending %v", pending, unsaved, l.controller.hasPending())
+	}
+	var kinds []runtimeEventKind
+	for _, view := range events {
+		kinds = append(kinds, view.event.kind)
+	}
+	if !slices.Equal(kinds, []runtimeEventKind{runtimeEventKindInteractionOpened, runtimeEventKindInteractionClosed, runtimeEventKindRunnerExited}) {
+		t.Fatalf("kinds = %v", kinds)
+	}
+	if last := events[len(events)-1].event.observedAt; last != controllerTimestamp(t, 300) {
+		t.Fatalf("observed at %s", last)
+	}
+	for range 3 {
+		pollStatus(t, l.controller, l.writer, l.clock, l.terminal)
+	}
+	if len(runEvents(t, l.fixture)) != len(events) || l.controller.hasPending() {
+		t.Fatal("no live post-terminal gap is appended")
+	}
+}
+
+func TestRuntimeObservation_ControllerQuietPollOpensOneEpisodeWithTheUnchangedParserSequence(t *testing.T) {
+	t.Parallel()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	writer := startReal(t, f, &writerTestHooks{})
+	c := observationFixtureClock(t)
+	controller, _, terminal := startedController(t, f, writer, c, syntheticCatalog(t))
+	feedObservedBy(t, terminal, controllerForm("write disposable.txt"), controller, writer, c)
+	sequence := terminal.snapshot().screenSeq
+	if controller.status().eligibility != (inputEligibilityHold{reason: gateReasonCandidate}) {
+		t.Fatalf("status %+v", controller.status())
+	}
+	c.setElapsed(99 * time.Millisecond)
+	pollStatus(t, controller, writer, c, terminal)
+	if got := committed(t, f); got != 0 {
+		t.Fatalf("committed %d", got)
+	}
+	c.setElapsed(100 * time.Millisecond)
+	pollStatus(t, controller, writer, c, terminal)
+	yieldUntil(t, func() bool { return committed(t, f) == 1 })
+	view := readEvent(t, f.conn, 1)
+	interaction, ok := view.interaction.get()
+	if !ok || interaction.runID != f.run.runID || interaction.episodeSeq != 1 {
+		t.Fatalf("the opening links its persisted episode: %+v", interaction)
+	}
+	if view.event.kind != runtimeEventKindInteractionOpened || view.event.interactionID != some(interaction.interactionID) {
+		t.Fatalf("event %+v", view.event)
+	}
+	assertJSONEqual(t, jsonAt(t, view.event.payloadJSON, "evidence", "screen_seq"), mustJSON(t, sequence), "screen_seq")
+	if terminal.snapshot().screenSeq != sequence {
+		t.Fatal("the poll leaves the parser sequence unchanged")
+	}
+	writer.finish(realDeadline())
+}
+
+func TestRuntimeObservation_ControllerActualAdapterObservesTransientFormBeforeClearWithoutOpening(t *testing.T) {
+	t.Parallel()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	writer := startReal(t, f, &writerTestHooks{})
+	c := observationFixtureClock(t)
+	controller, _, terminal := startedController(t, f, writer, c, syntheticCatalog(t))
+	feedObservedBy(t, terminal, append(controllerForm("write disposable.txt"), "\x1b[2J\x1b[Hworking"...), controller, writer, c)
+	c.setElapsed(100 * time.Millisecond)
+	status := pollStatus(t, controller, writer, c, terminal)
+	if _, held := status.eligibility.(inputEligibilityHold); !held || committed(t, f) != 0 || status.retainedTransition || status.retainedDraft {
+		t.Fatalf("status %+v", status)
+	}
+	writer.finish(realDeadline())
+}
+
+func TestRuntimeObservation_ControllerTypedFailuresKeepMetadataOnlyDiagnosticsAndHoldInput(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		reason observationFailure
+		code   string
+	}{{observationFailureParser, "parser_unavailable"}, {observationFailureDetector, "detector_unavailable"}, {observationFailureSink, "sink_unavailable"}} {
+		f := newWriterFixture(t)
+		configureController(t, f)
+		controller := newController(t, f.run, syntheticCatalog(t))
+		if err := controller.observerFailed(tc.reason, observationFixtureClock(t)); err != nil {
+			t.Fatal(err)
+		}
+		status := controller.status()
+		if _, held := status.eligibility.(inputEligibilityHold); !held || status.diagnostic != some(tc.code) || status.gapCount == 0 {
+			t.Fatalf("%s: status %+v", tc.code, status)
+		}
+	}
+}
+
+func TestRuntimeObservation_ControllerStartedValidatesCurrentIdentityAndIsSingleUse(t *testing.T) {
+	t.Parallel()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	writer := startReal(t, f, &writerTestHooks{})
+	c := observationFixtureClock(t)
+	controller := newController(t, f.run, syntheticCatalog(t))
+	screen := mustTerminalState(t, terminalSize{rows: 24, cols: 80}).snapshot()
+	if controller.start(f.run, &screen, writer, c) == nil {
+		t.Fatal("a run that is not running is refused")
+	}
+	child := spawnCat(t)
+	markRunning(t, f, child.identity)
+	stale := f.run
+	stale.ownerEpoch++
+	if controller.start(stale, &screen, writer, c) == nil {
+		t.Fatal("a stale owner is refused")
+	}
+	if err := controller.start(f.run, &screen, writer, c); err != nil {
+		t.Fatal(err)
+	}
+	if controller.start(f.run, &screen, writer, c) == nil {
+		t.Fatal("the controller starts once")
+	}
+	writer.finish(realDeadline())
+}
+
+func TestRuntimeObservation_ControllerExitClosesTheOpenEpisodeBeforeRecordingTheRealNativeSignal(t *testing.T) {
+	t.Parallel()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	writer := startReal(t, f, &writerTestHooks{})
+	c := observationFixtureClock(t)
+	controller, child, terminal := startedController(t, f, writer, c, syntheticCatalog(t))
+	feedObservedBy(t, terminal, controllerForm("write disposable.txt"), controller, writer, c)
+	c.setElapsed(100 * time.Millisecond)
+	pollStatus(t, controller, writer, c, terminal)
+	waitUntilWithin(t, 20*time.Second, func() bool { return committed(t, f) == 1 })
+	if !child.alive(t) {
+		t.Fatal("the child runs")
+	}
+	child.terminate(t)
+	c.setElapsed(200 * time.Millisecond)
+	snapshot := terminal.snapshot()
+	if err := controller.childExited(childExitSignal{signal: 15}, &snapshot, writer, c); err != nil {
+		t.Fatal(err)
+	}
+	waitUntilWithin(t, 20*time.Second, func() bool { return committed(t, f) == 3 })
+	if kinds := eventKinds(t, f); !slices.Equal(kinds, []string{"interaction_opened", "interaction_closed", "runner_exited"}) {
+		t.Fatalf("kinds = %q", kinds)
+	}
+	if run := mustRun(t, f.conn, f.run.runID); run.exitCode != none[int64]() {
+		t.Fatalf("exit code %v", run.exitCode)
+	}
+	writer.finish(realDeadline())
+}
+
+// pressureDrainBudget bounds draining 64 retained pressure transitions through SQLite, which
+// exceeds the shared 2 s budget under a concurrent full suite on slower storage.
+const pressureDrainBudget = 10 * time.Second
+
+func assertRetainedPressure(t *testing.T, err error, status observationStatus) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	if !status.retainedTransition && !status.retainedDraft && status.gapCount == 0 {
+		t.Fatalf("an observer error requires retained work or a recorded gap: %v", err)
+	}
+	if _, held := status.eligibility.(inputEligibilityHold); !held {
+		t.Fatalf("an observer error holds eligibility: %v", err)
+	}
+}
+
+func TestRuntimeObservation_ControllerRetainsBothSupersededOriginalsWhenTheFirstSubmitHitsPressure(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	catalog := mustLoadCatalog(t, syntheticDefinitions())
+	hooks := &writerTestHooks{}
+	hooks.pause(writerBoundaryReceive)
+	writer := startReal(t, f, hooks)
+	hooks.wait(t, writerBoundaryReceive, 1)
+	c := observationFixtureClock(t)
+	controller, _, terminal := startedController(t, f, writer, c, catalog)
+	preview, err := insertMessageValidated(ctx, f.conn, f.run.directorMemberID, f.run.memberID, "preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.publishDeliveryResult(previewDeliveryResultCause(preview.messageID, deliveryMethodProfile, "partial", stopCauseShortWrite))
+	pollStatus(t, controller, writer, c, terminal)
+	if pending := writer.status().pendingCount; pending != 1 {
+		t.Fatalf("pending %d", pending)
+	}
+	lastOpeningSequence := uint64(0)
+	for index := range uint64(32) {
+		c.setElapsed(time.Duration(index*200) * time.Millisecond) //nolint:gosec // index is below 32
+		mustFeed(t, terminal, controllerForm(fmt.Sprintf("write fixture-%02d.txt", index)))
+		lastOpeningSequence = terminal.snapshot().screenSeq
+		observeSnapshot(t, controller, writer, c, terminal)
+		c.setElapsed(time.Duration(index*200+100) * time.Millisecond) //nolint:gosec // index is below 32
+		pollStatus(t, controller, writer, c, terminal)
+		if pending := writer.status().pendingCount; pending != index*2+2 || controller.hasPending() {
+			t.Fatalf("index %d: pending %d", index, pending)
+		}
+	}
+	if status := writer.status(); status.pendingCount != 64 || status.diagnostic != none[string]() || committed(t, f) != 0 {
+		t.Fatalf("writer status %+v", status)
+	}
+	c.setElapsed(8600 * time.Millisecond)
+	replacement := controllerForm("write final-original.txt")
+	feedObservedBy(t, terminal, replacement[:1], controller, writer, c)
+	if terminal.snapshot().screenSeq <= lastOpeningSequence {
+		t.Fatal("the lone escape advances the screen")
+	}
+	feedObservedBy(t, terminal, replacement[1:], controller, writer, c)
+	c.setElapsed(8700 * time.Millisecond)
+	snapshot := terminal.snapshot()
+	_, err = controller.poll(&snapshot, writer, c)
+	assertRetainedPressure(t, err, controller.status())
+	originalSequence := terminal.snapshot().screenSeq
+	if status := controller.status(); !status.retainedTransition || !status.retainedDraft || writer.status().pendingCount != 64 {
+		t.Fatalf("status %+v", status)
+	}
+	if _, held := controller.status().eligibility.(inputEligibilityHold); !held {
+		t.Fatal("input is held")
+	}
+	err = terminal.feedObserved([]byte("\x1b[2J\x1b[Hlater output during the gap"), controller.observer(writer, c))
+	assertRetainedPressure(t, err, controller.status())
+	if status := controller.status(); terminal.snapshot().screenSeq <= originalSequence || !status.retainedTransition || !status.retainedDraft {
+		t.Fatalf("status %+v", status)
+	}
+	hooks.releaseForCleanup()
+	pollUntil := func(condition func() bool) {
+		until := time.Now().Add(pressureDrainBudget)
+		for !condition() {
+			if !time.Now().Before(until) {
+				t.Fatal("bounded worker condition did not complete")
+			}
+			snapshot := terminal.snapshot()
+			_, err := controller.poll(&snapshot, writer, c)
+			assertRetainedPressure(t, err, controller.status())
+			runtime.Gosched()
+		}
+	}
+	pollUntil(func() bool { return committed(t, f) >= 66 })
+	closed := eventViewAt(t, f, 65)
+	opened := eventViewAt(t, f, 66)
+	if closed.event.kind != runtimeEventKindInteractionClosed {
+		t.Fatalf("closed %+v", closed.event)
+	}
+	assertJSONEqual(t, jsonAt(t, closed.event.payloadJSON, "close_reason"), jsontext.Value(`"superseded"`), "close_reason")
+	for _, tc := range []struct {
+		view     runtimeEventView
+		sequence int64
+		episode  int64
+		screen   uint64
+	}{{closed, 65, 32, lastOpeningSequence}, {opened, 66, 33, originalSequence}} {
+		interaction, ok := tc.view.interaction.get()
+		if !ok || tc.view.event.runID != f.run.runID || tc.view.event.eventSeq != tc.sequence || tc.view.event.interactionID != some(interaction.interactionID) || interaction.episodeSeq != tc.episode {
+			t.Fatalf("event %d: %+v %+v", tc.sequence, tc.view.event, interaction)
+		}
+		if tc.view.event.observedAt != wallStamp(c) {
+			t.Fatalf("the supersede is observed at the clock's current moment: %s", tc.view.event.observedAt)
+		}
+		assertJSONEqual(t, jsonAt(t, tc.view.event.payloadJSON, "evidence", "screen_seq"), mustJSON(t, tc.screen), "screen_seq")
+	}
+	if opened.event.kind != runtimeEventKindInteractionOpened {
+		t.Fatalf("opened %+v", opened.event)
+	}
+	pollUntil(func() bool { return !controller.hasPending() && writer.status().pendingCount == 0 })
+	if pending, unsaved := writer.finish(time.Now().Add(pressureDrainBudget)); pending != 0 || unsaved != 0 {
+		t.Fatalf("finish (%d, %d)", pending, unsaved)
+	}
+	if !runtimeEventRecordsEqual(eventViewAt(t, f, 65).event, closed.event) || !runtimeEventRecordsEqual(eventViewAt(t, f, 66).event, opened.event) {
+		t.Fatal("the committed events are final")
+	}
+}
+
+var idleComposer = []byte("\x1b[0m\x1b[2J\x1b[23;1HSynthetic state\r\nState end")
+
+func TestRuntimeObservation_ControllerGapRecoveryReobservesTheUnchangedScreenAfterPublishingADelivery(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name           string
+		queuesDelivery bool
+	}{{"no queued delivery", false}, {"delivery queued during the gap", true}} {
+		f := newWriterFixture(t)
+		configureController(t, f)
+		if _, err := f.conn.execute("UPDATE member_runs SET coverage='unknown' WHERE run_id=?1", f.run.runID); err != nil {
+			t.Fatal(err)
+		}
+		refreshWriterRun(t, f)
+		catalog := composerCatalog(t, none[string](), none[string]())
+		hooks := &writerTestHooks{}
+		hooks.pause(writerBoundaryPersist)
+		writer := startReal(t, f, hooks)
+		c := observationFixtureClock(t)
+		controller, _, terminal := startedController(t, f, writer, c, catalog)
+		waitUntilWithin(t, 20*time.Second, func() bool { return writer.status().diagnostic != none[string]() })
+		feedObservedBy(t, terminal, idleComposer, controller, writer, c)
+		c.setElapsed(100 * time.Millisecond)
+		if status := pollStatus(t, controller, writer, c, terminal); status.eligibility != (inputEligibilityHold{reason: gateReasonGap}) {
+			t.Fatalf("%s: a degraded writer holds input behind a gap: %v", tc.name, status.eligibility)
+		}
+		if tc.queuesDelivery {
+			preview, err := insertMessageValidated(ctx, f.conn, f.run.directorMemberID, f.run.memberID, "preview")
+			if err != nil {
+				t.Fatal(err)
+			}
+			controller.publishDeliveryResult(previewDeliveryResultCause(preview.messageID, deliveryMethodProfile, "partial", stopCauseShortWrite))
+		}
+		hooks.releaseForCleanup()
+		waitUntilWithin(t, 20*time.Second, func() bool {
+			state := writer.status()
+			return state.diagnostic == none[string]() && state.pendingCount == 0
+		})
+		status := controller.status()
+		for _, millis := range []int{200, 300, 400} {
+			c.setElapsed(time.Duration(millis) * time.Millisecond)
+			status = pollStatus(t, controller, writer, c, terminal)
+		}
+		if status.eligibility != (inputEligibilityComposerEmpty{}) {
+			t.Fatalf("%s: the unchanged idle screen is re-observed after the gap closes: %v", tc.name, status.eligibility)
+		}
+		writer.finish(realDeadline())
+	}
+}
+
+func TestRuntimeObservation_PublishDeliveryResultQueuesBlockedRecordsPerBlockerAndDropsAQueuedRepeat(t *testing.T) {
+	t.Parallel()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	controller := newController(t, f.run, syntheticCatalog(t))
+	blocked := func(blocker int64) jsontext.Value {
+		return jsontext.Value(fmt.Sprintf(`{"kind":"input_delivery_stalled","input_id":null,"message_id":null,"blocked_by_input_id":%d,"waiting_since":%q}`, blocker, observationFixtureNow))
+	}
+	controller.publishDeliveryStalled(blocked(11))
+	controller.publishDeliveryStalled(blocked(12))
+	controller.publishDeliveryStalled(blocked(11))
+	if len(controller.deliveryResults) != 2 {
+		t.Fatalf("queued %d", len(controller.deliveryResults))
+	}
+	assertJSONEqual(t, controller.deliveryResults[0], blocked(11), "the first blocker")
+	assertJSONEqual(t, controller.deliveryResults[1], blocked(12), "the second blocker")
+}
+
+func TestRuntimeObservation_ControllerReplacesAnEvidenceInvalidRefusalWithItsRejectionAndOpensNoGap(t *testing.T) {
+	t.Parallel()
+	f := newWriterFixture(t)
+	configureController(t, f)
+	writer := startReal(t, f, &writerTestHooks{})
+	c := observationFixtureClock(t)
+	controller, _, terminal := startedController(t, f, writer, c, syntheticCatalog(t))
+	forged := transitionDraft{
+		runID:          f.run.runID,
+		episodeSeq:     none[int64](),
+		classification: none[interactionClass](),
+		kind:           runtimeEventKindCoverageUnknown,
+		observedAt:     observationFixtureNow,
+		evidenceJSON:   jsontext.Value(`{"forged":true}`),
+		closeReason:    none[interactionCloseReason](),
+		causeJSON:      jsontext.Value(`{"kind":"coverage_unknown"}`),
+	}
+	if err := controller.retain(controller.update([]transitionDraft{forged})); err != nil {
+		t.Fatal(err)
+	}
+	c.setElapsed(100 * time.Millisecond)
+	status := pollStatus(t, controller, writer, c, terminal)
+	if status.gapCount != 0 || status.diagnostic != none[string]() || status.retainedTransition || controller.hasPending() {
+		t.Fatalf("status %+v", status)
+	}
+	waitUntilWithin(t, 20*time.Second, func() bool { return committed(t, f) == 1 && writer.status().pendingCount == 0 })
+	if state := writer.status(); state.diagnostic != none[string]() || state.gapCount != 0 {
+		t.Fatalf("writer %+v", state)
+	}
+	event := eventViewAt(t, f, 1).event
+	if event.kind != runtimeEventKindRunnerDegraded {
+		t.Fatalf("event %+v", event)
+	}
+	cause := jsonAt(t, event.payloadJSON, "cause")
+	assertJSONEqual(t, jsonAt(t, cause, "kind"), jsontext.Value(`"event_rejected"`), "kind")
+	assertJSONEqual(t, jsonAt(t, cause, "rejected_kind"), jsontext.Value(`"coverage_unknown"`), "rejected_kind")
+	assertJSONEqual(t, jsonAt(t, cause, "rejected_observed_at"), mustJSON(t, observationFixtureNow), "rejected_observed_at")
+	if decodedString(t, jsonAt(t, cause, "error")) == "" {
+		t.Fatalf("cause %s", cause)
+	}
+	assertJSONEqual(t, jsonAt(t, event.payloadJSON, "evidence", "rule_id"), jsontext.Value(`"runner-lifecycle"`), "rule_id")
+	assertJSONEqual(t, jsonAt(t, event.payloadJSON, "evidence", "screen_seq"), mustJSON(t, terminal.snapshot().screenSeq), "screen_seq")
+	if controller.status().gapCount != 0 {
+		t.Fatal("no gap")
+	}
+	writer.finish(realDeadline())
+}
+
+func TestRuntimeObservation_InspectionTests_PermissionInspectionObservedAuthorityHasNoDebugOrSerializedRepresentation(t *testing.T) {
+	t.Parallel()
+	request := observedRequest{requestRuleID: "observed-authority-private-rule", choices: []string{"private-choice"}, focus: "private-focus"}
+	assertRedacted(t, "observedRequest", request)
+	assertRedacted(t, "*observedRequest", &request)
 }

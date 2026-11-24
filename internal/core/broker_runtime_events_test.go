@@ -752,7 +752,7 @@ func stalledFixture(t *testing.T) (*brokerRuntimeFixture, runOwner, inputOperati
 	return fixture, owner, head
 }
 
-func stalledRecord(t *testing.T, inputID, messageID, blockedBy jsontext.Value, waitingSince string) jsontext.Value {
+func stalledCause(t *testing.T, inputID, messageID, blockedBy jsontext.Value, waitingSince string) jsontext.Value {
 	t.Helper()
 	return mustJSON(t, jsonObject{
 		{"kind", "input_delivery_stalled"},
@@ -767,7 +767,7 @@ func stalledTransition(t *testing.T, owner runOwner, head int64) observedTransit
 	t.Helper()
 	transition := nativeExit(t, owner.runID, 1)
 	transition.Kind = runtimeEventKindInputDeliveryStalled
-	transition.CauseJSON = stalledRecord(t, mustJSON(t, head), jsontext.Value("null"), jsontext.Value("null"), runtimeFixtureNow)
+	transition.CauseJSON = stalledCause(t, mustJSON(t, head), jsontext.Value("null"), jsontext.Value("null"), runtimeFixtureNow)
 	return transition
 }
 
@@ -893,7 +893,7 @@ func blockedTransition(t *testing.T, owner runOwner, eventSeq int64, blocker jso
 	t.Helper()
 	transition := nativeExit(t, owner.runID, eventSeq)
 	transition.Kind = runtimeEventKindInputDeliveryStalled
-	transition.CauseJSON = stalledRecord(t, jsontext.Value("null"), jsontext.Value("null"), blocker, runtimeFixtureNow)
+	transition.CauseJSON = stalledCause(t, jsontext.Value("null"), jsontext.Value("null"), blocker, runtimeFixtureNow)
 	return transition
 }
 
@@ -1087,7 +1087,7 @@ func TestBrokerRuntimeEvents_ComposerReliability_ADuplicateStalledRecordCommitsA
 			fixture, owner, head := stalledFixture(t)
 			stalled := func(inputID, messageID, blockedBy jsontext.Value) observedTransition {
 				transition := stalledTransition(t, owner, head.inputID)
-				transition.CauseJSON = stalledRecord(t, inputID, messageID, blockedBy, runtimeFixtureNow)
+				transition.CauseJSON = stalledCause(t, inputID, messageID, blockedBy, runtimeFixtureNow)
 				return transition
 			}
 			null := jsontext.Value("null")
