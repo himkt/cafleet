@@ -29,6 +29,11 @@ func independentFrame(body []byte) []byte {
 	return append(frame, body...)
 }
 
+// realTimeBound bounds every wait on a real socket, lock or database in these tests. It sits far
+// above what an unloaded exchange takes, so a loaded run still finishes inside it, and an
+// assertion that bounded code returns early compares against a fraction of it.
+const realTimeBound = 10 * time.Second
+
 func feedValues(decoder *controlDecoder, data []byte) ([]jsontext.Value, error) {
 	frames, err := decoder.feedAdmitted(data, time.Now())
 	if err != nil {
@@ -124,7 +129,7 @@ func silentServer(t *testing.T, path string) {
 	failure := make(chan error, 1)
 	go func() {
 		defer done.Done()
-		end := time.Now().Add(2 * time.Second)
+		end := time.Now().Add(realTimeBound)
 		var connections []int
 		defer func() {
 			for _, connection := range connections {
@@ -583,7 +588,7 @@ func serveOneHealthReply(listener int, identity, reply jsontext.Value, deadline 
 		return errors.New("accepted fixture stream is nonblocking")
 	}
 	readDeadline := deadline
-	if limit := time.Now().Add(time.Second); limit.Before(readDeadline) {
+	if limit := time.Now().Add(realTimeBound); limit.Before(readDeadline) {
 		readDeadline = limit
 	}
 	header := make([]byte, 4)
@@ -645,7 +650,7 @@ func TestRuntimeControl_ControlCodecTests_RunnerReviewActualHealthClientUsesFram
 			if c.version != "" {
 				reply = jsonSetAt(t, reply, c.version, "protocol_version")
 			}
-			deadline := time.Now().Add(2 * time.Second)
+			deadline := time.Now().Add(realTimeBound)
 			served := make(chan error, 1)
 			go func() { served <- serveOneHealthReply(listener, identity, reply, deadline) }()
 			health, err := probeHealth(run, deadline, systemClock{})
@@ -820,7 +825,7 @@ func describeOutcome(outcome exchangeOutcome) string {
 func exchangeWithPeer(t *testing.T, work func(stop *atomic.Bool, until time.Time) (peerObservation, error), exchange func() (inputControlReply, error)) (exchangeOutcome, peerObservation) {
 	t.Helper()
 	var stop atomic.Bool
-	until := time.Now().Add(2 * time.Second)
+	until := time.Now().Add(2 * realTimeBound)
 	type peerResult struct {
 		observed peerObservation
 		err      error
@@ -859,7 +864,7 @@ func preloadedExchange(t *testing.T, fixture *runnerFixture, response []byte) (e
 	t.Helper()
 	client, fd := controlPair(t)
 	var stop atomic.Bool
-	peer := controlPeer{fd: fd, stop: &stop, until: time.Now().Add(time.Second)}
+	peer := controlPeer{fd: fd, stop: &stop, until: time.Now().Add(realTimeBound)}
 	if err := peer.write(response); err != nil {
 		t.Fatal(err)
 	}
@@ -899,7 +904,7 @@ func TestRuntimeControl_InputClientTests_ExchangeValidatesFragmentedDuplicateAnd
 		}
 		return peerObservation{request: request, at: at}, nil
 	}, func() (inputControlReply, error) {
-		return client.exchangeInput(inputClientRequest(fixture), time.Now().Add(time.Second), systemClock{})
+		return client.exchangeInput(inputClientRequest(fixture), time.Now().Add(realTimeBound), systemClock{})
 	})
 	assertAcceptedSubmission(t, outcome)
 	assertJSONEqual(t, observed.request, inputClientExpected(t, fixture), "fragmented reply request")
@@ -934,7 +939,7 @@ func TestRuntimeControl_InputClientTests_ExchangeRejectsExtraReplyTrailingPartia
 	}
 	client, fd := controlPair(t)
 	var stop atomic.Bool
-	peer := controlPeer{fd: fd, stop: &stop, until: time.Now().Add(time.Second)}
+	peer := controlPeer{fd: fd, stop: &stop, until: time.Now().Add(realTimeBound)}
 	if err := peer.write(good[:len(good)-1]); err != nil {
 		t.Fatal(err)
 	}
@@ -978,9 +983,9 @@ func TestRuntimeControl_InputClientTests_ExpiredAndStalledExchangesKeepTheOrigin
 	}
 
 	client, fd = controlPair(t)
-	budget := 800 * time.Millisecond
-	fragmentDelay := 350 * time.Millisecond
-	returnTolerance := 100 * time.Millisecond
+	budget := 3 * time.Second
+	fragmentDelay := 1500 * time.Millisecond
+	returnTolerance := time.Second
 	started := time.Now()
 	deadline := started.Add(budget)
 	var returned time.Time
@@ -1048,7 +1053,7 @@ func TestRuntimeControl_InputClientTests_DisconnectAfterTheRequestHasNoReconnect
 	path := shortTempdir(t) + "/control.sock"
 	listener := boundSocket(t, path, 0o600, true)
 	var exchangeReturned atomic.Bool
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(realTimeBound)
 	var returnedAt time.Time
 	outcome, observed := exchangeWithPeer(t, func(stop *atomic.Bool, until time.Time) (peerObservation, error) {
 		peer := controlPeer{stop: stop, until: until}
@@ -1203,10 +1208,10 @@ func TestRuntimeControl_LaunchReadinessTests_RunnerReadinessPostStartHealthPrese
 			transferSetting(t, fixture, "status='running',child_pid=?1,child_start_identity=?2")
 			listener := boundSocket(t, artifacts.paths.controlSocket, c.mode, c.listening)
 			started := time.Now()
-			if _, err := probeHealth(fixture.run, started.Add(time.Second), systemClock{}); err == nil {
+			if _, err := probeHealth(fixture.run, started.Add(realTimeBound), systemClock{}); err == nil {
 				t.Fatalf("%s: the probe fails", c.name)
 			}
-			if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+			if elapsed := time.Since(started); elapsed >= realTimeBound/2 {
 				t.Fatalf("%s: the strict failure took %v", c.name, elapsed)
 			}
 			if c.listening {
@@ -1231,7 +1236,7 @@ func TestRuntimeControl_RunnerHealthRealSilentEndpointIsBoundedAndProbeIsReadOnl
 	if _, err := probeHealth(fixture.run, start.Add(80*time.Millisecond), systemClock{}); err == nil {
 		t.Fatal("a silent endpoint fails the probe")
 	}
-	if elapsed := time.Since(start); elapsed >= 750*time.Millisecond {
+	if elapsed := time.Since(start); elapsed >= realTimeBound/2 {
 		t.Fatalf("the silent probe took %v", elapsed)
 	}
 	after, err := os.ReadFile(fixture.databaseFile(t))

@@ -293,7 +293,7 @@ func TestRuntimeInputClient_LiveReceiptSettledHistoryIsImmutableBeforeLiveCallsA
 	changes := totalChanges(history.fixture.conn)
 	beforeRun := mustRun(t, history.fixture.conn, history.row.runID)
 	records := healthRecords(t, history.fixture.conn)
-	original := time.Now().Add(2 * time.Second)
+	original := time.Now().Add(realTimeBound)
 	conn := history.fixture.conn
 	reads := recordReadBudgets(t, conn, "member_input_operations")
 	_, expired := reconcileReceiptWithHost(ctx, conn, history.settings, history.row.inputID, inputDispositionSubmitted,
@@ -303,7 +303,7 @@ func TestRuntimeInputClient_LiveReceiptSettledHistoryIsImmutableBeforeLiveCallsA
 	var historyFailure *inputFailure
 	if _, err := withDatabaseBudget(ctx, conn, deadlineUntil(original), func(ctx context.Context, conn *dbConn) (struct{}, error) {
 		recorded, historyFailure = reconcileReceiptWithHost(ctx, conn, history.settings, history.row.inputID, inputDispositionSubmitted,
-			"fixture:replacement-evidence", deadlineUntil(original.Add(2*time.Second)), &noLiveHost{})
+			"fixture:replacement-evidence", deadlineUntil(original.Add(realTimeBound)), &noLiveHost{})
 		return struct{}{}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -381,7 +381,7 @@ func TestRuntimeInputClient_ExternalInputRetainedHistoryPrecedesBusyPaneAndInact
 			holdPaneLock(t, history.settings, history.placement)
 			changes := totalChanges(history.fixture.conn)
 			found, failure := findSubmission(ctx, history.fixture.conn, history.identity(), history.request,
-				deadlineUntil(time.Now().Add(time.Second)), systemClock{})
+				deadlineUntil(time.Now().Add(realTimeBound)), systemClock{})
 			if failure != nil {
 				t.Fatalf("%s: %v", c.name, failure.asError())
 			}
@@ -389,7 +389,7 @@ func TestRuntimeInputClient_ExternalInputRetainedHistoryPrecedesBusyPaneAndInact
 				t.Fatalf("%s: found %+v", c.name, found)
 			}
 			result, failure := submitWrappedInputWithHost(ctx, history.fixture.conn, history.settings, history.fixture.run,
-				history.placement, history.request, deadlineUntil(time.Now().Add(150*time.Millisecond)), &noLiveHost{})
+				history.placement, history.request, deadlineUntil(time.Now().Add(realTimeBound)), &noLiveHost{})
 			if failure != nil {
 				t.Fatalf("%s: %v", c.name, failure.asError())
 			}
@@ -415,7 +415,7 @@ func TestRuntimeInputClient_ExternalInputBorrowedHistoryKeepsThePreparedDeadline
 	held := holdPaneLock(t, history.settings, history.placement)
 	conn := history.fixture.conn
 	changes := totalChanges(conn)
-	controlDeadline := time.Now().Add(2 * time.Second)
+	controlDeadline := time.Now().Add(realTimeBound)
 	runBefore := mustRun(t, conn, history.fixture.run.runID)
 	recordsBefore := healthRecords(t, conn)
 	control, err := newPreparedSubmission(history.request, controlDeadline, systemClock{})
@@ -440,17 +440,17 @@ func TestRuntimeInputClient_ExternalInputBorrowedHistoryKeepsThePreparedDeadline
 	if time.Now().Before(original) {
 		t.Fatal("the checked prepared attempt actually expired")
 	}
-	originalActive := time.Now().Add(time.Second)
+	originalActive := time.Now().Add(realTimeBound)
 	reads := recordReadBudgets(t, conn, "member_input_operations")
 	_, expired := submitWrappedInputUnderPaneLockWithHost(ctx, conn, history.settings, history.fixture.run, history.placement,
-		held, expiredAttempt, deadlineUntil(time.Now().Add(3*time.Second)), &noLiveHost{})
+		held, expiredAttempt, deadlineUntil(time.Now().Add(3*realTimeBound)), &noLiveHost{})
 	expiredReads := reads.take()
 	activeAttempt, err := newPreparedSubmission(history.request, originalActive, systemClock{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inherited := deadlineUntil(time.Now().Add(2 * time.Second))
-	supplied := deadlineUntil(time.Now().Add(3 * time.Second))
+	inherited := deadlineUntil(time.Now().Add(2 * realTimeBound))
+	supplied := deadlineUntil(time.Now().Add(3 * realTimeBound))
 	var active submissionResult
 	var activeFailure *inputFailure
 	if _, err := withDatabaseBudget(ctx, conn, inherited, func(ctx context.Context, conn *dbConn) (struct{}, error) {
@@ -500,7 +500,7 @@ func TestRuntimeInputClient_ExternalInputDiscoveryRejectsPayloadAssociationAndDa
 	conn := history.fixture.conn
 	changes := totalChanges(conn)
 	identity := history.identity()
-	d := deadlineUntil(time.Now().Add(2 * time.Second))
+	d := deadlineUntil(time.Now().Add(realTimeBound))
 	found, failure := findSubmission(ctx, conn, identity, history.request, d, systemClock{})
 	if failure != nil || found != some(history.row) {
 		t.Fatalf("the retained input is found: %+v %v", found, failure)
@@ -598,7 +598,7 @@ func TestRuntimeInputClient_ExternalInputStaleOrUnreachableHealthRefusesBeforeEx
 			if len(records[0].rows) != 1 {
 				t.Fatalf("meaningful open interaction control: %d rows", len(records[0].rows))
 			}
-			until := time.Now().Add(time.Second)
+			until := time.Now().Add(realTimeBound)
 			host := newSocketHost(t, history.settings, history.placement, until)
 			if stale {
 				runner := currentProcess(t)
@@ -735,7 +735,7 @@ func refusedInspection(t *testing.T, conn *dbConn, s settings, eventID, interact
 		EventID:          eventID,
 		InteractionID:    interactionID,
 		DirectorMemberID: directorMemberID,
-	}, deadlineUntil(time.Now().Add(time.Second)))
+	}, deadlineUntil(time.Now().Add(realTimeBound)))
 	if failure == nil {
 		t.Fatal("this inspection is refused")
 	}
@@ -881,7 +881,7 @@ func TestRuntimeInputClient_AbsentPlacementReceiptStaysUncertainWithoutLiveCalls
 	original := storedInput(t, conn, reserved.inputID)
 	host := &noLiveHost{}
 	_, failure := reconcileReceiptWithHost(ctx, conn, c.settings, reserved.inputID, inputDispositionSubmitted,
-		"fixture:absent-placement-receipt", deadlineUntil(time.Now().Add(2*time.Second)), host)
+		"fixture:absent-placement-receipt", deadlineUntil(time.Now().Add(realTimeBound)), host)
 	if failure == nil {
 		t.Fatal("an absent placement refuses live reconciliation")
 	}
