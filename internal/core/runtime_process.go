@@ -313,7 +313,13 @@ func ptySessionPrepare(size terminalSize, c clock) (*ptySession, error) {
 }
 
 func setWindowSize(master *os.File, size terminalSize) error {
-	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: size.rows, Col: size.cols}); err != nil {
+	return setWindowSizeFd(int(master.Fd()), size)
+}
+
+// setWindowSizeFd sizes the PTY through a raw descriptor: os.File.Fd on the master would switch
+// the open file description it shares with the nonblocking duplicate back to blocking mode.
+func setWindowSizeFd(fd int, size terminalSize) error {
+	if err := unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, &unix.Winsize{Row: size.rows, Col: size.cols}); err != nil {
 		return ioError(errnoText(err))
 	}
 	return nil
@@ -491,10 +497,11 @@ func (s *ptySession) resize(size terminalSize) error {
 	if err := size.validate(); err != nil {
 		return err
 	}
-	if s.master == nil {
+	fd, open := s.io.get()
+	if s.master == nil || !open {
 		return runtimeError("PTY is closed")
 	}
-	return setWindowSize(s.master, size)
+	return setWindowSizeFd(fd, size)
 }
 
 func (s *ptySession) close() error {

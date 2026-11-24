@@ -20,7 +20,14 @@ import (
 )
 
 func runtimeServiceTerminalSize(terminal *os.File) (terminalSize, error) {
-	size, err := unix.IoctlGetWinsize(int(terminal.Fd()), unix.TIOCGWINSZ)
+	return runtimeServiceTerminalSizeFd(int(terminal.Fd()))
+}
+
+// runtimeServiceTerminalSizeFd reads the size through a raw descriptor. The runner loop uses it
+// because os.File.Fd switches the shared open file description back to blocking mode, which
+// would stall the nonblocking outer input read.
+func runtimeServiceTerminalSizeFd(fd int) (terminalSize, error) {
+	size, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
 	if err != nil {
 		return terminalSize{}, ioError(ioErrorText(err))
 	}
@@ -1391,7 +1398,7 @@ type liveShutdown struct {
 
 func (l *liveShutdown) pollShutdown() error {
 	snapshot := l.transport.snapshot()
-	_, err := l.controller.poll(&snapshot, l.writer, l.shutdownClk)
+	_, err := l.controller.pollAt(&snapshot, l.writer, l.shutdownClk, observationPhaseShutdownDrain)
 	return err
 }
 
@@ -1417,9 +1424,12 @@ func (l *liveShutdown) termVerifiedDescendants() error {
 }
 
 func (l *liveShutdown) drainAndReapUntil(deadline time.Time) (opt[childExit], error) {
+	l.transport.observationPhase = observationPhaseShutdownDrain
 	for l.shutdownClk.now().Before(deadline) {
 		tick := func(t *transport) (transportProgress, error) {
-			return t.tick(l.input, l.pty, l.output, l.controller.observer(l.writer, l.shutdownClk))
+			observer := l.controller.observer(l.writer, l.shutdownClk)
+			observer.phase = observationPhaseShutdownDrain
+			return t.tick(l.input, l.pty, l.output, observer)
 		}
 		var progress transportProgress
 		if l.coordinator != nil {
@@ -1590,7 +1600,7 @@ type runnerLoop struct {
 	process           processIdentity
 	creator           processIdentity
 	listener          int
-	terminal          *os.File
+	terminalFd        int
 	terminate         *atomic.Bool
 	resize            *atomic.Bool
 	catalog           *profileCatalog
@@ -1896,7 +1906,7 @@ func (r *runnerLoop) tickRunning() (opt[shutdownDeadlines], transportProgress, e
 	}
 	native := r.native
 	if r.resize.Swap(false) {
-		size, err := runtimeServiceTerminalSize(r.terminal)
+		size, err := runtimeServiceTerminalSizeFd(r.terminalFd)
 		if err != nil {
 			return none[shutdownDeadlines](), transportProgress{}, err
 		}
@@ -2141,7 +2151,8 @@ func runService(s settings, descriptorPath string, services runnerDependencies) 
 		return 0, err
 	}
 	defer reportClose(terminal.Close)
-	initialSize, err := runtimeServiceTerminalSize(terminal)
+	terminalFd := int(terminal.Fd())
+	initialSize, err := runtimeServiceTerminalSizeFd(terminalFd)
 	if err != nil {
 		return 0, err
 	}
@@ -2179,6 +2190,10 @@ func runService(s settings, descriptorPath string, services runnerDependencies) 
 		return 0, err
 	}
 	controller.shareDiagnostics(services.diagnostics)
+	if services.observationHooks != nil {
+		controller.observationHooks = services.observationHooks
+		transport.observationHooks = services.observationHooks
+	}
 	writer, err := eventWriterStartWorker(s.databaseURL, run, lock, c, services.diagnostics, services.writerHooks)
 	if err != nil {
 		return 0, err
@@ -2208,7 +2223,7 @@ func runService(s settings, descriptorPath string, services runnerDependencies) 
 		process:           process,
 		creator:           creator,
 		listener:          listener,
-		terminal:          terminal,
+		terminalFd:        terminalFd,
 		terminate:         terminate,
 		resize:            resize,
 		catalog:           catalog,
