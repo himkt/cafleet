@@ -332,7 +332,7 @@ The 7k-line `native_capture` tooling (`src/runtime/observation.rs:1020-7993`) is
 
 ### Frozen parity inputs
 
-These tests stay after cutover as permanent regression tests, each in the `_test.go` of the file that owns the behavior it asserts. Each expected-value block sits between `// BEGIN GENERATED: mise //:test -- -run '<TestName>' -update-golden` and `// END GENERATED` lines. The update mode rewrites only that block, from the current Go output; the rest of the file is hand-written.
+These tests stay after cutover as permanent regression tests, each in the `_test.go` of the file that owns the behavior it asserts. Each expected-value block sits between `// BEGIN GENERATED: go test ./internal/core -run '^<TestName>$' -update-golden` and `// END GENERATED` lines. The update mode rewrites only that block, from the current Go output; the rest of the file is hand-written.
 
 | Owner file | Content | Asserted behavior |
 |---|---|---|
