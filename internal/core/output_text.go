@@ -312,3 +312,7 @@ func formatPermissionInspection(row permissionInspection) string {
 	}
 	return text
 }
+
+func formatMemberPress(value keyAcknowledgment) string {
+	return fmt.Sprintf("Acknowledged keys %s for member %d (%s).", formatJSON(value.keys), value.memberID, value.paneID)
+}

@@ -1686,9 +1686,11 @@ func dispatch(s settings, command cliCommand) (err error) {
 		return commandNotYetPorted()
 	case permissionCommandInspect, permissionCommandRespond:
 		return permissionDispatch(ctx, s, command.(permissionCommand))
+	case memberCommandPress:
+		return cliMemberPressDispatch(ctx, s, command)
 	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete,
 		memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
-		memberCommandPrompt, memberCommandExec, memberCommandPress, memberCommandCapture,
+		memberCommandPrompt, memberCommandExec, memberCommandCapture,
 		messageCommandSend, messageCommandPoll, messageCommandShow,
 		eventCommandShow, inputCommandShow, inputCommandReconcile:
 	default:
@@ -1716,7 +1718,7 @@ func dispatch(s settings, command cliCommand) (err error) {
 	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete:
 		return fleetRun(ctx, conn, s, command.(fleetCommand), d)
 	case memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
-		memberCommandPrompt, memberCommandExec, memberCommandPress, memberCommandCapture:
+		memberCommandPrompt, memberCommandExec, memberCommandCapture:
 		return memberRun(ctx, conn, s, command.(memberCommand), d)
 	case messageCommandSend, messageCommandPoll, messageCommandShow:
 		return messageRun(ctx, conn, command.(messageCommand))
@@ -1724,7 +1726,7 @@ func dispatch(s settings, command cliCommand) (err error) {
 		return eventRun(ctx, conn, command.(eventCommand))
 	case inputCommandShow, inputCommandReconcile:
 		return inputRun(ctx, conn, s, command.(inputCommand), d)
-	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect, permissionCommandRespond:
+	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect, permissionCommandRespond, memberCommandPress:
 		panic("a command without a guarded connection is dispatched before one is opened")
 	default:
 		panic("invalid cliCommand")

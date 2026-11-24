@@ -260,3 +260,12 @@ func outputJSONMemberCapture(capture memberCapture) jsonObject {
 		{"content_sha256", capture.snapshot.contentSHA256},
 	}
 }
+
+func outputJSONMemberPress(value keyAcknowledgment) jsonObject {
+	return jsonObject{
+		{"member_id", value.memberID},
+		{"pane_id", value.paneID},
+		{"keys", value.keys},
+		{"status", "acknowledged"},
+	}
+}

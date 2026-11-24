@@ -388,7 +388,7 @@ def main(argv=None):
     for name in unstable:
         print(f"  G1 unstable (reference runs differ; a harness defect): {name}")
     if args.report:
-        with open(args.report, "w") as f:
+        with open(args.report, "w", errors="backslashreplace") as f:
             json.dump(report, f, indent=1, ensure_ascii=False)
     if args.records:
         with open(args.records, "w") as f:
