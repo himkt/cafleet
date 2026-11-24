@@ -481,10 +481,14 @@ pub(crate) fn create_with_layout_wait(
                 .map(|base| crate::coding_agent::hermes::HermesCli::new(executable.clone(), base))
         })
         .transpose()?;
-    let probe_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
+    let preflight_start = Instant::now();
+    let probe_deadline = deadline.min(preflight_start + Duration::from_secs(2));
+    let config_path_deadline = deadline.min(preflight_start + Duration::from_secs(5));
     let (hermes_home, probe) = std::thread::scope(|scope| {
         let home = hermes.as_ref().map(|hermes| {
-            scope.spawn(move || crate::coding_agent::hermes::effective_home(hermes, probe_deadline))
+            scope.spawn(move || {
+                crate::coding_agent::hermes::effective_home(hermes, config_path_deadline)
+            })
         });
         let probe = backend.probe_native_version(&executable, probe_deadline);
         (home.map(crate::coding_agent::hermes::joined), probe)
@@ -1571,6 +1575,128 @@ mod tests {
             assert_eq!(output.status.code(), Some(1));
             assert!(!pane_calls.contains("split-window"), "{pane_calls}");
             assert_eq!(members(&conn), before);
+        }
+    }
+
+    #[test]
+    fn hermes_member_create_bounds_config_path_by_five_seconds_and_the_version_probe_by_two() {
+        enum Outcome {
+            ReachesPaneSpawn { warning: Option<&'static str> },
+            Refused(&'static str),
+        }
+        struct Case {
+            name: &'static str,
+            version: &'static str,
+            config_path: &'static str,
+            outcome: Outcome,
+        }
+        let version_line = "printf 'Hermes Agent vunknown (2026.9.24)\\n'";
+        let home_config = "printf '%s/config.yaml\\n' \"$HERMES_HOME\"";
+        let cases = [
+            Case {
+                name: "both probes answer at once",
+                version: version_line,
+                config_path: home_config,
+                outcome: Outcome::ReachesPaneSpawn { warning: None },
+            },
+            Case {
+                name: "config path answers after three seconds",
+                version: version_line,
+                config_path: "/bin/sleep 3\n    printf '%s/config.yaml\\n' \"$HERMES_HOME\"",
+                outcome: Outcome::ReachesPaneSpawn { warning: None },
+            },
+            Case {
+                name: "config path runs past five seconds",
+                version: version_line,
+                config_path: "exec /bin/sleep 8",
+                outcome: Outcome::Refused(
+                    "Error: cannot read hermes configuration through 'hermes config path': did not finish within its deadline\n",
+                ),
+            },
+            Case {
+                name: "version probe runs past two seconds",
+                version: "exec /bin/sleep 8",
+                config_path: home_config,
+                outcome: Outcome::ReachesPaneSpawn {
+                    warning: Some(
+                        "Warning: native version unavailable for hermes: hermes --version did not finish within its deadline.\n",
+                    ),
+                },
+            },
+        ];
+        for case in cases {
+            let name = case.name;
+            let dir = crate::runtime::test_support::short_tempdir();
+            let mut conn = initialized_file_conn(&dir);
+            let (fleet, _) = create_fleet_fixture(&mut conn, "hermes-probe-bounds");
+            let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+            let members = |conn: &Connection| {
+                conn.query_row("SELECT COUNT(*) FROM members", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+            };
+            let before = members(&conn);
+            let hermes = format!(
+                "case \"$*\" in\n  --version)\n    {} ;;\n  'config path')\n    {} ;;\n  *) exit 3 ;;\nesac",
+                case.version, case.config_path
+            );
+            let tmux = "printf '%s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' #{window_height} '*) printf '120\\n' ;; *' display-message '*) printf 'main|@1|%%1\\n' ;; *' split-window '*) exit 1 ;; esac";
+            let fleet = fleet.to_string();
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                &settings,
+                &[
+                    "member",
+                    "create",
+                    "--fleet-id",
+                    &fleet,
+                    "--name",
+                    "worker",
+                    "--description",
+                    "hermes probe bound fixture",
+                    "--coding-agent",
+                    "hermes",
+                    "literal assignment on {database_url}",
+                ],
+                &[("tmux", tmux), ("hermes", &hermes)],
+                &[
+                    ("TMUX_PANE", "%1"),
+                    ("HERMES_HOME", dir.path().to_str().unwrap()),
+                ],
+            );
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(output.status.code(), Some(1), "{name}: {stderr}");
+            match case.outcome {
+                Outcome::ReachesPaneSpawn { warning } => {
+                    assert!(
+                        !stderr.contains("hermes configuration"),
+                        "{name}: the config path probe finished within its bound: {stderr}"
+                    );
+                    assert!(
+                        pane_calls.contains("split-window"),
+                        "{name}: creation reached the pane spawn: {pane_calls}"
+                    );
+                    assert!(
+                        stderr.contains("runner pane spawn failed"),
+                        "{name}: {stderr}"
+                    );
+                    match warning {
+                        Some(warning) => assert!(
+                            stderr.contains(warning),
+                            "{name}: the version probe stopped at its two-second bound: {stderr}"
+                        ),
+                        None => assert!(
+                            !stderr.contains("native version unavailable"),
+                            "{name}: {stderr}"
+                        ),
+                    }
+                }
+                Outcome::Refused(expected) => {
+                    assert_eq!(stderr, expected, "{name}");
+                    assert!(!pane_calls.contains("split-window"), "{name}: {pane_calls}");
+                    assert_eq!(members(&conn), before, "{name}");
+                }
+            }
         }
     }
 
