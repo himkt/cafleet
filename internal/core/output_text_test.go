@@ -218,3 +218,88 @@ func TestOutputText_FleetDeletionReportsEveryOrdinaryMemberOutcomeInTextAndJson(
 		t.Fatalf("formatFleetDelete without members = %q", got)
 	}
 }
+
+func TestOutputText_DeliveryText_DeliveryTextSubmittedPromptAndExecKeepTheirSuccessLinesThenDeliveryAndInput(t *testing.T) {
+	t.Parallel()
+	profile := deliveryFixture(deliveryStatusSubmitted, some(deliveryMethodProfile), none[string]())
+	if got, want := formatMemberPrompt(7, "do it", "worker", "%2", some(int64(5)), profile),
+		"Sent prompt \"do it\" to member worker (%2).\nDelivery: status=submitted method=profile reason=-\nInput: 5"; got != want {
+		t.Fatalf("formatMemberPrompt = %q, want %q", got, want)
+	}
+	fallback := deliveryFixture(deliveryStatusSubmitted, some(deliveryMethodFallback), some("submission_plan_unavailable"))
+	if got, want := formatMemberExec(7, "%2", some(int64(6)), fallback),
+		"Dispatched native command to member 7 (%2). Inspect the pane for its result.\nDelivery: status=submitted method=fallback reason=submission_plan_unavailable\nInput: 6"; got != want {
+		t.Fatalf("formatMemberExec = %q, want %q", got, want)
+	}
+}
+
+func TestOutputText_DeliveryText_DeliveryTextQueuedPromptAndExecPrintQueueLinesRetryAndTheReceiptPointer(t *testing.T) {
+	t.Parallel()
+	queued := deliveryFixture(deliveryStatusQueued, none[deliveryMethod](), some("interaction_open"))
+	cases := []struct {
+		text, first string
+	}{
+		{formatMemberPrompt(7, "do it", "worker", "%2", some(int64(8)), queued), "Queued prompt for member 7 (%2)."},
+		{formatMemberExec(7, "%2", some(int64(8)), queued), "Queued native command for member 7 (%2)."},
+	}
+	for _, tc := range cases {
+		if got := lines(tc.text); len(got) == 0 || got[0] != tc.first {
+			t.Fatalf("first line of %q, want %q", tc.text, tc.first)
+		}
+		if strings.Contains(tc.text, "Sent prompt") || strings.Contains(tc.text, "Dispatched") {
+			t.Fatalf("a queued result keeps no success line: %q", tc.text)
+		}
+		for _, part := range []string{"\nDelivery: status=queued method=- reason=interaction_open", "\nInput: 8", "retry", "cafleet input show 8 --json"} {
+			if !strings.Contains(tc.text, part) {
+				t.Fatalf("%q lacks %q", tc.text, part)
+			}
+		}
+	}
+}
+
+func TestOutputText_QuotedText_MemberPromptTextQuotesEachScalarClassPerTheQuotedTextDefinition(t *testing.T) {
+	t.Parallel()
+	submitted := deliveryFixture(deliveryStatusSubmitted, some(deliveryMethodProfile), none[string]())
+	cases := []struct {
+		name, scalar, quoted string
+	}{
+		{"double quote", `"`, `"\""`},
+		{"backslash", `\`, `"\\"`},
+		{"tab", "\t", `"\t"`},
+		{"line feed", "\n", `"\n"`},
+		{"carriage return", "\r", `"\r"`},
+		{"nul", "\x00", `"\0"`},
+		{"Cc bell", "\x07", `"\u{7}"`},
+		{"Cc escape", "\x1b", `"\u{1b}"`},
+		{"Cc delete", "\x7f", `"\u{7f}"`},
+		{"Cc next line", "\xc2\x85", `"\u{85}"`},
+		{"Cf soft hyphen", "\xc2\xad", `"\u{ad}"`},
+		{"Cf zero width space", "\xe2\x80\x8b", `"\u{200b}"`},
+		{"Cf byte order mark", "\xef\xbb\xbf", `"\u{feff}"`},
+		{"Co private use", "\xee\x80\x80", `"\u{e000}"`},
+		{"Cn noncharacter", "\xef\xbf\xbf", `"\u{ffff}"`},
+		{"Cn plane 16 noncharacter", "\xf4\x8f\xbf\xbf", `"\u{10ffff}"`},
+		{"Zl line separator", "\xe2\x80\xa8", `"\u{2028}"`},
+		{"Zp paragraph separator", "\xe2\x80\xa9", `"\u{2029}"`},
+		{"Zs no-break space", "\xc2\xa0", `"\u{a0}"`},
+		{"Zs ideographic space", "\xe3\x80\x80", `"\u{3000}"`},
+		{"Grapheme_Extend alone", "\xcc\x81", `"\u{301}"`},
+		{"Grapheme_Extend after a base", "e\xcc\x81", `"e\u{301}"`},
+		{"Grapheme_Extend enclosing mark", "\xe2\x83\x9d", `"\u{20dd}"`},
+		{"Grapheme_Extend zero width non-joiner", "\xe2\x80\x8c", `"\u{200c}"`},
+		{"space", " ", `" "`},
+		{"single quote", "'", `"'"`},
+		{"solidus", "/", `"/"`},
+		{"latin small e with acute", "\xc3\xa9", "\"\xc3\xa9\""},
+		{"cjk ideographs", "\xe6\x97\xa5\xe6\x9c\xac", "\"\xe6\x97\xa5\xe6\x9c\xac\""},
+		{"euro sign", "\xe2\x82\xac", "\"\xe2\x82\xac\""},
+		{"emoji", "\xf0\x9f\x92\xa9", "\"\xf0\x9f\x92\xa9\""},
+	}
+	for _, tc := range cases {
+		text := formatMemberPrompt(7, tc.scalar, "worker", "%2", none[int64](), submitted)
+		first, _, _ := strings.Cut(text, "\n")
+		if want := "Sent prompt " + tc.quoted + " to member worker (%2)."; first != want {
+			t.Fatalf("%s: first line %q, want %q", tc.name, first, want)
+		}
+	}
+}
