@@ -1,0 +1,47 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - depguard
+    - errcheck
+    - exhaustive
+    - gochecksumtype
+    - gosec
+    - govet
+    - nilnil
+    - paralleltest
+    - predeclared
+    - staticcheck
+    - tparallel
+  settings:
+    depguard:
+      rules:
+        no-unsafe:
+          files:
+            - $all
+            # The darwin span mask needs the raw __pthread_sigmask syscall; its safety invariants are stated inline.
+            - "!**/internal/core/time_darwin.go"
+          deny:
+            - pkg: unsafe
+              desc: cafleet code stays memory-safe
+            - pkg: C
+              desc: cafleet builds without cgo
+    exhaustive:
+      default-signifies-exhaustive: false
+    gochecksumtype:
+      default-signifies-exhaustive: false
+    gosec:
+      includes:
+        - G115
+    govet:
+      enable:
+        - nilness
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - ^docs/
+      - ^researches/

@@ -8,9 +8,11 @@ config_roots = [
 [tools]
 "aqua:pnpm/pnpm" = "12.21.0"
 "core:node" = "26.13.1"
-"core:rust" = { version = "1.100.0", components = ["clippy", "rustfmt", "llvm-tools-preview"] }
-"core:zig" = "0.15.2"
-"cargo:cargo-llvm-cov" = "0.9.1"
+"core:go" = "1.27.4"
+"aqua:golangci/golangci-lint" = "2.15.0"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
+"core:python" = "3.15.2"
+"core:rust" = { version = "1.100.0", components = ["clippy", "rustfmt"] }
 
 [tasks.skill-install]
 run = [
@@ -25,29 +27,37 @@ run = [{ task = "//:install" }, { task = "//:skill-install" }]
 description = "Install the CLI and the working-tree skills"
 
 [tasks.test]
-run = "RUST_TEST_THREADS=${RUST_TEST_THREADS:-$(cpus=$(if [ \"$(uname)\" = Darwin ]; then sysctl -n hw.logicalcpu; else nproc; fi); echo $(( cpus < 32 ? cpus : 32 )))} cargo test --bin cafleet"
-description = "Run inline unit tests (positional args forward to the cargo test harness)"
+run = "if [ \"$(uname)\" = Linux ]; then export CGO_ENABLED=1; fi; go test -race -timeout 30m ./..."
+description = "Run the tests with the race detector (arguments after one standalone -- forward to go test, e.g. -run '<regexp>')"
+
+[tasks.test-shipped]
+run = "CGO_ENABLED=0 go test -timeout 30m ./..."
+description = "Run the tests in the cgo-free shipped build configuration"
 
 [tasks.coverage]
-run = "cargo llvm-cov --bin cafleet --summary-only"
-description = "Report line coverage of the inline unit tests"
+run = "go test -cover -timeout 30m ./..."
+description = "Report statement coverage of the tests"
 
 [tasks.lint]
-run = ["cargo clippy --all-targets -- -D warnings", "cargo fmt --check"]
-description = "Run clippy (deny warnings) and the rustfmt check"
+run = ["CGO_ENABLED=0 go vet ./...", "golangci-lint run ./...", "golangci-lint fmt --diff"]
+description = "Run go vet without cgo, golangci-lint and the formatting check"
+
+[tasks.vulncheck]
+run = "govulncheck ./..."
+description = "Check the module's dependencies for known vulnerabilities (needs network)"
 
 [tasks.format]
-run = "cargo fmt"
-description = "Format the Rust sources with rustfmt"
+run = "golangci-lint fmt"
+description = "Format the Go sources"
 
 [tasks.typecheck]
-run = "cargo check"
-description = "Type-check the package without producing a binary"
+run = "go vet ./..."
+description = "Type-check and vet the packages without producing a binary"
 
 [tasks.install]
-run = "cargo install --path ."
-description = "Install the cafleet CLI from the working tree (re-run after source edits to refresh the installed binary)"
+run = "CGO_ENABLED=0 go install ./cmd/cafleet"
+description = "Install the cafleet CLI from the working tree into $GOBIN, default ~/go/bin (re-run after source edits to refresh the installed binary)"
 
 [tasks.build]
-run = "cargo build --release"
-description = "Build the release binary into target/release/cafleet"
+run = "CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w\" -o dist/cafleet ./cmd/cafleet"
+description = "Build the release binary into dist/cafleet"

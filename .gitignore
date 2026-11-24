@@ -4,10 +4,12 @@
 !.claude
 !.github
 !.bumpversion.toml
+!.golangci.yml
 
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 /target/
+/dist/
 __pycache__/
 /docs/doc_build/
 /docs/node_modules/

@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 20/70 tasks complete
+**Progress**: 23/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -459,9 +459,10 @@ COMMENT(programmer): Parity tooling status for the Director. (1) My share of the
 
 ### Step 7: Go module skeleton and toolchain
 
-- [ ] `go.mod` (with `ignore ./docs`), root `assets.go`, `cmd/cafleet/main.go`, `internal/core/main.go`, `internal/core/version.go` and the `third_party/` license texts <!-- completed: -->
-- [ ] `mise.toml` tools and tasks per § Build, lint, CI and release <!-- completed: -->
-- [ ] `.golangci.yml` with the linters in § Build, lint, CI and release; `.gitignore` `!.golangci.yml` and `/dist/` <!-- completed: -->
+- [x] `go.mod` (with `ignore ./docs`), root `assets.go`, `cmd/cafleet/main.go`, `internal/core/main.go`, `internal/core/version.go` and the `third_party/` license texts <!-- completed: 2026-11-24T11:46 -->
+- [x] `mise.toml` tools and tasks per § Build, lint, CI and release <!-- completed: 2026-11-24T11:46 -->
+- [x] `.golangci.yml` with the linters in § Build, lint, CI and release; `.gitignore` `!.golangci.yml` and `/dist/` <!-- completed: 2026-11-24T11:46 -->
+
 - [ ] `ci.yml` Go caching, the `//:vulncheck` step and the `//:test-shipped` step <!-- completed: -->
 - [ ] `internal/core/main_test.go` with the re-exec child naming helper and the `-update-golden` flag <!-- completed: -->
 
