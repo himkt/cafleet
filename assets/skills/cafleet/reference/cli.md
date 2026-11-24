@@ -38,7 +38,7 @@ Place the complete database-assigned integer subject immediately after its subco
 
 ## Database selection
 
-The global `--database-url <url>`, before or after the subcommand, selects the SQLite database. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the package version. Explicit `sqlite:///<path>` resolves relative paths against cwd and leaves literal tildes unexpanded. CAFleet reads no `CAFLEET_*` environment variable.
+The global `--database-url <url>`, before or after the subcommand, selects the SQLite database. Pass it once per command level: a repeat at the same level is a parse error (exit 2), and across levels the deepest occurrence wins. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the package version. Explicit `sqlite:///<path>` resolves relative paths against cwd and leaves literal tildes unexpanded. CAFleet reads no `CAFLEET_*` environment variable.
 
 A member whose `DATABASE URL:` names a URL passes `--database-url <url>` on every `cafleet` command; without it, the command reaches the default database and fails with `no cafleet database; run 'cafleet setup'` or matches another fleet's IDs.
 
@@ -480,7 +480,7 @@ Application errors print to stderr prefixed `Error: `, even with `--json`; struc
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member | `Error: Member <member-id> not found` |
 | `permission inspect` | An unknown `INTERACTION_ID` | `Error: Interaction <interaction-id> not found` |
 
-Text-body errors of `message send` and `member create`:
+Text-body errors of `message send` and `member create`, checked after the database rows above, so a body error never appears while the database is missing or incompatible:
 
 | Situation | Error message |
 |---|---|

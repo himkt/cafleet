@@ -136,7 +136,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 #### Database selection
 
-The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
+The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. It may appear once per command level, such as `cafleet`, `message` and `poll` in `cafleet message poll`: a repeat at the same level is a parse error, and across levels the deepest occurrence wins, so `cafleet --database-url <a> message poll 7 --database-url <b>` selects `<b>`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
 
 The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; resolve a relative file path against the invoking working directory before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
 
@@ -319,6 +319,8 @@ pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 #### Schema-version guard
 
 Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
+
+Usage validation of a text body, whether positional, `--file PATH` or `--file -`, runs after the guard: `message send` with an empty body against a missing database fails with `no cafleet database; run 'cafleet setup'`.
 
 `--help` renders at parse time and exits before any command body runs, so neither group-level help (`cafleet fleet --help`) nor subcommand help (`cafleet fleet create --help`) triggers the guard; both print help and exit 0 even under a missing database.
 
@@ -1036,6 +1038,16 @@ Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eig
 
 `TEXT_REPR` and `<quoted>` denote the value wrapped in `"` with these escapes: `"` → `\"`, `\` → `\\`, U+0009 → `\t`, U+000A → `\n`, U+000D → `\r`, U+0000 → `\0`; any other scalar whose general category is Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs (except U+0020), or which has the Grapheme_Extend property, → `\u{H}` with lowercase hex and no leading zeros. Every other scalar, including `'`, is written as itself. Categories and properties follow the Unicode version the implementation ships; the rendering of a scalar whose classification differs between Unicode versions is non-normative.
 
+##### Cause texts
+
+A `<cause>`, `<error>` or `{cause}` placeholder whose cause comes from the operating system, SQLite or a child process renders it as follows:
+
+| Cause | Rendering |
+|---|---|
+| Operating-system error | The platform's description of the error number with its first letter capitalized, followed by ` (os error N)`, as in `No such file or directory (os error 2)` |
+| SQLite error | SQLite's own message text with no prefix, as in `database is locked` or `file is not a database` |
+| Child exit status | `exit status: N` for an exit code, or `signal: N (SIGNAME)` for a terminating signal, followed by ` (core dumped)` when the child dumped core |
+
 #### JSON encoding
 
 Every JSON document the `cafleet` binary writes — `--json` output, stored JSON columns and inbox payloads — is compact: no whitespace between tokens, object members in the order this specification lists, arrays in order. Strings escape `"` as `\"`, `\` as `\\`, U+0008 as `\b`, U+000C as `\f`, U+000A as `\n`, U+000D as `\r`, U+0009 as `\t`, and every other code point below U+0020 as `\u00` followed by two lowercase hex digits; every other scalar, including `/`, U+007F, non-ASCII text, U+2028 and U+2029, is written raw as UTF-8. Numbers in these documents are integers, written in decimal with a leading `-` when negative.
@@ -1092,7 +1104,7 @@ On success, the spawn returns the pane ID and its window ID, and ownership trans
 
 #### Subprocess output and deadlines
 
-The shared subprocess runner captures stdout and stderr without truncation. With a timeout, it drains both pipes concurrently from spawn using nonblocking I/O: each loop checks the monotonic deadline and the direct child's exit status, then reads at most 64 KiB per stream, polling at most 20 ms or the remaining deadline, whichever is shorter. Interrupted operations retry against the same deadline. Completion requires the child's exit and EOF on both streams. Success returns stdout, and a nonzero exit reports stderr, decoded as UTF-8 with each maximal ill-formed subsequence replaced by one U+FFFD. Calls without a timeout retain the unbounded output-collection path.
+The shared subprocess runner captures stdout and stderr without truncation. With a timeout, it drains both pipes concurrently from spawn, so a child that fills one stream never stalls on it while the runner waits on the other. Completion requires the direct child's exit and EOF on both streams before the monotonic deadline; a run still incomplete at the deadline times out, and none times out earlier. The timeout records whether the direct child had exited, leaving only its pipes open, or had not exited. Interrupted operations retry against the same deadline. Success returns stdout, and a nonzero exit reports stderr, decoded as UTF-8 with each maximal ill-formed subsequence replaced by one U+FFFD. Calls without a timeout retain the unbounded output-collection path.
 
 At the deadline, including when the direct child has exited but a descendant still holds a pipe open, the runner kills and reaps the direct child, closes both read pipes and reports a timeout; descendant termination is outside this contract. FD setup, read, poll and child-status failures also release the pipes and kill/reap the child; cleanup failures accompany the primary error instead of replacing it. The deadline bounds observation and the start of cleanup; an unresponsive operating system can delay cleanup itself.
 
@@ -1150,6 +1162,8 @@ Every span is bounded by its own deadline, so a deferred signal waits at most on
 | `member press` after its writing process starts | Any prefix, including empty or complete, may have been handled | Inspect the pane before an explicitly authorized new action |
 | `member create` | A pane without a registry row, or a row whose placement stays pending; the OS releases the fleet layout lock, and a consumed overflow ordinal stays consumed | `member list` and `member capture`; `member delete` the row, and close an unregistered pane with the multiplexer's own kill command |
 | `member delete` / `fleet delete` | A closed pane whose row remains, or the reverse | `member list`; rerun the delete |
+
+Signal dispositions and blocked signals that cafleet inherits from its parent are not part of this contract; cafleet may reset any of them for itself and for the processes it starts.
 
 #### Explicit key dispatch
 
