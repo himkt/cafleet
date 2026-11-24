@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 29/70 tasks complete
+**Progress**: 33/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -430,11 +430,11 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 ### Step 4: Branch, migration tooling and baseline
 
 - [ ] Create `feat/go-rewrite` from `main` and open its draft PR <!-- completed: -->
-- [ ] Add `migration/` per § Migration tooling, with the `capture_golden` test module in `src/coding_agent/detector.rs` <!-- completed: -->
+- [x] Add `migration/` per § Migration tooling, with the `capture_golden` test module in `src/coding_agent/detector.rs` <!-- completed: 2026-11-24T13:28 -->
 - [x] Scrub every stream with `migration/scrub.py`, have the Director review the rendered screens, and place the scrubbed streams in the local `researches/go-rewrite/corpus/` (never committed) <!-- completed: 2026-11-24T11:56 -->
-- [ ] Extend the harness from exp-interop's four commands to every §6.3 command and `__member-run`, with stand-in multiplexer and native executables and the G2 determinism rules <!-- completed: -->
-- [ ] Run G2's three-run Rust baseline and drop every scenario whose Rust runs differ, listing each dropped scenario for G5 coverage <!-- completed: -->
-- [ ] Run the harness against the Rust binary alone and list every observed output that SPEC does not state; this list completes amendment A1 <!-- completed: -->
+- [x] Extend the harness from exp-interop's four commands to every §6.3 command and `__member-run`, with stand-in multiplexer and native executables and the G2 determinism rules <!-- completed: 2026-11-24T13:27 -->
+- [x] Run G2's three-run Rust baseline and drop every scenario whose Rust runs differ, listing each dropped scenario for G5 coverage <!-- completed: 2026-11-24T13:27 -->
+- [x] Run the harness against the Rust binary alone and list every observed output that SPEC does not state; this list completes amendment A1 <!-- completed: 2026-11-24T13:27 -->
 - [x] Add the branch-only `migration` CI job on `ubuntu-latest` and `macos-15`, including `check_version.py` <!-- completed: 2026-11-24T11:11 -->
 
 
@@ -470,7 +470,7 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 - [x] `error.go`, `time.go` (clock, test clock, deadlines, deferral spans), `config.go`, `digest.go` <!-- completed: 2026-11-24T12:51 -->
 - [x] `textcodec.go`: F6–F8, F10–F11 and F17 helpers; F9 and F18 in their Rust-home files <!-- completed: 2026-11-24T12:51 -->
 - [x] `db.go`: `schemaSQL`, connection pragmas, format diagnosis, deadline budget (F20), test fault plans on ncruces hooks <!-- completed: 2026-11-24T12:51 -->
-- [ ] `broker*.go` including `broker_runtime*.go` row mapping <!-- completed: -->
+- [x] `broker*.go` including `broker_runtime*.go` row mapping <!-- completed: 2026-11-24T13:27 -->
 - [ ] `output*.go` presenters and the CLI parser, help generation and parse-error rendering (A11) <!-- completed: -->
 - [ ] `assets.go` (F12), `setup`, `doctor`, `message *`, `fleet list/show`, `member list/show`, `event`/`input`/`permission` read commands <!-- completed: -->
 - [ ] G1 passes for every Stage 1 command <!-- completed: -->
