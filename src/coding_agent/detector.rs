@@ -6440,3 +6440,114 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod capture_golden {
+    use crate::coding_agent::catalog::ProfileCatalog;
+    use crate::coding_agent::catalog::test_support::bundled_files;
+    use crate::coding_agent::coding_agent;
+    use crate::coding_agent::detector::Detector;
+    use crate::coding_agent::detector::test_support::replay_as_captured;
+    use crate::runtime::ScreenSnapshot;
+    use crate::runtime::TerminalSize;
+    use crate::runtime::TerminalState;
+    use serde_json::Value;
+    use serde_json::json;
+    use std::io::BufRead;
+    use std::io::Write;
+
+    fn hex(s: &str) -> Vec<u8> {
+        assert!(s.len().is_multiple_of(2), "odd-length hex string");
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex digit pair"))
+            .collect()
+    }
+
+    fn dimension(value: &Value) -> u16 {
+        u16::try_from(value.as_u64().expect("a dimension")).expect("a dimension fits u16")
+    }
+
+    fn record(name: &str, backend: &str, version: &str, snapshot: &ScreenSnapshot) -> Value {
+        let backend = coding_agent(backend).expect("a bundled backend name");
+        let detector = Detector::new(ProfileCatalog::bundled(), backend, Some(version));
+        let observed = detector.observe(snapshot).expect("observe");
+        let composer = detector.composer_text(snapshot).expect("composer text");
+        json!({
+            "name": name,
+            "size": [snapshot.rows, snapshot.cols],
+            "cursor": snapshot.cursor,
+            "alternate_screen": snapshot.alternate_screen,
+            "kind": format!("{:?}", observed.kind),
+            "rule_id": observed.rule_id,
+            "match_evidence": format!("{:?}", observed.match_evidence),
+            "verified_noninteraction": observed.verified_noninteraction,
+            "matched_region": observed.matched_region.map(|r| [r.top, r.bottom]),
+            "operation": observed.raw_evidence["operation"],
+            "choices": observed.raw_evidence["choices"],
+            "composer_text": composer.map(|c| format!("{c:?}")),
+        })
+    }
+
+    /// Writes one JSONL record per bundled native screen fixture, replayed as captured, and per
+    /// checkpoint of each stream in CAFLEET_GOLDEN_CHECKPOINTS, replayed through `TerminalState`:
+    /// the bundled detector's observation and composer text. migration/golden.py drives it.
+    #[test]
+    #[ignore = "migration/golden.py runs it with CAFLEET_GOLDEN_CHECKPOINTS and CAFLEET_GOLDEN_OUT"]
+    fn export() {
+        let checkpoints = std::env::var("CAFLEET_GOLDEN_CHECKPOINTS")
+            .expect("CAFLEET_GOLDEN_CHECKPOINTS names the checkpoint streams");
+        let out = std::env::var("CAFLEET_GOLDEN_OUT").expect("CAFLEET_GOLDEN_OUT names the output");
+        let mut writer = std::io::BufWriter::new(std::fs::File::create(out).expect("golden file"));
+        for (backend, file) in bundled_files()
+            .as_object()
+            .expect("profile files by backend")
+        {
+            for (id, screen) in file["screens"].as_object().expect("screens by id") {
+                let version = screen["native_version"]
+                    .as_str()
+                    .expect("a fixture native version");
+                let snapshot = replay_as_captured(id, |_| {}, None);
+                let line = record(&format!("fixture:{id}"), backend, version, &snapshot);
+                writeln!(writer, "{line}").expect("write golden record");
+            }
+        }
+        let reader =
+            std::io::BufReader::new(std::fs::File::open(checkpoints).expect("checkpoints"));
+        for line in reader.lines() {
+            let stream: Value = serde_json::from_str(&line.expect("line")).expect("stream json");
+            let backend = stream["backend"].as_str().expect("backend");
+            let version = stream["native_version"].as_str().expect("native version");
+            let mut state = TerminalState::new(TerminalSize {
+                rows: dimension(&stream["rows"]),
+                cols: dimension(&stream["cols"]),
+            })
+            .expect("terminal");
+            let steps = stream["steps"].as_array().expect("steps");
+            let mut fed = 0;
+            for checkpoint in stream["checkpoints"].as_array().expect("checkpoints") {
+                let upto = usize::try_from(checkpoint["steps"].as_u64().expect("step count"))
+                    .expect("step count fits usize");
+                for step in &steps[fed..upto] {
+                    if let Some(h) = step.get("hex") {
+                        state
+                            .feed(&hex(h.as_str().expect("hex string")))
+                            .expect("feed");
+                    } else {
+                        let size = &step["resize"];
+                        state
+                            .resize(TerminalSize {
+                                rows: dimension(&size[0]),
+                                cols: dimension(&size[1]),
+                            })
+                            .expect("resize");
+                    }
+                }
+                fed = upto;
+                let name = checkpoint["name"].as_str().expect("checkpoint name");
+                let line = record(name, backend, version, &state.snapshot());
+                writeln!(writer, "{line}").expect("write golden record");
+            }
+        }
+    }
+}

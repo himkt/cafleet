@@ -1,0 +1,16 @@
+[package]
+name = "vtoracle"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+vt100 = "=0.18.1"
+vte = "=0.15.0"
+unicode-width = "=0.2.2"
+serde_json = "1"
+
+[profile.release]
+debug = false
+
+[workspace]
