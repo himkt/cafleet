@@ -223,7 +223,7 @@ Each layout failure below exits 1 with nothing registered; a failed herdr re-par
 | Fleet layout lock busy for 60 seconds | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` |
 | An overflow window cannot be read | `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.` |
 | The window ordinal changed under the lock | `Error: fleet <fleet-id> window ordinal changed under the layout lock` |
-| A malformed tmux `new-window` or herdr `tab create` reply | `Error: unexpected tmux new-window output: <quoted>` or `Error: herdr tab create missing '<key>' field`, then `pane ID unknown; pane cleanup unconfirmed` |
+| A malformed tmux `new-window` or herdr `tab create` reply | `Error: runner pane spawn failed: unexpected tmux new-window output: <quoted>` or `Error: runner pane spawn failed: herdr tab create missing '<key>' field`, then `pane ID unknown; pane cleanup unconfirmed` |
 
 Backend preflights exit 1 before registration:
 
@@ -252,6 +252,8 @@ The first three outcomes exit 1 and keep the member; retry after inspecting the 
 | Unverified Hermes stop | `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.` |
 | Hermes client already exited | Deletion completes with `warning: hermes client for member ID had already exited; its session work may still be running in the Hermes gateway` |
 
+The unverified-stop `CAUSE` names the failed step: `member run RUN_ID has no Hermes session record`, `the Hermes turn did not stop after Ctrl-C`, `the Hermes composer still holds text after clearing`, `Hermes did not report /stop`, `Hermes printed no exit summary after /exit` or `the Hermes client did not exit after /exit`; inspect the member's pane before retrying.
+
 ### `member list`
 
 `cafleet member list FLEET_ID [--json]` lists active Director and ordinary records (§ Member list output).
@@ -266,10 +268,10 @@ The first three outcomes exit 1 and keep the member; retry after inspecting the 
 
 | Condition | Error body (exit 1) |
 |---|---|
-| Pre-write error, including a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
-| Partial uncertainty | `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| The runner rejected it before any byte was written | `prompt was not dispatched to member ID: CAUSE` |
+| Any other refusal, including typing that may have begun | `prompt delivery to member ID is STATUS`, `STATUS` being `held`, `rejected` or `uncertain`, plus `: CAUSE` when known and ` (method=METHOD)` when a method was selected |
 
-Uncertain errors include `input_id=INPUT_ID`; inspect it and the pane before a deliberate retry. Over-limit input without safe framing gets the pre-write error with a CAUSE below (UNIT `bytes` or `characters`).
+For example, `prompt delivery to member 2 is uncertain: literal_mismatch (method=profile)`. A runner that closes its control connection mid-request fails with `control endpoint disconnected during write` or `control endpoint disconnected before reply`, for example when the native child exits. These errors add a context line such as `run_id=1 input_id=2 operation_key="prompt:1:<64 hex>"` (§ Error messages); inspect the input and the pane before a deliberate retry. Over-limit input without safe framing gets the pre-write error with a CAUSE below (UNIT `bytes` or `characters`).
 
 | Missing delivery mechanism | CAUSE |
 |---|---|
@@ -285,18 +287,19 @@ The runner submits `! ` plus the command; the host owns cwd, environment, permis
 | Condition | Error body (exit 1) |
 |---|---|
 | Root Director, before I/O | `cannot exec in the Director's own pane` |
-| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
-| Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| The runner rejected it before any byte was written | `native command was not dispatched to member ID: CAUSE` |
+| Any other refusal, including typing that may have begun | `native command delivery to member ID is STATUS`, with `STATUS`, `: CAUSE` and ` (method=METHOD)` as for [member prompt](#member-prompt) |
 
-Uncertain errors include `input_id=INPUT_ID`, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`; the command may have typed partially or executed, so inspect native output and reconcile receipts before a newly authorized retry. Over-limit CAUSE strings match [member prompt](#member-prompt). After completion, explicitly prompt continuation if the host has not resumed.
+Refusals add the context line of [member prompt](#member-prompt), as in `native command delivery to member 110 is uncertain: write_failed (method=profile)` followed by `run_id=… input_id=… operation_key=…`; the command may have typed partially or executed, so inspect native output and reconcile receipts before a newly authorized retry. Over-limit CAUSE strings match [member prompt](#member-prompt). After completion, explicitly prompt continuation if the host has not resumed.
 
 ### `member press`
 
 `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID KEY... [--json]` requests 1–64 ordered keys, each at most 32 UTF-8 bytes, with no implicit Escape, Enter or shell submission. For punctuation use `cafleet member press 42 --from-member-id 1 -- '-' '+' ';'`. Wrapped members receive keys through the outer pane. Every probe and the write share one five-second deadline. Exit 0 establishes backend acknowledgment, not native effect; fields are `member_id,pane_id,keys,status`, with `status=acknowledged`.
 
+No key or more than 64 keys is a parse error (exit 2, first line `error: `). Each key is then validated:
+
 | Condition | Error body (exit 2) |
 |---|---|
-| Key count outside the domain | `press requires between 1 and 64 keys` |
 | A key exceeds its UTF-8 bound | `press key at position N exceeds 32 UTF-8 bytes` |
 | A key is outside the common grammar | `invalid press key at position N: JSON_QUOTED_TOKEN` |
 
@@ -463,6 +466,17 @@ Application errors print to stderr prefixed `Error: `, even with `--json`; struc
 |---|---|---|
 | Any but `setup` and `doctor` | No database | `no cafleet database; run 'cafleet setup'` |
 | Any but `setup` and `doctor` | Incompatible database file, including another version's | `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` |
+| Any selecting a database | `--database-url` is not `sqlite:///<path>` | `Error: database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'` |
+| Any selecting a database | No `--database-url`, with `HOME` unset or not UTF-8 | `Error: HOME is not set; cannot derive the default database path` / `Error: HOME is not valid UTF-8; cannot derive the default database path` |
+| Any selecting a database | The path's existence cannot be checked, e.g. a parent is a file | `Error: cannot inspect database at '<path>': <cause>` |
+| Any selecting a database | SQLite cannot open the existing file | `Error: failed to open database at '<path>': <cause>` |
+| Any using the database | A statement fails; the database stayed busy past its wait (`database is locked`) or is not a database (`file is not a database`) | `Error: database error: <cause>` |
+| Any using the database | The operation's deadline passed | `Error: operation exceeded its deadline` |
+| `setup` / `member create` / `doctor` | A backend config directory derives from `HOME`, which is unset (`doctor` reports it as that agent's configuration row) | `Error: HOME is not set` |
+| `setup` | `--database-url sqlite:///` names no file | `Error: database URL has no file path` |
+| `setup` | The database's parent directory cannot be created | `Error: cannot create <directory>: <cause>` |
+| `setup` | Applying the schema to an empty file fails; nothing is written | `Error: database initialization failed: <cause>` |
+| Any selecting a database | Connection settings cannot be applied after the file opened | `Error: failed to apply connection PRAGMAs: <cause>` |
 | Any with output | Writing stdout fails other than by broken pipe | `Error: failed to write output: <cause>` |
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` |
 | `member create` | The selected opencode preset is unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` |
@@ -479,6 +493,13 @@ Application errors print to stderr prefixed `Error: `, even with `--json`; struc
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member | `Error: Member <member-id> not found` |
 | `permission inspect` | An unknown `INTERACTION_ID` | `Error: Interaction <interaction-id> not found` |
+| `event show` | An unknown `EVENT_ID` | `Error: Event <event-id> not found` |
+| `input show` / `input reconcile` | An unknown `INPUT_ID` | `Error: Input <input-id> not found` |
+| `input reconcile` | The input is already settled with another disposition | `Error: settled input disposition changed` |
+| `member create` | Creating the runner pane fails; the cleanup diagnostic follows | `Error: runner pane spawn failed: <cause>` |
+| `member capture` | The capture read fails, including `--lines` below 1 | `Error: capture failed: <cause>` |
+
+Runtime input, receipt and permission errors add one stderr line after the error naming the known identities in the order `run_id=<id> interaction_id=<id> input_id=<id> operation_key="<key>"`, omitting unknown ones; use those IDs with `input show` and `event show`.
 
 Text-body errors of `message send` and `member create`, checked after the database rows above, so a body error never appears while the database is missing or incompatible:
 
@@ -487,6 +508,7 @@ Text-body errors of `message send` and `member create`, checked after the databa
 | Positional body empty or whitespace-only | `Error: text may not be empty.` (exit 2) |
 | `--file <path>` to an empty file | `Error: --file <path>: file is empty.` |
 | `--file -` with empty stdin | `Error: --file -: stdin is empty.` |
-| `--file <path>` to a missing path or non-regular file | `Error: --file <path>: file does not exist or is not a regular file.` |
-| `--file <path>` to an unreadable file | `Error: --file <path>: file is not readable.` |
+| `--file <path>` to a missing path or a directory | `Error: --file <path>: file does not exist or is not a regular file. (<cause>)` |
+| `--file <path>` that cannot be read otherwise | `Error: --file <path>: file is not readable. (<cause>)` |
+| Reading stdin for `--file -` fails | `Error: --file -: <cause>` |
 | `--file <path>` to invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` |
