@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 8/69 tasks complete
+**Progress**: 20/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -14,8 +14,8 @@ Replace the Rust implementation of the `cafleet` binary with a Go implementation
 - [ ] `mise.toml` pins no `core:rust`, `core:python` or `core:zig` and no `cargo:` tool, and no workflow installs rustup targets, zig or cargo-zigbuild. One `CGO_ENABLED=0 go build` per release target produces all three release archives on `ubuntu-24.04`.
 - [ ] `go list -deps -f '{{with .Module}}{{.Path}}{{end}}' ./cmd/cafleet` lists, apart from `github.com/himkt/cafleet`, only the modules in § Dependencies: at most 5 third-party modules from the Go team, ncruces and creack.
 - [ ] Before the cutover commit, the migration differential harness reports 0 differences between the Go and Rust binaries for every command and runner scenario on Linux and macOS (gates G1–G2).
-- [ ] The Go terminal emulator matches the Rust `vt100` 0.18.1 oracle at every observation step on the fixture, live, capture and fuzz corpora. The fuzz corpora hold at least 2 MB of seeded input (gate G3).
-- [ ] The Go detector reproduces the Rust detector's golden on every bundled native screen fixture and every capture checkpoint (gate G4).
+- [ ] The Go terminal emulator matches the Rust `vt100` 0.18.1 oracle at every observation step on the fixture, synthetic and seeded fuzz cases in CI (at least 2 MB of fuzz input), and on the live and capture streams of the local stream corpus (gate G3).
+- [ ] The Go detector reproduces the Rust detector's golden on every bundled native screen fixture in CI, and on every capture checkpoint of the local stream corpus (gate G4).
 - [ ] The migration test map shows that every Rust `#[test]` on the merged main head has a Go counterpart in the mapped file, or appears in the omission list with its replacement test (gate G5).
 - [ ] Live acceptance records (docs `contributing.md` § Release acceptance) are re-collected against the Go binary for every bundled backend on tmux and herdr, on a dedicated database (gate G6).
 - [ ] Every SPEC.md amendment in § SPEC amendments has landed, and the documentation, README, skill and rule edits in § Documentation and rules have landed, before the first Go production file.
@@ -274,14 +274,15 @@ Target mapping: `aarch64-apple-darwin` = `darwin/arm64`, `x86_64-unknown-linux-m
 
 `migration/` is committed on the branch and deleted at cutover. It contains Python 3 scripts (pinned by `core:python` in `mise.toml` on the branch) and one Rust crate. It contains no Go code, so the module's `./...` never sees it.
 
-The no-fixture-file and no-`testdata/` rule governs the permanent tree, the tree that remains after cutover. `migration/` is temporary tooling outside that tree: the "Migration model" row of § Decisions and § Migration model item 4 record the user's decision to keep migration tooling outside the permanent tree and delete it at cutover. The data files it holds therefore sit outside the rule. The only committed data files are the scrubbed real streams; everything else is generated at run time.
+The no-fixture-file and no-`testdata/` rule governs the permanent tree, the tree that remains after cutover. `migration/` is temporary tooling outside that tree: the "Migration model" row of § Decisions and § Migration model item 4 record the user's decision to keep migration tooling outside the permanent tree and delete it at cutover. It commits no data file: every input it reads is generated at run time or read from the local stream corpus below.
+
+**Local stream corpus.** The user decided that captured native streams are never committed. The scrubbed live and capture streams live only in the gitignored `researches/go-rewrite/corpus/` (`live.jsonl.gz`, `capture.jsonl.gz`) on the Director's machine. Every tool that reads streams takes the corpus directory from `--corpus DIR` and runs its stream cases only when the directory is given; without it, it runs the fixture, synthetic and seeded fuzz cases alone.
 
 | Path | Content |
 |---|---|
 | `migration/harness/` | The exp-interop differential harness, extended to every §6.3 command and `__member-run`, with stand-in `tmux`, `herdr` and native executables (G1, G2) |
 | `migration/vtoracle/` | A Rust crate pinned to `vt100 =0.18.1`, `vte =0.15.0`, `unicode-width =0.2.2` with its own `Cargo.lock`, printing the per-step canonical dump hashes (G3) |
-| `migration/corpus/` | The scrubbed, approved real streams as gzip-compressed JSONL (one case per line: size, timestamped output/resize events): `live.jsonl.gz` and `capture.jsonl.gz` |
-| `migration/fuzz.py` | The exp-vt seeded fuzz generator, with its fixed seeds as constants. The `migration` job generates the grammar and random families from the seeds alone, and the mutated family from the seeds plus `migration/corpus/`, producing at least 2 MB per run |
+| `migration/fuzz.py` | The exp-vt seeded fuzz generator, with its fixed seeds as constants. It generates the grammar and random families from the seeds alone, at least 2 MB per run, and, with `--corpus`, the mutated family from the seeds plus the local stream corpus |
 | `migration/cases.py` | Generates the fixture cases from `assets/profiles/` and the synthetic edge cases at run time |
 | `migration/diffrun.py` | The exp-vt per-step comparator |
 | `migration/golden.py` | Runs the Rust detector golden test and writes its JSONL reference (G4) |
@@ -293,7 +294,7 @@ The detector golden reaches `Detector::observe` and `composer_text` through an i
 
 ### Captured-stream privacy
 
-The branch is pushed to GitHub, so every committed stream is public, including `migration/corpus/` history. Before the first commit of any stream:
+Captured streams stay on the Director's machine (§ Migration tooling, local stream corpus) and enter no commit, CI log or PR text. Before a stream joins the local corpus:
 
 1. `migration/scrub.py` normalizes each stream. Every match of the following is replaced with a placeholder of identical byte length and display width, so layouts and wrap points are preserved:
    - absolute paths under the capturing user's home, the repository root and `/tmp`;
@@ -301,9 +302,9 @@ The branch is pushed to GitHub, so every committed stream is public, including `
    - `work/<name>` and other experiment directory names;
    - session and pane titles that name the host or user.
 2. The scrubber reruns the exp-capture secret scan (key, bearer, JWT, AWS and private-key shapes) and lists every remaining typed prompt and model reply.
-3. The Director reviews the rendered screens of the scrubbed streams, and the user signs off on each stream before its first commit.
+3. The Director reviews the rendered screens of the scrubbed streams before they join the local corpus.
 
-The oracle references (G3, G4) and the frozen golden files are produced from the scrubbed streams.
+The local G3 and G4 stream runs read the scrubbed streams.
 
 ### Testing
 
@@ -312,7 +313,7 @@ The oracle references (G3, G4) and the frozen golden files are produced from the
 - A test lives in `<file>_test.go` beside the implementation file whose behavior it asserts, in the same package (white-box). Related tests of one Rust nested `mod` stay together in that file.
 - A helper or test-only constructor shared by tests of several files lives in the `_test.go` of the file that owns the type it builds; a helper used by one file's tests stays in that file's `_test.go`. Because the crate is one package, every test sees these helpers, which covers what Rust `test_support` modules and `#[cfg(test)] impl` blocks provide today. Crate-wide test helpers (the re-exec child naming that replaces `test_path!` and the `-update-golden` flag) live in `internal/core/main_test.go`.
 - Test inputs are literals or generated bytes in `_test.go` source. No data file and no data directory (`testdata/` included). Tests read `assets/` through `cafleet.Assets` only as input to production code or as the expected value of its output.
-- A golden test over a frozen native capture records what production code reports for it: screen hashes, observation kinds, rule ids, regions, operations, choices and composer text. These are outputs of production code, regenerated with `-update-golden` and reviewed as behavior diffs. They are the only tests that record rule ids from the embedded profiles.
+- A golden test over the bundled native screen fixtures records what production code reports for them: screen hashes, observation kinds, rule ids, regions, operations, choices and composer text. These are outputs of production code, regenerated with `-update-golden` and reviewed as behavior diffs. They are the only tests that record rule ids from the embedded profiles.
 - A re-executed child test runs `os.Args[0] -test.run '^<name>$'` with an environment guard and `t.Skip` when the guard is unset. A helper derives the name from the function value, so renames stay safe.
 - Related cases form one table-driven test over a named case slice, naming the case in every assertion message.
 - Runner code takes time from the injected `clock`, and its tests use `testClock`. Real time is used only by tests that drive real processes, PTYs, sockets or locks. Runner behavior is driven through the scenario harness in `internal/core/runtime_service_test.go`.
@@ -335,8 +336,8 @@ These tests stay after cutover as permanent regression tests, each in the `_test
 
 | Owner file | Content | Asserted behavior |
 |---|---|---|
-| `internal/core/runtime_transport_test.go` | The scrubbed backend capture streams (the exp-capture recordings and the exp-vt claude, codex and pi live streams) as Go string literals of their timestamped events, under a comment recording the scrub and approval date. A generated block holds, per checkpoint (each capture checkpoint plus each stream's final state), the FNV-1a hash of the canonical screen dump and a chain hash over every observation step since the previous checkpoint | `TestRuntimeTransport_CaptureScreens`: `TerminalState` replays each stream with its per-step split; on mismatch it prints the dump at the failing checkpoint |
-| `internal/core/coding_agent_detector_test.go` | A generated block holding, per capture checkpoint: kind, `rule_id`, `match_evidence`, `verified_noninteraction`, matched region, operation, choices and composer text | `TestCodingAgentDetector_CaptureGolden`: the `Detector` observes the screens `TerminalState` produces from the streams in `runtime_transport_test.go` (same package scope) |
+| `internal/core/runtime_transport_test.go` | A Go port of `migration/fuzz.py`'s grammar and random families with fixed seeds, generating its byte streams in the test. A generated block holds, per generated stream, the FNV-1a hash of the canonical screen dump after the final step and a chain hash over every observation step | `TestRuntimeTransport_SeededScreens`: `TerminalState` replays each generated stream with its per-step split; on mismatch it prints the dump at the failing step |
+| `internal/core/coding_agent_detector_test.go` | A generated block holding, per bundled native screen fixture: kind, `rule_id`, `match_evidence`, `verified_noninteraction`, matched region, operation, choices and composer text | `TestCodingAgentDetector_FixtureGolden`: the `Detector` observes each fixture screen through `TerminalState`, reading the fixtures from `cafleet.Assets` as input |
 | `internal/vt/unicodewidth/tables.go` | unicode-width 0.2.2 non-CJK tables, as production code with a `// Code generated from unicode-width 0.2.2 tables.rs; DO NOT EDIT.` header | Width tests in `internal/vt/unicodewidth/width_test.go` |
 
 The canonical screen dump is the exp-vt oracle serialization: size, cursor, the 8 mode fields, current attrs, raw title/icon bytes, `contents()`, each row string with its wrap flag, and every non-default cell's has_contents/wide/continuation, fg, bg, five attribute bits and contents bytes. The dump function in `runtime_transport_test.go` transliterates `migration/vtoracle`'s dump.
@@ -344,18 +345,18 @@ The canonical screen dump is the exp-vt oracle serialization: size, cursor, the 
 Maintenance:
 
 - **On the branch.** The generated blocks are written by the update mode only after G3 and G4 pass at that merge (§ Migration model step 2), so the Go output they record equals the Rust oracle's.
-- **After cutover.** A change to the emulator, the detector or a profile that alters a recorded value regenerates the block with the update mode in the same PR, and the reviewed golden diff is part of that behavior change. Adding a new capture follows § Captured-stream privacy and the update mode. Removing a capture needs the design doc of the change that makes it obsolete.
+- **After cutover.** A change to the emulator, the detector or a profile that alters a recorded value regenerates the block with the update mode in the same PR, and the reviewed golden diff is part of that behavior change. A fixture added to or removed from a profile enters or leaves the detector golden through the update mode.
 
 ### Parity gates
 
-All six gates must pass on the final merge of `main` before the cutover change. G1–G5 run in the branch-only CI job `migration`, on `ubuntu-latest` and `macos-15`.
+All six gates must pass on the final merge of `main` before the cutover change. G1–G5 run in the branch-only CI job `migration`, on `ubuntu-latest` and `macos-15`, without the stream corpus. The Director also runs G3 and G4 with `--corpus researches/go-rewrite/corpus` on Linux at every `main` merge and before cutover, and records the result (pass/fail and case counts, no stream content) in the merge PR description.
 
 | Gate | Check | Pass condition |
 |---|---|---|
 | G1 Command parity | `migration/harness` runs every §6.3 command through both binaries, in same-path worlds with stand-in `tmux`, `herdr` and native executables that log argv and answer from scripts. It compares exit code, stdout bytes, stderr bytes, stand-in argv logs and normalized database dumps, and covers `/dev/full` and closed-pipe sinks | 0 differences. Parse errors compare exit code, empty stdout, the first stderr line and the accepted-value list; help compares exit 0 and the strings SPEC quotes |
 | G2 Runner parity | `migration/harness` launches `__member-run` from each binary under the determinism rules below | Normalized `member_runs`, event and input rows and the child's received bytes are identical per scenario |
-| G3 Emulator parity | `migration/vtoracle` vs `internal/vt`, hashing after every observation step | 0 diffs on the 624 fixtures, the synthetic cases, every live and capture stream for all five backends and ≥ 2 MB of seeded fuzz (grammar, random and mutated families); every per-scalar and 500,000 string-width checks equal |
-| G4 Detector parity | `migration/golden.py` exports the Rust `Detector::observe` and `composer_text` results for every bundled fixture and capture checkpoint | Go results equal on every field |
+| G3 Emulator parity | `migration/vtoracle` vs `internal/vt`, hashing after every observation step | In CI: 0 diffs on the bundled fixtures, the synthetic cases and ≥ 2 MB of seeded fuzz (grammar and random families); every per-scalar and 500,000 string-width checks equal. Locally with `--corpus`: also 0 diffs on every live and capture stream for all five backends and on the mutated fuzz family |
+| G4 Detector parity | `migration/golden.py` exports the Rust `Detector::observe` and `composer_text` results for every bundled fixture (CI) and, with `--corpus`, every capture checkpoint (local) | Go results equal on every field |
 | G5 Test map | `migration/testmap.py` lists every Rust `#[test]` on the merged head and its Go counterpart by the file mapping and naming rule | No unmapped test outside the omission list; no duplicate Go name |
 | G6 Live acceptance | The Director re-runs docs `contributing.md` § Release acceptance and the Director delivery probe against the branch's Go binary, for every bundled backend on tmux and herdr | Records complete, with native and multiplexer versions and dates |
 
@@ -380,7 +381,7 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 |---|---|
 | `SPEC.md` | Amendments A1–A11 |
 | `assets/skills/cafleet/reference/cli.md` | The error rows and database-selection facts it carries for A1, A3 and A4 (Step 5). A9 changes no `cli.md` fact (Step 3 confirms) |
-| `docs/docs/contributing.md` | Project-structure `src/` row → the Go module (`cmd/`, `internal/`, root `assets.go`, `go.mod`). "Rust boundaries" → "Go boundaries", with the test sentence restated for `_test.go`. Development paragraph: Go validation, no `CARGO_PROFILE_TEST_OPT_LEVEL`, and the C compiler that `//:test` needs on Linux. A switch-over note for existing contributors: run `cargo uninstall cafleet`, put `~/go/bin` (or `$GOBIN`) first on `PATH`, run `mise //:install`, then re-run `cafleet setup` so the extensions' executable record names the new binary. The unsafe/PTY paragraph: cafleet uses no cgo and no `unsafe` except the single audited darwin `__pthread_sigmask` call in `internal/core/time_darwin.go`, `creack/pty` for PTY allocation, and the in-repo emulator transliterated from vt100 0.18.1 / vte 0.15.0 with its notices in `third_party/`. The bundled-catalog guard location → `internal/core/coding_agent_catalog_test.go` |
+| `docs/docs/contributing.md` | Project-structure `src/` row → the Go module (`cmd/`, `internal/`, root `assets.go`, `go.mod`). "Rust boundaries" → "Go boundaries", with the test sentence restated for `_test.go`. Development paragraph: Go validation, no `CARGO_PROFILE_TEST_OPT_LEVEL`, and the C compiler that `//:test` needs on Linux. The install paragraph states that `mise //:install` installs to `$GOBIN` (default `~/go/bin`), which must be on `PATH`, and that `cafleet setup` re-run after an install makes the extensions' executable record name the installed binary. The one-time switch-over steps for existing checkouts (`cargo uninstall cafleet`, put `~/go/bin` first on `PATH`, `mise //:install`, re-run `cafleet setup`) go in the cutover PR description and the first Go release's notes, which are point-in-time records, not in `contributing.md`. The unsafe/PTY paragraph: cafleet uses no cgo and no `unsafe` except the single audited darwin `__pthread_sigmask` call in `internal/core/time_darwin.go`, `creack/pty` for PTY allocation, and the in-repo emulator transliterated from vt100 0.18.1 / vte 0.15.0 with its notices in `third_party/`. The bundled-catalog guard location → `internal/core/coding_agent_catalog_test.go` |
 | `README.md` | No change: the pitch, install commands and archive names stay |
 | Other `assets/skills/` files | No change: the `#[cfg(test)]` mentions in the design-doc programmer and tester roles are examples for any project |
 | `CLAUDE.md` | Project: "The Go module at the repository root builds the unified CLI with the standard library, ncruces go-sqlite3 and an embedded SQL schema." Tests: "Write every Go test in the `_test.go` file beside the implementation file it exercises, in the same package; never add a test data file or directory." |
@@ -409,7 +410,9 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 ### Step 1: Preserve the study evidence
 
 - [x] Copy `/tmp/go-rewrite/` (minus build targets and module caches) into `researches/go-rewrite/poc/` (gitignored), keeping the subtree layout <!-- completed: 2026-11-24T08:58 -->
-- [ ] Confirm that each reproduction command in exp-vt.md, exp-capture.md and exp-interop.md runs with `researches/go-rewrite/poc/` in place of `/tmp/go-rewrite/` <!-- completed: -->
+- [x] Confirm that each reproduction command in exp-vt.md, exp-capture.md and exp-interop.md runs with `researches/go-rewrite/poc/` in place of `/tmp/go-rewrite/` <!-- completed: 2026-11-24T11:33 -->
+
+The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.py` and `perf.py` run with their database directories on a local filesystem such as `/tmp`, because the NFS volume that holds `researches/` breaks SQLite locking and the long path exceeds the runtime socket limit. `harness.py` takes absolute binary paths. The exp-capture recording session and `run-oc.sh` need live native agents and were not rerun.
 
 ### Step 2: Record the macOS validation results
 
@@ -428,29 +431,31 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 
 - [ ] Create `feat/go-rewrite` from `main` and open its draft PR <!-- completed: -->
 - [ ] Add `migration/` per § Migration tooling, with the `capture_golden` test module in `src/coding_agent/detector.rs` <!-- completed: -->
-- [ ] Scrub every stream with `migration/scrub.py`; the Director reviews the rendered screens and the user signs off on each stream; only then commit `migration/corpus/` <!-- completed: -->
+- [ ] Scrub every stream with `migration/scrub.py`, have the Director review the rendered screens, and place the scrubbed streams in the local `researches/go-rewrite/corpus/` (never committed) <!-- completed: -->
 - [ ] Extend the harness from exp-interop's four commands to every §6.3 command and `__member-run`, with stand-in multiplexer and native executables and the G2 determinism rules <!-- completed: -->
 - [ ] Run G2's three-run Rust baseline and drop every scenario whose Rust runs differ, listing each dropped scenario for G5 coverage <!-- completed: -->
 - [ ] Run the harness against the Rust binary alone and list every observed output that SPEC does not state; this list completes amendment A1 <!-- completed: -->
-- [ ] Add the branch-only `migration` CI job on `ubuntu-latest` and `macos-15`, including `check_version.py` <!-- completed: -->
+- [x] Add the branch-only `migration` CI job on `ubuntu-latest` and `macos-15`, including `check_version.py` <!-- completed: 2026-11-24T11:11 -->
+
+COMMENT(programmer): Parity tooling status for the Director. (1) My share of the "Add `migration/`" box is done: `vtoracle/` (hash, layout, dump, final, screens, strwidth, charwidths modes), `cases.py`, `fuzz.py` (seeds 1/2/3, 2.4 MB), `diffrun.py`, `golden.py`, `testmap.py`, `scrub.py` and `capture_golden::export` in `src/coding_agent/detector.rs`; `mise //:lint` passes. I left that box unchecked because it also covers `harness/` and `check_version.py`. (2) Verified against the exp-vt Go port with `diffrun.py --go-binary …/vtdump`: 1,439 cases (625 fixtures, 81 synthetic, 14 staged streams, 719 fuzz), 548,685 steps, 0 differences; mutant M1 is caught. `golden.py export` writes 625 fixture records and 175 capture checkpoints, and these match the exp-capture golden on all 173 checkpoints they share. `testmap.py` derives 1,473 Go names with no collision. (3) Go-side contracts that Step 9 must provide, documented in each script: `TestRuntimeTransport_VtOracleParity` (env `VTPARITY_MODE/INPUT/ARGS/OUT`, output byte-identical to `vtoracle`) and `TestCodingAgentDetector_GoldenExport` (env `CAFLEET_GOLDEN_CHECKPOINTS/OUT`, structured composer text). G3 and G4 report SKIP while `internal/vt` or `internal/core/coding_agent_detector.go` is absent, G5 while `internal/core` is absent, and the version check while `internal/core/version.go` is absent (`check_version.py` would otherwise fail before Step 7). (4) The CI job reads `migration/corpus/*.jsonl.gz`, so it fails until the signed-off corpus is committed. It runs Python 3.13 through `mise x python@3.13` until Step 7 pins `core:python`. It has no G1/G2 harness step yet. `ci.yml` triggers only on pushes and PRs to `main`, so a draft PR stacked on #652 does not run it until its base becomes `main`.
 
 ### Step 5: SPEC amendments
 
 - [ ] A1: the error strings from Step 4, at their owning sections <!-- completed: -->
-- [ ] A2: library-defined cause texts <!-- completed: -->
-- [ ] A3: the `--database-url` repeat rule <!-- completed: -->
-- [ ] A4: body validation after the schema guard <!-- completed: -->
-- [ ] A6: inherited signal dispositions and blocked signals are not part of the contract <!-- completed: -->
-- [ ] A7: observable subprocess-runner guarantees <!-- completed: -->
+- [x] A2: library-defined cause texts <!-- completed: 2026-11-24T11:38 -->
+- [x] A3: the `--database-url` repeat rule <!-- completed: 2026-11-24T11:38 -->
+- [x] A4: body validation after the schema guard <!-- completed: 2026-11-24T11:38 -->
+- [x] A6: inherited signal dispositions and blocked signals are not part of the contract <!-- completed: 2026-11-24T11:38 -->
+- [x] A7: observable subprocess-runner guarantees <!-- completed: 2026-11-24T11:38 -->
 - [ ] Update `assets/skills/cafleet/reference/cli.md` for the facts it carries from A1, A3 and A4 <!-- completed: -->
 
 ### Step 6: Documentation and rules
 
-- [ ] `docs/docs/contributing.md` edits from § Documentation and rules, including the contributor switch-over note; run `mise //docs:build` <!-- completed: -->
-- [ ] `CLAUDE.md` Project and Tests sections <!-- completed: -->
-- [ ] `.claude/rules/code-quality.md` banned patterns, Test placement (with the golden-test rule) and Database schema <!-- completed: -->
-- [ ] `.claude/rules/commands.md` task wording and test-filter form <!-- completed: -->
-- [ ] `.claude/skills/clean-docs/SKILL.md` validation wording <!-- completed: -->
+- [x] `docs/docs/contributing.md` edits from § Documentation and rules, including the contributor switch-over note; run `mise //docs:build` <!-- completed: 2026-11-24T11:40 -->
+- [x] `CLAUDE.md` Project and Tests sections <!-- completed: 2026-11-24T11:40 -->
+- [x] `.claude/rules/code-quality.md` banned patterns, Test placement (with the golden-test rule) and Database schema <!-- completed: 2026-11-24T11:40 -->
+- [x] `.claude/rules/commands.md` task wording and test-filter form <!-- completed: 2026-11-24T11:40 -->
+- [x] `.claude/skills/clean-docs/SKILL.md` validation wording <!-- completed: 2026-11-24T11:40 -->
 
 ### Step 7: Go module skeleton and toolchain
 
@@ -473,10 +478,10 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 ### Step 9: Stage 2 — emulator, detector, backends and multiplexer
 
 - [ ] `internal/vt` from the exp-vt port, with the read-only view and `CopyInto` (F15), generated width tables and per-file notices <!-- completed: -->
-- [ ] `runtime_transport.go` `TerminalState` and its screen snapshot types; G3 passes; add the scrubbed streams and `TestRuntimeTransport_CaptureScreens` to `runtime_transport_test.go` and write its generated block with the update mode <!-- completed: -->
+- [ ] `runtime_transport.go` `TerminalState` and its screen snapshot types; G3 passes in CI and locally with `--corpus`; add `TestRuntimeTransport_SeededScreens` to `runtime_transport_test.go` and write its generated block with the update mode <!-- completed: -->
 - [ ] `coding_agent_catalog.go` strict decode (F7, F21), validation, catalog runtime and the provenance guard test <!-- completed: -->
 - [ ] `coding_agent_detector.go`, `coding_agent.go` (backend argv, version probe), `coding_agent_hermes.go` (F14) <!-- completed: -->
-- [ ] G4 passes; add `TestCodingAgentDetector_CaptureGolden` to `coding_agent_detector_test.go` and write its generated block with the update mode <!-- completed: -->
+- [ ] G4 passes in CI and locally with `--corpus`; add `TestCodingAgentDetector_FixtureGolden` to `coding_agent_detector_test.go` and write its generated block with the update mode <!-- completed: -->
 - [ ] `multiplexer*.go`: tmux, herdr (F13), caller verification and layout <!-- completed: -->
 - [ ] `pane_lock.go` <!-- completed: -->
 
@@ -511,6 +516,7 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 - [ ] Delete `src/`, `Cargo.toml`, `Cargo.lock`, `build.rs` and `migration/`; remove `core:rust`, `core:python` and the `migration` CI job <!-- completed: -->
 - [ ] `release.yml`, `.bumpversion.toml`, `.github/renovate.jsonc` and `.gitignore` edits from § Build, lint, CI and release, with `THIRD_PARTY_LICENSES` in each archive <!-- completed: -->
 - [ ] Repository-wide check: no living document, rule, skill or comment mentions Rust, Cargo, clippy, rustfmt, `#[cfg(test)]` (outside the generic skill examples), `portable-pty`, `vt100` as a dependency, `migration/` or `~/.cargo/bin` <!-- completed: -->
+- [ ] Put the contributor switch-over steps (§ Documentation and rules, `contributing.md` row) in the cutover PR description and the first Go release notes <!-- completed: -->
 - [ ] Merge the cutover PR, then run the bump workflow for the next minor version; confirm that the release job publishes all three archives and bottles <!-- completed: -->
 - [ ] Download each published archive on its platform (macOS arm64, Linux amd64, Linux arm64) and, under a throwaway `HOME`, run `cafleet --version` and `cafleet setup --database-url sqlite:///<tmp>/c.db`; record the results <!-- completed: -->
 
@@ -524,3 +530,4 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 | 2026-11-24 | Reviewer round 1: one-package layout, darwin outcomes pending exp-macos, loosened A6, full R4/A8 scope, migration tooling, stream privacy, golden maintenance, G2 determinism, G6 isolation, cgo-free test configuration, version sync |
 | 2026-11-24 | Reviewer round 2: identifier derivation rules, explicit test timeout, run-time fuzz generation, capture tests in their owners' `_test.go`, G6 `PATH` isolation |
 | 2026-11-24 | Reviewer round 3 and exp-macos: darwin `SYS___PTHREAD_SIGMASK` route, macOS lock interop and raw-mode results, darwin PTY rules F22–F25 |
+| 2026-11-24 | Execution: pre-baseline fixes ship as one PR. User decision: captured streams are never committed; they form a local corpus for Director-run G3/G4 stream checks, and the permanent golden tests use seeded generated streams and the bundled fixtures |
