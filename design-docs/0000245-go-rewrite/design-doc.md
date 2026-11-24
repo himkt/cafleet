@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 23/70 tasks complete
+**Progress**: 25/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -431,13 +431,12 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 
 - [ ] Create `feat/go-rewrite` from `main` and open its draft PR <!-- completed: -->
 - [ ] Add `migration/` per § Migration tooling, with the `capture_golden` test module in `src/coding_agent/detector.rs` <!-- completed: -->
-- [ ] Scrub every stream with `migration/scrub.py`, have the Director review the rendered screens, and place the scrubbed streams in the local `researches/go-rewrite/corpus/` (never committed) <!-- completed: -->
+- [x] Scrub every stream with `migration/scrub.py`, have the Director review the rendered screens, and place the scrubbed streams in the local `researches/go-rewrite/corpus/` (never committed) <!-- completed: 2026-11-24T11:56 -->
 - [ ] Extend the harness from exp-interop's four commands to every §6.3 command and `__member-run`, with stand-in multiplexer and native executables and the G2 determinism rules <!-- completed: -->
 - [ ] Run G2's three-run Rust baseline and drop every scenario whose Rust runs differ, listing each dropped scenario for G5 coverage <!-- completed: -->
 - [ ] Run the harness against the Rust binary alone and list every observed output that SPEC does not state; this list completes amendment A1 <!-- completed: -->
 - [x] Add the branch-only `migration` CI job on `ubuntu-latest` and `macos-15`, including `check_version.py` <!-- completed: 2026-11-24T11:11 -->
 
-COMMENT(programmer): Parity tooling status for the Director. (1) My share of the "Add `migration/`" box is done: `vtoracle/` (hash, layout, dump, final, screens, strwidth, charwidths modes), `cases.py`, `fuzz.py` (seeds 1/2/3, 2.4 MB), `diffrun.py`, `golden.py`, `testmap.py`, `scrub.py` and `capture_golden::export` in `src/coding_agent/detector.rs`; `mise //:lint` passes. I left that box unchecked because it also covers `harness/` and `check_version.py`. (2) Verified against the exp-vt Go port with `diffrun.py --go-binary …/vtdump`: 1,439 cases (625 fixtures, 81 synthetic, 14 staged streams, 719 fuzz), 548,685 steps, 0 differences; mutant M1 is caught. `golden.py export` writes 625 fixture records and 175 capture checkpoints, and these match the exp-capture golden on all 173 checkpoints they share. `testmap.py` derives 1,473 Go names with no collision. (3) Go-side contracts that Step 9 must provide, documented in each script: `TestRuntimeTransport_VtOracleParity` (env `VTPARITY_MODE/INPUT/ARGS/OUT`, output byte-identical to `vtoracle`) and `TestCodingAgentDetector_GoldenExport` (env `CAFLEET_GOLDEN_CHECKPOINTS/OUT`, structured composer text). G3 and G4 report SKIP while `internal/vt` or `internal/core/coding_agent_detector.go` is absent, G5 while `internal/core` is absent, and the version check while `internal/core/version.go` is absent (`check_version.py` would otherwise fail before Step 7). (4) The CI job reads `migration/corpus/*.jsonl.gz`, so it fails until the signed-off corpus is committed. It runs Python 3.13 through `mise x python@3.13` until Step 7 pins `core:python`. It has no G1/G2 harness step yet. `ci.yml` triggers only on pushes and PRs to `main`, so a draft PR stacked on #652 does not run it until its base becomes `main`.
 
 ### Step 5: SPEC amendments
 
@@ -463,7 +462,7 @@ COMMENT(programmer): Parity tooling status for the Director. (1) My share of the
 - [x] `mise.toml` tools and tasks per § Build, lint, CI and release <!-- completed: 2026-11-24T11:46 -->
 - [x] `.golangci.yml` with the linters in § Build, lint, CI and release; `.gitignore` `!.golangci.yml` and `/dist/` <!-- completed: 2026-11-24T11:46 -->
 
-- [ ] `ci.yml` Go caching, the `//:vulncheck` step and the `//:test-shipped` step <!-- completed: -->
+- [x] `ci.yml` Go caching, the `//:vulncheck` step and the `//:test-shipped` step <!-- completed: 2026-11-24T11:56 -->
 - [ ] `internal/core/main_test.go` with the re-exec child naming helper and the `-update-golden` flag <!-- completed: -->
 
 ### Step 8: Stage 1 — foundation, broker and CLI surface
@@ -475,6 +474,8 @@ COMMENT(programmer): Parity tooling status for the Director. (1) My share of the
 - [ ] `output*.go` presenters and the CLI parser, help generation and parse-error rendering (A11) <!-- completed: -->
 - [ ] `assets.go` (F12), `setup`, `doctor`, `message *`, `fleet list/show`, `member list/show`, `event`/`input`/`permission` read commands <!-- completed: -->
 - [ ] G1 passes for every Stage 1 command <!-- completed: -->
+
+COMMENT(tester): U1 defers four `src/time.rs` thread-mask tests to Step 10 (F5 masked spawner): `time::tests::a_span_blocks_sigint_sigterm_and_sighup_until_dropped`, `a_span_restores_signals_blocked_before_it_began`, `a_helper_thread_started_inside_a_span_inherits_the_blocked_set`, `unwinding_restores_the_callers_signal_mask`. The process-wide deferral span is covered now by `TestTime_DeferTerminationDefersTerminationSignalsUntilTheOutermostSpanEnds`. The F9 `quoted` test is in `output_text_test.go`, beside `output_text.go`; the F18 `osErrorText`, `ioErrorText` and `exitStatusText` tests are in `textcodec_test.go`; the SQLite cause text is `sqliteFailure(code, message)` in `error_test.go`, with prefix stripping left to `db.go`.
 
 ### Step 9: Stage 2 — emulator, detector, backends and multiplexer
 
