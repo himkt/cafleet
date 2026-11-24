@@ -1714,7 +1714,7 @@ func dispatch(s settings, command cliCommand) (err error) {
 	d := newDeadline()
 	switch command.(type) {
 	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete:
-		return fleetRun(ctx, conn, command.(fleetCommand))
+		return fleetRun(ctx, conn, s, command.(fleetCommand), d)
 	case memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
 		memberCommandPrompt, memberCommandExec, memberCommandPress, memberCommandCapture:
 		return memberRun(ctx, conn, s, command.(memberCommand), d)

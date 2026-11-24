@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func fleetRun(ctx context.Context, conn *dbConn, command fleetCommand) error {
+func fleetRun(ctx context.Context, conn *dbConn, s settings, command fleetCommand, d deadline) error {
 	switch command := command.(type) {
 	case fleetCommandList:
 		fleets, err := listFleets(ctx, conn)
@@ -30,8 +30,18 @@ func fleetRun(ctx context.Context, conn *dbConn, command fleetCommand) error {
 			return err
 		}
 		return emit(command.json, outputJSONFleet(fleet), func() string { return formatFleetShow(fleet) })
-	case fleetCommandCreate, fleetCommandDelete:
-		return commandNotYetPorted()
+	case fleetCommandCreate:
+		agent, known := codingAgentCodingAgent(command.codingAgent)
+		if !known {
+			panic("the parser accepts only bundled coding agents for --coding-agent")
+		}
+		return fleetCreate(ctx, conn, fleetCreateRequest{name: command.name, agent: agent, pane: command.pane, muxServer: command.muxServer}, command.json)
+	case fleetCommandDelete:
+		deleted, err := deleteFleet(ctx, conn, s, command.fleetID, d)
+		if err != nil {
+			return err
+		}
+		return emit(command.json, outputJSONDeletedFleet(deleted), func() string { return formatFleetDelete(deleted) })
 	default:
 		panic("invalid fleetCommand")
 	}
@@ -151,11 +161,7 @@ func createWith(ctx context.Context, conn *dbConn, request fleetCreateRequest, e
 // verified pane.
 func verifiedEnvPane(env map[string]string, runner commandRunner, table processTable) (callerMux, string, error) {
 	ancestry := walk(table)
-	shared, err := fleetCreateSharedServer(ancestry)
-	if err != nil {
-		return callerMux{}, "", err
-	}
-	if server, found := shared.get(); found {
+	if server, found := sharedServerOf(ancestry).get(); found {
 		return callerMux{}, "", cliFleetRefusal(sharedServerMessage(server))
 	}
 	backend, detectErr := muxBackendDetect(lookup(env))
@@ -182,12 +188,6 @@ func verifiedEnvPane(env map[string]string, runner commandRunner, table processT
 	default:
 		panic("invalid verification")
 	}
-}
-
-// fleetCreateSharedServer funnels row 1 of caller verification until sharedServerOf reaches
-// this branch with the next main merge.
-func fleetCreateSharedServer(ancestry) (opt[sharedServer], error) {
-	return none[sharedServer](), commandNotYetPorted()
 }
 
 type deletionPlacement struct {
@@ -267,13 +267,7 @@ func (runtimeDeletionSteps) recover(ctx context.Context, conn *dbConn, s setting
 }
 
 func (runtimeDeletionSteps) shutdown(ctx context.Context, conn *dbConn, run runRecord, d deadline) (shutdownOutcome, error) {
-	return deletionRequestShutdown(ctx, conn, run, d.instant())
-}
-
-// deletionRequestShutdown funnels the runner shutdown request until requestShutdown lands in
-// runtime_control.go.
-func deletionRequestShutdown(context.Context, *dbConn, runRecord, time.Time) (shutdownOutcome, error) {
-	return shutdownOutcome{}, commandNotYetPorted()
+	return requestShutdown(ctx, conn, run, d.instant(), systemClock{})
 }
 
 // multiplexerDeletionHost runs each deletion step through mux bounded by that step's deadline, so
