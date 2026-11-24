@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -1622,10 +1623,119 @@ func runParsed(args cliArgs) error {
 	return dispatch(s, args.command)
 }
 
-// dispatch runs a parsed command's body. Bodies are ported stage by stage; until a command's
-// body lands, its invocation fails.
-func dispatch(_ settings, _ cliCommand) error {
+// commandNotYetPorted is the failure of a command whose body is not ported yet.
+func commandNotYetPorted() error {
 	return appErrorf("cafleet %s command bodies are not yet ported to Go", Version)
+}
+
+// requireDirector requires a Director-only command's --from-member-id to be the root Director of
+// the live fleet that owns its subject. An unknown subject passes, so the command reports its own
+// not-found error.
+func requireDirector(conn *dbConn, guarded directorOnly) error {
+	fleet, err := queryRowOptional(conn, guarded.fleetQuery, []any{guarded.subject},
+		func(row sqlRow) (int64, error) { return row.int64(0) })
+	if err != nil {
+		return err
+	}
+	fleetID, found := fleet.get()
+	if !found {
+		return nil
+	}
+	root, err := queryRowOptional(conn,
+		"SELECT 1 FROM fleets WHERE fleet_id=?1 AND deleted_at IS NULL AND director_member_id=?2",
+		[]any{fleetID, guarded.directorMemberID}, func(row sqlRow) (int64, error) { return row.int64(0) })
+	if err != nil {
+		return err
+	}
+	if _, isRoot := root.get(); isRoot {
+		return nil
+	}
+	return appErrorf("'cafleet %s' is a Director-only command and member %d is not the root Director of fleet %d; send the request to your Director.",
+		guarded.name, guarded.directorMemberID, fleetID)
+}
+
+// invocationConnection opens the selected database after the schema-version guard accepts it,
+// first through a read-only preflight, so a refused file is never opened for writing.
+func invocationConnection(ctx context.Context, databaseURL string, d deadline) (*dbConn, error) {
+	missingDatabase := appError("no cafleet database; run 'cafleet setup'")
+	open := func(readOnly bool) (*dbConn, error) {
+		opened, err := openExisting(databaseURL, readOnly)
+		if err != nil {
+			return nil, err
+		}
+		conn, found := opened.get()
+		if !found {
+			return nil, missingDatabase
+		}
+		_, err = withDatabaseBudget(ctx, conn, d, func(_ context.Context, conn *dbConn) (struct{}, error) {
+			return struct{}{}, classifySelectedSchema(conn, databaseURL).requireCurrent()
+		})
+		if err != nil {
+			return nil, mergeCleanup(err, conn.close())
+		}
+		return conn, nil
+	}
+	preflight, err := open(true)
+	if err != nil {
+		return nil, err
+	}
+	if err := preflight.close(); err != nil {
+		return nil, err
+	}
+	return open(false)
+}
+
+// dispatch runs a parsed command's body; a command whose body is not ported yet fails with
+// commandNotYetPorted.
+func dispatch(s settings, command cliCommand) (err error) {
+	ctx := context.Background()
+	switch command.(type) {
+	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect:
+		return commandNotYetPorted()
+	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete,
+		memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
+		memberCommandPrompt, memberCommandExec, memberCommandPress, memberCommandCapture,
+		messageCommandSend, messageCommandPoll, messageCommandShow,
+		eventCommandShow, inputCommandShow, inputCommandReconcile, permissionCommandRespond:
+	default:
+		panic("invalid cliCommand")
+	}
+	conn, err := invocationConnection(ctx, s.databaseURL, newDeadline())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = mergeCleanup(err, conn.close())
+	}()
+	if guarded, ok := directorOnlyOf(command); ok {
+		if err := requireDirector(conn, guarded); err != nil {
+			return err
+		}
+	}
+	if member, ok := command.(memberCommand); ok {
+		if command, err = prepareInput(member); err != nil {
+			return err
+		}
+	}
+	switch command.(type) {
+	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete:
+		return fleetRun(ctx, conn, command.(fleetCommand))
+	case memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
+		memberCommandPrompt, memberCommandExec, memberCommandPress, memberCommandCapture:
+		return memberRun(ctx, conn, command.(memberCommand))
+	case messageCommandSend, messageCommandPoll, messageCommandShow:
+		return messageRun(ctx, conn, command.(messageCommand))
+	case eventCommandShow:
+		return eventRun(ctx, conn, command.(eventCommand))
+	case inputCommandShow, inputCommandReconcile:
+		return inputRun(ctx, conn, command.(inputCommand))
+	case permissionCommandRespond:
+		return commandNotYetPorted()
+	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect:
+		panic("a command without a guarded connection is dispatched before one is opened")
+	default:
+		panic("invalid cliCommand")
+	}
 }
 
 // resolveBody reads the text body from its one source and requires it to be nonblank.

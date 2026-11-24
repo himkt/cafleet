@@ -142,9 +142,9 @@ const (
 	settlementClientAlreadyExited
 )
 
-// settle stops the member's Hermes session work and verifies that no process it registered
-// still runs.
-func settle(memberID int64, session *nativeSession, host hermesSettlementHost, until time.Time) (settlement, error) {
+// codingAgentHermesSettle stops the member's Hermes session work and verifies that no process it
+// registered still runs.
+func codingAgentHermesSettle(memberID int64, session *nativeSession, host hermesSettlementHost, until time.Time) (settlement, error) {
 	outcome, err := settleSession(session, host, until)
 	if err != nil {
 		return 0, appErrorf("hermes work for member %d could not be verified as stopped: %s; member was not deleted.", memberID, cafleetErrorOf(err).message())

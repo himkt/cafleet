@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 29/70 tasks complete
+**Progress**: 36/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -398,6 +398,7 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 | ncruces is pre-1.0, generated (wasm2go) and effectively single-maintainer | Pin the version and keep every driver call in `internal/core/db.go`. If ncruces becomes unusable, switching to `modernc.org/sqlite` is a re-planning event, not a drop-in change. It needs a re-armed timer in place of the busy handler for F20, and a `Done()` channel for the 1,000-step cancellation. Its database/sql `Commit` rolls back silently, so `GetAutocommit` detection and its diagnostic change (a SPEC-visible change), and it adds about 10 non-stdlib packages, relaxing the module success criterion. That switch gets its own design doc |
 | Runner port effort (largest unit) | Track Step 11 against the 16–25 person-week band at each sub-machine boundary. Above 26 person-weeks, re-plan before continuing |
 | Type-safety loss in the `InputCoordinator` and other state machines | Transliteration rules, linters, the per-sub-machine mutation check in Step 11, and `-race` |
+| vt100 0.18.1 panics at screen.rs:985 when a screen holding wide cells is resized to two or three columns; the A10 floor does not prevent it, so the Rust runner can panic on such panes (found by the seeded fuzz stream fuzz:grammar:00010) | The Go port keeps bug-for-bug parity for the rewrite and the seeded-screen golden records the panic. A follow-up change after cutover fixes it in the Go emulator with its own SPEC text |
 | Load-sensitive real-time tests (3/1,468 flaked under load in Rust) | Real time only in OS-level tests, with tolerant deadlines; the `t.Parallel()` policy keeps clock-driven tests deterministic |
 
 ---
@@ -430,23 +431,23 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 ### Step 4: Branch, migration tooling and baseline
 
 - [ ] Create `feat/go-rewrite` from `main` and open its draft PR <!-- completed: -->
-- [ ] Add `migration/` per § Migration tooling, with the `capture_golden` test module in `src/coding_agent/detector.rs` <!-- completed: -->
+- [x] Add `migration/` per § Migration tooling, with the `capture_golden` test module in `src/coding_agent/detector.rs` <!-- completed: 2026-11-24T13:28 -->
 - [x] Scrub every stream with `migration/scrub.py`, have the Director review the rendered screens, and place the scrubbed streams in the local `researches/go-rewrite/corpus/` (never committed) <!-- completed: 2026-11-24T11:56 -->
-- [ ] Extend the harness from exp-interop's four commands to every §6.3 command and `__member-run`, with stand-in multiplexer and native executables and the G2 determinism rules <!-- completed: -->
-- [ ] Run G2's three-run Rust baseline and drop every scenario whose Rust runs differ, listing each dropped scenario for G5 coverage <!-- completed: -->
-- [ ] Run the harness against the Rust binary alone and list every observed output that SPEC does not state; this list completes amendment A1 <!-- completed: -->
+- [x] Extend the harness from exp-interop's four commands to every §6.3 command and `__member-run`, with stand-in multiplexer and native executables and the G2 determinism rules <!-- completed: 2026-11-24T13:27 -->
+- [x] Run G2's three-run Rust baseline and drop every scenario whose Rust runs differ, listing each dropped scenario for G5 coverage <!-- completed: 2026-11-24T13:27 -->
+- [x] Run the harness against the Rust binary alone and list every observed output that SPEC does not state; this list completes amendment A1 <!-- completed: 2026-11-24T13:27 -->
 - [x] Add the branch-only `migration` CI job on `ubuntu-latest` and `macos-15`, including `check_version.py` <!-- completed: 2026-11-24T11:11 -->
 
 
 ### Step 5: SPEC amendments
 
-- [ ] A1: the error strings from Step 4, at their owning sections <!-- completed: -->
+- [x] A1: the error strings from Step 4, at their owning sections <!-- completed: 2026-11-24T13:38 -->
 - [x] A2: library-defined cause texts <!-- completed: 2026-11-24T11:38 -->
 - [x] A3: the `--database-url` repeat rule <!-- completed: 2026-11-24T11:38 -->
 - [x] A4: body validation after the schema guard <!-- completed: 2026-11-24T11:38 -->
 - [x] A6: inherited signal dispositions and blocked signals are not part of the contract <!-- completed: 2026-11-24T11:38 -->
 - [x] A7: observable subprocess-runner guarantees <!-- completed: 2026-11-24T11:38 -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md` for the facts it carries from A1, A3 and A4 <!-- completed: -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` for the facts it carries from A1, A3 and A4 <!-- completed: 2026-11-24T13:38 -->
 
 ### Step 6: Documentation and rules
 
@@ -470,12 +471,14 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 - [x] `error.go`, `time.go` (clock, test clock, deadlines, deferral spans), `config.go`, `digest.go` <!-- completed: 2026-11-24T12:51 -->
 - [x] `textcodec.go`: F6–F8, F10–F11 and F17 helpers; F9 and F18 in their Rust-home files <!-- completed: 2026-11-24T12:51 -->
 - [x] `db.go`: `schemaSQL`, connection pragmas, format diagnosis, deadline budget (F20), test fault plans on ncruces hooks <!-- completed: 2026-11-24T12:51 -->
-- [ ] `broker*.go` including `broker_runtime*.go` row mapping <!-- completed: -->
+- [x] `broker*.go` including `broker_runtime*.go` row mapping <!-- completed: 2026-11-24T13:27 -->
 - [ ] `output*.go` presenters and the CLI parser, help generation and parse-error rendering (A11) <!-- completed: -->
 - [ ] `assets.go` (F12), `setup`, `doctor`, `message *`, `fleet list/show`, `member list/show`, `event`/`input`/`permission` read commands <!-- completed: -->
 - [ ] G1 passes for every Stage 1 command <!-- completed: -->
 
 COMMENT(tester): U1 defers four `src/time.rs` thread-mask tests to Step 10 (F5 masked spawner): `time::tests::a_span_blocks_sigint_sigterm_and_sighup_until_dropped`, `a_span_restores_signals_blocked_before_it_began`, `a_helper_thread_started_inside_a_span_inherits_the_blocked_set`, `unwinding_restores_the_callers_signal_mask`. The process-wide deferral span is covered now by `TestTime_DeferTerminationDefersTerminationSignalsUntilTheOutermostSpanEnds`. The F9 `quoted` test is in `output_text_test.go`, beside `output_text.go`; the F18 `osErrorText`, `ioErrorText` and `exitStatusText` tests are in `textcodec_test.go`; the SQLite cause text is `sqliteFailure(code, message)` in `error_test.go`, with prefix stripping left to `db.go`.
+
+COMMENT(tester): Pair A (Step 8 tasks 5–6) and the broker runtime unit hold these Rust tests until their dependency lands. Waiting for Pair C's `coding_agent.go`: all 11 `assets::tests` (they drive `agent_paths`/`install_agent` over `CodingAgent`) and all 40 `cli::setup::tests`. Waiting for the runtime observation probe and control harness (Step 11): `cli::member::tests::{member_show_runtime_appends_the_probe_keys_for_each_outcome, member_show_text_suffix_names_the_observation_state_and_degradation, member_show_runtime_without_diagnostics_reports_an_empty_list, probe_observation_skips_unprobed_statuses_and_fails_without_a_runner}` (they need `ObservationHealth` and `probe_health`) and `broker::runtime::tests::runner_registry::member_runtime_returns_historical_health_without_contacting_a_live_endpoint`. Waiting for the press and permission runtime (Steps 10–11): `output::json::tests::member_press_json_is_the_canonical_acknowledgment_without_effect_counts`, `output::json::tests::runtime::permission_inspection_request_orders_its_identity_and_capability_keys`, `output::text::tests::{permission_inspection_text_names_the_token_sequence_answers_and_rule_or_dashes, member_press_text_acknowledges_the_canonical_keys_without_effect_counts}`. Waiting for the runner service harness (Step 11): `cli::message::tests::runner_pull::message_send_stores_the_message_and_writes_no_byte_to_the_recipients_child`. `src/cli/fleet.rs` and `src/cli/member.rs` have no Rust test for fleet list/show or member list. `TestCli_DirectorOnlyGuard_RunArgsRefusesAMemberCallerWithExitOneAndNothingOnStdout` fails for `member press` and `permission respond` until `dispatch` applies the Director-only guard before returning the not-yet-ported error for those commands.
 
 ### Step 9: Stage 2 — emulator, detector, backends and multiplexer
 
@@ -486,6 +489,8 @@ COMMENT(tester): U1 defers four `src/time.rs` thread-mask tests to Step 10 (F5 m
 - [ ] G4 passes in CI and locally with `--corpus`; add `TestCodingAgentDetector_FixtureGolden` to `coding_agent_detector_test.go` and write its generated block with the update mode <!-- completed: -->
 - [ ] `multiplexer*.go`: tmux, herdr (F13), caller verification and layout <!-- completed: -->
 - [ ] `pane_lock.go` <!-- completed: -->
+
+COMMENT(director): Step 9 arbitration (Tester-C, U3): (b). Pure per-fixture classification/extraction tests of src/coding_agent/catalog.rs and detector.rs that hard-code embedded fixture ids or rule ids become G5 omissions whose replacement is TestCodingAgentDetector_FixtureGolden; the behavioral ones (answer-plan matching, fingerprint equality/inequality, primary-vs-alternate replay, edited-fixture guards) are ported by selecting fixtures and plans through the catalog's own provenance (a plan's fixture_ids, a rule's kind) and asserting relations, not embedded values, as § Testing and .claude/rules/code-quality.md require.
 
 ### Step 10: Stage 3 — OS layer and lifecycle commands
 

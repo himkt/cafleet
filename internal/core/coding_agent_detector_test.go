@@ -53,7 +53,7 @@ func screenOf(t testing.TB, bytes []byte) screenSnapshot {
 	return terminal.snapshot()
 }
 
-func fixtureDocument(id string) any { return mustJSON(bundledScreen(id)) }
+func fixtureDocument(id string) any { return parseTestJSON(bundledScreen(id)) }
 
 func fixtureLines(id string) []string {
 	var lines []string
@@ -84,7 +84,7 @@ func fixtureAlternate(screen any) bool {
 	case nil:
 		return false
 	default:
-		panic("a fixture screen mode is a boolean or null: " + jsonText(mode))
+		panic("a fixture screen mode is a boolean or null: " + testJSONText(mode))
 	}
 }
 
@@ -147,7 +147,7 @@ func fingerprintsEqual(a, b *semanticFingerprint) bool {
 }
 
 func replayNativeFixture(fixture string, change func(*[]string), alternate bool, cursor opt[[2]uint16]) screenSnapshot {
-	screen := mustJSON(fixture)
+	screen := parseTestJSON(fixture)
 	terminal, err := newTerminalState(sizeOf(screen))
 	if err != nil {
 		panic(err)
@@ -168,7 +168,7 @@ func replayNativeFixture(fixture string, change func(*[]string), alternate bool,
 // nativeFixtureBytes is the byte stream that paints a committed native screen, using its own
 // screen mode and cursor.
 func nativeFixtureBytes(fixture string) []byte {
-	screen := mustJSON(fixture)
+	screen := parseTestJSON(fixture)
 	return fixtureBytes(screen, nil, fixtureAlternate(screen), none[[2]uint16]())
 }
 
@@ -528,7 +528,7 @@ func TestCodingAgentDetector_GoldenExport(t *testing.T) {
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(nil, 1<<30)
 	for scanner.Scan() {
-		stream := mustJSON(scanner.Text())
+		stream := parseTestJSON(scanner.Text())
 		backendName, _ := jstring(jget(stream, "backend"))
 		backend, ok := codingAgentCodingAgent(backendName)
 		if !ok {
@@ -544,11 +544,11 @@ func TestCodingAgentDetector_GoldenExport(t *testing.T) {
 		for _, checkpoint := range jarray(jget(stream, "checkpoints")).items {
 			count, ok := ju64(jget(checkpoint, "steps"))
 			if !ok || count > math.MaxInt32 {
-				panic("a checkpoint step count: " + jsonText(checkpoint))
+				panic("a checkpoint step count: " + testJSONText(checkpoint))
 			}
 			upto := int(count)
 			if upto < fed || upto > len(steps) {
-				t.Fatalf("a checkpoint step count: %s", jsonText(checkpoint))
+				t.Fatalf("a checkpoint step count: %s", testJSONText(checkpoint))
 			}
 			for _, step := range steps[fed:upto] {
 				if text, isHex := jstring(jget(step, "hex")); isHex {
@@ -602,7 +602,7 @@ func TestCodingAgentDetector_FixtureGolden(t *testing.T) {
 		got = append(got, detectorFixtureGolden{
 			fixture: fixture.id,
 			screen:  fnv1a(canonicalScreenDump(snapshot.screen, &terminalTitles{}, nil)),
-			record:  jsonText(record),
+			record:  testJSONText(record),
 		})
 	}
 	if *updateGolden {
@@ -629,6 +629,662 @@ func goStringLiteral(text string) string {
 		return "`" + text + "`"
 	}
 	return fmt.Sprintf("%q", text)
+}
+
+func assertPermissionObservation(t testing.TB, label string, value *screenObservation) {
+	t.Helper()
+	if value.kind != observationKindPermissionRequest || value.matchEvidence != matchEvidenceComplete || value.fingerprint == nil {
+		t.Fatalf("%s: %s %s fingerprint %v, want a complete permission request", label, value.kind.debugString(), value.matchEvidence.debugString(), value.fingerprint != nil)
+	}
+}
+
+func assertNoPermission(t testing.TB, label string, value *screenObservation) {
+	t.Helper()
+	if value.kind == observationKindPermissionRequest {
+		t.Fatalf("%s: a permission request is observed", label)
+	}
+}
+
+func syntheticObserved(t testing.TB, definition any, terminal *terminalState) screenObservation {
+	t.Helper()
+	snapshot := terminal.snapshot()
+	return syntheticObservation(t, definition, &snapshot)
+}
+
+// wrappedPermission is the synthetic permission form written from the top of a cols-wide screen.
+func wrappedPermission(t testing.TB, operation string, cols uint16) screenSnapshot {
+	t.Helper()
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: cols})
+	mustFeed(t, terminal, []byte("\x1b[2J\x1b[H"+strings.Join(permissionLines(operation), "\r\n")))
+	return terminal.snapshot()
+}
+
+func evidenceKeys(t testing.TB, evidence observationEvidence) []string {
+	t.Helper()
+	encoded, err := encodeJSON(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := jobject(parseTestJSON(string(encoded))).keys()
+	slices.Sort(keys)
+	return keys
+}
+
+func TestCodingAgentDetector_RuntimeDetectorCompleteSyntheticFormReturnsItsLiveRegionAndSemantics(t *testing.T) {
+	t.Parallel()
+	screen := syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false).snapshot()
+	value := syntheticObservation(t, syntheticDefinitions(), &screen)
+	assertPermissionObservation(t, "the synthetic form", &value)
+	if value.rawEvidence.nativeVersion != some(syntheticVersion) || value.ruleID != syntheticRule || value.outputSeq != screen.screenSeq {
+		t.Fatalf("version %v rule %s seq %d", value.rawEvidence.nativeVersion, value.ruleID, value.outputSeq)
+	}
+	if value.matchedRegion != some(screenRegion{top: 18, bottom: 24}) {
+		t.Fatalf("region %v", value.matchedRegion)
+	}
+	if value.rawEvidence.operation != some("write disposable.txt") {
+		t.Fatalf("operation %v", value.rawEvidence.operation)
+	}
+	if !value.rawEvidence.choices.set || !slices.Equal(value.rawEvidence.choices.values, []string{"Allow once", "Deny once"}) {
+		t.Fatalf("choices %v", value.rawEvidence.choices)
+	}
+	if slices.Contains(evidenceKeys(t, value.rawEvidence), "cwd") || value.verifiedNoninteraction {
+		t.Fatal("the request carries no cwd and verifies no noninteraction")
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorEveryRequiredLiveComponentIsIndispensable(t *testing.T) {
+	t.Parallel()
+	original := permissionLines("write disposable.txt")
+	complete := syntheticObserved(t, syntheticDefinitions(), syntheticTerminal(t, original, 80, false))
+	assertPermissionObservation(t, "the original form", &complete)
+	for index := range original {
+		changed := slices.Clone(original)
+		changed[index] = "unrelated output"
+		observed := syntheticObserved(t, syntheticDefinitions(), syntheticTerminal(t, changed, 80, false))
+		assertNoPermission(t, fmt.Sprintf("row %d replaced", index), &observed)
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorMissingOrEmptyConfiguredCaptureKeepsTheRuleIncomplete(t *testing.T) {
+	t.Parallel()
+	definition := syntheticDefinitions()
+	jset(definition, "^Operation: (?P<operation>.*)$", "codex", "profile", "rules", 0, "matchers", 0, "pattern")
+	present := syntheticObserved(t, definition, syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false))
+	assertPermissionObservation(t, "a captured operation", &present)
+	empty := syntheticObserved(t, definition, syntheticTerminal(t, permissionLines(""), 80, false))
+	assertNoPermission(t, "an empty operation", &empty)
+	jset(definition, "^Operation: (?:write disposable.txt|(?P<operation>other))$", "codex", "profile", "rules", 0, "matchers", 0, "pattern")
+	missing := syntheticObserved(t, definition, syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false))
+	assertNoPermission(t, "an unmatched capture group", &missing)
+}
+
+func TestCodingAgentDetector_RuntimeDetectorDuplicateMatchersOrAmbiguousLiveRegionsRemainIncomplete(t *testing.T) {
+	t.Parallel()
+	duplicate := slices.Insert(permissionLines("write disposable.txt"), 2, "Operation: another disposable.txt")
+	observed := syntheticObserved(t, syntheticDefinitions(), syntheticTerminal(t, duplicate, 80, false))
+	assertNoPermission(t, "a duplicate matcher row", &observed)
+	definition := syntheticDefinitions()
+	jset(definition, "any", "codex", "profile", "rules", 0, "region", "cursor")
+	one := permissionLines("write disposable.txt")
+	single := syntheticObserved(t, definition, syntheticTerminal(t, one, 80, false))
+	assertPermissionObservation(t, "one form", &single)
+	two := syntheticObserved(t, definition, syntheticTerminal(t, append(slices.Clone(one), one...), 80, false))
+	assertNoPermission(t, "two forms", &two)
+}
+
+func TestCodingAgentDetector_RuntimeDetectorRegionLimitsScreenSelectionAndCursorAreEnforced(t *testing.T) {
+	t.Parallel()
+	screen := syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false).snapshot()
+	definition := syntheticDefinitions()
+	jset(definition, 6, "codex", "profile", "rules", 0, "region", "max_rows")
+	six := syntheticObservation(t, definition, &screen)
+	assertPermissionObservation(t, "max_rows 6", &six)
+	jset(definition, 5, "codex", "profile", "rules", 0, "region", "max_rows")
+	five := syntheticObservation(t, definition, &screen)
+	assertNoPermission(t, "max_rows 5", &five)
+	definition = syntheticDefinitions()
+	jset(definition, "alternate", "codex", "profile", "rules", 0, "region", "screen")
+	primary := syntheticObservation(t, definition, &screen)
+	assertNoPermission(t, "an alternate rule on the primary screen", &primary)
+	alternate := syntheticObserved(t, definition, syntheticTerminal(t, permissionLines("write disposable.txt"), 80, true))
+	assertPermissionObservation(t, "an alternate rule on the alternate screen", &alternate)
+	moved := syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false)
+	mustFeed(t, moved, []byte("\x1b[1;1H"))
+	atEnd := syntheticObserved(t, syntheticDefinitions(), moved)
+	assertNoPermission(t, "a cursor off the end", &atEnd)
+	definition = syntheticDefinitions()
+	jset(definition, "inside", "codex", "profile", "rules", 0, "region", "cursor")
+	inside := syntheticObserved(t, definition, moved)
+	assertNoPermission(t, "a cursor outside the region", &inside)
+}
+
+func TestCodingAgentDetector_RuntimeDetectorCursorEndpointUsesWideDisplayCells(t *testing.T) {
+	t.Parallel()
+	definition := syntheticDefinitions()
+	jset(definition, "^Selection界: $", "codex", "profile", "rules", 0, "region", "end_pattern")
+	rows := permissionLines("write disposable.txt")
+	rows[len(rows)-1] = "Selection界: "
+	terminal := syntheticTerminal(t, rows, 80, false)
+	if cursor, _ := terminal.snapshot().cursor.get(); cursor[1] != 13 {
+		t.Fatalf("cursor column %d, want 13", cursor[1])
+	}
+	atEnd := syntheticObserved(t, definition, terminal)
+	assertPermissionObservation(t, "the cursor after the wide cell", &atEnd)
+	mustFeed(t, terminal, []byte("\x1b[24;13H"))
+	before := syntheticObserved(t, definition, terminal)
+	assertNoPermission(t, "the cursor one cell early", &before)
+}
+
+func TestCodingAgentDetector_RuntimeDetectorSoftWrapPreservesIdentityWhileSignificantSpacesChangeIt(t *testing.T) {
+	t.Parallel()
+	const operation = "printf 'a significant quoted operation with repeated  internal spaces'"
+	wideScreen := wrappedPermission(t, operation, 100)
+	narrowScreen := wrappedPermission(t, operation, 40)
+	wide := syntheticObservation(t, syntheticDefinitions(), &wideScreen)
+	narrow := syntheticObservation(t, syntheticDefinitions(), &narrowScreen)
+	assertPermissionObservation(t, "wide", &wide)
+	assertPermissionObservation(t, "narrow", &narrow)
+	if !fingerprintsEqual(wide.fingerprint, narrow.fingerprint) || wide.rawEvidence.operation != narrow.rawEvidence.operation {
+		t.Fatal("a soft wrap keeps the request identity")
+	}
+	changed := permissionObservation(t, "printf 'a significant quoted operation with repeated internal spaces'")
+	assertPermissionObservation(t, "changed", &changed)
+	if fingerprintsEqual(wide.fingerprint, changed.fingerprint) {
+		t.Fatal("a significant space changes the identity")
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorRegionExtractionPreservesHardNewlines(t *testing.T) {
+	t.Parallel()
+	definition := syntheticDefinitions()
+	jset(definition, parseTestJSON(`{"id":"operation","scope":"region","pattern":"(?m)^Operation: (?P<operation>[\\s\\S]+?)\\n> Allow once$"}`), "codex", "profile", "rules", 0, "matchers", 0)
+	firstScreen := wrappedPermission(t, "printf 'ab'", 80)
+	secondScreen := wrappedPermission(t, "printf 'a\r\nb'", 80)
+	first := syntheticObservation(t, definition, &firstScreen)
+	second := syntheticObservation(t, definition, &secondScreen)
+	assertPermissionObservation(t, "first", &first)
+	assertPermissionObservation(t, "second", &second)
+	if second.rawEvidence.operation != some("printf 'a\nb'") || fingerprintsEqual(first.fingerprint, second.fingerprint) {
+		t.Fatalf("second operation %v", second.rawEvidence.operation)
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorDecorationAndGeometryKeepStableSemantics(t *testing.T) {
+	t.Parallel()
+	value := permissionObservation(t, "write disposable.txt")
+	terminal := syntheticTerminal(t, permissionLines("write disposable.txt"), 100, false)
+	mustFeed(t, terminal, []byte("\x1b[1;1Hspinner 123\x1b[24;12H"))
+	redraw := syntheticObserved(t, syntheticDefinitions(), terminal)
+	assertPermissionObservation(t, "the redraw", &redraw)
+	if !fingerprintsEqual(value.fingerprint, redraw.fingerprint) {
+		t.Fatal("decoration and geometry keep the identity")
+	}
+	changed := permissionObservation(t, "write another-disposable.txt")
+	if fingerprintsEqual(value.fingerprint, changed.fingerprint) {
+		t.Fatal("another operation is another request")
+	}
+}
+
+func singleProfileScreen(t testing.TB) screenSnapshot {
+	t.Helper()
+	rows := append([]string{"Live footer", "Refused: write outside.txt", "Refusal end"}, permissionLines("write disposable.txt")...)
+	return syntheticTerminal(t, rows, 80, false).snapshot()
+}
+
+func TestCodingAgentDetector_RuntimeDetectorFingerprintsCarryNoNativeVersion(t *testing.T) {
+	t.Parallel()
+	catalog := mustLoadCatalog(t, singleProfiles([]singleProfile{{codingAgentCodex, "only"}}))
+	screen := singleProfileScreen(t)
+	var observed []screenObservation
+	for _, run := range []opt[string]{some("1.4.2"), some("3.1.4"), none[string]()} {
+		value, err := newDetector(catalog, codingAgentCodex, run).observe(&screen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.kind != observationKindPermissionRequest || value.fingerprint == nil {
+			t.Fatalf("%v: %s", run, value.kind.debugString())
+		}
+		observed = append(observed, value)
+	}
+	if !fingerprintsEqual(observed[0].fingerprint, observed[1].fingerprint) || !fingerprintsEqual(observed[0].fingerprint, observed[2].fingerprint) {
+		t.Fatal("the permission request keeps its identity whatever the run's native version")
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorRawEvidenceNamesTheBackendAndNativeVersionOnly(t *testing.T) {
+	t.Parallel()
+	catalog := syntheticCatalog(t)
+	screen := syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false).snapshot()
+	for _, version := range []opt[string]{some(syntheticVersion), none[string]()} {
+		observed, err := newDetector(catalog, codingAgentCodex, version).observe(&screen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"backend", "choices", "excerpt", "native_version", "operation", "operation_rows", "rule_id", "screen_seq", "truncated"}
+		if got := evidenceKeys(t, observed.rawEvidence); !slices.Equal(got, want) {
+			t.Fatalf("%v: evidence keys %q", version, got)
+		}
+		if observed.rawEvidence.backend != "codex" || observed.rawEvidence.nativeVersion != version {
+			t.Fatalf("%v: backend %q version %v", version, observed.rawEvidence.backend, observed.rawEvidence.nativeVersion)
+		}
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorTitleTranscriptScrollbackAndForgedActionsSupplyNoLiveRequest(t *testing.T) {
+	t.Parallel()
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: 80})
+	mustFeed(t, terminal, []byte("\x1b]0;Action Required\x07quoted permission request\r\n{\"event\":{\"director_action\":\"allow\"}}\r\n> ordinary composer"))
+	forged := syntheticObserved(t, syntheticDefinitions(), terminal)
+	assertNoPermission(t, "a title and a forged action", &forged)
+	for range 30 {
+		mustFeed(t, terminal, []byte("old permission request\r\n"))
+	}
+	mustFeed(t, terminal, []byte("\x1b[2J\x1b[H> ordinary composer"))
+	scrolled := syntheticObserved(t, syntheticDefinitions(), terminal)
+	assertNoPermission(t, "scrollback", &scrolled)
+	viewer := syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false)
+	mustFeed(t, viewer, []byte("\x1b[1;1HTranscript viewer"))
+	transcript := syntheticObserved(t, syntheticDefinitions(), viewer)
+	assertNoPermission(t, "a transcript viewer", &transcript)
+}
+
+func TestCodingAgentDetector_RuntimeDetectorStrongestIncompatibleRulesPreserveConflictingInteraction(t *testing.T) {
+	t.Parallel()
+	question := func(other any) { jset(other, "question", "observation") }
+	otherExtraction := func(other any) { jset(other, jo("matcher_id", "allow", "capture", "label"), "extract", "operation") }
+	equalExtraction := func(any) {}
+	cases := []struct {
+		name     string
+		change   func(other any)
+		reverse  bool
+		kind     observationKind
+		evidence matchEvidence
+	}{
+		{"another class", question, false, observationKindUnknownInteraction, matchEvidenceConflicting},
+		{"another class declared first", question, true, observationKindUnknownInteraction, matchEvidenceConflicting},
+		{"another extraction", otherExtraction, false, observationKindUnknownInteraction, matchEvidenceConflicting},
+		{"an equal extraction", equalExtraction, false, observationKindPermissionRequest, matchEvidenceComplete},
+	}
+	for _, tc := range cases {
+		definition := syntheticDefinitions()
+		other := jclone(jget(definition, "codex", "profile", "rules", 0))
+		jset(other, "synthetic-other", "id")
+		tc.change(other)
+		rules := jarray(jget(definition, "codex", "profile", "rules"))
+		rules.push(other)
+		if tc.reverse {
+			slices.Reverse(rules.items)
+		}
+		jset(definition, ja(syntheticRule, "synthetic-other"), "codex", "profile", "capabilities", "detection", "rule_ids")
+		result := syntheticObserved(t, definition, syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false))
+		if result.kind != tc.kind || result.matchEvidence != tc.evidence {
+			t.Fatalf("%s: %s %s", tc.name, result.kind.debugString(), result.matchEvidence.debugString())
+		}
+	}
+	conflicting := composerDefinition(none[string](), none[string]())
+	twin := jclone(jget(conflicting, "codex", "profile", "rules", 0))
+	jset(twin, "synthetic-unknown-twin", "id")
+	jset(twin, "unknown", "observation")
+	jset(twin, false, "verified_noninteraction")
+	jarray(jget(conflicting, "codex", "profile", "rules")).push(twin)
+	jset(conflicting, jo("rule_ids", ja("synthetic-unknown-twin"), "fixture_ids", ja(syntheticFixture)), "codex", "profile", "capabilities", "detection")
+	composers := syntheticObserved(t, conflicting, syntheticTerminal(t, []string{"Synthetic state", "State end"}, 80, false))
+	if composers.kind != observationKindUnknown || composers.matchEvidence != matchEvidenceConflicting || composers.verifiedNoninteraction {
+		t.Fatalf("conflicting non-interaction rules: %s %s %v", composers.kind.debugString(), composers.matchEvidence.debugString(), composers.verifiedNoninteraction)
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorLowerPriorityRuleCannotOverrideTheStrongerPermissionForm(t *testing.T) {
+	t.Parallel()
+	definition := syntheticDefinitions()
+	other := jclone(jget(definition, "codex", "profile", "rules", 0))
+	jset(other, "synthetic-lower", "id")
+	jset(other, "question", "observation")
+	jset(other, 99, "priority")
+	rules := jarray(jget(definition, "codex", "profile", "rules"))
+	rules.items = slices.Insert(rules.items, 0, other)
+	jset(definition, ja(syntheticRule, "synthetic-lower"), "codex", "profile", "capabilities", "detection", "rule_ids")
+	observed := syntheticObserved(t, definition, syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false))
+	assertPermissionObservation(t, "the stronger form", &observed)
+}
+
+func TestCodingAgentDetector_RuntimeDetectorOtherInteractionClassesRemainDistinct(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		kind     string
+		expected observationKind
+	}{{"question", observationKindQuestion}, {"unknown_interaction", observationKindUnknownInteraction}} {
+		value := stateObservation(t, tc.kind, false)
+		if value.kind != tc.expected || value.matchEvidence != matchEvidenceComplete {
+			t.Fatalf("%s: %s %s", tc.kind, value.kind.debugString(), value.matchEvidence.debugString())
+		}
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorComposerRequiresItsOwnPositiveEvidence(t *testing.T) {
+	t.Parallel()
+	if got := stateObservation(t, "composer_empty", true).kind; got != observationKindComposerEmpty {
+		t.Fatalf("composer kind %s", got.debugString())
+	}
+	unknown := syntheticObserved(t, syntheticDefinitions(), syntheticTerminal(t, nil, 80, false))
+	if unknown.kind != observationKindUnknown || unknown.matchEvidence != matchEvidenceAbsent || unknown.fingerprint != nil {
+		t.Fatalf("empty screen: %s %s", unknown.kind.debugString(), unknown.matchEvidence.debugString())
+	}
+}
+
+func TestCodingAgentDetector_RuntimeDetectorUnsupportedVersionReportsAbsentEvidenceWithoutNearbyProfile(t *testing.T) {
+	t.Parallel()
+	screen := syntheticTerminal(t, permissionLines("write disposable.txt"), 80, false).snapshot()
+	value, err := newDetector(syntheticCatalog(t), codingAgentClaude, some(syntheticVersion)).observe(&screen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.kind != observationKindUnknown || value.matchEvidence != matchEvidenceAbsent || value.fingerprint != nil {
+		t.Fatalf("claude without a profile: %s %s", value.kind.debugString(), value.matchEvidence.debugString())
+	}
+}
+
+const operationRowMargin = "    "
+
+// rowedDefinition is the synthetic form with a region-scoped operation that captures every row
+// between the `Operation:` prefix and the choice rows.
+func rowedDefinition(marginRows, trailer opt[string]) any {
+	value := syntheticDefinitions()
+	r := jget(value, "codex", "profile", "rules", 0)
+	jset(r, parseTestJSON(`{
+		"id":"operation","scope":"region",
+		"pattern":"(?m)^Operation: (?P<operation>[^\\n]+(?:\\n[^>\\n][^\\n]*)*)\\n> Allow once$"
+	}`), "matchers", 0)
+	operation := jget(r, "extract", "operation")
+	jset(operation, operationRowMargin, "row_margin")
+	if rows, set := marginRows.get(); set {
+		jset(operation, rows, "margin_rows")
+	}
+	if text, set := trailer.get(); set {
+		jset(operation, text, "row_trailer")
+	}
+	return value
+}
+
+func operationForm(t testing.TB, rows []string) screenSnapshot {
+	t.Helper()
+	lines := []string{"Synthetic permission request", "Operation: " + rows[0]}
+	lines = append(lines, rows[1:]...)
+	lines = append(lines, "> Allow once", "  Deny once", "Request form: synthetic-only", "Selection: ")
+	return syntheticTerminal(t, lines, 80, false).snapshot()
+}
+
+type extractedOperation struct {
+	text string
+	rows uint64
+}
+
+func extractedOperationOf(t testing.TB, definition any, rows []string) opt[extractedOperation] {
+	t.Helper()
+	screen := operationForm(t, rows)
+	observed := syntheticObservation(t, definition, &screen)
+	if observed.kind != observationKindPermissionRequest {
+		return none[extractedOperation]()
+	}
+	text, hasText := observed.rawEvidence.operation.get()
+	count, hasRows := observed.rawEvidence.operationRows.get()
+	if !hasText || !hasRows {
+		t.Fatal("a permission request records its operation and its rows")
+	}
+	return some(extractedOperation{text: text, rows: count})
+}
+
+func assertOperation(t testing.TB, label string, got opt[extractedOperation], text string, rows uint64) {
+	t.Helper()
+	if want := some(extractedOperation{text: text, rows: rows}); got != want {
+		t.Fatalf("%s: operation %v, want %v", label, got, want)
+	}
+}
+
+func TestCodingAgentDetector_OperationRows_ContinuationMarginRowsExemptTheFirstRowAndStripEveryLaterMargin(t *testing.T) {
+	t.Parallel()
+	definition := rowedDefinition(some("continuation"), none[string]())
+	assertOperation(t, "two rows", extractedOperationOf(t, definition, []string{"cat /long/path/", "    to/the/file.txt"}), "cat /long/path/\nto/the/file.txt", 2)
+	assertOperation(t, "three rows", extractedOperationOf(t, definition, []string{"printf one", "    two   ", "    three"}), "printf one\ntwo\nthree", 3)
+	assertOperation(t, "one row", extractedOperationOf(t, definition, []string{"write disposable.txt"}), "write disposable.txt", 1)
+}
+
+func TestCodingAgentDetector_OperationRows_ASelectedRowWithoutItsMarginFailsTheMatch(t *testing.T) {
+	t.Parallel()
+	continuation := rowedDefinition(some("continuation"), none[string]())
+	if got := extractedOperationOf(t, continuation, []string{"cat /long/path/", "  to/the/file.txt"}); got != none[extractedOperation]() {
+		t.Fatalf("a short margin matches: %v", got)
+	}
+	for _, all := range []any{rowedDefinition(some("all"), none[string]()), rowedDefinition(none[string](), none[string]())} {
+		if got := extractedOperationOf(t, all, []string{"cat /long/path/", "    to/the/file.txt"}); got != none[extractedOperation]() {
+			t.Fatalf("the default margin rows include the first row: %v", got)
+		}
+	}
+}
+
+func TestCodingAgentDetector_OperationRows_TheDefaultMarginRowsKeepTheShippedAllRowsExtraction(t *testing.T) {
+	t.Parallel()
+	definition := rowedDefinition(none[string](), none[string]())
+	jset(definition, `(?m)^Operation:(?P<operation> [^\n]+(?:\n[^>\n][^\n]*)*)\n> Allow once$`, "codex", "profile", "rules", 0, "matchers", 0, "pattern")
+	jset(definition, " ", "codex", "profile", "rules", 0, "extract", "operation", "row_margin")
+	explicit := jclone(definition)
+	jset(explicit, "all", "codex", "profile", "rules", 0, "extract", "operation", "margin_rows")
+	for _, value := range []any{definition, explicit} {
+		assertOperation(t, "all rows", extractedOperationOf(t, value, []string{"cat /long/path/", " to/the/file.txt"}), "cat /long/path/\nto/the/file.txt", 2)
+	}
+}
+
+func TestCodingAgentDetector_OperationRows_ATrailerIsRemovedWithItsPrecedingWhitespaceBeforeTheMargin(t *testing.T) {
+	t.Parallel()
+	definition := rowedDefinition(some("continuation"), some("█"))
+	assertOperation(t, "trailers with whitespace", extractedOperationOf(t, definition, []string{"cat /long/path/      █", "    to/the/file.txt     █  "}), "cat /long/path/\nto/the/file.txt", 2)
+	assertOperation(t, "a row without the trailer keeps its text", extractedOperationOf(t, definition, []string{"cat /long/path/█", "    to/the/file.txt"}), "cat /long/path/\nto/the/file.txt", 2)
+	assertOperation(t, "the trailer is removed only at the row end", extractedOperationOf(t, definition, []string{"cat a█b", "    c █ d"}), "cat a█b\nc █ d", 2)
+}
+
+func TestCodingAgentDetector_OperationRows_ATrailerAppliesToASingleRowOperationWithoutAMargin(t *testing.T) {
+	t.Parallel()
+	definition := syntheticDefinitions()
+	jset(definition, "█", "codex", "profile", "rules", 0, "extract", "operation", "row_trailer")
+	observed := syntheticObserved(t, definition, syntheticTerminal(t, permissionLines("write disposable.txt   █"), 80, false))
+	assertPermissionObservation(t, "a trailed operation", &observed)
+	if observed.rawEvidence.operation != some("write disposable.txt") || observed.rawEvidence.operationRows != some(uint64(1)) {
+		t.Fatalf("operation %v rows %v", observed.rawEvidence.operation, observed.rawEvidence.operationRows)
+	}
+}
+
+func TestCodingAgentDetector_OperationRows_ABlankMarginedRowInsideAMultiLineCommandStillMatches(t *testing.T) {
+	t.Parallel()
+	definition := rowedDefinition(none[string](), none[string]())
+	jset(definition, `(?m)^Operation:(?P<operation> [^\n]+(?:\n [^\n]*)*)\n> Allow once$`, "codex", "profile", "rules", 0, "matchers", 0, "pattern")
+	jset(definition, " ", "codex", "profile", "rules", 0, "extract", "operation", "row_margin")
+	assertOperation(t, "margin removal precedes trimming", extractedOperationOf(t, definition, []string{"printf one", " ", " printf two"}), "printf one\n\nprintf two", 3)
+}
+
+func mustMatchAnswer(t testing.TB, d *detector, screen screenSnapshot, plan *answerPlan, label string) answerMatch {
+	t.Helper()
+	matched, ok, err := d.matchAnswer(&screen, plan)
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+	if !ok {
+		t.Fatalf("%s: the plan matches", label)
+	}
+	return matched
+}
+
+func assertNoAnswerMatch(t testing.TB, d *detector, screen screenSnapshot, plan *answerPlan, label string) {
+	t.Helper()
+	if _, ok, err := d.matchAnswer(&screen, plan); err != nil || ok {
+		t.Fatalf("%s: matched %v, %v", label, ok, err)
+	}
+}
+
+func TestCodingAgentDetector_PermissionInspectionAnswerMatchUsesCompleteCurrentRuleChoiceAndFocus(t *testing.T) {
+	t.Parallel()
+	catalog := mustLoadCatalog(t, inspectionFixtureDefinition())
+	d := newDetector(catalog, codingAgentCodex, some("0.0.1-synthetic"))
+	plan, ok := catalog.answerPlan(codingAgentCodex, "synthetic-permission", answerKeyDecision{decision: permissionDecisionAllow})
+	if !ok {
+		t.Fatal("the allow plan")
+	}
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: 80})
+	mustFeed(t, terminal, inspectionFixtureForm("private operation", "synthetic-only"))
+	screen := terminal.snapshot()
+	observation, err := d.observe(&screen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := mustMatchAnswer(t, d, screen, &plan, "the synthetic-only form")
+	if observation.kind != observationKindPermissionRequest || !fingerprintsEqual(&matched.semantic, observation.fingerprint) {
+		t.Fatal("the match carries the observation's identity")
+	}
+	if !slices.Equal(matched.choices, []string{"Allow once", "Deny once"}) || matched.outputSeq != screen.screenSeq || matched.plan.choiceID != "allow-once" {
+		t.Fatalf("match choices %q seq %d choice %q", matched.choices, matched.outputSeq, matched.plan.choiceID)
+	}
+	focus := matched.focus
+	if focus == "" {
+		t.Fatal("the match records its focus")
+	}
+	mustFeed(t, terminal, inspectionFixtureForm("private operation", "synthetic-other"))
+	other := mustMatchAnswer(t, d, terminal.snapshot(), &plan, "the synthetic-other form")
+	if !other.semantic.equal(&matched.semantic) || other.focus == focus {
+		t.Fatal("another focus keeps the semantics and changes the focus")
+	}
+	for _, form := range []string{"missing-focus", "synthetic-alt"} {
+		mustFeed(t, terminal, inspectionFixtureForm("private operation", form))
+		assertNoAnswerMatch(t, d, terminal.snapshot(), &plan, form)
+	}
+	mustFeed(t, terminal, inspectionFixtureForm("private operation", "synthetic-only"))
+	mustFeed(t, terminal, []byte("\x1b[21;1H  Allow once"))
+	assertNoAnswerMatch(t, d, terminal.snapshot(), &plan, "a form without its focused choice")
+}
+
+func TestCodingAgentDetector_PermissionInspectionAnswerMatchesHaveNoDebugOrSerializedRepresentation(t *testing.T) {
+	t.Parallel()
+	catalog := mustLoadCatalog(t, inspectionFixtureDefinition())
+	d := newDetector(catalog, codingAgentCodex, some(syntheticVersion))
+	plan, _ := catalog.answerPlan(codingAgentCodex, "synthetic-permission", answerKeyDecision{decision: permissionDecisionAllow})
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: 80})
+	mustFeed(t, terminal, inspectionFixtureForm("private operation", "synthetic-only"))
+	matched := mustMatchAnswer(t, d, terminal.snapshot(), &plan, "the inspection form")
+	assertRedacted(t, "answerMatch", matched)
+	assertRedacted(t, "*answerMatch", &matched)
+}
+
+func TestCodingAgentDetector_RuntimeProfilePrivateFingerprintSupportsComparisonWithoutDebugOrSerialization(t *testing.T) {
+	t.Parallel()
+	first := permissionObservation(t, "write disposable.txt")
+	second := permissionObservation(t, "write disposable.txt")
+	other := permissionObservation(t, "write another-disposable.txt")
+	if !first.fingerprint.equal(second.fingerprint) || first.fingerprint.equal(other.fingerprint) {
+		t.Fatal("fingerprints compare by their semantics")
+	}
+	assertRedacted(t, "semanticFingerprint", *first.fingerprint)
+	assertRedacted(t, "*semanticFingerprint", first.fingerprint)
+}
+
+func bundledDetector(backend codingAgent, version string) *detector {
+	return newDetector(profileCatalogBundled(), backend, some(version))
+}
+
+const (
+	sgrFaint = "\x1b[2m"
+	sgrGrey  = "\x1b[38;5;8m"
+	sgrReset = "\x1b[0m"
+)
+
+func suggestionDefinition(style any) any {
+	definition := simpleDefinition("composer_empty", true)
+	r := jget(definition, "codex", "profile", "rules", 0)
+	jset(r, parseTestJSON(`{"screen":"either","start_pattern":"^> ","end_pattern":"^> ","max_rows":1,"cursor":"after_prompt"}`), "region")
+	jset(r, parseTestJSON(`[{"id":"prompt","scope":"line","pattern":"^> "}]`), "matchers")
+	jset(r, jo("style", style), "suggestion")
+	return definition
+}
+
+// suggestionComposer is the composer row `> ` followed by painted, with the cursor at
+// cursorCol.
+func suggestionComposer(t testing.TB, painted string, cursorCol int) screenSnapshot {
+	t.Helper()
+	return screenOf(t, fmt.Appendf(nil, "\x1b[2J\x1b[24;1H> %s%s\x1b[24;%dH", painted, sgrReset, cursorCol+1))
+}
+
+func TestCodingAgentDetector_SuggestionComposer_OnlyASuggestionInTheDeclaredStyleWithTheCursorAfterThePromptIsEmpty(t *testing.T) {
+	t.Parallel()
+	faint := parseTestJSON(`{"faint":true}`)
+	grey := parseTestJSON(`{"foreground":{"kind":"indexed","index":8}}`)
+	faintSuggestion := sgrFaint + "fix the failing build"
+	greySuggestion := sgrGrey + "fix the failing build"
+	kind := func(style any, screen screenSnapshot) observationKind {
+		return syntheticObservation(t, suggestionDefinition(jclone(style)), &screen).kind
+	}
+	for _, tc := range []struct {
+		name   string
+		style  any
+		screen screenSnapshot
+		empty  bool
+	}{
+		{"faint suggestion", faint, suggestionComposer(t, faintSuggestion, 2), true},
+		{"indexed foreground suggestion", grey, suggestionComposer(t, greySuggestion, 2), true},
+		{"bare prompt with the cursor after it", faint, suggestionComposer(t, "", 2), true},
+		{"typed draft in the default style", faint, suggestionComposer(t, "fix the failing build", 23), false},
+		{"typed text followed by a suggestion", faint, suggestionComposer(t, "fix"+sgrFaint+" the failing build", 5), false},
+		{"faint text under a foreground rule", grey, suggestionComposer(t, faintSuggestion, 2), false},
+		{"foreground text under a faint rule", faint, suggestionComposer(t, greySuggestion, 2), false},
+	} {
+		if got := kind(tc.style, tc.screen) == observationKindComposerEmpty; got != tc.empty {
+			t.Fatalf("%s: empty %v", tc.name, got)
+		}
+	}
+	for _, cursorCol := range []int{0, 1, 3, 23} {
+		if kind(faint, suggestionComposer(t, faintSuggestion, cursorCol)) == observationKindComposerEmpty {
+			t.Fatalf("suggestion with the cursor at column %d is empty", cursorCol)
+		}
+	}
+}
+
+var opencodeShellModeVersions = []string{"2.1.4", "2.2.7"}
+
+// opencodeComposer is an OpenCode composer row `┃` painted with trailing blanks and the cursor
+// after the marker, then footer two rows below.
+func opencodeComposer(t testing.TB, footer string) screenSnapshot {
+	t.Helper()
+	terminal := mustTerminalState(t, terminalSize{rows: 36, cols: 120})
+	mustFeed(t, terminal, []byte("\x1b[2J\x1b[32;1H┃    \x1b[34;1H"+footer+"\x1b[32;3H"))
+	return terminal.snapshot()
+}
+
+func opencodeObserved(t testing.TB, version, footer string) screenObservation {
+	t.Helper()
+	screen := opencodeComposer(t, footer)
+	observed, err := bundledDetector(codingAgentOpencode, version).observe(&screen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return observed
+}
+
+func TestCodingAgentDetector_OpencodeShellMode_AComposerAboveTheNormalModeFooterIsAnEmptyComposer(t *testing.T) {
+	t.Parallel()
+	for _, version := range opencodeShellModeVersions {
+		for _, agent := range []string{"cafleet", "cafleet-ask"} {
+			observation := opencodeObserved(t, version, agent+" · Big Pickle · OpenCode · ctrl+p menu")
+			if observation.kind != observationKindComposerEmpty || !observation.verifiedNoninteraction {
+				t.Fatalf("%s %s: %s verified %v", version, agent, observation.kind.debugString(), observation.verifiedNoninteraction)
+			}
+		}
+	}
+}
+
+func TestCodingAgentDetector_OpencodeShellMode_AShellModeComposerWithTheNormalGlyphIsNotAnEmptyComposer(t *testing.T) {
+	t.Parallel()
+	for _, version := range opencodeShellModeVersions {
+		observation := opencodeObserved(t, version, "Shell · esc normal")
+		if observation.kind == observationKindComposerEmpty || observation.verifiedNoninteraction {
+			t.Fatalf("%s: %s verified %v", version, observation.kind.debugString(), observation.verifiedNoninteraction)
+		}
+	}
 }
 
 var detectorFixtureGoldens = []detectorFixtureGolden{

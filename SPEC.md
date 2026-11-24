@@ -138,7 +138,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. It may appear once per command level, such as `cafleet`, `message` and `poll` in `cafleet message poll`: a repeat at the same level is a parse error, and across levels the deepest occurrence wins, so `cafleet --database-url <a> message poll 7 --database-url <b>` selects `<b>`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
 
-The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; resolve a relative file path against the invoking working directory before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
+The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; resolve a relative file path against the invoking working directory before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded. Another scheme, and a default without a usable HOME, fail with the database-selection rows of §6.3 Error Messages.
 
 CAFleet reads no `CAFLEET_*` environment variable. Member creation renders the selected database into the spawn prompt (§ Spawn-prompt substitution), and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A member that omits the option on a custom-database fleet reaches the default database: when that file is absent the command fails with `no cafleet database; run 'cafleet setup'`, and when it exists its literal IDs may match another fleet. This is the same cooperative limit as the Director-only command guard (§ Director-only command guard).
 
@@ -714,7 +714,7 @@ A root Director target exits 1 with `cannot prompt the Director's own pane`. The
 
 A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queued prompt prints `Queued prompt for member ID (PANE).` Both add the delivery and input lines (§6.3 Runtime presentation). `TEXT_REPR` follows §6.4 Quoted text.
 
-Pre-write error, including a held runner reply: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
+A runner reply that rejects the prompt before any byte is written prints `prompt was not dispatched to member ID: CAUSE`. Every other refusal prints `prompt delivery to member ID is STATUS`, where `STATUS` is the reply's `held`, `rejected` or `uncertain`, followed by `: CAUSE` when the reply carries a cause and ` (method=METHOD)` when a delivery method was selected, as in `prompt delivery to member 2 is uncertain: literal_mismatch (method=profile)`. These exit 1 without a success record.
 
 A prompt whose staged write stops or whose submission is not confirmed records `uncertain` and exits 1 with its recorded cause, method and input ID (§6.3 Runtime presentation). Prompt input requires a deliberate retry. Oversized input without safe framing is refused before reservation or bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` and publishes its result (§6.9 Measured submission plans and settle intervals). Insufficient immediate-attempt budget accepts a zero-byte queue entry with reason `delivery_budget_exhausted`.
 
@@ -737,8 +737,8 @@ Ordered JSON is:
 | Condition | Error body (exit 1) |
 |---|---|
 | Root Director | `cannot exec in the Director's own pane` |
-| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
-| Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Runner rejection before any byte is written | `native command was not dispatched to member ID: CAUSE` |
+| Any other runner refusal, including typing that may have begun | `native command delivery to member ID is STATUS`, with `STATUS`, `: CAUSE` and ` (method=METHOD)` as for `member prompt` |
 
 An exec whose staged write stops or whose submission is not confirmed records `uncertain`, exits 1 and requires a deliberate retry. An immediate oversized command with no safe framing is refused with zero bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` with a result event. Insufficient immediate budget queues with reason `delivery_budget_exhausted` (§6.9 Measured submission plans and settle intervals).
 
@@ -760,11 +760,10 @@ Exit 0 prints compact ordered JSON when `--json` is selected:
 
 Otherwise print `Acknowledged keys KEYS_JSON for member ID (PANE).`, where `KEYS_JSON` is the compact JSON array of canonical keys. Both modes end with one newline. The result carries no native-byte count, delivered-prefix count or permission receipt.
 
-Missing/extra positional arguments and a nonpositive/malformed member ID are parse errors (§6.3 Error Messages); key validation uses these bodies, with one-based `N` and JSON-quoted invalid input:
+Missing/extra positional arguments, no key or more than 64 keys, and a nonpositive/malformed member ID are parse errors (§6.3 Error Messages); key validation uses these bodies, with one-based `N` and JSON-quoted invalid input:
 
 | Condition | Error body (exit 2) |
 |---|---|
-| Key count outside the domain | `press requires between 1 and 64 keys` |
 | A key exceeds its UTF-8 bound | `press key at position N exceeds 32 UTF-8 bytes` |
 | A key is outside the common grammar | `invalid press key at position N: JSON_QUOTED_TOKEN` |
 
@@ -928,6 +927,18 @@ Application errors print to stderr even with `--json`, which selects only succes
 | (any surface resolving a config dir) | A set config-path variable holds a non-absolute value (empty string and relative paths included); `doctor` reports it as the agent's configuration check instead | §6.3 Config-dir resolution validation | 1 |
 | (any surface resolving a config dir) | A set config-path variable or `HOME` holds a value that is not valid UTF-8 (§6.3 Config-dir resolution) | `Error: <VAR> is not valid UTF-8` | 1 |
 | (any command except `setup` and `doctor`) | A missing, empty or incompatible database | §6.3 Schema-version guard | 1 |
+| (any command selecting a database) | The `--database-url` value does not begin with `sqlite:///`, the empty value included (§6.3 Database selection) | `Error: database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'` | 1 |
+| (any command selecting a database) | No `--database-url`, and `HOME` is unset | `Error: HOME is not set; cannot derive the default database path` | 1 |
+| (any command selecting a database) | No `--database-url`, and `HOME` is not valid UTF-8 | `Error: HOME is not valid UTF-8; cannot derive the default database path` | 1 |
+| (any surface resolving a config dir) | The backend's base derives from `HOME` (no config-location variable is set), and `HOME` is unset; `doctor` reports it as the agent's configuration check instead | `Error: HOME is not set` | 1 |
+| (any command selecting a database) | Whether the selected path exists cannot be determined, e.g. a path component is a regular file | `Error: cannot inspect database at '<path>': <cause>` | 1 |
+| (any command selecting a database) | SQLite cannot open the existing file, e.g. the path is a directory (cause `disk I/O error`); a file SQLite cannot open at all carries the cause `unable to open database file: <path>` | `Error: failed to open database at '<path>': <cause>` | 1 |
+| `setup` | `--database-url` names no file path (`sqlite:///`) | `Error: database URL has no file path` | 1 |
+| `setup` | The database file's parent directory cannot be created | `Error: cannot create <directory>: <cause>` | 1 |
+| `setup` | Applying the embedded schema to an empty file fails; nothing is written (§8 Database schema) | `Error: database initialization failed: <cause>` | 1 |
+| (any command selecting a database) | The file opened, but setting its foreign-key enforcement and busy timeout (§6.1) fails | `Error: failed to apply connection PRAGMAs: <cause>` | 1 |
+| (any command reading or writing the database) | A database statement fails: the database stays busy past the operation's wait (cause `database is locked`), the file is not a database (cause `file is not a database`) or another SQLite failure | `Error: database error: <cause>` | 1 |
+| (any command reading or writing the database) | The operation's deadline passes before or during a database step | `Error: operation exceeded its deadline` | 1 |
 | (any command with output) | Writing stdout fails with a broken pipe, e.g. `cafleet member list 1` piped into `head -1`; the command stops writing and nothing goes to stderr | — | The command's own result |
 | (any command with output) | Writing stdout fails with any other error | `Error: failed to write output: <cause>` | 1 |
 | `member prompt` / `member exec` / `member press` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
@@ -946,8 +957,11 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `fleet delete` | The fleet layout lock stays busy for the layout lock wait (60 s); every member is unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.` | 1 |
 | `member create` | An overflow window's height read fails or is unparsable; nothing is registered (§6.5 Fleet window layout) | `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.` | 1 |
 | `member create` | The conditional `last_window_ordinal` update changes a row count other than 1; the registration transaction rolls back (§6.2 Members) | `Error: fleet <fleet-id> window ordinal changed under the layout lock` | 1 |
-| `member create` | The tmux `new-window` reply is malformed; the cleanup diagnostic follows (§6.5 Member pane creation) | `Error: unexpected tmux new-window output: <quoted>` | 1 |
-| `member create` | The herdr `tab create` reply lacks `result.root_pane.pane_id` or `result.tab.tab_id`; the cleanup diagnostic follows | `Error: herdr tab create missing '<key>' field` | 1 |
+| `member create` | Creating the runner pane fails; `<cause>` is the multiplexer failure of §6.5 Member pane creation and Backend operations, or `tmux split-window returned an empty pane ID` / `herdr pane split returned an empty pane ID` for a split reply naming no pane, and the cleanup diagnostic follows | `Error: runner pane spawn failed: <cause>` | 1 |
+| `member capture` | The capture read fails, including the `lines <= 0` rejection of §6.5 Capture windowing | `Error: capture failed: <cause>` | 1 |
+| `fleet create` | The Director window name read back after renaming differs from the canonical name (§ `fleet create`) | `Error: Director window name verification failed: expected <quoted>, found <quoted>` | 1 |
+| `fleet create` | The Director pane context re-read after naming differs from the original (§ `fleet create`); the rendering of each `<context>` (session, window and pane IDs, or none) is non-normative | `Error: Director pane context changed during window naming: expected <context>, found <context>` | 1 |
+| `fleet create` | Any failure once naming was attempted; the diagnostic follows the cause on its own stderr line (§ `fleet create`) | <code>fleet create naming attempt: fleet_id=&lt;fleet-id&gt; backend=&lt;backend&gt; server=&lt;quoted&gt; window_id=&lt;quoted&gt; pane_id=&lt;quoted&gt; requested_name=&lt;quoted&gt;; the terminal name may have changed. Inspect 'cafleet fleet list' and &#96;&lt;inspection&gt;&#96;. The attempted fleet ID can be reused after rollback.</code>, where `<inspection>` is <code>tmux -S &lt;quoted server&gt; display-message -p -t &lt;quoted window&gt; '#{window_id}&#124;#{window_name}'</code> or `herdr --session <quoted server> tab get <quoted window>` | 1 |
 | `member create` | A herdr re-parenting move failed; a stderr diagnostic while the spawn continues (§6.5 herdr re-parenting) | `layout re-parenting incomplete: <cause>` | The command's own result |
 | `setup` | An extension file or its executable record cannot be installed (§6.3 Asset installation) | `failed to install extension into <target>: <error>` | 1 |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path, before registration or multiplexer effects. `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
@@ -965,17 +979,26 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `message send` / `member create` | Positional body empty or whitespace-only | `Error: text may not be empty.` | 2 |
 | `message send` / `member create` | `--file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --file <path>: file is empty.` | 1 |
 | `message send` / `member create` | `--file -` with empty or whitespace-only stdin | `Error: --file -: stdin is empty.` | 1 |
-| `message send` / `member create` | `--file <path>` to a non-existent path or non-regular file | `Error: --file <path>: file does not exist or is not a regular file.` | 1 |
-| `message send` / `member create` | `--file <path>` to an unreadable file | `Error: --file <path>: file is not readable.` | 1 |
-| `message send` / `member create` | `--file <path>` to a file containing invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` to a non-existent path (an empty path included) or a directory; `<cause>` is the read error | `Error: --file <path>: file does not exist or is not a regular file. (<cause>)` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` that cannot be read for any other reason; `<cause>` is the read error | `Error: --file <path>: file is not readable. (<cause>)` | 1 |
+| `message send` / `member create` / `member exec` | Reading stdin for `--file -` fails | `Error: --file -: <cause>` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` to a file containing invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` | 1 |
 | `member create` | A `--model` or `--effort` value the selected backend rejects, before any side effect | §6.7 *Model selection* and *Reasoning effort* | 2 |
 | `member create` | An unknown `{placeholder}` in the prompt, before registration | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` | 2 |
 | `member create` | A malformed brace expression in the prompt, before registration | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 |
 | `permission inspect` | An unknown `INTERACTION_ID`, ordered per §6.3 Permission commands | `Error: Interaction <interaction-id> not found` | 1 |
 | `permission respond` | `--choice` on a non-question, `--decision` on a question, a choice without a tested plan, or a second answer for the episode; the structured `rejected` response prints on stdout first, with reasons per §6.3 Permission commands | `Error: permission response rejected for interaction <interaction-id>: <reason>` | 1 |
 | `permission inspect` | The inspected run records a database identity other than the selected database's; the known interaction context follows | `Error: invalid stored value for member_runs.database_identity_json: selected database identity mismatch` | 1 |
+| `event show` | An unknown `EVENT_ID` | `Error: Event <event-id> not found` | 1 |
+| `input show` / `input reconcile` | An unknown `INPUT_ID` | `Error: Input <input-id> not found` | 1 |
+| `input reconcile` | The input is settled with a different disposition (§6.3 Runtime event and input commands) | `Error: settled input disposition changed` | 1 |
+| `member prompt` / `member exec` | The runner closes its control connection before the request is written or before it replies, as when the native child exits during the submission | `Error: control endpoint disconnected during write`; `Error: control endpoint disconnected before reply` | 1 |
+| `__member-run` | `--descriptor` is not an absolute path | `Error: absolute runner descriptor path required` | 1 |
+| `__member-run` | The descriptor is not a private regular file owned by the caller (§6.9 Runner boundary and creation transaction) | `Error: runtime artifact ownership or permissions mismatch` | 1 |
+| `__member-run` | The descriptor content is not a launch descriptor | `Error: malformed launch descriptor` | 1 |
+| `__member-run` | Reading the descriptor or another runtime artifact fails | `Error: member runtime: <cause>` | 1 |
 
-Left-in-composer prompt/exec errors append known receipt identity as `input_id=INPUT_ID`. In the plain-limit errors, UNIT is `bytes` for a byte limit and `characters` for a scalar limit; N measures rendered prefix plus literal. Uncertain errors retain their command forms with the recorded cause, for example `write_failed`.
+Runtime input, receipt and permission errors add one context line after the error, naming the identities known at the failure in this order: `run_id=<run-id>`, `interaction_id=<interaction-id>`, `input_id=<input-id>` and `operation_key=<key>`, the key as a JSON string, separated by single spaces and omitting unknown ones, as in `run_id=1 input_id=2 operation_key="prompt:1:<64 hex>"`. In the plain-limit errors, UNIT is `bytes` for a byte limit and `characters` for a scalar limit; N measures rendered prefix plus literal. Uncertain errors retain their command forms with the recorded cause, for example `write_failed`.
 
 ### 6.4 Output & Formatting
 
@@ -1974,8 +1997,44 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 | CAFleet pi extension missing or unreadable | `cannot read the CAFleet pi extension at {path}: {cause}; run 'cafleet setup --coding-agent pi' first` |
 | Invalid config-path variable (§6.3 *Config-dir resolution*) | `{var} must be an absolute path (got '{value}')` |
 | Non-UTF-8 config-path variable or `HOME` (§6.3 *Config-dir resolution*) | `{var} is not valid UTF-8` |
+| No config-location variable set and `HOME` unset (§6.3 *Config-dir resolution*) | `HOME is not set` |
 | `hermes config path` cannot start, times out or exits nonzero | `cannot read hermes configuration through 'hermes config path': {cause}` |
 | `hermes config path` prints no absolute file path | `cannot read hermes configuration through 'hermes config path': printed no absolute file path: {stdout}` |
+
+The `{cause}` of a failed `hermes config path` is its trimmed stderr when it exits nonzero with stderr text, `exited with code {code}` when it exits nonzero with none, and otherwise the bounded-run failure below.
+
+A native command run under a bound (the version probe and `hermes config path`) fails with one of these bounded-run causes:
+
+| Condition | Cause |
+|---|---|
+| The executable cannot start | `could not start: {cause}` |
+| The bound passes while the process runs | `did not finish within its deadline` |
+| The process exited but its output did not close within the bound | `output did not close within its deadline` |
+| Reading its output fails | `output could not be read: {cause}` |
+
+The native version probe's warning (§6.9 Native version probe) names its cause as `{backend} --version {detail}`, with `{detail}` one of:
+
+| Condition | `{detail}` |
+|---|---|
+| A bounded-run failure | The bounded-run cause above |
+| Nonzero exit | `exited with {status}`, followed by `: {line}` when the first stderr line is nonblank; `{status}` follows §6.4 Cause texts |
+| Non-UTF-8 stdout | `printed non-UTF-8 output` |
+| Empty stdout | `printed no output` |
+| No version token on the first line | `printed no version token` |
+| Several version tokens on the first line | `printed several version tokens` |
+| hermes: the first line is not a Hermes version line | `printed no Hermes version line` |
+| hermes: the captured version is not canonical SemVer | `printed a non-SemVer Hermes version` |
+
+Hermes work settlement (§ Hermes work settlement) names its failed step as the `{cause}` of its deletion error:
+
+| Failed step | `{cause}` |
+|---|---|
+| The run has no stored native session identity | `member run {run_id} has no Hermes session record` |
+| The running turn stays busy after `Ctrl+C` | `the Hermes turn did not stop after Ctrl-C` |
+| Clearing leaves the composer region unchanged | `the Hermes composer still holds text after clearing` |
+| `/stop` prints no new stop report within the budget | `Hermes did not report /stop` |
+| `/exit` prints no exit summary within the budget | `Hermes printed no exit summary after /exit` |
+| The client is still running after its exit summary | `the Hermes client did not exit after /exit` |
 
 #### Host evidence and native-input authorization
 
@@ -2143,7 +2202,7 @@ Hermes replaces the one-token rule with its own first-line rule. The first stdou
 
 For hermes the probe runs concurrently with `hermes config path`, which has its own bound (§6.7 Hermes availability preflight).
 
-A probe that fails a rule above, cannot start, times out or prints non-UTF-8 output records `native_version` null, and creation continues with the backend's bundled profile and its coverage. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE.`, and leaves its stdout text and JSON unchanged.
+A probe that fails a rule above, cannot start, times out or prints non-UTF-8 output records `native_version` null, and creation continues with the backend's bundled profile and its coverage. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE.`, with `CAUSE` per §6.7 Contract error strings, and leaves its stdout text and JSON unchanged.
 
 ##### Bundled profiles and native screen fixtures
 

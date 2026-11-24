@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -531,5 +533,353 @@ func TestTime_DeferTerminationDefersTerminationSignalsUntilTheOutermostSpanEnds(
 				t.Fatalf("%s: child ended with %v, want termination by %v", tc.name, exit, tc.signal)
 			}
 		})
+	}
+}
+
+// onFreshThread runs test on a new goroutine locked to its own OS thread with an empty blocked
+// set. The goroutine ends still locked, so the runtime discards the thread and its mask.
+func onFreshThread(t *testing.T, test func() error) {
+	t.Helper()
+	failure := make(chan error)
+	go func() {
+		runtime.LockOSThread()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				failure <- fmt.Errorf("panic: %v", recovered)
+			}
+		}()
+		if err := threadSetSignalMask(0); err != nil {
+			failure <- err
+			return
+		}
+		failure <- test()
+	}()
+	if err := <-failure; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func blockedNow() (signalSet, error) {
+	return threadSignalMask()
+}
+
+func defersAll(mask signalSet) bool {
+	return mask&deferredTerminationSet == deferredTerminationSet
+}
+
+func defersNone(mask signalSet) bool {
+	return mask&deferredTerminationSet == 0
+}
+
+func TestTime_ASpanBlocksSigintSigtermAndSighupUntilDropped(t *testing.T) {
+	t.Parallel()
+	onFreshThread(t, func() error {
+		previous, err := threadBlockSignals(deferredTerminationSet)
+		if err != nil {
+			return err
+		}
+		if mask, err := blockedNow(); err != nil || !defersAll(mask) {
+			return fmt.Errorf("inside the span the thread blocks %#x (%v), want all of %#x", mask, err, deferredTerminationSet)
+		}
+		if err := threadSetSignalMask(previous); err != nil {
+			return err
+		}
+		if mask, err := blockedNow(); err != nil || !defersNone(mask) {
+			return fmt.Errorf("after the span the thread blocks %#x (%v), want none of %#x", mask, err, deferredTerminationSet)
+		}
+		return nil
+	})
+}
+
+func TestTime_ASpanRestoresSignalsBlockedBeforeItBegan(t *testing.T) {
+	t.Parallel()
+	onFreshThread(t, func() error {
+		if err := threadSetSignalMask(signalSetOf(syscall.SIGUSR1, syscall.SIGTERM)); err != nil {
+			return err
+		}
+		previous, err := threadBlockSignals(deferredTerminationSet)
+		if err != nil {
+			return err
+		}
+		if err := threadSetSignalMask(previous); err != nil {
+			return err
+		}
+		mask, err := blockedNow()
+		switch {
+		case err != nil:
+			return err
+		case !mask.contains(syscall.SIGUSR1):
+			return fmt.Errorf("SIGUSR1 stays blocked: %#x", mask)
+		case !mask.contains(syscall.SIGTERM):
+			return fmt.Errorf("a signal the caller had blocked stays blocked: %#x", mask)
+		case mask.contains(syscall.SIGINT) || mask.contains(syscall.SIGHUP):
+			return fmt.Errorf("the span's own signals are unblocked again: %#x", mask)
+		}
+		return nil
+	})
+}
+
+// processSignalSet reads one signal set of process pid as the kernel reports it: the named
+// /proc status line (SigBlk, SigIgn, ShdPnd) on Linux, the named ps column (sigmask, sigignore)
+// elsewhere. The probe is a process that never changes its own signal state, such as sleep;
+// shells clear and re-block their masks and cannot serve.
+func processSignalSet(pid int, statusField, psColumn string) (signalSet, error) {
+	if runtime.GOOS == "linux" {
+		status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+		if err != nil {
+			return 0, err
+		}
+		for _, line := range strings.Split(string(status), "\n") {
+			if value, found := strings.CutPrefix(line, statusField+":"); found {
+				mask, err := strconv.ParseUint(strings.TrimSpace(value), 16, 64)
+				return signalSet(mask), err
+			}
+		}
+		return 0, fmt.Errorf("/proc/%d/status has no %s line", pid, statusField)
+	}
+	output, err := exec.Command("ps", "-o", psColumn+"=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, fmt.Errorf("ps -o %s: %w", psColumn, err)
+	}
+	mask, err := strconv.ParseUint(strings.TrimSpace(string(output)), 16, 64)
+	return signalSet(mask), err
+}
+
+// startedSleeper starts `sleep 30` with start; its signal state is the state it inherited.
+func startedSleeper(start func(*exec.Cmd) error) (*exec.Cmd, error) {
+	sleeper := exec.Command("sleep", "30")
+	if err := start(sleeper); err != nil {
+		return nil, err
+	}
+	return sleeper, nil
+}
+
+func endSleeper(sleeper *exec.Cmd) error {
+	if err := sleeper.Process.Kill(); err != nil {
+		return err
+	}
+	var exit *exec.ExitError
+	if err := sleeper.Wait(); !errors.As(err, &exit) {
+		return fmt.Errorf("the killed sleeper ended with %v", err)
+	}
+	return nil
+}
+
+// childBlockedSet starts a sleeper with start and returns the blocked set it inherited.
+func childBlockedSet(start func(*exec.Cmd) error) (signalSet, error) {
+	sleeper, err := startedSleeper(start)
+	if err != nil {
+		return 0, err
+	}
+	mask, readErr := processSignalSet(sleeper.Process.Pid, "SigBlk", "sigmask")
+	return mask, errors.Join(readErr, endSleeper(sleeper))
+}
+
+func plainStart(cmd *exec.Cmd) error {
+	return cmd.Start()
+}
+
+func TestTime_AHelperThreadStartedInsideASpanInheritsTheBlockedSet(t *testing.T) {
+	t.Parallel()
+	onFreshThread(t, func() error {
+		if _, err := threadBlockSignals(deferredTerminationSet); err != nil {
+			return err
+		}
+		inherited, err := childBlockedSet(plainStart)
+		if err != nil {
+			return err
+		}
+		if !defersAll(inherited) {
+			return fmt.Errorf("a child started on the masked thread blocks %#x, want all of %#x", inherited, deferredTerminationSet)
+		}
+		return nil
+	})
+}
+
+func TestTime_UnwindingRestoresTheCallersSignalMask(t *testing.T) {
+	t.Parallel()
+	onFreshThread(t, func() error {
+		previous, err := blockedNow()
+		if err != nil {
+			return err
+		}
+		var inside signalSet
+		unwound := func() (recovered any) {
+			defer func() { recovered = recover() }()
+			spanPrevious, err := threadBlockSignals(deferredTerminationSet)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				if err := threadSetSignalMask(spanPrevious); err != nil {
+					panic(err)
+				}
+			}()
+			if inside, err = blockedNow(); err != nil {
+				return err
+			}
+			panic("unwind protected work")
+		}()
+		if unwound != "unwind protected work" {
+			return fmt.Errorf("the protected work unwound with %v", unwound)
+		}
+		if !defersAll(inside) {
+			return fmt.Errorf("inside the span the thread blocks %#x", inside)
+		}
+		if after, err := blockedNow(); err != nil || after != previous {
+			return fmt.Errorf("after unwinding the thread blocks %#x (%v), want %#x", after, err, previous)
+		}
+		return nil
+	})
+}
+
+func TestTime_MaskedSpawnerThreadReadsTheSetWhileASecondLockedThreadReadsNone(t *testing.T) {
+	t.Parallel()
+	spawner, err := newMaskedSpawner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spawner.stop()
+	var masked signalSet
+	var maskedErr error
+	spawner.do(func() { masked, maskedErr = threadSignalMask() })
+	if maskedErr != nil || !defersAll(masked) {
+		t.Fatalf("the spawner thread blocks %#x (%v), want all of %#x", masked, maskedErr, deferredTerminationSet)
+	}
+	onFreshThread(t, func() error {
+		sibling, err := threadSignalMask()
+		if err != nil || !defersNone(sibling) {
+			return fmt.Errorf("a second locked thread blocks %#x (%v), want none of %#x", sibling, err, deferredTerminationSet)
+		}
+		return nil
+	})
+}
+
+func spawnerStart(spawner *maskedSpawner) func(*exec.Cmd) error {
+	return func(cmd *exec.Cmd) error {
+		var err error
+		spawner.do(func() { err = cmd.Start() })
+		return err
+	}
+}
+
+func TestTime_MaskedSpawnerChildInheritsTheSetAndDefersItsOwnSigterm(t *testing.T) {
+	t.Parallel()
+	spawner, err := newMaskedSpawner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spawner.stop()
+	inherited, err := childBlockedSet(spawnerStart(spawner))
+	if err != nil || !defersAll(inherited) {
+		t.Fatalf("a spawner child blocks %#x (%v), want all of %#x", inherited, err, deferredTerminationSet)
+	}
+	sleeper, err := startedSleeper(spawnerStart(spawner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sleeper.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- sleeper.Wait() }()
+	select {
+	case err := <-exited:
+		t.Fatalf("a spawner child ended on SIGTERM while it blocks it: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if runtime.GOOS == "linux" {
+		pending, err := processSignalSet(sleeper.Process.Pid, "ShdPnd", "")
+		if err != nil || !pending.contains(syscall.SIGTERM) {
+			t.Fatalf("the deferred SIGTERM stays pending: %#x %v", pending, err)
+		}
+	}
+	if err := sleeper.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	var exit *exec.ExitError
+	if err := <-exited; !errors.As(err, &exit) {
+		t.Fatalf("the killed spawner child ended with %v", err)
+	}
+}
+
+func TestTime_MaskedSpawnerChildrenAloneInheritTheSetWhileOrdinaryGoroutinesSpawnConcurrently(t *testing.T) {
+	t.Parallel()
+	const (
+		maskedChildren = 40
+		siblings       = 8
+		perSibling     = 10
+	)
+	spawner, err := newMaskedSpawner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spawner.stop()
+	var mu sync.Mutex
+	var siblingFailures []string
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range siblings {
+		wg.Go(func() {
+			<-start
+			for range perSibling {
+				mask, err := childBlockedSet(plainStart)
+				if err != nil || !defersNone(mask) {
+					mu.Lock()
+					siblingFailures = append(siblingFailures, fmt.Sprintf("%#x %v", mask, err))
+					mu.Unlock()
+				}
+			}
+		})
+	}
+	close(start)
+	var maskedFailures []string
+	for range maskedChildren {
+		mask, err := childBlockedSet(spawnerStart(spawner))
+		if err != nil || !defersAll(mask) {
+			maskedFailures = append(maskedFailures, fmt.Sprintf("%#x %v", mask, err))
+		}
+	}
+	wg.Wait()
+	if len(maskedFailures) != 0 || len(siblingFailures) != 0 {
+		t.Fatalf("spawner children missing the set: %v; ordinary children holding it: %v", maskedFailures, siblingFailures)
+	}
+}
+
+//nolint:paralleltest // changes process-wide signal handlers inside its own child process
+func TestTime_SpanChildStartsChild(t *testing.T) {
+	skipUnlessChildTest(t)
+	span, err := deferTerminationBegin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inSpan, err := childBlockedSet(span.start)
+	if err != nil || !defersAll(inSpan) {
+		t.Fatalf("a span child blocks %#x (%v), want all of %#x", inSpan, err, deferredTerminationSet)
+	}
+	routed := make(chan error)
+	go func() {
+		mask, err := childBlockedSet(startChild)
+		if err == nil && !defersAll(mask) {
+			err = fmt.Errorf("an in-span startChild child on another goroutine blocks %#x", mask)
+		}
+		routed <- err
+	}()
+	if err := <-routed; err != nil {
+		t.Fatal(err)
+	}
+	span.close()
+	after, err := childBlockedSet(startChild)
+	if err != nil || !defersNone(after) {
+		t.Fatalf("a child started after the span blocks %#x (%v), want none of %#x", after, err, deferredTerminationSet)
+	}
+	fmt.Println("span child checks passed")
+}
+
+func TestTime_InSpanStartsRouteThroughTheMaskedSpawnerAndLaterStartsDoNot(t *testing.T) {
+	t.Parallel()
+	output, err := childTestCommand(TestTime_SpanChildStartsChild, "-test.v").CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "span child checks passed\n") {
+		t.Fatalf("span child failed: %v\n%s", err, output)
 	}
 }

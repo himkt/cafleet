@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -121,6 +122,14 @@ func decodeStrictValue(decoder *jsontext.Decoder, destination reflect.Value) err
 	if _, ok := destination.Addr().Interface().(json.UnmarshalerFrom); ok {
 		return decodeLeaf(decoder, destination)
 	}
+	if destination.Type() == reflect.TypeFor[jsontext.Value]() {
+		value, err := decoder.ReadValue()
+		if err != nil {
+			return appError(err.Error())
+		}
+		destination.Set(reflect.ValueOf(slices.Clone(value)))
+		return nil
+	}
 	if kind := destination.Kind(); kind == reflect.Struct {
 		return decodeStrictStruct(decoder, destination)
 	} else if kind == reflect.Slice {
@@ -172,6 +181,12 @@ func strictFields(structType reflect.Type) []strictField {
 	return fields
 }
 
+// unknownFieldsIgnored marks a struct whose Rust type lacks deny_unknown_fields: decodeStrict
+// skips its unknown members as serde does, and still applies every other rule to it.
+type unknownFieldsIgnored interface {
+	ignoresUnknownFields()
+}
+
 func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) error {
 	if kind := decoder.PeekKind(); kind != '{' {
 		return appErrorf("invalid type: expected a JSON object for %s, found %v", destination.Type(), kind)
@@ -179,6 +194,7 @@ func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) er
 	if _, err := decoder.ReadToken(); err != nil {
 		return appError(err.Error())
 	}
+	_, tolerant := destination.Addr().Interface().(unknownFieldsIgnored)
 	fields := strictFields(destination.Type())
 	byName := make(map[string]strictField, len(fields))
 	for _, field := range fields {
@@ -192,6 +208,12 @@ func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) er
 		}
 		name := token.String()
 		field, known := byName[name]
+		if !known && tolerant {
+			if err := decoder.SkipValue(); err != nil {
+				return appError(err.Error())
+			}
+			continue
+		}
 		if !known {
 			return appError("unknown field `" + name + "`")
 		}
@@ -569,4 +591,266 @@ func (c *rfc3339Cursor) offset() int {
 		c.failed = true
 	}
 	return sign * (hours*3600 + minutes*60)
+}
+
+// jsonEqual compares two JSON values as serde_json does: objects regardless of member order,
+// arrays in order.
+func jsonEqual(a, b jsontext.Value) bool {
+	left, err := canonicalJSON(a)
+	if err != nil {
+		panic("a stored JSON value is valid: " + err.Error())
+	}
+	right, err := canonicalJSON(b)
+	if err != nil {
+		panic("a stored JSON value is valid: " + err.Error())
+	}
+	return left == right
+}
+
+// jsonText is value re-encoded compactly in the SPEC §6.4 JSON encoding with its member order
+// kept, as serde_json's to_string writes a decoded value.
+func jsonText(value jsontext.Value) string {
+	decoder := jsontext.NewDecoder(bytes.NewReader(value), jsontext.AllowDuplicateNames(true))
+	var out bytes.Buffer
+	encoder := jsontext.NewEncoder(&out, jsontext.AllowDuplicateNames(true))
+	for {
+		token, err := decoder.ReadToken()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			panic("a JSON value to store is valid: " + err.Error())
+		}
+		if err := encoder.WriteToken(token); err != nil {
+			panic("a valid JSON token re-encodes: " + err.Error())
+		}
+	}
+	return strings.TrimSuffix(out.String(), "\n")
+}
+
+var jsonNull = jsontext.Value("null")
+
+type jsonRawMember struct {
+	key   string
+	value jsontext.Value
+}
+
+// jsonMembers is the members of the object v in order; false when v is not an object.
+func jsonMembers(v jsontext.Value) ([]jsonRawMember, bool) {
+	if v.Kind() != '{' {
+		return nil, false
+	}
+	decoder := jsontext.NewDecoder(bytes.NewReader(v), jsontext.AllowDuplicateNames(true))
+	if _, err := decoder.ReadToken(); err != nil {
+		panic("a JSON object value is valid: " + err.Error())
+	}
+	members := []jsonRawMember{}
+	for decoder.PeekKind() != '}' {
+		name, err := decoder.ReadToken()
+		if err != nil {
+			panic("a JSON object value is valid: " + err.Error())
+		}
+		key := name.String()
+		value, err := decoder.ReadValue()
+		if err != nil {
+			panic("a JSON object value is valid: " + err.Error())
+		}
+		members = append(members, jsonRawMember{key: key, value: slices.Clone(value)})
+	}
+	return members, true
+}
+
+// jsonKeys is the distinct member names of the object v in first-occurrence order.
+func jsonKeys(v jsontext.Value) []string {
+	members, _ := jsonMembers(v)
+	keys := []string{}
+	for _, member := range members {
+		if !slices.Contains(keys, member.key) {
+			keys = append(keys, member.key)
+		}
+	}
+	return keys
+}
+
+// jsonLookup is the value of key in the object v, as serde_json's Value::get; a later duplicate
+// wins as serde_json decodes it.
+func jsonLookup(v jsontext.Value, key string) (jsontext.Value, bool) {
+	members, _ := jsonMembers(v)
+	var found jsontext.Value
+	present := false
+	for _, member := range members {
+		if member.key == key {
+			found, present = member.value, true
+		}
+	}
+	return found, present
+}
+
+// jsonIndex is serde_json's v[key]: null when v is not an object or has no such member.
+func jsonIndex(v jsontext.Value, key string) jsontext.Value {
+	if value, present := jsonLookup(v, key); present {
+		return value
+	}
+	return jsonNull
+}
+
+func jsonIsNull(v jsontext.Value) bool {
+	return v.Kind() == 'n'
+}
+
+func jsonString(v jsontext.Value) (string, bool) {
+	if v.Kind() != '"' {
+		return "", false
+	}
+	var text string
+	if err := json.Unmarshal(v, &text); err != nil {
+		panic("a JSON string value is valid: " + err.Error())
+	}
+	return text, true
+}
+
+// jsonIsString reports whether v is the JSON string text, as serde_json's Value == &str.
+func jsonIsString(v jsontext.Value, text string) bool {
+	decoded, ok := jsonString(v)
+	return ok && decoded == text
+}
+
+// jsonIntegerText is v's literal when serde_json decodes it as an integer rather than a float.
+func jsonIntegerText(v jsontext.Value) (string, bool) {
+	if v.Kind() != '0' {
+		return "", false
+	}
+	text := strings.TrimSpace(string(v))
+	return text, !strings.ContainsAny(text, ".eE") && text != "-0"
+}
+
+// jsonInt64 is serde_json's as_i64.
+func jsonInt64(v jsontext.Value) (int64, bool) {
+	text, ok := jsonIntegerText(v)
+	if !ok {
+		return 0, false
+	}
+	number, err := strconv.ParseInt(text, 10, 64)
+	return number, err == nil
+}
+
+// jsonUint64 is serde_json's as_u64.
+func jsonUint64(v jsontext.Value) (uint64, bool) {
+	text, ok := jsonIntegerText(v)
+	if !ok {
+		return 0, false
+	}
+	number, err := strconv.ParseUint(text, 10, 64)
+	return number, err == nil
+}
+
+// jsonValue is value encoded as a JSON value.
+func jsonValue(value any) jsontext.Value {
+	encoded, err := encodeJSON(value)
+	if err != nil {
+		panic("a runtime JSON value encodes: " + err.Error())
+	}
+	return encoded
+}
+
+// jsonWith is the object v with key set to value, as serde_json's v[key] = value: an existing
+// member keeps its position and a new one is appended.
+func jsonWith(v jsontext.Value, key string, value any) jsontext.Value {
+	members, ok := jsonMembers(v)
+	if !ok {
+		panic("a JSON member is set on an object")
+	}
+	object := make(jsonObject, 0, len(members)+1)
+	for _, member := range members {
+		object = append(object, jsonMember{key: member.key, value: member.value})
+	}
+	return jsonValue(object.with(key, value))
+}
+
+// jsonWithout is the object v without its key members.
+func jsonWithout(v jsontext.Value, key string) jsontext.Value {
+	members, ok := jsonMembers(v)
+	if !ok {
+		panic("a JSON member is removed from an object")
+	}
+	object := jsonObject{}
+	for _, member := range members {
+		if member.key != key {
+			object = append(object, jsonMember{key: member.key, value: member.value})
+		}
+	}
+	return jsonValue(object)
+}
+
+// with is o with key set to value: an existing member keeps its position and a new one is
+// appended.
+func (o jsonObject) with(key string, value any) jsonObject {
+	updated := slices.Clone(o)
+	for index := range updated {
+		if updated[index].key == key {
+			updated[index].value = value
+			return updated
+		}
+	}
+	return append(updated, jsonMember{key: key, value: value})
+}
+
+// jsonOptionalEqual compares two optional JSON values, nil meaning absent.
+func jsonOptionalEqual(a, b jsontext.Value) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return jsonEqual(a, b)
+}
+
+// jsonParse parses text as serde_json::from_str does: one JSON value with optional surrounding
+// whitespace, a repeated member name allowed.
+func jsonParse(text string) (jsontext.Value, bool) {
+	value := jsontext.Value(strings.Trim(text, " \t\r\n"))
+	if !value.IsValid(jsontext.AllowDuplicateNames(true)) {
+		return nil, false
+	}
+	return value, true
+}
+
+func jsonIsObject(v jsontext.Value) bool {
+	return v.Kind() == '{'
+}
+
+// jsonArray is the items of the array v in order; false when v is not an array.
+func jsonArray(v jsontext.Value) ([]jsontext.Value, bool) {
+	if v.Kind() != '[' {
+		return nil, false
+	}
+	decoder := jsontext.NewDecoder(bytes.NewReader(v), jsontext.AllowDuplicateNames(true))
+	if _, err := decoder.ReadToken(); err != nil {
+		panic("a JSON array value is valid: " + err.Error())
+	}
+	items := []jsontext.Value{}
+	for decoder.PeekKind() != ']' {
+		item, err := decoder.ReadValue()
+		if err != nil {
+			panic("a JSON array value is valid: " + err.Error())
+		}
+		items = append(items, slices.Clone(item))
+	}
+	return items, true
+}
+
+// jsonFloat64 is serde_json's as_f64: any number as the nearest float64.
+func jsonFloat64(v jsontext.Value) (float64, bool) {
+	if v.Kind() != '0' {
+		return 0, false
+	}
+	number, err := strconv.ParseFloat(strings.TrimSpace(string(v)), 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
+		panic("a JSON number literal parses as a float: " + err.Error())
+	}
+	return number, true
+}
+
+// jsonBool is serde_json's as_bool.
+func jsonBool(v jsontext.Value) (bool, bool) {
+	kind := v.Kind()
+	return kind == jsontext.KindTrue, kind == jsontext.KindTrue || kind == jsontext.KindFalse
 }

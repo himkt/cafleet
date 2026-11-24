@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -846,6 +848,24 @@ func inTransaction[T any](conn *dbConn, behavior transactionBehavior, operation 
 	return value, nil
 }
 
+// path is the connection's main database file, or empty for an in-memory database.
+func (c *dbConn) path() string {
+	return c.raw.Filename("main").String()
+}
+
+// canonicalizePath is path made absolute with every symbolic link resolved, as Rust's
+// fs::canonicalize; a missing target, or an empty path, is an error.
+func canonicalizePath(path string) (string, error) {
+	if path == "" {
+		return "", &os.PathError{Op: "canonicalize", Path: path, Err: syscall.ENOENT}
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(absolute)
+}
+
 // pathExists reports whether path names an existing file, following symbolic links as Rust's
 // Path::try_exists does: a missing target is false, every other failure an error.
 func pathExists(path string) (bool, error) {
@@ -1151,4 +1171,14 @@ func utf8SequenceLength(lead byte) int {
 	default:
 		return 1
 	}
+}
+
+// columnIndex is the index of the column named name in the statement's result.
+func (r sqlRow) columnIndex(name string) int {
+	for column := range r.stmt.ColumnCount() {
+		if r.stmt.ColumnName(column) == name {
+			return column
+		}
+	}
+	panic("a selected row has the column " + name)
 }

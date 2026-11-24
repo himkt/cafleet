@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,16 +37,96 @@ func parseLenient(value string) (time.Time, bool) {
 
 var deferredTerminationSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP}
 
+// signalSet holds signal n at bit n-1, as the kernel's sigset_t does.
+type signalSet uint64
+
+func signalSetOf(signals ...syscall.Signal) signalSet {
+	var set signalSet
+	for _, sig := range signals {
+		set |= 1 << (sig - 1)
+	}
+	return set
+}
+
+func (s signalSet) contains(sig syscall.Signal) bool {
+	return s&(1<<(sig-1)) != 0
+}
+
+var deferredTerminationSet = signalSetOf(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
 // terminationDeferral is the process-wide state behind every open deferTermination span; spans
 // nest, and only the outermost begin and end change signal handling.
 var terminationDeferral struct {
 	mu       sync.Mutex
 	depth    int
 	captured chan os.Signal
+	spawner  *maskedSpawner
+}
+
+// maskedSpawner runs requests on one goroutine locked to one OS thread whose blocked set holds
+// SIGINT, SIGTERM and SIGHUP (F5). A child forked on that thread inherits the blocked set, and no
+// other goroutine forks with it.
+type maskedSpawner struct {
+	requests chan func()
+	previous signalSet
+}
+
+func newMaskedSpawner() (*maskedSpawner, error) {
+	spawner := &maskedSpawner{requests: make(chan func())}
+	ready := make(chan error)
+	go func() {
+		runtime.LockOSThread()
+		previous, err := threadBlockSignals(deferredTerminationSet)
+		spawner.previous = previous
+		ready <- err
+		if err != nil {
+			return
+		}
+		for request := range spawner.requests {
+			request()
+		}
+		// The goroutine ends while still locked, so the runtime discards the thread instead
+		// of handing its mask to another goroutine.
+	}()
+	if err := <-ready; err != nil {
+		return nil, appErrorf("cannot defer termination signals: %s", errnoText(err))
+	}
+	return spawner, nil
+}
+
+// errnoText renders a failed system call as `<ERRNO>: <Description>`.
+func errnoText(err error) string {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		panic("a system call failed without an errno: " + err.Error())
+	}
+	description := errno.Error()
+	return unix.ErrnoName(errno) + ": " + strings.ToUpper(description[:1]) + description[1:]
+}
+
+// do runs f on the spawner's masked thread and waits for it.
+func (s *maskedSpawner) do(f func()) {
+	done := make(chan struct{})
+	s.requests <- func() {
+		defer close(done)
+		f()
+	}
+	<-done
+}
+
+// stop restores the thread's previous blocked set and ends the spawner.
+func (s *maskedSpawner) stop() {
+	var err error
+	s.do(func() { err = threadSetSignalMask(s.previous) })
+	close(s.requests)
+	if err != nil {
+		panic("restoring a mask previously returned by pthread_sigmask failed: " + err.Error())
+	}
 }
 
 // deferTermination captures SIGINT, SIGTERM and SIGHUP from its begin until its close; the first
-// signal captured meanwhile takes its default action when the outermost span closes.
+// signal captured meanwhile takes its default action when the outermost span closes. Children
+// the span starts inherit the blocked set (SPEC §6.5).
 type deferTermination struct {
 	closed bool
 }
@@ -53,6 +135,10 @@ func deferTerminationBegin() (*deferTermination, error) {
 	terminationDeferral.mu.Lock()
 	defer terminationDeferral.mu.Unlock()
 	if terminationDeferral.depth == 0 {
+		spawner, err := newMaskedSpawner()
+		if err != nil {
+			return nil, err
+		}
 		captured := make(chan os.Signal, len(deferredTerminationSignals))
 		for _, sig := range deferredTerminationSignals {
 			if !signal.Ignored(sig) {
@@ -60,19 +146,32 @@ func deferTerminationBegin() (*deferTermination, error) {
 			}
 		}
 		terminationDeferral.captured = captured
+		terminationDeferral.spawner = spawner
 	}
 	terminationDeferral.depth++
 	return &deferTermination{}, nil
 }
 
-// start starts cmd as a child of the span. SPEC §6.5 requires in-span children to inherit the
-// blocked SIGINT/SIGTERM/SIGHUP set; children started here do not yet, until the masked spawner
-// (F5) forks them from a locked, masked OS thread.
+// start starts cmd on the masked spawner thread, so the child inherits the blocked set.
 func (d *deferTermination) start(cmd *exec.Cmd) error {
 	if d.closed {
 		panic("a closed termination-deferral span starts no child")
 	}
-	return cmd.Start()
+	return startChild(cmd)
+}
+
+// startChild starts cmd. While a termination-deferral span is open the start runs on the
+// masked spawner thread, as in-span multiplexer clients and probes require (F5); otherwise it
+// runs on the calling goroutine.
+func startChild(cmd *exec.Cmd) error {
+	terminationDeferral.mu.Lock()
+	defer terminationDeferral.mu.Unlock()
+	if terminationDeferral.spawner == nil {
+		return cmd.Start()
+	}
+	var err error
+	terminationDeferral.spawner.do(func() { err = cmd.Start() })
+	return err
 }
 
 func (d *deferTermination) close() {
@@ -86,6 +185,8 @@ func (d *deferTermination) close() {
 		terminationDeferral.mu.Unlock()
 		return
 	}
+	terminationDeferral.spawner.stop()
+	terminationDeferral.spawner = nil
 	captured := terminationDeferral.captured
 	terminationDeferral.captured = nil
 	signal.Stop(captured)

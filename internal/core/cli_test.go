@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -656,6 +658,214 @@ func TestCli_DirectorOnlyGuard_DirectorOnlyCommandsRequireAPositiveFromMemberId(
 			zero[position+1] = "0"
 			if outcome := parseOutcome(t, tc.name+" with a zero caller", zero...); outcome.exitCode() != 2 {
 				t.Fatalf("%s: %q exits %d, want 2: %s", tc.name, zero, outcome.exitCode(), outcome.text)
+			}
+		})
+	}
+}
+
+func TestCli_OrdinaryCommandsPreserveRefusedWalDatabaseAndSidecarBytes(t *testing.T) {
+	t.Parallel()
+	const mutation = "PRAGMA application_id=42"
+	path := filepath.Join(t.TempDir(), "registry.db")
+	selected := settingsForDatabase(path)
+	conn := fileConn(t, selected.databaseURL)
+	if err := initialize(conn, selected.databaseURL); err != nil {
+		t.Fatal(err)
+	}
+	mustExecBatch(t, conn, "PRAGMA journal_mode=WAL")
+	mustExecBatch(t, conn, mutation)
+	mustExecBatch(t, conn, "BEGIN; SELECT * FROM cafleet_database")
+	before := walSnapshot(t, path)
+	for _, args := range [][]string{
+		{"fleet", "list", "--json"},
+		{"member", "press", "1", "--from-member-id", "1", "Enter"},
+		{"permission", "inspect", "1", "--event-id", "1", "--from-member-id", "1"},
+	} {
+		if err := dispatch(selected, mustParse(t, mutation, args...)); err == nil {
+			t.Fatalf("%s: %q succeeds on a refused database", mutation, args)
+		}
+		for _, file := range before {
+			data, err := os.ReadFile(file.path)
+			if err != nil || !bytes.Equal(data, file.bytes) {
+				t.Fatalf("%s: %q: %s changed: %v", mutation, args, file.path, err)
+			}
+		}
+	}
+	mustExecBatch(t, conn, "ROLLBACK")
+}
+
+func TestCli_OrdinaryCommandsRequireStorageWithoutCreatingAMissingFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "missing.db")
+	conn, err := invocationConnection(context.Background(), "sqlite:///"+path, newDeadline())
+	if err == nil {
+		closeConnection(t, conn)
+		t.Fatal("a missing database is refused")
+	}
+	if err.Error() != "no cafleet database; run 'cafleet setup'" {
+		t.Fatalf("invocationConnection = %v", err)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("the missing database stays absent: %v", err)
+	}
+}
+
+func TestCli_NativeCommandFilesStripOnlyOneTerminalLineEnding(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "command.txt")
+	write := func(source string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accepted := []struct {
+		source string
+		want   string
+	}{
+		{"printf '界🙂'", "printf '界🙂'"},
+		{"echo literal\n", "echo literal"},
+		{"echo literal\r\n", "echo literal"},
+		{"  echo literal  \n", "  echo literal  "},
+	}
+	for _, tc := range accepted {
+		write(tc.source)
+		if got, err := resolveCommandBody(none[string](), some(path)); err != nil || got != tc.want {
+			t.Fatalf("%q: resolveCommandBody = %q %v, want %q", tc.source, got, err, tc.want)
+		}
+	}
+	for _, source := range []string{"", "echo x\n\n", "echo x\r"} {
+		write(source)
+		if got, err := resolveCommandBody(none[string](), some(path)); err == nil {
+			t.Fatalf("%q: resolveCommandBody accepted %q", source, got)
+		}
+	}
+	if got, err := resolveCommandBody(some("echo literal"), none[string]()); err != nil || got != "echo literal" {
+		t.Fatalf("an inline command = %q %v", got, err)
+	}
+	if got, err := resolveCommandBody(some("echo literal\n"), none[string]()); err == nil {
+		t.Fatalf("an inline command keeps its line ending and is refused, got %q", got)
+	}
+}
+
+type directorOnlySubjects struct {
+	fixture     *brokerRuntimeFixture
+	input       int64
+	interaction int64
+}
+
+func newDirectorOnlySubjects(t *testing.T) directorOnlySubjects {
+	t.Helper()
+	fixture := newBrokerRuntimeFixture(t)
+	owner := fixture.activate(t)
+	input := fixture.input(t, owner, "prompt:guard", inputKindPrompt).inputID
+	interaction, ok := fixture.open(t, owner).interactionID.get()
+	if !ok {
+		t.Fatal("the opening event creates an interaction")
+	}
+	return directorOnlySubjects{fixture: fixture, input: input, interaction: interaction}
+}
+
+func (s directorOnlySubjects) commands(caller int64) []directorOnlyCase {
+	cases := directorOnlyCommands("0", strconv.FormatInt(caller, 10))
+	for index, tc := range cases {
+		subject := s.fixture.member
+		switch tc.name {
+		case "permission respond":
+			subject = s.interaction
+		case "input reconcile":
+			subject = s.input
+		}
+		args := slices.Clone(tc.args)
+		args[2] = strconv.FormatInt(subject, 10)
+		cases[index].args = args
+	}
+	return cases
+}
+
+func (s directorOnlySubjects) check(t *testing.T, tc directorOnlyCase) error {
+	t.Helper()
+	guarded, ok := directorOnlyOf(mustParse(t, tc.name, tc.args...))
+	if !ok {
+		t.Fatalf("%s: %q is guarded", tc.name, tc.args)
+	}
+	return requireDirector(s.fixture.conn, guarded)
+}
+
+func directorOnlyGuardMessage(name string, caller, fleet int64) string {
+	return fmt.Sprintf("'cafleet %s' is a Director-only command and member %d is not the root Director of fleet %d; send the request to your Director.", name, caller, fleet)
+}
+
+func TestCli_DirectorOnlyGuard_RequireDirectorAdmitsTheRootDirectorOfEachSubjectsFleet(t *testing.T) {
+	t.Parallel()
+	subjects := newDirectorOnlySubjects(t)
+	for _, tc := range subjects.commands(subjects.fixture.director) {
+		if err := subjects.check(t, tc); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+	}
+	for _, args := range directorOnlyUnguardedCommands {
+		if guarded, ok := directorOnlyOf(mustParse(t, strings.Join(args, " "), args...)); ok {
+			t.Fatalf("%q is guarded as %#v", args, guarded)
+		}
+	}
+}
+
+func TestCli_DirectorOnlyGuard_RequireDirectorRefusesAnyOtherCallerNamingTheSubjectsFleet(t *testing.T) {
+	t.Parallel()
+	subjects := newDirectorOnlySubjects(t)
+	otherFleet, otherDirector := createFleetFixture(t, subjects.fixture.conn, "other-fleet")
+	if otherFleet == subjects.fixture.fleet {
+		t.Fatal("the other fleet is distinct")
+	}
+	for _, caller := range []int64{subjects.fixture.member, otherDirector, 999_999} {
+		for _, tc := range subjects.commands(caller) {
+			err := subjects.check(t, tc)
+			var failure *cafleetError
+			if !errors.As(err, &failure) || failure.exitCode() != 1 || failure.message() != directorOnlyGuardMessage(tc.name, caller, subjects.fixture.fleet) {
+				t.Fatalf("%s refuses member %d: %v", tc.name, caller, err)
+			}
+		}
+	}
+}
+
+func TestCli_DirectorOnlyGuard_RequireDirectorRefusesTheDirectorOfADeletedFleet(t *testing.T) {
+	t.Parallel()
+	subjects := newDirectorOnlySubjects(t)
+	if _, err := subjects.fixture.conn.execute("UPDATE fleets SET deleted_at='2026-11-07T00:00:00+00:00' WHERE fleet_id=?1", subjects.fixture.fleet); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range subjects.commands(subjects.fixture.director) {
+		if strings.HasPrefix(tc.name, "member ") {
+			continue
+		}
+		want := directorOnlyGuardMessage(tc.name, subjects.fixture.director, subjects.fixture.fleet)
+		if err := subjects.check(t, tc); err == nil || err.Error() != want {
+			t.Fatalf("%s: requireDirector = %v, want %q", tc.name, err, want)
+		}
+	}
+}
+
+func TestCli_DirectorOnlyGuard_RequireDirectorLeavesAnUnknownSubjectToTheCommandsOwnNotFoundError(t *testing.T) {
+	t.Parallel()
+	subjects := newDirectorOnlySubjects(t)
+	for _, tc := range directorOnlyCommands("999999", strconv.FormatInt(subjects.fixture.member, 10)) {
+		if err := subjects.check(t, tc); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+	}
+}
+
+func TestCli_DirectorOnlyGuard_RunArgsRefusesAMemberCallerWithExitOneAndNothingOnStdout(t *testing.T) {
+	t.Parallel()
+	subjects := newDirectorOnlySubjects(t)
+	for _, tc := range subjects.commands(subjects.fixture.member) {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			outcome := runCliChild(t, append([]string{"--database-url", subjects.fixture.url}, tc.args...)...)
+			want := "Error: " + directorOnlyGuardMessage(tc.name, subjects.fixture.member, subjects.fixture.fleet) + "\n"
+			if outcome.code != 1 || outcome.stderr != want || outcome.stdout != "" {
+				t.Fatalf("%s: exit %d stdout %q stderr %q, want exit 1 and %q", tc.name, outcome.code, outcome.stdout, outcome.stderr, want)
 			}
 		})
 	}

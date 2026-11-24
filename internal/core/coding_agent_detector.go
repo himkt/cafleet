@@ -205,8 +205,8 @@ type nullableStrings struct {
 	set    bool
 }
 
-// rawEvidence is the JSON object an observation records, with its members in this order.
-type rawEvidence struct {
+// observationEvidence is the JSON object an observation records, with its members in this order.
+type observationEvidence struct {
 	backend       string
 	nativeVersion opt[string]
 	ruleID        string
@@ -218,7 +218,7 @@ type rawEvidence struct {
 	truncated     bool
 }
 
-func (e rawEvidence) MarshalJSONTo(encoder *jsontext.Encoder) error {
+func (e observationEvidence) MarshalJSONTo(encoder *jsontext.Encoder) error {
 	var choices any
 	if e.choices.set {
 		choices = e.choices.values
@@ -244,7 +244,7 @@ type screenObservation struct {
 	ruleID                 string
 	matchEvidence          matchEvidence
 	matchedRegion          opt[screenRegion]
-	rawEvidence            rawEvidence
+	rawEvidence            observationEvidence
 	fingerprint            *semanticFingerprint
 	verifiedNoninteraction bool
 	outputSeq              uint64
@@ -748,7 +748,7 @@ func sortedObject(values map[string]string) jsonObject {
 	return object
 }
 
-func mustEncodeJSON(v any) string {
+func focusJSON(v any) string {
 	encoded, err := encodeJSON(v)
 	if err != nil {
 		panic("focus strings serialize: " + err.Error())
@@ -792,7 +792,7 @@ func extract(r *rule, lines []logicalLine, c candidate) (matched, bool) {
 			return matched{}, false
 		}
 		value := capturedValues[0]
-		focuses[m.id] = mustEncodeJSON([]any{m.id, value.full, sortedObject(value.named)})
+		focuses[m.id] = focusJSON([]any{m.id, value.full, sortedObject(value.named)})
 		if m.scope == matcherScopeLine {
 			spans[m.id] = value.located
 			matcherLines[m.id] = value.line
@@ -912,7 +912,7 @@ func markerLayout(r *rule, m *matched) string {
 		}
 		layout = append(layout, []any{ch.id, line})
 	}
-	return mustEncodeJSON(layout)
+	return focusJSON(layout)
 }
 
 // markerFocus is the one choice whose label matcher matched the focus matcher's row.
@@ -967,7 +967,7 @@ func answerMatchOf(screen *screenSnapshot, observed *screenObservation, r *rule,
 	}
 	focus := captureText
 	if styled {
-		focus = mustEncodeJSON([]any{captureText, focusedChoice})
+		focus = focusJSON([]any{captureText, focusedChoice})
 	}
 	choiceIndex := slices.IndexFunc(r.choices, func(c choice) bool { return c.id == plan.choiceID })
 	if choiceIndex < 0 {
@@ -990,7 +990,7 @@ func answerMatchOf(screen *screenSnapshot, observed *screenObservation, r *rule,
 
 // withMatchedRule is base with the fields every matched rule records: its id, operation and
 // excerpt.
-func withMatchedRule(base rawEvidence, r *rule, operation opt[string], excerpt string) rawEvidence {
+func withMatchedRule(base observationEvidence, r *rule, operation opt[string], excerpt string) observationEvidence {
 	evidence := base
 	evidence.ruleID = r.id
 	evidence.operation = operation
@@ -1120,7 +1120,7 @@ func (d *detector) observeWhere(screen *screenSnapshot, selected func(*profile, 
 		kind:          observationKindUnknown,
 		ruleID:        "unmatched-screen",
 		matchEvidence: matchEvidenceAbsent,
-		rawEvidence: rawEvidence{
+		rawEvidence: observationEvidence{
 			backend: d.backend.name(), nativeVersion: d.version, ruleID: "unmatched-screen", screenSeq: screen.screenSeq,
 		},
 		outputSeq: screen.screenSeq,

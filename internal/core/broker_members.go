@@ -219,9 +219,20 @@ func getMember(ctx context.Context, conn *dbConn, memberID, fleetID int64) (opt[
 	if _, err := requireLiveFleet(ctx, conn, fleetID); err != nil {
 		return none[memberRecord](), err
 	}
-	return queryRowOptional(conn,
+	found, err := queryRowOptional(conn,
 		"SELECT "+memberColumns()+" "+memberFrom+"\n                 WHERE m.member_id=?1 AND m.fleet_id=?2 AND m.status='active'",
 		[]any{memberID, fleetID}, memberRow)
+	if err != nil {
+		return none[memberRecord](), err
+	}
+	member, set := found.get()
+	if !set {
+		return found, nil
+	}
+	if member.runtime, err = memberRuntime(ctx, conn, memberID); err != nil {
+		return none[memberRecord](), err
+	}
+	return some(member), nil
 }
 
 // fleetMembership is a member's fleet and registration status.

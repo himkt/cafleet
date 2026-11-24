@@ -182,6 +182,7 @@ type memberRecord struct {
 	status       memberStatus
 	kind         memberKind
 	placement    placement
+	runtime      opt[*runtimeSnapshot]
 }
 
 type memberActivity struct {

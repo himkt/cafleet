@@ -258,7 +258,7 @@ func jpointerSet(root any, pointer string, value any) {
 func jobject(value any) *jsonObj {
 	object, ok := value.(*jsonObj)
 	if !ok {
-		panic(fmt.Sprintf("%s is not an object", jsonText(value)))
+		panic(fmt.Sprintf("%s is not an object", testJSONText(value)))
 	}
 	return object
 }
@@ -266,7 +266,7 @@ func jobject(value any) *jsonObj {
 func jarray(value any) *jsonArr {
 	array, ok := value.(*jsonArr)
 	if !ok {
-		panic(fmt.Sprintf("%s is not an array", jsonText(value)))
+		panic(fmt.Sprintf("%s is not an array", testJSONText(value)))
 	}
 	return array
 }
@@ -401,7 +401,7 @@ func jsonBytes(value any) []byte {
 	return bytes.TrimSuffix(out.Bytes(), []byte("\n"))
 }
 
-func jsonText(value any) string { return string(jsonBytes(value)) }
+func testJSONText(value any) string { return string(jsonBytes(value)) }
 
 // parseJSONValue parses one JSON text in member order. A repeated key keeps its first position
 // and its last value, as serde_json's preserve_order map does; duplicate reports the first key
@@ -478,7 +478,7 @@ func parseJSONFrom(decoder *jsontext.Decoder) (any, opt[string], error) {
 	}
 }
 
-func mustJSON(text string) any {
+func parseTestJSON(text string) any {
 	value, _, err := parseJSONValue([]byte(text))
 	if err != nil {
 		panic(fmt.Sprintf("test JSON %s: %v", text, err))
@@ -490,15 +490,15 @@ func mustJSON(text string) any {
 func jsonf(format string, args ...any) any {
 	texts := make([]any, len(args))
 	for index, arg := range args {
-		texts[index] = jsonText(arg)
+		texts[index] = testJSONText(arg)
 	}
-	return mustJSON(fmt.Sprintf(format, texts...))
+	return parseTestJSON(fmt.Sprintf(format, texts...))
 }
 
 func TestCodingAgentCatalog_JSONTestValuesKeepMemberOrderAndSerdeIndexing(t *testing.T) {
 	t.Parallel()
-	value := mustJSON(`{"b":1,"a":{"x":[true,null,"s"]},"n":1.5,"big":18446744073709551615}`)
-	if got := jsonText(value); got != `{"b":1,"a":{"x":[true,null,"s"]},"n":1.5,"big":18446744073709551615}` {
+	value := parseTestJSON(`{"b":1,"a":{"x":[true,null,"s"]},"n":1.5,"big":18446744073709551615}`)
+	if got := testJSONText(value); got != `{"b":1,"a":{"x":[true,null,"s"]},"n":1.5,"big":18446744073709551615}` {
 		t.Fatalf("round trip %s", got)
 	}
 	if got := jget(value, "a", "x", 2); got != "s" {
@@ -509,21 +509,21 @@ func TestCodingAgentCatalog_JSONTestValuesKeepMemberOrderAndSerdeIndexing(t *tes
 	}
 	jset(value, "new", "c", "d")
 	jset(value, 2, "b")
-	if got := jsonText(value); got != `{"b":2,"a":{"x":[true,null,"s"]},"n":1.5,"big":18446744073709551615,"c":{"d":"new"}}` {
+	if got := testJSONText(value); got != `{"b":2,"a":{"x":[true,null,"s"]},"n":1.5,"big":18446744073709551615,"c":{"d":"new"}}` {
 		t.Fatalf("after jset %s", got)
 	}
 	jpointerSet(value, "/a/x/1", false)
 	if got, ok := jpointer(value, "/a/x/1"); !ok || got != false {
 		t.Fatalf("jpointer %v %v", got, ok)
 	}
-	if !jequal(mustJSON(`{"p":1,"q":[2]}`), mustJSON(`{"q":[2],"p":1}`)) || jequal(mustJSON(`[1,2]`), mustJSON(`[2,1]`)) {
+	if !jequal(parseTestJSON(`{"p":1,"q":[2]}`), parseTestJSON(`{"q":[2],"p":1}`)) || jequal(parseTestJSON(`[1,2]`), parseTestJSON(`[2,1]`)) {
 		t.Fatal("jequal compares objects as maps and arrays in order")
 	}
 	_, duplicate, err := parseJSONValue([]byte(`{"a":{"k":1,"k":2},"a":3}`))
 	if err != nil || duplicate != some("k") {
 		t.Fatalf("duplicate %v, %v", duplicate, err)
 	}
-	if got := jsonText(jsonf(`{"id":%s,"rows":%s}`, "a\x1b\"b", math.MaxUint16)); got != `{"id":"a\u001b\"b","rows":65535}` {
+	if got := testJSONText(jsonf(`{"id":%s,"rows":%s}`, "a\x1b\"b", math.MaxUint16)); got != `{"id":"a\u001b\"b","rows":65535}` {
 		t.Fatalf("jsonf %s", got)
 	}
 }
@@ -1158,7 +1158,7 @@ func serdeOptional(object *jsonObj, field string) (any, bool) {
 func serdeObject(value any) (*jsonObj, error) {
 	object, ok := value.(*jsonObj)
 	if !ok {
-		return nil, invalidProfile("invalid type: " + jsonText(value) + ", expected a map")
+		return nil, invalidProfile("invalid type: " + testJSONText(value) + ", expected a map")
 	}
 	return object, nil
 }
@@ -1176,7 +1176,7 @@ func serdeVariant[T any](value any, names []string, values []T) (T, error) {
 	var zero T
 	text, ok := value.(string)
 	if !ok {
-		return zero, invalidProfile("invalid type: " + jsonText(value) + ", expected a variant")
+		return zero, invalidProfile("invalid type: " + testJSONText(value) + ", expected a variant")
 	}
 	if index := slices.Index(names, text); index >= 0 {
 		return values[index], nil
@@ -1199,7 +1199,7 @@ func serdeFraming(value any) (literalFraming, error) {
 func serdeNonZero(value any) (uint64, error) {
 	number, ok := ju64(value)
 	if !ok || number == 0 {
-		return 0, invalidProfile("invalid value: " + jsonText(value) + ", expected a nonzero u64")
+		return 0, invalidProfile("invalid value: " + testJSONText(value) + ", expected a nonzero u64")
 	}
 	return number, nil
 }
@@ -1207,7 +1207,7 @@ func serdeNonZero(value any) (uint64, error) {
 func serdeNonBlank(value any) (string, error) {
 	text, ok := value.(string)
 	if !ok {
-		return "", invalidProfile("invalid type: " + jsonText(value) + ", expected a string")
+		return "", invalidProfile("invalid type: " + testJSONText(value) + ", expected a string")
 	}
 	if strings.TrimSpace(text) == "" {
 		return "", invalidProfile("nonblank text required")
@@ -1219,7 +1219,7 @@ func serdeNonBlank(value any) (string, error) {
 func serdeIDs(value any) ([]string, error) {
 	items, ok := value.(*jsonArr)
 	if !ok {
-		return nil, invalidProfile("invalid type: " + jsonText(value) + ", expected a sequence")
+		return nil, invalidProfile("invalid type: " + testJSONText(value) + ", expected a sequence")
 	}
 	var ids []string
 	for _, item := range items.items {
@@ -1477,7 +1477,7 @@ func serdeProvenanceProfile(file *provenanceFile, value any) error {
 	}
 	rules, ok := rawRules.(*jsonArr)
 	if !ok {
-		return invalidProfile("invalid type: " + jsonText(rawRules) + ", expected a sequence")
+		return invalidProfile("invalid type: " + testJSONText(rawRules) + ", expected a sequence")
 	}
 	for _, item := range rules.items {
 		object, err := serdeObject(item)
@@ -1497,7 +1497,7 @@ func serdeProvenanceProfile(file *provenanceFile, value any) error {
 		}
 		text, ok := raw.(string)
 		if !ok {
-			return invalidProfile("invalid type: " + jsonText(raw) + ", expected a string")
+			return invalidProfile("invalid type: " + testJSONText(raw) + ", expected a string")
 		}
 		if r.observation, err = observationKindParse(text); err != nil {
 			return invalidProfile(err.Error())
@@ -1534,7 +1534,7 @@ func serdeProvenanceProfile(file *provenanceFile, value any) error {
 	}
 	answers, ok := rawAnswers.(*jsonArr)
 	if !ok {
-		return invalidProfile("invalid type: " + jsonText(rawAnswers) + ", expected a sequence")
+		return invalidProfile("invalid type: " + testJSONText(rawAnswers) + ", expected a sequence")
 	}
 	for _, item := range answers.items {
 		object, err := serdeObject(item)
@@ -1569,7 +1569,7 @@ func serdeProvenanceProfile(file *provenanceFile, value any) error {
 		}
 		multiplexers, ok := value.(*jsonArr)
 		if !ok {
-			return invalidProfile("invalid type: " + jsonText(value) + ", expected a sequence")
+			return invalidProfile("invalid type: " + testJSONText(value) + ", expected a sequence")
 		}
 		for _, item := range multiplexers.items {
 			multiplexer, err := serdeMultiplexer(item)
@@ -1634,7 +1634,7 @@ func serdeProvenanceFiles(files any) ([]provenanceFile, error) {
 			}
 			text, ok := version.(string)
 			if !ok {
-				return nil, invalidProfile("invalid type: " + jsonText(version) + ", expected a string")
+				return nil, invalidProfile("invalid type: " + testJSONText(version) + ", expected a string")
 			}
 			if _, ok := nativeVersionParse(text); !ok {
 				return nil, invalidProfile("canonical SemVer version required")
@@ -1643,7 +1643,7 @@ func serdeProvenanceFiles(files any) ([]provenanceFile, error) {
 			if evidence, present := screen.get("composer_evidence"); present {
 				records, ok := evidence.(*jsonArr)
 				if !ok {
-					return nil, invalidProfile("invalid type: " + jsonText(evidence) + ", expected a sequence")
+					return nil, invalidProfile("invalid type: " + testJSONText(evidence) + ", expected a sequence")
 				}
 				decodedScreen.hasEvidence = true
 				for _, record := range records.items {
@@ -1908,7 +1908,7 @@ func preSubmitRecords(screen any) ([]preSubmitRecord, error) {
 	}
 	array, ok := records.(*jsonArr)
 	if !ok {
-		return nil, invalidProfile("invalid type: " + jsonText(records) + ", expected a sequence")
+		return nil, invalidProfile("invalid type: " + testJSONText(records) + ", expected a sequence")
 	}
 	var out []preSubmitRecord
 	for _, raw := range array.items {
@@ -2333,7 +2333,7 @@ func bundledFixture(id string) string {
 }
 
 func syntheticDefinitions() any {
-	return mustJSON(`{"codex":{
+	return parseTestJSON(`{"codex":{
 		"schema_version":1,"backend":"codex",
 		"profile":{
 			"rules":[{"id":"synthetic-permission","priority":100,"observation":"permission_request",
@@ -2588,13 +2588,13 @@ func simpleDefinition(kind string, verified bool) any {
 	jset(rule, kind, "observation")
 	jset(rule, "^Synthetic state$", "region", "start_pattern")
 	jset(rule, "^State end$", "region", "end_pattern")
-	jset(rule, mustJSON(`[{"id":"state","scope":"line","pattern":"^Synthetic state$"}]`), "matchers")
-	jset(rule, mustJSON(`{"operation":null,"choices":[]}`), "extract")
+	jset(rule, parseTestJSON(`[{"id":"state","scope":"line","pattern":"^Synthetic state$"}]`), "matchers")
+	jset(rule, parseTestJSON(`{"operation":null,"choices":[]}`), "extract")
 	jset(rule, verified, "verified_noninteraction")
 	declaration := jo("rule_ids", ja("synthetic-"+kind), "fixture_ids", ja(syntheticFixture))
 	composerKind := strings.HasPrefix(kind, "composer_")
 	if composerKind {
-		declaration.set("submission", mustJSON(`{
+		declaration.set("submission", parseTestJSON(`{
 			"prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":["synthetic-permission-1"]},
 			"exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":["synthetic-permission-1"]}
 		}`))
@@ -2929,7 +2929,7 @@ func TestCodingAgentCatalog_ComposerReliability_ComposerPlansAcceptPlainOrBracke
 	for _, framing := range []string{"plain", "bracketed_paste"} {
 		for _, limit := range []any{nil, jo("unit", "bytes", "max", 1), jo("unit", "scalars", "max", 1024)} {
 			if _, err := loadTestCatalog(framedDefinition(framing, limit)); err != nil {
-				t.Fatalf("%s: %s: %v", framing, jsonText(limit), err)
+				t.Fatalf("%s: %s: %v", framing, testJSONText(limit), err)
 			}
 		}
 	}
@@ -2940,14 +2940,14 @@ func TestCodingAgentCatalog_ComposerReliability_ComposerPlansRejectUnknownFramin
 	for _, framing := range []any{nil, true, 1, "", "paste"} {
 		value := framedDefinition("plain", nil)
 		jset(value, framing, "codex", "profile", "capabilities", "composer", "submission", "prompt", "literal_framing")
-		assertLoadRejected(t, jsonText(framing), value)
+		assertLoadRejected(t, testJSONText(framing), value)
 	}
 	for _, limit := range []string{
 		`{}`, `{"unit":"bytes"}`, `{"max":1}`, `{"unit":"cells","max":1}`, `{"unit":"bytes","max":0}`,
 		`{"unit":"scalars","max":-1}`, `{"unit":"bytes","max":1.5}`, `{"unit":"bytes","max":"1"}`,
 		`{"unit":"bytes","max":true}`, `{"unit":"bytes","max":1,"extra":true}`, `false`, `[]`,
 	} {
-		assertLoadRejected(t, limit, framedDefinition("plain", mustJSON(limit)))
+		assertLoadRejected(t, limit, framedDefinition("plain", parseTestJSON(limit)))
 	}
 }
 
@@ -3181,7 +3181,7 @@ func TestCodingAgentCatalog_ComposerEvidence_PlainLimitEvidenceMatchesTheUnitBou
 			for _, limit := range []any{jo("unit", unit, "max", 512), jo("unit", otherUnit, "max", 1024), nil} {
 				value := jclone(baseline)
 				jset(witness(value, operation, multiplexer, "plain_limit"), limit, "composer_evidence", 0, "plain_literal_limit")
-				assertProvenanceRejected(t, operation+"/"+multiplexer+" "+jsonText(limit), value)
+				assertProvenanceRejected(t, operation+"/"+multiplexer+" "+testJSONText(limit), value)
 			}
 		}
 	}
@@ -3219,7 +3219,7 @@ func TestCodingAgentCatalog_ComposerEvidence_AdditionalSelectedOperationClaimsMu
 			for _, record := range mismatched {
 				value := jclone(baseline)
 				jset(value, ja(record), "codex", "screens", syntheticFixture, "composer_evidence")
-				assertProvenanceRejected(t, "the additional selected claim contradicts its plan: "+jsonText(record), value)
+				assertProvenanceRejected(t, "the additional selected claim contradicts its plan: "+testJSONText(record), value)
 			}
 		}
 	}
@@ -3263,7 +3263,7 @@ func TestCodingAgentCatalog_ComposerEvidence_MissingPlainLimitKeyIsRejectedEvenW
 	t.Parallel()
 	value := unlimitedDefinition()
 	mustValidateProvenance(t, "unlimited", value)
-	jset(value, mustJSON(`[{"operation":"prompt","multiplexer":"tmux","kind":"plain_limit"}]`), "codex", "screens", syntheticFixture, "composer_evidence")
+	jset(value, parseTestJSON(`[{"operation":"prompt","multiplexer":"tmux","kind":"plain_limit"}]`), "codex", "screens", syntheticFixture, "composer_evidence")
 	assertProvenanceRejected(t, "a plain_limit record without its limit", value)
 }
 
@@ -3271,7 +3271,7 @@ func TestCodingAgentCatalog_ComposerEvidence_EvidenceRecordsHaveStrictRequiredFi
 	t.Parallel()
 	baseline := measuredDefinition()
 	mustValidateProvenance(t, "baseline", baseline)
-	framing := mustJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"framing","literal_framing":"bracketed_paste"}`)
+	framing := parseTestJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"framing","literal_framing":"bracketed_paste"}`)
 	var malformed []any
 	for _, field := range []string{"operation", "multiplexer", "kind", "literal_framing"} {
 		record := jclone(framing)
@@ -3289,16 +3289,16 @@ func TestCodingAgentCatalog_ComposerEvidence_EvidenceRecordsHaveStrictRequiredFi
 		malformed = append(malformed, record)
 	}
 	for _, limit := range []string{`{"unit":"bytes","max":0}`, `{"unit":"characters","max":1}`, `{"unit":"bytes","max":1,"extra":true}`} {
-		malformed = append(malformed, jo("operation", "prompt", "multiplexer", "tmux", "kind", "plain_limit", "plain_literal_limit", mustJSON(limit)))
+		malformed = append(malformed, jo("operation", "prompt", "multiplexer", "tmux", "kind", "plain_limit", "plain_literal_limit", parseTestJSON(limit)))
 	}
 	for _, kind := range []string{"post_submit", "unsubmitted_literal"} {
 		malformed = append(malformed, jo("operation", "prompt", "multiplexer", "tmux", "kind", kind, "literal_framing", "plain"))
 	}
-	malformed = append(malformed, mustJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"unsubmitted_literal","expected_literal":"typed","literal_framing":"plain"}`))
+	malformed = append(malformed, parseTestJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"unsubmitted_literal","expected_literal":"typed","literal_framing":"plain"}`))
 	for _, record := range malformed {
 		value := jclone(baseline)
 		jset(value, ja(record), "codex", "screens", syntheticFixture, "composer_evidence")
-		assertProvenanceRejected(t, jsonText(record), value)
+		assertProvenanceRejected(t, testJSONText(record), value)
 	}
 }
 
@@ -3310,19 +3310,19 @@ func withEvidenceRecord(record any) any {
 
 func TestCodingAgentCatalog_ComposerEvidence_UnsubmittedLiteralRecordsRequireAnExpectedLiteralAndOtherKindsRefuseOne(t *testing.T) {
 	t.Parallel()
-	unsubmitted := mustJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"unsubmitted_literal","expected_literal":"typed"}`)
-	mustValidateProvenance(t, jsonText(unsubmitted), withEvidenceRecord(unsubmitted))
+	unsubmitted := parseTestJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"unsubmitted_literal","expected_literal":"typed"}`)
+	mustValidateProvenance(t, testJSONText(unsubmitted), withEvidenceRecord(unsubmitted))
 	missing := jclone(unsubmitted)
 	jobject(missing).remove("expected_literal")
 	assertProvenanceRejected(t, "an unsubmitted_literal record without expected_literal", withEvidenceRecord(missing))
-	framing := mustJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"framing","literal_framing":"bracketed_paste"}`)
-	mustValidateProvenance(t, jsonText(framing), withEvidenceRecord(framing))
+	framing := parseTestJSON(`{"operation":"prompt","multiplexer":"tmux","kind":"framing","literal_framing":"bracketed_paste"}`)
+	mustValidateProvenance(t, testJSONText(framing), withEvidenceRecord(framing))
 	for _, misplaced := range []string{
 		`{"operation":"prompt","multiplexer":"tmux","kind":"framing","literal_framing":"bracketed_paste","expected_literal":"! true"}`,
 		`{"operation":"prompt","multiplexer":"tmux","kind":"plain_limit","plain_literal_limit":null,"expected_literal":"typed"}`,
 		`{"operation":"prompt","multiplexer":"tmux","kind":"post_submit","expected_literal":"typed"}`,
 	} {
-		assertProvenanceRejected(t, misplaced, withEvidenceRecord(mustJSON(misplaced)))
+		assertProvenanceRejected(t, misplaced, withEvidenceRecord(parseTestJSON(misplaced)))
 	}
 }
 
@@ -3332,14 +3332,14 @@ func TestCodingAgentCatalog_ComposerEvidence_AnExpectedLiteralIsAStringOrAWellFo
 		return jo("operation", "exec", "multiplexer", "herdr", "kind", "unsubmitted_literal", "expected_literal", literal)
 	}
 	for _, accepted := range []string{`""`, `{"repeat":"a","count":1000,"prefix":"! "}`, `{"repeat":"あ","count":4000,"prefix":""}`} {
-		mustValidateProvenance(t, accepted, withEvidenceRecord(record(mustJSON(accepted))))
+		mustValidateProvenance(t, accepted, withEvidenceRecord(record(parseTestJSON(accepted))))
 	}
 	for _, malformed := range []string{
 		`7`, `null`, `["a"]`, `{"repeat":"a","count":3}`, `{"repeat":"a","prefix":""}`, `{"count":3,"prefix":""}`,
 		`{"repeat":"a","count":0,"prefix":""}`, `{"repeat":"a","count":-1,"prefix":""}`, `{"repeat":"a","count":"3","prefix":""}`,
 		`{"repeat":"","count":3,"prefix":""}`, `{"repeat":"a","count":3,"prefix":"","extra":true}`,
 	} {
-		assertProvenanceRejected(t, malformed, withEvidenceRecord(record(mustJSON(malformed))))
+		assertProvenanceRejected(t, malformed, withEvidenceRecord(record(parseTestJSON(malformed))))
 	}
 }
 
@@ -3383,7 +3383,7 @@ func TestCodingAgentCatalog_ComposerEvidence_SyntheticTestHelperPreservesExplici
 		ids.items = slices.DeleteFunc(ids.items, func(id any) bool { return id == syntheticFixture })
 	}
 	mustLoadCatalog(t, value)
-	jset(witness(value, "prompt", "tmux", "post_submit"), mustJSON(`[{"operation":"exec","multiplexer":"tmux","kind":"post_submit"}]`), "composer_evidence")
+	jset(witness(value, "prompt", "tmux", "post_submit"), parseTestJSON(`[{"operation":"exec","multiplexer":"tmux","kind":"post_submit"}]`), "composer_evidence")
 	assertLoadRejected(t, "a replaced witness", value)
 }
 
@@ -3760,7 +3760,7 @@ func TestCodingAgentCatalog_BundledBackendFiles_TheBundledCatalogGuardAcceptsVal
 		{
 			name: "a screen id repeated within one file's text",
 			load: func() (*profileCatalog, error) {
-				text := strings.ReplaceAll(jsonText(jget(newNativeFixtureCatalog().files, "codex")),
+				text := strings.ReplaceAll(testJSONText(jget(newNativeFixtureCatalog().files, "codex")),
 					`"`+nativeRegressionFixture+`"`, `"`+nativePrimaryFixture+`"`)
 				file, err := parseBundledText([]byte(text))
 				if err != nil {
@@ -3932,8 +3932,8 @@ func TestCodingAgentCatalog_BundledBackendFiles_CellBackgroundsOutsideTheReviewe
 	run := func(row, start, end int, bg any) any {
 		return jo("row", row, "start_col", start, "end_col", end, "bg", jclone(bg))
 	}
-	rgb := mustJSON(`{"kind":"rgb","r":1,"g":2,"b":3}`)
-	indexed := mustJSON(`{"kind":"indexed","index":255}`)
+	rgb := parseTestJSON(`{"kind":"rgb","r":1,"g":2,"b":3}`)
+	indexed := parseTestJSON(`{"kind":"indexed","index":255}`)
 	load := func(runs any) opt[string] {
 		fixture := maskedNativeFixtureCatalog()
 		fixture.changePrimary(func(s any) { jset(s, runs, "cell_backgrounds") })
@@ -3946,16 +3946,16 @@ func TestCodingAgentCatalog_BundledBackendFiles_CellBackgroundsOutsideTheReviewe
 		name string
 		runs any
 	}{
-		{"not an array", mustJSON(`{"row":0}`)},
+		{"not an array", parseTestJSON(`{"row":0}`)},
 		{"run missing a field", ja(jo("row", 0, "start_col", 0, "bg", jclone(rgb)))},
 		{"row below the geometry", ja(run(24, 0, 4, rgb))},
 		{"start past the width", ja(run(0, 81, 82, rgb))},
 		{"end past the width", ja(run(0, 0, 81, rgb))},
 		{"empty run", ja(run(0, 4, 4, rgb))},
 		{"masked row", ja(run(5, 0, 4, rgb))},
-		{"default colour", ja(run(0, 0, 4, mustJSON(`{"kind":"default"}`)))},
-		{"indexed colour out of range", ja(run(0, 0, 4, mustJSON(`{"kind":"indexed","index":256}`)))},
-		{"rgb channel out of range", ja(run(0, 0, 4, mustJSON(`{"kind":"rgb","r":256,"g":0,"b":0}`)))},
+		{"default colour", ja(run(0, 0, 4, parseTestJSON(`{"kind":"default"}`)))},
+		{"indexed colour out of range", ja(run(0, 0, 4, parseTestJSON(`{"kind":"indexed","index":256}`)))},
+		{"rgb channel out of range", ja(run(0, 0, 4, parseTestJSON(`{"kind":"rgb","r":256,"g":0,"b":0}`)))},
 		{"overlapping runs", ja(run(0, 0, 6, rgb), run(0, 5, 9, rgb))},
 	}
 	for _, tc := range cases {
@@ -3971,8 +3971,8 @@ func styleRun(row, start, end int, faint bool, foreground any) any {
 
 func TestCodingAgentCatalog_BundledBackendFiles_CellStylesOutsideTheReviewedShapeAreRejected(t *testing.T) {
 	t.Parallel()
-	rgb := mustJSON(`{"kind":"rgb","r":1,"g":2,"b":3}`)
-	indexed := mustJSON(`{"kind":"indexed","index":8}`)
+	rgb := parseTestJSON(`{"kind":"rgb","r":1,"g":2,"b":3}`)
+	indexed := parseTestJSON(`{"kind":"indexed","index":8}`)
 	load := func(runs any) opt[string] {
 		fixture := maskedNativeFixtureCatalog()
 		fixture.changePrimary(func(s any) { jset(s, runs, "cell_styles") })
@@ -3993,19 +3993,19 @@ func TestCodingAgentCatalog_BundledBackendFiles_CellStylesOutsideTheReviewedShap
 		name string
 		runs any
 	}{
-		{"not an array", mustJSON(`{"row":0}`)},
-		{"run missing a field", mustJSON(`[{"row":0,"start_col":0,"end_col":4,"faint":true}]`)},
-		{"run with an extra field", mustJSON(`[{"row":0,"start_col":0,"end_col":4,"faint":true,"foreground":null,"bold":true}]`)},
+		{"not an array", parseTestJSON(`{"row":0}`)},
+		{"run missing a field", parseTestJSON(`[{"row":0,"start_col":0,"end_col":4,"faint":true}]`)},
+		{"run with an extra field", parseTestJSON(`[{"row":0,"start_col":0,"end_col":4,"faint":true,"foreground":null,"bold":true}]`)},
 		{"row below the geometry", ja(styleRun(24, 0, 4, true, nil))},
 		{"start past the width", ja(styleRun(0, 81, 82, true, nil))},
 		{"end past the width", ja(styleRun(0, 0, 81, true, nil))},
 		{"empty run", ja(styleRun(0, 4, 4, true, nil))},
 		{"masked row", ja(styleRun(5, 0, 4, true, nil))},
 		{"default style", ja(styleRun(0, 0, 4, false, nil))},
-		{"non-boolean faint", mustJSON(`[{"row":0,"start_col":0,"end_col":4,"faint":1,"foreground":null}]`)},
-		{"default foreground colour", ja(styleRun(0, 0, 4, false, mustJSON(`{"kind":"default"}`)))},
-		{"indexed foreground out of range", ja(styleRun(0, 0, 4, false, mustJSON(`{"kind":"indexed","index":256}`)))},
-		{"rgb foreground channel out of range", ja(styleRun(0, 0, 4, false, mustJSON(`{"kind":"rgb","r":0,"g":256,"b":0}`)))},
+		{"non-boolean faint", parseTestJSON(`[{"row":0,"start_col":0,"end_col":4,"faint":1,"foreground":null}]`)},
+		{"default foreground colour", ja(styleRun(0, 0, 4, false, parseTestJSON(`{"kind":"default"}`)))},
+		{"indexed foreground out of range", ja(styleRun(0, 0, 4, false, parseTestJSON(`{"kind":"indexed","index":256}`)))},
+		{"rgb foreground channel out of range", ja(styleRun(0, 0, 4, false, parseTestJSON(`{"kind":"rgb","r":0,"g":256,"b":0}`)))},
 		{"overlapping runs", ja(styleRun(0, 0, 6, true, nil), styleRun(0, 5, 9, false, indexed))},
 	}
 	for _, tc := range cases {
@@ -4018,11 +4018,11 @@ func TestCodingAgentCatalog_BundledBackendFiles_CellStylesOutsideTheReviewedShap
 func TestCodingAgentCatalog_BundledBackendFiles_FixtureReplayAppliesEachStyleRunAndKeepsItsBackground(t *testing.T) {
 	t.Parallel()
 	fixture := nativeFixtureScreen("faint grey both plain")
-	jset(fixture, mustJSON(`[{"row":0,"start_col":11,"end_col":15,"bg":{"kind":"indexed","index":4}}]`), "cell_backgrounds")
+	jset(fixture, parseTestJSON(`[{"row":0,"start_col":11,"end_col":15,"bg":{"kind":"indexed","index":4}}]`), "cell_backgrounds")
 	jset(fixture, ja(
 		styleRun(0, 0, 5, true, nil),
-		styleRun(0, 6, 10, false, mustJSON(`{"kind":"indexed","index":8}`)),
-		styleRun(0, 11, 15, true, mustJSON(`{"kind":"rgb","r":10,"g":20,"b":30}`)),
+		styleRun(0, 6, 10, false, parseTestJSON(`{"kind":"indexed","index":8}`)),
+		styleRun(0, 11, 15, true, parseTestJSON(`{"kind":"rgb","r":10,"g":20,"b":30}`)),
 	), "cell_styles")
 	replayed := replayNativeFixture(mustCanonicalJSON(fixture), nil, true, none[[2]uint16]())
 	cell := func(col uint16) *vt.Cell { return replayed.screen.Cell(0, col) }
@@ -4337,7 +4337,7 @@ func TestCodingAgentCatalog_RuntimeProfileAnswerDecisionsHaveSeparateRequestAndB
 func TestCodingAgentCatalog_RuntimeProfileRootSchemaAndUnknownFieldsFailInitialization(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{`null`, `[]`, `{"codex":[]}`} {
-		assertLoadRejected(t, value, mustJSON(value))
+		assertLoadRejected(t, value, parseTestJSON(value))
 	}
 	invalidDefinition(t, "schema_version 2", func(value any) { jset(value, 2, "codex", "schema_version") })
 	invalidDefinition(t, "a file under another name", func(value any) {
@@ -4383,7 +4383,7 @@ func TestCodingAgentCatalog_RuntimeProfileEnumsGeometryAndRealBooleanTypesAreVal
 		{"/codex/profile/rules/0/matchers/0/scope", "transcript"},
 		{"/codex/profile/rules/0/extract/choices/0/scope", "forever"},
 	} {
-		invalidDefinition(t, tc.path+" = "+jsonText(tc.replacement), func(value any) { jpointerSet(value, tc.path, tc.replacement) })
+		invalidDefinition(t, tc.path+" = "+testJSONText(tc.replacement), func(value any) { jpointerSet(value, tc.path, tc.replacement) })
 	}
 }
 
@@ -4429,7 +4429,7 @@ func TestCodingAgentCatalog_RuntimeProfileOperationRowMarginMustBeANonemptySingl
 	jset(operationOf(margined), " ", "row_margin")
 	mustLoadCatalog(t, margined)
 	for _, margin := range []any{1, "", "\n"} {
-		invalidDefinition(t, "row_margin "+jsonText(margin), func(value any) { jset(operationOf(value), margin, "row_margin") })
+		invalidDefinition(t, "row_margin "+testJSONText(margin), func(value any) { jset(operationOf(value), margin, "row_margin") })
 	}
 	invalidDefinition(t, "an unknown operation key", func(value any) {
 		jset(operationOf(value), " ", "row_margin")
@@ -4464,7 +4464,7 @@ func TestCodingAgentCatalog_RuntimeProfileOperationRowTrailerIsATrimmedSingleRow
 		mustLoadCatalog(t, value)
 	}
 	for _, trailer := range []any{1, "", " █", "█\n█"} {
-		invalidDefinition(t, "row_trailer "+jsonText(trailer), func(value any) { jset(operationOf(value), trailer, "row_trailer") })
+		invalidDefinition(t, "row_trailer "+testJSONText(trailer), func(value any) { jset(operationOf(value), trailer, "row_trailer") })
 	}
 }
 
@@ -4484,7 +4484,7 @@ func TestCodingAgentCatalog_RuntimeProfileCapabilityProvenanceReferencesAreCheck
 		{"/codex/profile/capabilities/detection/fixture_ids", ja("missing-fixture")},
 		{"/codex/profile/capabilities/detection/fixture_ids", ja()},
 	} {
-		invalidDefinition(t, tc.path+" = "+jsonText(tc.replacement), func(value any) { jpointerSet(value, tc.path, tc.replacement) })
+		invalidDefinition(t, tc.path+" = "+testJSONText(tc.replacement), func(value any) { jpointerSet(value, tc.path, tc.replacement) })
 	}
 	invalidDefinition(t, "a composer capability of detection rules", func(value any) {
 		jset(value, jclone(jget(value, "codex", "profile", "capabilities", "detection")), "codex", "profile", "capabilities", "composer")
@@ -4681,13 +4681,13 @@ func TestCodingAgentCatalog_GatedCatalog_GatedCatalogValidatesTheContinuationRul
 	t.Parallel()
 	gatedRejected(t, "continuation with an operation", func(definition any) {
 		r := pointed(definition, gatedReason)
-		jarray(jget(r, "matchers")).push(mustJSON(`{"id":"operation","scope":"line","pattern":"^Reason: (?P<operation>.+)$"}`))
+		jarray(jget(r, "matchers")).push(parseTestJSON(`{"id":"operation","scope":"line","pattern":"^Reason: (?P<operation>.+)$"}`))
 		jset(r, jo("matcher_id", "operation", "capture", "operation"), "extract", "operation")
 	})
 	gatedRejected(t, "continuation with choices", func(definition any) {
 		r := pointed(definition, gatedReason)
-		jarray(jget(r, "matchers")).push(mustJSON(`{"id":"confirm","scope":"line","pattern":"^Confirm: (?P<label>enter)$"}`))
-		jset(r, mustJSON(`[{"id":"confirm","label":{"matcher_id":"confirm","capture":"label"},"scope":"single_request"}]`), "extract", "choices")
+		jarray(jget(r, "matchers")).push(parseTestJSON(`{"id":"confirm","scope":"line","pattern":"^Confirm: (?P<label>enter)$"}`))
+		jset(r, parseTestJSON(`[{"id":"confirm","label":{"matcher_id":"confirm","capture":"label"},"scope":"single_request"}]`), "extract", "choices")
 	})
 	gatedRejected(t, "continuation as an answer request rule", func(definition any) {
 		jset(definition, gatedReasonRule, "codex", "profile", "capabilities", "answers", 0, "request_rule_id")
@@ -4833,7 +4833,7 @@ func TestCodingAgentCatalog_ComposerSubmission_ComposerEachOperationRequiresItsO
 	for _, invalid := range []any{ja(), ja(" "), ja("unknown-fixture"), ja(promptFixture, promptFixture), nil} {
 		bad := jclone(good)
 		jset(bad, invalid, submissionPath("prompt", "fixture_ids")...)
-		assertDefinitionRejected(t, good, bad, composerOperationPrompt, "operation fixture set "+jsonText(invalid))
+		assertDefinitionRejected(t, good, bad, composerOperationPrompt, "operation fixture set "+testJSONText(invalid))
 	}
 	bad := jclone(good)
 	claude := jclone(jget(syntheticDefinitions(), "codex"))
@@ -4860,7 +4860,7 @@ func TestCodingAgentCatalog_ComposerSubmission_ComposerRuleReferencesKeepCompone
 	for _, invalid := range []any{ja(), ja("unknown-rule"), ja(syntheticRule), ja(emptyComposerRule, emptyComposerRule)} {
 		bad := jclone(good)
 		jset(bad, invalid, "codex", "profile", "capabilities", "composer", "rule_ids")
-		assertDefinitionRejected(t, good, bad, composerOperationPrompt, "composer rule component "+jsonText(invalid))
+		assertDefinitionRejected(t, good, bad, composerOperationPrompt, "composer rule component "+testJSONText(invalid))
 	}
 }
 
@@ -5613,7 +5613,7 @@ func TestCodingAgentCatalog_ProfileRejections_AComposerPlaceholderCapturesCountI
 		{"a bytes unit", `{"pattern":"\\[(?P<count>[0-9]+)\\]","unit":"bytes"}`, false},
 	} {
 		value := composerDefinition(some("0d"), some("0d"))
-		jset(composerTextOf(value), ja(mustJSON(tc.placeholder)), "placeholders")
+		jset(composerTextOf(value), ja(parseTestJSON(tc.placeholder)), "placeholders")
 		if tc.accepted {
 			mustLoadCatalog(t, value)
 		} else {
@@ -5662,7 +5662,7 @@ func directorDefinition(plainLimit, literal any) any {
 }
 
 func scalars1024() any {
-	return directorDefinition(jo("unit", "scalars", "max", 1024), mustJSON(`{"repeat":"a","count":1024,"prefix":""}`))
+	return directorDefinition(jo("unit", "scalars", "max", 1024), parseTestJSON(`{"repeat":"a","count":1024,"prefix":""}`))
 }
 
 func directorDeliveryOfCodex(t testing.TB, catalog *profileCatalog) *directorDelivery {
@@ -5704,7 +5704,7 @@ func TestCodingAgentCatalog_DirectorDelivery_TheDirectorPlainLimitCountsItsUnitA
 	if !byteLimit.plainLiteralAllowed("ああ") || byteLimit.plainLiteralAllowed("ああa") {
 		t.Fatal("the plain limit is 6 bytes")
 	}
-	inline := directorDeliveryOfCodex(t, mustLoadCatalog(t, directorDefinition(nil, mustJSON(`{"repeat":"あ","count":4000,"prefix":""}`))))
+	inline := directorDeliveryOfCodex(t, mustLoadCatalog(t, directorDefinition(nil, parseTestJSON(`{"repeat":"あ","count":4000,"prefix":""}`))))
 	if !inline.plainLiteralAllowed(strings.Repeat("あ", 4000)) {
 		t.Fatal("a null limit allows the inline preview")
 	}
@@ -5757,12 +5757,12 @@ func TestCodingAgentCatalog_DirectorDelivery_DirectorDeliveryRequiresAPlainLimit
 		name   string
 		screen any
 	}{
-		{"a herdr literal below the limit", limitScreen("herdr", mustJSON(`{"repeat":"a","count":1023,"prefix":""}`))},
-		{"a herdr literal above the limit", limitScreen("herdr", mustJSON(`{"repeat":"a","count":1025,"prefix":""}`))},
+		{"a herdr literal below the limit", limitScreen("herdr", parseTestJSON(`{"repeat":"a","count":1023,"prefix":""}`))},
+		{"a herdr literal above the limit", limitScreen("herdr", parseTestJSON(`{"repeat":"a","count":1025,"prefix":""}`))},
 		{"an exec record at the limit", jsonf(`{"native_version":%s,"composer_evidence":[
 			{"operation":"exec","multiplexer":"herdr","kind":"unsubmitted_literal","expected_literal":{"repeat":"a","count":1024,"prefix":""}}
 		]}`, syntheticVersion)},
-		{"a tmux record cited for herdr", limitScreen("tmux", mustJSON(`{"repeat":"a","count":1024,"prefix":""}`))},
+		{"a tmux record cited for herdr", limitScreen("tmux", parseTestJSON(`{"repeat":"a","count":1024,"prefix":""}`))},
 		{"a post-submit record", jsonf(`{"native_version":%s,"composer_evidence":[
 			{"operation":"prompt","multiplexer":"herdr","kind":"post_submit"}
 		]}`, syntheticVersion)},
@@ -5784,13 +5784,483 @@ func TestCodingAgentCatalog_DirectorDelivery_DirectorDeliveryCitesKnownFixturesA
 	}{{"fixture_ids", ja()}, {"fixture_ids", ja("no-such-fixture")}, {"coverage", "unknown"}, {"multiplexers", ja("screen")}} {
 		bad := scalars1024()
 		jset(directorDeliveryField(bad), tc.value, tc.field)
-		assertLoadRejected(t, tc.field+": "+jsonText(tc.value), bad)
+		assertLoadRejected(t, tc.field+": "+testJSONText(tc.value), bad)
+	}
+}
+
+const boxPreSubmitScreen = "box-pre-submit-tmux-80-1"
+
+// paintedPreSubmit is a painted pre-submit screen: the composer box at rows 17 through 20
+// holding `abc`, then a blank row and the footer.
+func paintedPreSubmit(masked []int, literal string) any {
+	lines := make([]string, 24)
+	lines[2] = "transcript"
+	lines[17] = "> abc"
+	lines[19] = "-- footer"
+	masks := ja()
+	for _, row := range masked {
+		lines[row] = ""
+		masks.push(jo("row", row, "reason", "reviewed_privacy"))
+	}
+	return jo("native_version", syntheticVersion, "rows", 24, "cols", 80, "alternate_screen", false,
+		"screen_seq", 0, "cursor_row", 17, "cursor_col", 5, "lines", lines, "masked_rows", masks,
+		"composer_evidence", ja(jo("operation", "prompt", "multiplexer", "tmux", "kind", "unsubmitted_literal", "expected_literal", literal)))
+}
+
+func withPreSubmitScreen(screen any) any {
+	value := boxDefinition("char")
+	jset(value, screen, "codex", "screens", boxPreSubmitScreen)
+	return value
+}
+
+func TestCodingAgentCatalog_PreSubmitFixtures_APaintedPreSubmitScreenRendersItsExpectedLiteral(t *testing.T) {
+	t.Parallel()
+	mustLoadCatalog(t, withPreSubmitScreen(paintedPreSubmit(nil, "abc")))
+	mustLoadCatalog(t, withPreSubmitScreen(paintedPreSubmit([]int{2}, "abc")))
+	assertRejectedWith(t, withPreSubmitScreen(paintedPreSubmit(nil, "abd")),
+		"pre-submit fixture "+boxPreSubmitScreen+" does not render its expected_literal", "a mismatching literal")
+}
+
+func TestCodingAgentCatalog_PreSubmitFixtures_APreSubmitScreenMasksNoRowOfItsComposerRegion(t *testing.T) {
+	t.Parallel()
+	assertRejectedWith(t, withPreSubmitScreen(paintedPreSubmit([]int{18}, "abc")),
+		"pre-submit fixture "+boxPreSubmitScreen+" masks a composer row", "a masked row inside the composer region")
+}
+
+func TestCodingAgentCatalog_PreSubmitFixtures_APreSubmitScreenWithoutComposerTextIsRejected(t *testing.T) {
+	t.Parallel()
+	screen := paintedPreSubmit(nil, "abc")
+	jset(screen, "plain output", "lines", 17)
+	assertRejectedWith(t, withPreSubmitScreen(screen),
+		"pre-submit fixture "+boxPreSubmitScreen+" has no extractable composer text", "no composer on the screen")
+}
+
+func hasLines(screen any) bool {
+	_, painted := jobject(screen).get("lines")
+	return painted
+}
+
+func TestCodingAgentCatalog_PreSubmitFixtures_EveryBundledPreSubmitFixtureExtractsToItsExpectedLiteral(t *testing.T) {
+	t.Parallel()
+	files := bundledFiles()
+	if err := validatePreSubmitFixtures(files, profileCatalogBundled()); err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range files.members {
+		executable := jget(member.value, "profile", "capabilities", "composer", "submission") != nil
+		painted := 0
+		for _, screen := range jobject(jget(member.value, "screens")).members {
+			records, err := preSubmitRecords(screen.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasLines(screen.value) && len(records) > 0 {
+				painted++
+			}
+		}
+		if executable && painted == 0 {
+			t.Fatalf("%s: an executable composer plan has painted pre-submit fixtures", member.key)
+		}
+	}
+}
+
+type citedPreSubmit struct {
+	rows    int
+	literal string
+}
+
+func preSubmitComposerRows(t testing.TB, backend codingAgent, screen any) int {
+	t.Helper()
+	snapshot := replayNativeFixture(mustCanonicalJSON(screen), nil, fixtureAlternate(screen), none[[2]uint16]())
+	return mustComposerText(t, newDetector(profileCatalogBundled(), backend, none[string]()), snapshot, "a painted pre-submit fixture").rows
+}
+
+// citedPreSubmitFixtures is the cited painted pre-submit fixtures of operation as (rows, literal)
+// pairs.
+func citedPreSubmitFixtures(t testing.TB, backend codingAgent, file, cited any, operation composerOperation, multiplexer opt[muxBackend]) []citedPreSubmit {
+	t.Helper()
+	var out []citedPreSubmit
+	for _, id := range jarray(cited).items {
+		name, _ := jstring(id)
+		screen := jget(file, "screens", name)
+		if !hasLines(screen) {
+			continue
+		}
+		records, err := preSubmitRecords(screen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range records {
+			mux, filtered := multiplexer.get()
+			if record.operation != operation || (filtered && record.multiplexer != mux) {
+				continue
+			}
+			out = append(out, citedPreSubmit{rows: preSubmitComposerRows(t, backend, screen), literal: record.literal})
+		}
+	}
+	return out
+}
+
+func TestCodingAgentCatalog_PreSubmitFixtures_EveryOperationPlanCitesOneRowWrappedAndMaximumLengthPreSubmitFixtures(t *testing.T) {
+	t.Parallel()
+	for _, member := range bundledFiles().members {
+		backend, _ := codingAgentCodingAgent(member.key)
+		submission := jget(member.value, "profile", "capabilities", "composer", "submission")
+		if submission == nil {
+			continue
+		}
+		for _, operation := range composerOperations {
+			label := member.key + " " + operationName(operation)
+			plan, ok := profileCatalogBundled().composerPlan(backend, operation)
+			if !ok {
+				t.Fatalf("%s: an executable plan", label)
+			}
+			fixtures := citedPreSubmitFixtures(t, backend, member.value, jget(submission, operationName(operation), "fixture_ids"), operation, none[muxBackend]())
+			oneRow := slices.ContainsFunc(fixtures, func(f citedPreSubmit) bool { return f.rows == 1 })
+			wrapped := slices.ContainsFunc(fixtures, func(f citedPreSubmit) bool { return f.rows > 1 })
+			atLimit := slices.ContainsFunc(fixtures, func(f citedPreSubmit) bool {
+				literal := strings.TrimPrefix(f.literal, string(operation.prefix()))
+				if jget(submission, operationName(operation), "plain_literal_limit") == nil {
+					return utf8.RuneCountInString(literal) == 4000
+				}
+				return plan.plainLiteralAllowed(literal) && !plan.plainLiteralAllowed(literal+"a")
+			})
+			if !oneRow || !wrapped || !atLimit {
+				t.Fatalf("%s: one-row %v, wrapped %v, maximum-length %v pre-submit fixtures", label, oneRow, wrapped, atLimit)
+			}
+		}
+	}
+}
+
+func TestCodingAgentCatalog_PreSubmitFixtures_EveryDirectorDeliveryCitesOneRowWrappedAndLimitPromptFixturesPerMultiplexer(t *testing.T) {
+	t.Parallel()
+	for _, member := range bundledFiles().members {
+		backend, _ := codingAgentCodingAgent(member.key)
+		director := jget(member.value, "profile", "capabilities", "director_delivery")
+		if director == nil {
+			continue
+		}
+		delivery, ok := profileCatalogBundled().directorDelivery(backend)
+		if !ok {
+			t.Fatalf("%s: the declared Director delivery loads", member.key)
+		}
+		for _, raw := range jarray(jget(director, "multiplexers")).items {
+			name, _ := jstring(raw)
+			mux, failure := muxBackendParse(name)
+			if failure != nil {
+				t.Fatalf("%s: %v", name, failure)
+			}
+			if !delivery.covers(mux) {
+				t.Fatalf("%s does not cover %s", member.key, name)
+			}
+			label := member.key + " Director on " + name
+			fixtures := citedPreSubmitFixtures(t, backend, member.value, jget(director, "fixture_ids"), composerOperationPrompt, some(mux))
+			oneRow := slices.ContainsFunc(fixtures, func(f citedPreSubmit) bool { return f.rows == 1 })
+			wrapped := slices.ContainsFunc(fixtures, func(f citedPreSubmit) bool { return f.rows > 1 })
+			atLimit := slices.ContainsFunc(fixtures, func(f citedPreSubmit) bool {
+				return delivery.plainLiteralAllowed(f.literal) && (jget(director, "plain_limit") == nil || !delivery.plainLiteralAllowed(f.literal+"a"))
+			})
+			if !oneRow || !wrapped || !atLimit {
+				t.Fatalf("%s: one-row %v, wrapped %v, at-limit %v prompt fixtures", label, oneRow, wrapped, atLimit)
+			}
+		}
+	}
+}
+
+// bundledRules is each rule of the bundled backend profile file that keep selects.
+func bundledRules(backend codingAgent, keep func(r any) bool) []any {
+	var rules []any
+	for _, r := range jarray(jget(parsedBundledFiles(), backend.name(), "profile", "rules")).items {
+		if keep(r) {
+			rules = append(rules, r)
+		}
+	}
+	return rules
+}
+
+func citedFixtures(t testing.TB, r any) []string {
+	t.Helper()
+	cited, ok := jget(r, "fixture_ids").(*jsonArr)
+	if !ok || len(cited.items) == 0 {
+		t.Fatalf("%s cites its native fixtures", testJSONText(jget(r, "id")))
+	}
+	var ids []string
+	for _, id := range cited.items {
+		text, _ := jstring(id)
+		ids = append(ids, text)
+	}
+	return ids
+}
+
+func ruleObservation(t testing.TB, r any) observationKind {
+	t.Helper()
+	text, _ := jstring(jget(r, "observation"))
+	kind, err := observationKindParse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kind
+}
+
+// capturedAndCursorFree observes a bundled fixture as captured and without cursor or screen mode.
+func capturedAndCursorFree(t testing.TB, observe func(*screenSnapshot) (screenObservation, error), id string, change func(*[]string)) [2]screenObservation {
+	t.Helper()
+	captured := replayAsCaptured(id, change, none[[2]uint16]())
+	free := cursorFreeScreen(captured)
+	var out [2]screenObservation
+	for index, screen := range []*screenSnapshot{&captured, &free} {
+		observed, err := observe(screen)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		out[index] = observed
+	}
+	return out
+}
+
+func composerEmptyRule(r any) bool { return jget(r, "observation") == "composer_empty" }
+
+func TestCodingAgentCatalog_DirectorScreens_OpencodeComposerRulesAcceptAnyAgentNameInTheStatusLine(t *testing.T) {
+	t.Parallel()
+	d := newDetector(profileCatalogBundled(), codingAgentOpencode, none[string]())
+	edited := 0
+	for _, member := range jobject(jget(parsedBundledFiles(), "opencode", "screens")).members {
+		id := member.key
+		if !hasLines(member.value) || capturedAndCursorFree(t, d.observe, id, nil)[0].kind != observationKindComposerEmpty {
+			continue
+		}
+		row := slices.IndexFunc(fixtureLines(id), func(line string) bool { return strings.Contains(line, "cafleet-ask") })
+		if row < 0 {
+			continue
+		}
+		edited++
+		for _, agent := range []string{"Build", "Plan", "cafleet", "cafleet-ask", "review bot"} {
+			for _, observed := range capturedAndCursorFree(t, d.observe, id, func(lines *[]string) {
+				(*lines)[row] = strings.Replace((*lines)[row], "cafleet-ask", agent, 1)
+			}) {
+				if observed.kind != observationKindComposerEmpty {
+					t.Fatalf("%s with agent %q: %s", id, agent, observed.kind.debugString())
+				}
+			}
+		}
+	}
+	if edited == 0 {
+		t.Fatal("an opencode empty-composer fixture shows the default agent name")
+	}
+}
+
+func TestCodingAgentCatalog_DirectorScreens_OpencodeDirectorFixturesObserveAnEmptyComposer(t *testing.T) {
+	t.Parallel()
+	d := newDetector(profileCatalogBundled(), codingAgentOpencode, none[string]())
+	for _, r := range bundledRules(codingAgentOpencode, composerEmptyRule) {
+		for _, id := range citedFixtures(t, r) {
+			for _, observed := range capturedAndCursorFree(t, d.observe, id, nil) {
+				if observed.kind != observationKindComposerEmpty {
+					t.Fatalf("%s: %s", id, observed.kind.debugString())
+				}
+			}
+		}
+	}
+}
+
+// hermesTUIRule selects a hermes rule that reads the TUI's alternate screen.
+func hermesTUIRule(r any) bool { return jget(r, "region", "screen") == "alternate" }
+
+// hermesDirectorRules is the hermes TUI composer rules, which with every interaction rule
+// classify a hermes Director screen.
+func hermesDirectorRules() []string {
+	var ids []string
+	for _, r := range bundledRules(codingAgentHermes, func(r any) bool {
+		observation := jget(r, "observation")
+		return hermesTUIRule(r) && (observation == "composer_empty" || observation == "composer_text")
+	}) {
+		id, _ := jstring(jget(r, "id"))
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func TestCodingAgentCatalog_DirectorScreens_HermesTuiIdleComposerObservesEmptyAndADraftStaysNotEmpty(t *testing.T) {
+	t.Parallel()
+	d := newDetector(profileCatalogBundled(), codingAgentHermes, none[string]())
+	rules := hermesDirectorRules()
+	observe := func(screen *screenSnapshot) (screenObservation, error) { return d.observeDirector(screen, rules) }
+	idle := bundledRules(codingAgentHermes, func(r any) bool { return hermesTUIRule(r) && composerEmptyRule(r) })
+	if len(idle) == 0 {
+		t.Fatal("hermes declares a TUI empty-composer rule")
+	}
+	for _, r := range idle {
+		ruleID, _ := jstring(jget(r, "id"))
+		for _, id := range citedFixtures(t, r) {
+			for _, observed := range capturedAndCursorFree(t, observe, id, nil) {
+				if observed.kind != observationKindComposerEmpty || observed.ruleID != ruleID {
+					t.Fatalf("%s: %s %s, want the citing rule %s", id, observed.kind.debugString(), observed.ruleID, ruleID)
+				}
+			}
+			drafted := capturedAndCursorFree(t, observe, id, func(lines *[]string) {
+				row := -1
+				for index, line := range *lines {
+					if strings.HasPrefix(line, " ❯") {
+						row = index
+					}
+				}
+				if row < 0 {
+					panic("a Hermes TUI composer row")
+				}
+				(*lines)[row] = " ❯ draft text"
+			})
+			for _, observed := range drafted {
+				if observed.kind == observationKindComposerEmpty {
+					t.Fatalf("%s: a drafted TUI composer observes empty", id)
+				}
+			}
+		}
+	}
+}
+
+func TestCodingAgentCatalog_DirectorScreens_HermesTuiApprovalFormIsDetectedWithNoAnswerPlan(t *testing.T) {
+	t.Parallel()
+	catalog := profileCatalogBundled()
+	d := newDetector(catalog, codingAgentHermes, none[string]())
+	rules := hermesDirectorRules()
+	observe := func(screen *screenSnapshot) (screenObservation, error) { return d.observeDirector(screen, rules) }
+	forms := bundledRules(codingAgentHermes, func(r any) bool {
+		kind, err := observationKindParse(fmt.Sprint(jget(r, "observation")))
+		if err != nil {
+			panic(err)
+		}
+		_, interaction := kind.interaction()
+		return hermesTUIRule(r) && interaction
+	})
+	if len(forms) == 0 {
+		t.Fatal("hermes declares a TUI interaction rule")
+	}
+	for _, r := range forms {
+		ruleID, _ := jstring(jget(r, "id"))
+		expected := ruleObservation(t, r)
+		for _, id := range citedFixtures(t, r) {
+			for _, observed := range capturedAndCursorFree(t, observe, id, nil) {
+				if observed.kind != expected || observed.ruleID != ruleID {
+					t.Fatalf("%s: %s %s, want %s %s", id, observed.kind.debugString(), observed.ruleID, expected.debugString(), ruleID)
+				}
+			}
+		}
+		declared := 0
+		for _, a := range jarray(jget(parsedBundledFiles(), "hermes", "profile", "capabilities", "answers")).items {
+			if jget(a, "request_rule_id") == ruleID {
+				declared++
+			}
+		}
+		if got := len(catalog.answerPlans(codingAgentHermes, ruleID)); got != declared {
+			t.Fatalf("%s: %d answer plans for %d declared answers", ruleID, got, declared)
+		}
+	}
+}
+
+// cursorScreen is the id of a bundled codex screen with a recorded cursor whose every composer
+// record names multiplexer.
+func cursorScreen(files any, multiplexer string) string {
+	for _, member := range jobject(jget(files, "codex", "screens")).members {
+		screen := member.value
+		records, ok := jget(screen, "composer_evidence").(*jsonArr)
+		if jget(screen, "cursor_row") == nil || !hasLines(screen) || !ok {
+			continue
+		}
+		if !slices.ContainsFunc(records.items, func(record any) bool { return jget(record, "multiplexer") != multiplexer }) {
+			return member.key
+		}
+	}
+	panic("a bundled codex " + multiplexer + " screen with a cursor")
+}
+
+func guardedBundledFiles(files any) opt[string] {
+	_, err := profileCatalogFromBundledFiles(files)
+	if err != nil {
+		return some(err.Error())
+	}
+	return none[string]()
+}
+
+var cursorFreeFields = []string{"alternate_screen", "cursor_row", "cursor_col"}
+
+// nulledScreen is files with the fields of screen id set to null and its screen-level
+// multiplexer set to multiplexer when given.
+func nulledScreen(files any, id string, fields []string, multiplexer opt[string]) any {
+	out := jclone(files)
+	screen := jget(out, "codex", "screens", id)
+	for _, field := range fields {
+		jset(screen, nil, field)
+	}
+	if name, set := multiplexer.get(); set {
+		jset(screen, name, "multiplexer")
+	}
+	return out
+}
+
+func TestCodingAgentCatalog_CursorFreeFixtures_AHerdrCaptureMayRecordANullCursorAndScreenMode(t *testing.T) {
+	t.Parallel()
+	files := bundledFiles()
+	if failure := guardedBundledFiles(files); failure != none[string]() {
+		t.Fatalf("the bundled files: %v", failure)
+	}
+	for _, multiplexer := range multiplexerNames {
+		id := cursorScreen(files, multiplexer)
+		if failure := guardedBundledFiles(nulledScreen(files, id, cursorFreeFields, some("herdr"))); failure != none[string]() {
+			t.Fatalf("%s: %v", id, failure)
+		}
+	}
+}
+
+func TestCodingAgentCatalog_CursorFreeFixtures_ANullCursorOrScreenModeIsRefusedOutsideACompleteHerdrCapture(t *testing.T) {
+	t.Parallel()
+	files := bundledFiles()
+	herdr := cursorScreen(files, "herdr")
+	for _, tc := range []struct {
+		name        string
+		fields      []string
+		multiplexer opt[string]
+		expected    string
+	}{
+		{"no screen-level multiplexer", cursorFreeFields, none[string](), "a cursor-free fixture is a herdr capture"},
+		{"a tmux screen", cursorFreeFields, some("tmux"), "a cursor-free fixture is a herdr capture"},
+		{"a null cursor without a null screen mode", cursorFreeFields[1:], some("herdr"), "a cursor-free fixture records null cursor and screen mode together"},
+		{"a null row without a null column", cursorFreeFields[:2], some("herdr"), "a cursor-free fixture records null cursor and screen mode together"},
+		{"a multiplexer on a screen with a cursor", nil, some("herdr"), "only a cursor-free fixture names its multiplexer"},
+	} {
+		failure, refused := guardedBundledFiles(nulledScreen(files, herdr, tc.fields, tc.multiplexer)).get()
+		if !refused || !strings.Contains(failure, tc.expected) {
+			t.Fatalf("%s: the guard reports %q, want %q", tc.name, failure, tc.expected)
+		}
+	}
+}
+
+func TestCodingAgentCatalog_CursorFreeFixtures_ACursorFreeFixtureReplaysWithoutCursorOrScreenMode(t *testing.T) {
+	t.Parallel()
+	files := bundledFiles()
+	herdr := cursorScreen(files, "herdr")
+	screen := jclone(jget(files, "codex", "screens", herdr))
+	recorded := replayNativeFixture(mustCanonicalJSON(screen), nil, fixtureAlternate(screen), none[[2]uint16]())
+	if _, ok := recorded.cursor.get(); !ok {
+		t.Fatal("the recorded screen replays with its cursor")
+	}
+	if _, ok := recorded.alternateScreen.get(); !ok {
+		t.Fatal("the recorded screen replays with its screen mode")
+	}
+	for _, field := range cursorFreeFields {
+		jset(screen, nil, field)
+	}
+	replayed := replayNativeFixture(mustCanonicalJSON(screen), nil, fixtureAlternate(screen), none[[2]uint16]())
+	if replayed.cursor != none[[2]uint16]() || replayed.alternateScreen != none[bool]() {
+		t.Fatalf("cursor %v, screen mode %v", replayed.cursor, replayed.alternateScreen)
+	}
+	if replayed.screen.Contents() != recorded.screen.Contents() {
+		t.Fatal("the rows replay at their positions")
 	}
 }
 
 func TestCodingAgentCatalog_PanelSeparator_APanelSeparatorThatIsNotOneNonWhitespaceGlyphIsRefused(t *testing.T) {
 	t.Parallel()
 	for _, separator := range []any{1, "", " ", "││"} {
-		assertLoadRejected(t, jsonText(separator), withPanelSeparator("/codex/profile/rules/0", separator))
+		assertLoadRejected(t, testJSONText(separator), withPanelSeparator("/codex/profile/rules/0", separator))
 	}
 }
