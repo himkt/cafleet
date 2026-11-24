@@ -1261,10 +1261,7 @@ func TestRuntimeService_DirectorSweep_AMessageSentWhileNoRunnerIsLiveIsDelivered
 
 func clientPair(t *testing.T) (*client, int) {
 	t.Helper()
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fds := cloexecSocketpair(t)
 	for _, fd := range fds {
 		if err := unix.SetNonblock(fd, true); err != nil {
 			t.Fatal(err)
@@ -1433,5 +1430,79 @@ func TestRuntimeService_InputAdmissionTests_ClientRejectsPartialEof(t *testing.T
 	}
 	if _, err := partial.poll(systemClock{}); err == nil {
 		t.Fatal("a partial frame at EOF is refused")
+	}
+}
+
+func TestRuntimeService_PreviewSweep_TheRunWideBackoffStartsAtOneSecondDoublesToThirtyAndResets(t *testing.T) {
+	t.Parallel()
+	var backoff sweepBackoff
+	if backoff.delay() != 0 {
+		t.Fatalf("a fresh backoff is zero, got %v", backoff.delay())
+	}
+	var delays []time.Duration
+	for range 8 {
+		backoff.transient()
+		delays = append(delays, backoff.delay())
+	}
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second}
+	if !slices.Equal(delays, want) {
+		t.Fatalf("delays %v, want %v", delays, want)
+	}
+	backoff.reset()
+	if backoff.delay() != 0 {
+		t.Fatalf("a reset backoff is zero, got %v", backoff.delay())
+	}
+	backoff.transient()
+	if backoff.delay() != time.Second {
+		t.Fatalf("a reset backoff restarts at one second, got %v", backoff.delay())
+	}
+}
+
+func TestRuntimeService_PreviewSweep_TheSweepIntervalIsOneSecond(t *testing.T) {
+	t.Parallel()
+	if previewSweepInterval != time.Second {
+		t.Fatalf("the preview sweep interval is %v", previewSweepInterval)
+	}
+}
+
+func TestRuntimeService_PacingTests_PacingStartsTheNextTickAtOnceWhileOuterInputMoves(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	cases := []struct {
+		name                       string
+		humanBytes, forwardedBytes int
+	}{
+		{"outer bytes read", 4096, 0},
+		{"positive master write", 0, 2696},
+		{"both", 1, 1},
+	}
+	for _, c := range cases {
+		for _, next := range []opt[time.Time]{none[time.Time](), some(now.Add(time.Second))} {
+			progress := transportProgress{humanBytes: c.humanBytes, forwardedBytes: c.forwardedBytes}
+			if pause := tickSleep(progress, next, now); pause != 0 {
+				t.Fatalf("%s, next deadline %v: pause %v", c.name, next, pause)
+			}
+		}
+	}
+}
+
+func TestRuntimeService_PacingTests_PacingKeepsTheIdleSleepWithoutOuterInput(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	idle := transportProgress{}
+	cases := []struct {
+		name string
+		next opt[time.Time]
+		want time.Duration
+	}{
+		{"no observation deadline", none[time.Time](), 2 * time.Millisecond},
+		{"a later observation deadline", some(now.Add(time.Second)), 2 * time.Millisecond},
+		{"an earlier observation deadline still shortens the idle sleep", some(now.Add(500 * time.Microsecond)), 500 * time.Microsecond},
+		{"a passed observation deadline", some(now.Add(-time.Millisecond)), 0},
+	}
+	for _, c := range cases {
+		if pause := tickSleep(idle, c.next, now); pause != c.want {
+			t.Fatalf("%s: pause %v, want %v", c.name, pause, c.want)
+		}
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -79,11 +80,7 @@ func activate(t *testing.T, fixture *runnerFixture) (*runArtifacts, *runLock) {
 // boundSocket binds a nonblocking Unix stream socket at path with mode, listening when asked.
 func boundSocket(t *testing.T, path string, mode uint32, listening bool) int {
 	t.Helper()
-	fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { closeFD(t, fd) })
+	fd := cloexecSocket(t)
 	if err := unix.Bind(fd, &unix.SockaddrUnix{Name: path}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +103,40 @@ func boundSocket(t *testing.T, path string, mode uint32, listening bool) int {
 		}
 	}
 	return fd
+}
+
+// cloexecSocket is a Unix stream socket marked close-on-exec under the fork lock, so a child
+// started concurrently never inherits it; the test closes it.
+func cloexecSocket(t *testing.T) int {
+	t.Helper()
+	syscall.ForkLock.RLock()
+	fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err == nil {
+		unix.CloseOnExec(fd)
+	}
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeFD(t, fd) })
+	return fd
+}
+
+// cloexecSocketpair is a connected Unix stream pair marked close-on-exec under the fork lock;
+// the caller owns both ends.
+func cloexecSocketpair(t *testing.T) [2]int {
+	t.Helper()
+	syscall.ForkLock.RLock()
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err == nil {
+		unix.CloseOnExec(fds[0])
+		unix.CloseOnExec(fds[1])
+	}
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fds
 }
 
 func closeFD(t *testing.T, fd int) {
@@ -699,10 +730,7 @@ func inputClientReply(status, stage string) []byte {
 // controlPair is a production client and its nonblocking peer descriptor on a socket pair.
 func controlPair(t *testing.T) (*controlClient, int) {
 	t.Helper()
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fds := cloexecSocketpair(t)
 	for _, fd := range fds {
 		if err := unix.SetNonblock(fd, true); err != nil {
 			t.Fatal(err)
