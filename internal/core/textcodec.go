@@ -593,18 +593,70 @@ func (c *rfc3339Cursor) offset() int {
 	return sign * (hours*3600 + minutes*60)
 }
 
-// jsonEqual compares two JSON values as serde_json does: objects regardless of member order,
-// arrays in order.
+// jsonEqual compares two JSON values as serde_json does: objects regardless of member order (a
+// repeated member keeping its last value), arrays in order, and numbers by value, where an
+// integer never equals a float.
 func jsonEqual(a, b jsontext.Value) bool {
-	left, err := canonicalJSON(a)
-	if err != nil {
-		panic("a stored JSON value is valid: " + err.Error())
+	if a.Kind() != b.Kind() {
+		return false
 	}
-	right, err := canonicalJSON(b)
-	if err != nil {
-		panic("a stored JSON value is valid: " + err.Error())
+	switch a.Kind() {
+	case '{':
+		left, right := jsonObjectMap(a), jsonObjectMap(b)
+		if len(left) != len(right) {
+			return false
+		}
+		for key, value := range left {
+			other, present := right[key]
+			if !present || !jsonEqual(value, other) {
+				return false
+			}
+		}
+		return true
+	case '[':
+		left, _ := jsonArray(a)
+		right, _ := jsonArray(b)
+		return slices.EqualFunc(left, right, jsonEqual)
+	case '"':
+		left, _ := jsonString(a)
+		right, _ := jsonString(b)
+		return left == right
+	case '0':
+		return jsonNumberKey(a) == jsonNumberKey(b)
+	case 'n', 't', 'f':
+		return true
+	case jsontext.KindInvalid, jsontext.KindEndObject, jsontext.KindEndArray:
+		panic("a compared JSON value is valid")
+	default:
+		panic("invalid jsontext.Kind")
 	}
-	return left == right
+}
+
+func jsonObjectMap(v jsontext.Value) map[string]jsontext.Value {
+	members, _ := jsonMembers(v)
+	object := make(map[string]jsontext.Value, len(members))
+	for _, member := range members {
+		object[member.key] = member.value
+	}
+	return object
+}
+
+// jsonNumberKey is the value serde_json gives a number literal: an integer that fits u64 or i64,
+// or else the nearest float64.
+func jsonNumberKey(v jsontext.Value) string {
+	if text, isInteger := jsonIntegerText(v); isInteger {
+		if number, err := strconv.ParseUint(text, 10, 64); err == nil {
+			return "i" + strconv.FormatUint(number, 10)
+		}
+		if number, err := strconv.ParseInt(text, 10, 64); err == nil {
+			return "i" + strconv.FormatInt(number, 10)
+		}
+	}
+	number, _ := jsonFloat64(v)
+	if number == 0 {
+		number = 0
+	}
+	return "f" + strconv.FormatFloat(number, 'g', -1, 64)
 }
 
 // jsonText is value re-encoded compactly in the SPEC §6.4 JSON encoding with its member order

@@ -205,3 +205,47 @@ func outputJSONDeletedFleet(row deletedFleet) jsonObject {
 		{"members", members},
 	}
 }
+
+func outputJSONPermissionResponseResult(row permissionResponseResult) jsonObject {
+	answer := answerWireOf(row.Key)
+	return jsonObject{{"response", jsonObject{
+		{"status", row.Submission.Status.asStr()},
+		{"member_id", row.MemberID},
+		{"run_id", row.RunID},
+		{"owner_epoch", row.OwnerEpoch},
+		{"interaction_id", row.InteractionID},
+		{"event_id", row.EventID},
+		{"decision", answer.Decision},
+		{"choice", answer.Choice},
+		{"stage", row.Submission.Stage.asStr()},
+		{"output_seq", row.Submission.OutputSeq},
+		{"reason", row.Submission.Reason},
+	}}}
+}
+
+func outputJSONPermissionInspection(row permissionInspection) jsonObject {
+	return jsonObject{{"request", jsonObject{
+		{"event_id", row.EventID},
+		{"message_id", row.MessageID},
+		{"member_id", row.MemberID},
+		{"fleet_id", row.FleetID},
+		{"director_member_id", row.DirectorMemberID},
+		{"run_id", row.RunID},
+		{"owner_epoch", row.OwnerEpoch},
+		{"interaction_id", row.InteractionID},
+		{"episode_seq", row.EpisodeSeq},
+		{"classification", row.Classification},
+		{"visibility", row.Visibility},
+		{"backend", row.Backend},
+		{"native_version", row.NativeVersion},
+		{"answer_rule_id", row.AnswerRuleID},
+		{"answer_capability", row.AnswerCapability},
+		{"capability_reason", row.CapabilityReason},
+		{"supported_decisions", row.SupportedDecisions},
+		{"supported_choices", row.SupportedChoices},
+		{"request_token", row.RequestToken},
+		{"output_seq", row.OutputSeq},
+		{"evidence", row.Evidence},
+		{"missing_evidence", row.MissingEvidence},
+	}}}
+}

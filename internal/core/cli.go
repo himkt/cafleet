@@ -50,18 +50,6 @@ func validChoiceID(value string) bool {
 	return true
 }
 
-func validateRequestToken(value string) error {
-	valid := len(value) == 64
-	for i := 0; valid && i < len(value); i++ {
-		b := value[i]
-		valid = (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f')
-	}
-	if !valid {
-		return usageError("a lowercase 64-hex request token is required")
-	}
-	return nil
-}
-
 // cliArgs is a successfully parsed invocation: the deepest `--database-url` and the command.
 type cliArgs struct {
 	databaseURL opt[string]

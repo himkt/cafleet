@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"time"
 )
 
@@ -131,6 +132,71 @@ func shutdownOutcomeComplete(nativeExit opt[childExit]) shutdownOutcome {
 func (o *shutdownOutcome) fail(diagnostic string) {
 	o.diagnostics = append(o.diagnostics, diagnostic)
 	o.cleanupState = cleanupStateIncomplete
+}
+
+// childExitWire is a childExit's externally tagged wire object: exactly one member is set.
+type childExitWire struct {
+	Code   opt[int32] `json:"Code"`
+	Signal opt[int32] `json:"Signal"`
+}
+
+type shutdownOutcomeWire struct {
+	NativeExit   opt[childExitWire] `json:"native_exit"`
+	CleanupState cleanupState       `json:"cleanup_state"`
+	Diagnostics  []string           `json:"diagnostics"`
+}
+
+func (*shutdownOutcomeWire) ignoresUnknownFields() {}
+
+func (o shutdownOutcome) MarshalJSONTo(encoder *jsontext.Encoder) error {
+	wire := shutdownOutcomeWire{CleanupState: o.cleanupState, Diagnostics: o.diagnostics}
+	if exit, exited := o.nativeExit.get(); exited {
+		switch exit := exit.(type) {
+		case childExitCode:
+			wire.NativeExit = some(childExitWire{Code: some(exit.code)})
+		case childExitSignal:
+			wire.NativeExit = some(childExitWire{Signal: some(exit.signal)})
+		default:
+			panic("invalid childExit")
+		}
+	}
+	return json.MarshalEncode(encoder, jsonObject{
+		{"native_exit", wire.NativeExit},
+		{"cleanup_state", wire.CleanupState},
+		{"diagnostics", wire.Diagnostics},
+	})
+}
+
+func (w childExitWire) MarshalJSONTo(encoder *jsontext.Encoder) error {
+	if code, set := w.Code.get(); set {
+		return json.MarshalEncode(encoder, jsonObject{{"Code", code}})
+	}
+	signal, set := w.Signal.get()
+	if !set {
+		panic("a childExit wire object has one member")
+	}
+	return json.MarshalEncode(encoder, jsonObject{{"Signal", signal}})
+}
+
+func shutdownOutcomeDecode(value jsontext.Value) (shutdownOutcome, error) {
+	var wire shutdownOutcomeWire
+	if err := decodeStrict(value, &wire); err != nil {
+		return shutdownOutcome{}, ioError(cafleetErrorOf(err).message())
+	}
+	nativeExit := none[childExit]()
+	if exit, exited := wire.NativeExit.get(); exited {
+		code, isCode := exit.Code.get()
+		signal, isSignal := exit.Signal.get()
+		switch {
+		case isCode && !isSignal:
+			nativeExit = some[childExit](childExitCode{code: code})
+		case isSignal && !isCode:
+			nativeExit = some[childExit](childExitSignal{signal: signal})
+		default:
+			return shutdownOutcome{}, ioError("invalid native exit variant")
+		}
+	}
+	return shutdownOutcome{nativeExit: nativeExit, cleanupState: wire.CleanupState, diagnostics: wire.Diagnostics}, nil
 }
 
 // note returns the value of a result, or records its error in diagnostics and reports false.
