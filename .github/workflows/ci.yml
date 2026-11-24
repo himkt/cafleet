@@ -27,17 +27,64 @@ jobs:
       - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
           experimental: true
+      - id: go-env
+        run: |
+          echo "cache=$(mise exec -- go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "modcache=$(mise exec -- go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.go-env.outputs.cache }}
+            ${{ steps.go-env.outputs.modcache }}
+          key: ${{ runner.os }}-go-${{ matrix.task }}-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ runner.os }}-go-${{ matrix.task }}-
+      - if: matrix.task == 'lint'
+        run: mise //:lint
+      - if: matrix.task == 'lint'
+        run: mise //:vulncheck
+      - if: matrix.task == 'test'
+        run: mise //:test
+      - if: matrix.task == 'test' && matrix.runner == 'ubuntu-latest'
+        run: mise //:test-shipped
+
+  migration:
+    name: migration (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-15]
+    env:
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+      PY: mise exec -- python3 -I
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          experimental: true
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ matrix.task }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ matrix.task }}-
-      - if: matrix.task == 'lint'
-        run: mise //:lint
-      - if: matrix.task == 'test'
-        run: mise //:test
-        env:
-          CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+          key: ${{ runner.os }}-cargo-migration-${{ hashFiles('Cargo.lock', 'migration/vtoracle/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-migration-
+      - name: Rust oracle tests
+        run: cargo test --bin cafleet
+      - name: Rust oracle clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Rust oracle formatting
+        run: cargo fmt --check
+      - name: Version check
+        run: $PY migration/check_version.py
+      - name: G3 emulator parity
+        run: $PY migration/diffrun.py emulator
+      - name: G3 width parity
+        run: $PY migration/diffrun.py widths
+      - name: G4 detector parity
+        run: |
+          $PY migration/golden.py export "$RUNNER_TEMP/g4-reference.jsonl"
+          $PY migration/golden.py compare "$RUNNER_TEMP/g4-reference.jsonl"
+      - name: G5 test map
+        run: $PY migration/testmap.py list "$RUNNER_TEMP/testmap.tsv"
