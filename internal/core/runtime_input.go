@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const preSubmitWindow = time.Second
+
 func inspectionAssociation(ctx context.Context, conn *dbConn, run runRecord, input permissionInspectInput) (runtimeEventView, error) {
 	if err := ensure(
 		input.EventID > 0 && input.InteractionID > 0 && input.DirectorMemberID == run.directorMemberID,

@@ -216,6 +216,68 @@ func note[T any](diagnostics *[]string, value T, err error) (T, bool) {
 	return value, true
 }
 
+type shutdownHost interface {
+	clock() clock
+	gateProgrammaticInput()
+	termVerifiedDescendants() error
+	drainAndReapUntil(deadline time.Time) (opt[childExit], error)
+	killVerifiedSurvivors() error
+	closePty() error
+	finalNativeExit() (opt[childExit], error)
+	nativeWasSpawned() bool
+	flushDisplayUntil(deadline time.Time) (uint64, error)
+	finishEventsUntil(deadline time.Time) (uint64, uint64, error)
+	restoreTerminal() error
+}
+
+func shutdown(host shutdownHost, deadlines shutdownDeadlines, native opt[childExit]) shutdownOutcome {
+	outcome := shutdownOutcomeComplete(native)
+	reconcileExit := func(exit opt[childExit], conflict string) {
+		observed, set := exit.get()
+		if !set {
+			return
+		}
+		if recorded, known := outcome.nativeExit.get(); !known {
+			outcome.nativeExit = exit
+		} else if recorded != observed {
+			outcome.diagnostics = append(outcome.diagnostics, conflict)
+		}
+	}
+	host.gateProgrammaticInput()
+	note(&outcome.diagnostics, struct{}{}, host.termVerifiedDescendants())
+	drained, err := host.drainAndReapUntil(deadlines.childDeadline())
+	drained, _ = note(&outcome.diagnostics, drained, err)
+	reconcileExit(drained, "conflicting native exit status")
+	note(&outcome.diagnostics, struct{}{}, host.killVerifiedSurvivors())
+	note(&outcome.diagnostics, struct{}{}, host.closePty())
+	finalExit, err := host.finalNativeExit()
+	finalExit, _ = note(&outcome.diagnostics, finalExit, err)
+	reconcileExit(finalExit, "conflicting final native exit status")
+	droppedDisplayBytes, err := host.flushDisplayUntil(deadlines.displayDeadline())
+	droppedDisplayBytes, _ = note(&outcome.diagnostics, droppedDisplayBytes, err)
+	pendingEventFrames, unsavedObservationGap, err := host.finishEventsUntil(deadlines.storageDeadline())
+	if _, finished := note(&outcome.diagnostics, struct{}{}, err); !finished {
+		pendingEventFrames, unsavedObservationGap = 0, 0
+	}
+	note(&outcome.diagnostics, struct{}{}, host.restoreTerminal())
+	if host.clock().now().After(deadlines.storageDeadline()) {
+		outcome.diagnostics = append(outcome.diagnostics, "shutdown exceeded its original storage deadline")
+	}
+	if droppedDisplayBytes > 0 {
+		outcome.diagnostics = append(outcome.diagnostics, fmt.Sprintf("display truncated: %d undelivered bytes", droppedDisplayBytes))
+	}
+	if pendingEventFrames > 0 || unsavedObservationGap > 0 {
+		outcome.diagnostics = append(outcome.diagnostics, fmt.Sprintf("pending events=%d unsaved observation gap=%d", pendingEventFrames, unsavedObservationGap))
+	}
+	if !outcome.nativeExit.set && host.nativeWasSpawned() {
+		outcome.diagnostics = append(outcome.diagnostics, "native exit remains unconfirmed")
+	}
+	if len(outcome.diagnostics) > 0 {
+		outcome.cleanupState = cleanupStateIncomplete
+	}
+	return outcome
+}
+
 type controlIdentity struct {
 	DatabaseIdentityJSON jsontext.Value `json:"database_identity_json"`
 	FleetID              int64          `json:"fleet_id"`
