@@ -108,6 +108,41 @@ func formatMemberDelete(memberID int64, paneStatus string) string {
 
 const pending = "(pending)"
 
+func withDelivery(text string, inputID opt[int64], delivery deliveryProjection) string {
+	method := "-"
+	if value, set := delivery.Method.get(); set {
+		method = value.asStr()
+	}
+	reason, set := delivery.Reason.get()
+	if !set {
+		reason = "-"
+	}
+	text += fmt.Sprintf("\nDelivery: status=%s method=%s reason=%s", delivery.Status.asStr(), method, reason)
+	if id, set := inputID.get(); set {
+		text += fmt.Sprintf("\nInput: %d", id)
+		if delivery.Status == deliveryStatusQueued {
+			text += fmt.Sprintf("\nThe member's runner will retry it after the blocking work ends; run cafleet input show %d --json for its result.", id)
+		}
+	}
+	return text
+}
+
+func formatMemberPrompt(memberID int64, text, name, pane string, inputID opt[int64], delivery deliveryProjection) string {
+	first := fmt.Sprintf("Sent prompt %s to member %s (%s).", quoted(text), name, pane)
+	if delivery.Status == deliveryStatusQueued {
+		first = fmt.Sprintf("Queued prompt for member %d (%s).", memberID, pane)
+	}
+	return withDelivery(first, inputID, delivery)
+}
+
+func formatMemberExec(memberID int64, pane string, inputID opt[int64], delivery deliveryProjection) string {
+	first := fmt.Sprintf("Dispatched native command to member %d (%s). Inspect the pane for its result.", memberID, pane)
+	if delivery.Status == deliveryStatusQueued {
+		first = fmt.Sprintf("Queued native command for member %d (%s).", memberID, pane)
+	}
+	return withDelivery(first, inputID, delivery)
+}
+
 // windowLabel is the placement's window name, or (pending) while creation has not published it.
 func windowLabel(p placement) string {
 	if name, set := p.muxWindowName.get(); set {
@@ -117,7 +152,11 @@ func windowLabel(p placement) string {
 }
 
 func formatMemberDetail(member memberRecord) string {
-	return fmt.Sprintf("%d %s %s window=%s", member.memberID, member.name, member.status.asStr(), windowLabel(member.placement))
+	text := fmt.Sprintf("%d %s %s window=%s", member.memberID, member.name, member.status.asStr(), windowLabel(member.placement))
+	if runtime, set := member.runtime.get(); set {
+		text += "\n" + formatRuntimeSnapshot(*runtime)
+	}
+	return text
 }
 
 func formatFleetCreate(fleet createdFleet) string {
@@ -179,4 +218,41 @@ func formatMemberList(members []memberActivity) string {
 			windowLabel(member.placement), pane, formatIdle(row.idle)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatRuntimeSnapshot(snapshot runtimeSnapshot) string {
+	run := snapshot.run
+	return fmt.Sprintf("Runtime: run=%d mode=%s status=%s coverage=%s", run.runID, run.resolvedMode, run.status.asStr(), run.coverage.asStr())
+}
+
+func formatRuntimeEvent(view runtimeEventView) string {
+	event := view.event
+	message := "-"
+	if id, set := event.messageID.get(); set {
+		message = strconv.FormatInt(id, 10)
+	}
+	text := fmt.Sprintf("Event: %d run=%d seq=%d kind=%s notification=%s message=%s\n%s",
+		event.eventID, event.runID, event.eventSeq, event.kind.asStr(), event.notificationState.asStr(), message,
+		formatRuntimeSnapshot(view.run))
+	if interaction, set := view.interaction.get(); set {
+		closedAt, closed := interaction.closedAt.get()
+		if !closed {
+			closedAt = "-"
+		}
+		closeReason := "-"
+		if reason, set := interaction.closeReason.get(); set {
+			closeReason = reason.asStr()
+		}
+		text += fmt.Sprintf("\nInteraction: %d classification=%s closed_at=%s close_reason=%s",
+			interaction.interactionID, interaction.classification.asStr(), closedAt, closeReason)
+	}
+	return text
+}
+
+func formatInputOperation(input inputOperation) string {
+	disposition := "-"
+	if value, set := input.disposition.get(); set {
+		disposition = value.asStr()
+	}
+	return fmt.Sprintf("Input: %d run=%d kind=%s state=%s disposition=%s", input.inputID, input.runID, input.kind.asStr(), input.state.asStr(), disposition)
 }

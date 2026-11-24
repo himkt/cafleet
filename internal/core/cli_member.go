@@ -21,12 +21,27 @@ func memberRun(ctx context.Context, conn *dbConn, command memberCommand) error {
 	switch command := command.(type) {
 	case memberCommandList:
 		return memberList(ctx, conn, command.fleetID, command.json)
-	case memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandPrompt,
+	case memberCommandShow:
+		return memberShow(ctx, conn, command.memberID, command.json)
+	case memberCommandCreate, memberCommandDelete, memberCommandPrompt,
 		memberCommandExec, memberCommandPress, memberCommandCapture:
 		return commandNotYetPorted()
 	default:
 		panic("invalid memberCommand")
 	}
+}
+
+// memberShow prints a member; a member with a runtime also needs the runner observation probe
+// of the runtime control protocol, which is not ported yet.
+func memberShow(ctx context.Context, conn *dbConn, memberID int64, json bool) error {
+	member, err := activeMember(ctx, conn, memberID)
+	if err != nil {
+		return err
+	}
+	if _, set := member.runtime.get(); set {
+		return commandNotYetPorted()
+	}
+	return emit(json, outputJSONMember(member), func() string { return formatMemberDetail(member) })
 }
 
 func memberList(ctx context.Context, conn *dbConn, fleetID int64, json bool) error {
