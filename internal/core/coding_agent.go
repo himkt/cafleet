@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json/jsontext"
 	"math"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -10,6 +11,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 )
+
+type spawnProbe interface {
+	resolveBinary(name string) opt[string]
+	homeDir() (string, error)
+	envVar(name string) (opt[string], error)
+}
 
 type codingAgent uint8
 
@@ -171,6 +178,35 @@ func (a codingAgent) validateEffort(effort opt[string]) error {
 		return nil
 	}
 	return usageError("--effort for the " + a.name() + " backend must be one of " + strings.Join(choices, ", ") + " (got '" + value + "').")
+}
+
+func (a codingAgent) ensureAvailable(probe spawnProbe, mode string) (string, error) {
+	home, err := probe.homeDir()
+	if err != nil {
+		return "", err
+	}
+	config, err := a.configDir(probe.envVar, home)
+	if err != nil {
+		return "", err
+	}
+	executable, found := probe.resolveBinary(a.name()).get()
+	if !found {
+		return "", appError("binary " + a.name() + " not found on PATH")
+	}
+	if presetPath, required := a.requiredPreset(config, mode).get(); required {
+		if _, err := os.ReadFile(presetPath); err != nil {
+			return "", appError("cannot read opencode agent preset at " + lossyUTF8([]byte(presetPath)) + ": " + ioErrorText(err) + "; run 'cafleet setup --coding-agent opencode' first")
+		}
+	}
+	if a == codingAgentPi {
+		for _, file := range embeddedExtension(piExtensionPrefix) {
+			extension := joinPath(piExtensionsDir(config), file.path)
+			if _, err := os.ReadFile(extension); err != nil {
+				return "", appError("cannot read the CAFleet pi extension at " + lossyUTF8([]byte(extension)) + ": " + ioErrorText(err) + "; run 'cafleet setup --coding-agent pi' first")
+			}
+		}
+	}
+	return executable, nil
 }
 
 func (a codingAgent) launchArgv(executable, prompt, displayName, cwd string, model, effort opt[string], policy *launchPolicySelection) ([]string, error) {
