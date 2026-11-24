@@ -1683,7 +1683,12 @@ func dispatch(s settings, command cliCommand) (err error) {
 	case doctorArgs:
 		return doctor(s, command)
 	case memberRunCommand:
-		return commandNotYetPorted()
+		code, err := runnerRun(s, command.descriptor)
+		if err != nil {
+			return err
+		}
+		os.Exit(int(code))
+		panic("os.Exit returned")
 	case permissionCommandInspect, permissionCommandRespond:
 		return permissionDispatch(ctx, s, command.(permissionCommand))
 	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete,
