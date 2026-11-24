@@ -252,7 +252,7 @@
         "region": {
           "screen": "primary",
           "start_pattern": "^(?:☤ )?❯ ",
-          "end_pattern": "^─",
+          "end_pattern": "^(?:─| ☤ )",
           "max_rows": 40,
           "cursor": "any"
         },
@@ -466,7 +466,7 @@
           ],
           "first_prefix": "^(?:☤ )?❯ ",
           "continuation_prefix": "^",
-          "wrap": "char",
+          "wrap": "word",
           "placeholders": [
             {
               "pattern": "\\[Pasted text #[0-9]+: (?P<count>[0-9]+) lines → [^\\]]*\\]",
@@ -518,6 +518,7 @@
               "hermes-2026.9.24-composer-prompt-plain-4000-max-preview-chunks-post-500ms-tapped-v2-herdr-119-43",
               "hermes-2026.9.24-composer-prompt-one-literal-tmux-120-1",
               "hermes-2026.9.24-composer-prompt-wrap-literal-tmux-120-1",
+              "hermes-2026.9.24-composer-prompt-narrow-wrap-literal-tmux-30-1",
               "hermes-2026.9.24-composer-prompt-plain-558-literal-tmux-80-1",
               "hermes-2026.9.24-composer-prompt-plain-558-literal-herdr-81-1",
               "hermes-2026.9.24-composer-prompt-paste-2000-literal-tmux-120-1",
@@ -29387,6 +29388,285 @@
           "foreground": {
             "kind": "indexed",
             "index": 102
+          }
+        }
+      ]
+    },
+    "hermes-2026.9.24-composer-prompt-narrow-wrap-literal-tmux-30-1": {
+      "native_version": "2026.9.24",
+      "composer_evidence": [
+        {
+          "operation": "prompt",
+          "multiplexer": "tmux",
+          "kind": "unsubmitted_literal",
+          "expected_literal": "narrow draft 日本語テキスト with wide chars wrapping"
+        }
+      ],
+      "rows": 20,
+      "cols": 30,
+      "alternate_screen": false,
+      "screen_seq": 1,
+      "cursor_row": 18,
+      "cursor_col": 24,
+      "lines": [
+        "clarify, code_execution,      ",
+        "computer_use, connections,    ",
+        "cronjob, delegation, file,    ",
+        "image_gen, memory,            ",
+        "session_search, skills,       ",
+        "terminal, todo, tts, vision,  ",
+        "web · provider: openrouter    ",
+        "",
+        "Welcome to Hermes Agent! Type ",
+        "your message or /help for     ",
+        "commands.      ",
+        "✦ Tip: Set agent.max_turns:   ",
+        "1000 to let the agent take    ",
+        "more tool-calling steps per   ",
+        "turn.  ",
+        "",
+        "──────────────────────────────",
+        "❯ narrow draft 日本語テキスト ",
+        "with wide chars wrapping      ",
+        " ☤ gpt-6-luna · 11s           "
+      ],
+      "masked_rows": [],
+      "cell_styles": [
+        {
+          "row": 0,
+          "start_col": 0,
+          "end_col": 24,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 1,
+          "start_col": 0,
+          "end_col": 26,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 2,
+          "start_col": 0,
+          "end_col": 26,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 3,
+          "start_col": 0,
+          "end_col": 18,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 4,
+          "start_col": 0,
+          "end_col": 23,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 5,
+          "start_col": 0,
+          "end_col": 28,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 0,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 218,
+            "g": 165,
+            "b": 32
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 4,
+          "end_col": 5,
+          "faint": true,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 6,
+          "start_col": 6,
+          "end_col": 26,
+          "faint": true,
+          "foreground": null
+        },
+        {
+          "row": 8,
+          "start_col": 0,
+          "end_col": 29,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 248,
+            "b": 220
+          }
+        },
+        {
+          "row": 9,
+          "start_col": 0,
+          "end_col": 25,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 248,
+            "b": 220
+          }
+        },
+        {
+          "row": 10,
+          "start_col": 0,
+          "end_col": 9,
+          "faint": false,
+          "foreground": {
+            "kind": "rgb",
+            "r": 255,
+            "g": 248,
+            "b": 220
+          }
+        },
+        {
+          "row": 11,
+          "start_col": 0,
+          "end_col": 27,
+          "faint": true,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 12,
+          "start_col": 0,
+          "end_col": 26,
+          "faint": true,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 13,
+          "start_col": 0,
+          "end_col": 27,
+          "faint": true,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 14,
+          "start_col": 0,
+          "end_col": 5,
+          "faint": true,
+          "foreground": {
+            "kind": "rgb",
+            "r": 184,
+            "g": 134,
+            "b": 11
+          }
+        },
+        {
+          "row": 16,
+          "start_col": 0,
+          "end_col": 30,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 102
+          }
+        },
+        {
+          "row": 17,
+          "start_col": 0,
+          "end_col": 2,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 230
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 0,
+          "end_col": 3,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 250
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 3,
+          "end_col": 13,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 220
+          }
+        },
+        {
+          "row": 19,
+          "start_col": 13,
+          "end_col": 19,
+          "faint": false,
+          "foreground": {
+            "kind": "indexed",
+            "index": 101
           }
         }
       ]
