@@ -4019,7 +4019,7 @@ func TestCodingAgentDetector_CursorFree_AnObservationWithoutANativeVersionRecord
 }
 
 var detectorFixtureGoldens = []detectorFixtureGolden{
-	// BEGIN GENERATED: mise //:test -- -run 'TestCodingAgentDetector_FixtureGolden' -update-golden
+	// BEGIN GENERATED: go test ./internal/core -run '^TestCodingAgentDetector_FixtureGolden$' -update-golden
 	{fixture: "claude-2.1.302-default-permission-1", screen: 0xd63aa2196391346a, record: `{"size":[36,120],"cursor":[23,1],"alternate_screen":true,"kind":"Interaction(PermissionRequest)","rule_id":"claude-bash-permission","match_evidence":"Complete","verified_noninteraction":false,"matched_region":[14,29],"operation":"/private/tmp/cafleet-194/cells-002/permission-probe allow","choices":["Yes","No"],"composer_text":null,"episode":"claude-2.1.302-default-permission-1"}`},
 	{fixture: "claude-2.1.302-allow-pre-stage-1", screen: 0xdb2f1853b27806d1, record: `{"size":[36,120],"cursor":[23,1],"alternate_screen":true,"kind":"Interaction(PermissionRequest)","rule_id":"claude-bash-permission","match_evidence":"Complete","verified_noninteraction":false,"matched_region":[14,29],"operation":"/private/tmp/cafleet-194/ans-allow-001/permission-probe allow","choices":["Yes","No"],"composer_text":null,"episode":"claude-2.1.302-allow-pre-stage-1"}`},
 	{fixture: "claude-2.1.302-deny-pre-stage-1", screen: 0x1b873450db77c185, record: `{"size":[36,120],"cursor":[23,1],"alternate_screen":true,"kind":"Interaction(PermissionRequest)","rule_id":"claude-bash-permission","match_evidence":"Complete","verified_noninteraction":false,"matched_region":[14,29],"operation":"/private/tmp/cafleet-194/ans-deny-001/permission-probe deny","choices":["Yes","No"],"composer_text":null,"episode":"claude-2.1.302-deny-pre-stage-1"}`},

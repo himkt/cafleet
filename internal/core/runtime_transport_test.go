@@ -1025,7 +1025,7 @@ func TestRuntimeTransport_SeededScreens(t *testing.T) {
 }
 
 var seededScreenGolden = []seededScreenRecord{
-	// BEGIN GENERATED: mise //:test -- -run 'TestRuntimeTransport_SeededScreens' -update-golden
+	// BEGIN GENERATED: go test ./internal/core -run '^TestRuntimeTransport_SeededScreens$' -update-golden
 	{name: "fuzz:grammar:00000", steps: 75, final: 0xb1afe37f294712f2, chain: 0xb3051ace710ceadf},
 	{name: "fuzz:grammar:00001", steps: 319, final: 0xbc29e754bf55115a, chain: 0xdac734afdc29414f},
 	{name: "fuzz:grammar:00002", steps: 384, final: 0xbd8a8544a3a4814c, chain: 0x6b2b9ded643e39cf},
