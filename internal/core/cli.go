@@ -1727,7 +1727,11 @@ func dispatch(s settings, command cliCommand) (err error) {
 		return memberRun(ctx, conn, command.(memberCommand))
 	case messageCommandSend, messageCommandPoll, messageCommandShow:
 		return messageRun(ctx, conn, command.(messageCommand))
-	case eventCommandShow, inputCommandShow, inputCommandReconcile, permissionCommandRespond:
+	case eventCommandShow:
+		return eventRun(ctx, conn, command.(eventCommand))
+	case inputCommandShow, inputCommandReconcile:
+		return inputRun(ctx, conn, command.(inputCommand))
+	case permissionCommandRespond:
 		return commandNotYetPorted()
 	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect:
 		panic("a command without a guarded connection is dispatched before one is opened")
