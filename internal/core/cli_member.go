@@ -49,7 +49,7 @@ func memberRun(ctx context.Context, conn *dbConn, s settings, command memberComm
 	case memberCommandCreate:
 		return cliMemberCreate(ctx, conn, command.createArgs)
 	case memberCommandPress:
-		return commandNotYetPorted()
+		panic("member press is dispatched on its own connection")
 	default:
 		panic("invalid memberCommand")
 	}
@@ -863,6 +863,33 @@ func cliMemberCapture(ctx context.Context, conn *dbConn, memberID, lines int64, 
 	}
 	capture := memberCapture{memberID: memberID, paneID: paneID, lines: lines, snapshot: captureSnapshotFromRaw(raw, ansi, time.Now())}
 	return writeMemberCapture(os.Stdout, capture, json)
+}
+
+// cliMemberPressDispatch parses the keys, then presses them under the inherited database deadline;
+// a connection failure reports that no key was dispatched.
+func cliMemberPressDispatch(ctx context.Context, s settings, command memberCommandPress) (err error) {
+	d := deadlineInheritedOrNew(ctx)
+	keys, err := pressKeysParse(command.keys)
+	if err != nil {
+		return err
+	}
+	conn, err := invocationConnection(ctx, s.databaseURL, d)
+	if err != nil {
+		return cafleetErrorOf(err).withDiagnostic(fmt.Sprintf("keys were not dispatched to member %d.", command.memberID))
+	}
+	defer func() {
+		err = mergeCleanup(err, conn.close())
+	}()
+	if guarded, ok := directorOnlyOf(command); ok {
+		if err := requireDirector(conn, guarded); err != nil {
+			return err
+		}
+	}
+	acknowledgment, err := pressMember(ctx, conn, s, command.memberID, keys, d, systemClock{})
+	if err != nil {
+		return err
+	}
+	return emit(command.json, outputJSONMemberPress(acknowledgment), func() string { return formatMemberPress(acknowledgment) })
 }
 
 const defaultDatabase = "default"

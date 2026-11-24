@@ -3569,7 +3569,7 @@ func TestCodingAgentCatalog_QuestionAnswers_AnAnswerOutsideItsFormScopeOrChoiceS
 	}
 }
 
-func TestCodingAgentCatalog_QuestionAnswers_AChoiceIDFollowsTheLowercaseHyphenatedShapeUpTo64Bytes(t *testing.T) {
+func TestCodingAgentCatalog_QuestionAnswers_AChoiceIdFollowsTheLowercaseHyphenatedShapeUpTo64Bytes(t *testing.T) {
 	t.Parallel()
 	renamed := func(id string) any {
 		return changedQuestionDefinition(func(value any) {
@@ -6118,6 +6118,84 @@ func TestCodingAgentCatalog_DirectorScreens_HermesTuiIdleComposerObservesEmptyAn
 	}
 }
 
+// wordWrapped is text split at spaces into rows of at most width characters, the space at each
+// break dropped, as the hermes TUI wraps its composer.
+func wordWrapped(text string, width int) []string {
+	var rows []string
+	for _, word := range strings.Split(text, " ") {
+		if last := len(rows) - 1; last >= 0 && utf8.RuneCountInString(rows[last])+1+utf8.RuneCountInString(word) <= width {
+			rows[last] += " " + word
+			continue
+		}
+		rows = append(rows, word)
+	}
+	return rows
+}
+
+// hermesTUIScreen is a hermes TUI Director screen: a prior user turn and the status line above a
+// composer holding composer rows, the cursor after the last one.
+func hermesTUIScreen(t testing.TB, composer []string) screenSnapshot {
+	t.Helper()
+	lines := []string{
+		" ❯ an earlier prompt from the operator",
+		"",
+		"   The earlier answer.",
+		"",
+		" ─ ready · gpt-6-luna · 12% context",
+	}
+	for index, text := range composer {
+		if index == 0 {
+			lines = append(lines, " ❯ "+text)
+		} else {
+			lines = append(lines, "   "+text)
+		}
+	}
+	bytes := []byte("\x1b[?1049h\x1b[2J")
+	for offset, line := range lines {
+		bytes = fmt.Appendf(bytes, "\x1b[%d;1H%s", 30+offset, line)
+	}
+	terminal := mustTerminalState(t, terminalSize{rows: 39, cols: 120})
+	mustFeed(t, terminal, bytes)
+	return terminal.snapshot()
+}
+
+func TestCodingAgentCatalog_DirectorScreens_HermesTuiComposerTextReadsAWordWrappedPreviewBelowTheTranscriptAndStatusLine(t *testing.T) {
+	t.Parallel()
+	preview := canonicalPreviewLine(messageRecordFixture(12, 3, 1, "the results of the review are ready for the director to read"))
+	rows := wordWrapped(preview, 117)
+	if len(rows) < 2 {
+		t.Fatalf("the preview wraps: %q", rows)
+	}
+	d := newDetector(profileCatalogBundled(), codingAgentHermes, none[string]())
+	captured := hermesTUIScreen(t, rows)
+	cases := []struct {
+		name   string
+		screen screenSnapshot
+	}{
+		{"as captured", captured},
+		{"cursor-free", cursorFreeScreen(captured)},
+	}
+	for _, c := range cases {
+		composer, found, err := d.composerText(&c.screen)
+		if err != nil || !found {
+			t.Fatalf("%s: the TUI composer is extractable: %v", c.name, err)
+		}
+		if !composer.matches([]string{preview}) {
+			t.Fatalf("%s: the composer holds the preview %q", c.name, rows)
+		}
+		if composer.matches([]string{"an earlier prompt from the operator"}) {
+			t.Fatalf("%s: the transcript turn is not the composer", c.name)
+		}
+		observed, err := d.observeDirector(&c.screen, hermesDirectorRules())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if observed.kind == observationKindComposerEmpty {
+			t.Fatalf("%s: a typed preview is not an empty composer", c.name)
+		}
+	}
+}
+
 func TestCodingAgentCatalog_DirectorScreens_HermesTuiApprovalFormIsDetectedWithNoAnswerPlan(t *testing.T) {
 	t.Parallel()
 	catalog := profileCatalogBundled()
@@ -6179,6 +6257,51 @@ func guardedBundledFiles(files any) opt[string] {
 		return some(err.Error())
 	}
 	return none[string]()
+}
+
+func profileRuleIDs(p *profile) []string {
+	ids := make([]string, len(p.rules))
+	for index := range p.rules {
+		ids[index] = p.rules[index].id
+	}
+	return ids
+}
+
+// TestCodingAgentCatalog_ProductionLoaderStopsReadingAProfileFileAfterItsProfile is F21: the
+// production loader reads each profile file only through its profile member, so its bytes after
+// that member, however malformed, change nothing, while the bundled-catalog guard still validates
+// the whole file.
+func TestCodingAgentCatalog_ProductionLoaderStopsReadingAProfileFileAfterItsProfile(t *testing.T) {
+	t.Parallel()
+	for _, backend := range codingAgentAll() {
+		text, ok := bundledProfileText(backend)
+		if !ok {
+			continue
+		}
+		full, err := decodeProfileFileText(backend, text)
+		if err != nil {
+			t.Fatalf("%s: the bundled file decodes: %v", backend.name(), err)
+		}
+		file := jget(parsedBundledFiles(), backend.name())
+		head := jo("schema_version", jget(file, "schema_version"), "backend", jget(file, "backend"), "profile", jget(file, "profile"))
+		prefix := strings.TrimSuffix(testJSONText(head), "}")
+		for _, tail := range []string{`,"screens":{"unterminated`, `,"screens":1}`, `}trailing bytes`} {
+			truncated, err := decodeProfileFileText(backend, []byte(prefix+tail))
+			if err != nil {
+				t.Fatalf("%s %q: the loader stops after the profile member: %v", backend.name(), tail, err)
+			}
+			if !slices.Equal(profileRuleIDs(&truncated), profileRuleIDs(&full)) || len(truncated.answers) != len(full.answers) {
+				t.Fatalf("%s %q: the profile decodes as from the whole file", backend.name(), tail)
+			}
+		}
+		files := bundledFiles()
+		jset(files, 1, backend.name(), "screens")
+		if violation, found := guardedBundledFiles(files).get(); !found {
+			t.Fatalf("%s: the guard validates the screens after the profile", backend.name())
+		} else if violation == "" {
+			t.Fatalf("%s: the guard names its violation", backend.name())
+		}
+	}
 }
 
 var cursorFreeFields = []string{"alternate_screen", "cursor_row", "cursor_col"}
@@ -6262,5 +6385,778 @@ func TestCodingAgentCatalog_PanelSeparator_APanelSeparatorThatIsNotOneNonWhitesp
 	t.Parallel()
 	for _, separator := range []any{1, "", " ", "││"} {
 		assertLoadRejected(t, testJSONText(separator), withPanelSeparator("/codex/profile/rules/0", separator))
+	}
+}
+
+// requestOfCitedFixture is the request rule of the bundled answer plans citing fixture.
+func requestOfCitedFixture(t testing.TB, backend codingAgent, fixture string) string {
+	t.Helper()
+	for _, cited := range bundledCitedPlans(t, backend) {
+		if slices.ContainsFunc(cited.fixtures, func(f bundledFixtureRecord) bool { return f.id == fixture }) {
+			return cited.plan.capability.requestRuleID
+		}
+	}
+	t.Fatalf("%s: an answer plan cites it", fixture)
+	panic("unreachable")
+}
+
+// assertRequestPlansExclusive asserts that every plan of the request rule whose plans cite anchor
+// matches each form it cites as the observed request, matches no form a plan of another request
+// rule cites, and that no plan of another request rule matches its forms.
+func assertRequestPlansExclusive(t *testing.T, backend codingAgent, anchor string) {
+	t.Helper()
+	request := requestOfCitedFixture(t, backend, anchor)
+	plans := bundledCitedPlans(t, backend)
+	for _, own := range plans {
+		if own.plan.capability.requestRuleID != request {
+			continue
+		}
+		for _, form := range own.fixtures {
+			observed := observeFixture(t, form, nil)
+			matched, ok := matchFixture(t, form, nil, &own.plan)
+			if !ok || !slices.Equal(matched.choices, observed.rawEvidence.choices.values) || !fingerprintsEqual(&matched.semantic, observed.fingerprint) {
+				t.Fatalf("%s: the %s plan matches its pre-stage form as the observed request", form.id, own.plan.choiceID)
+			}
+		}
+		for _, other := range plans {
+			if other.plan.capability.requestRuleID == request {
+				continue
+			}
+			for _, form := range other.fixtures {
+				if _, ok := matchFixture(t, form, nil, &own.plan); ok {
+					t.Fatalf("%s: a %s plan matches another request rule's form", form.id, own.plan.choiceID)
+				}
+			}
+			for _, form := range own.fixtures {
+				if _, ok := matchFixture(t, form, nil, &other.plan); ok {
+					t.Fatalf("%s: another request rule's %s plan matches the form", form.id, other.plan.choiceID)
+				}
+			}
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaudeAuto_BundledClaudeAutoAskFormAnswersAllowWith1AndDenyWith2Ungated(t *testing.T) {
+	t.Parallel()
+	assertRequestPlansExclusive(t, codingAgentClaude, "claude-2.1.302-auto-ask-permission-1")
+}
+
+func TestCodingAgentCatalog_BundledClaudeAuto_BundledClaudeAutoTipFormAnswersAllowWith1AndDenyWith4Ungated(t *testing.T) {
+	t.Parallel()
+	assertRequestPlansExclusive(t, codingAgentClaude, "claude-2.1.302-access-allow-pre-stage-1")
+}
+
+func TestCodingAgentCatalog_BundledClaudeAuto_BundledClaudeReadOutsideDialogAnswersAllowWith4AndDenyWith3Ungated(t *testing.T) {
+	t.Parallel()
+	assertRequestPlansExclusive(t, codingAgentClaude, "claude-2.1.309-read-outside-allow-pre-stage-1")
+}
+
+func TestCodingAgentCatalog_BundledClaudeAuto_BundledClaudeReadOutsideDialogsAreCompletePermissionRequestsWithTheirOperation(t *testing.T) {
+	t.Parallel()
+	read := observeFixture(t, bundledFixtureByID("claude-2.1.309-read-outside-permission-1"), nil)
+	edit := observeFixture(t, bundledFixtureByID("claude-2.1.309-edit-outside-permission-1"), nil)
+	for _, observed := range []*screenObservation{&read, &edit} {
+		if observed.kind != observationKindPermissionRequest || observed.matchEvidence != matchEvidenceComplete || observed.fingerprint == nil || observed.verifiedNoninteraction {
+			t.Fatalf("a complete permission request, got %s %s", observed.kind.debugString(), observed.matchEvidence.debugString())
+		}
+	}
+	if read.ruleID != edit.ruleID || read.rawEvidence.operation == edit.rawEvidence.operation {
+		t.Fatalf("one rule displays both paths: %s %s", read.ruleID, edit.ruleID)
+	}
+	if fingerprintsEqual(read.fingerprint, edit.fingerprint) {
+		t.Fatal("a different displayed path is a different request")
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaudeAuto_BundledClaudeAutoStartupOfferAndWizardAreSeparateQuestions(t *testing.T) {
+	t.Parallel()
+	offer := observeFixture(t, bundledFixtureByID("claude-2.1.302-auto-env-setup-offer-1"), nil)
+	wizard := observeFixture(t, bundledFixtureByID("claude-2.1.302-auto-env-setup-wizard-1"), nil)
+	for _, observed := range []*screenObservation{&offer, &wizard} {
+		if observed.kind != observationKindQuestion || observed.matchEvidence != matchEvidenceComplete || observed.verifiedNoninteraction ||
+			observed.rawEvidence.operation != none[string]() || observed.fingerprint == nil {
+			t.Fatalf("a complete question without an operation, got %s %s", observed.kind.debugString(), observed.ruleID)
+		}
+	}
+	if fingerprintsEqual(offer.fingerprint, wizard.fingerprint) {
+		t.Fatal("the offer and its wizard are separate dialogs")
+	}
+	bundled, ok := profileCatalogBundled().profile(codingAgentClaude)
+	if !ok {
+		t.Fatal("a bundled Claude profile")
+	}
+	offerPlans := bundled.answerPlans(offer.ruleID)
+	if len(offerPlans) == 0 || slices.ContainsFunc(offerPlans, func(p answerPlan) bool { _, decision := answerKeyDecisionOf(p.capability.key); return decision }) {
+		t.Fatalf("the offer answers by choice only, got %d plans", len(offerPlans))
+	}
+	if len(bundled.answerPlans(wizard.ruleID)) != 0 {
+		t.Fatal("the wizard has no answer plan")
+	}
+}
+
+func observeClaudeFixture(t testing.TB, id string, change func(*[]string)) screenObservation {
+	t.Helper()
+	return observeFixture(t, bundledFixtureByID(id), change)
+}
+
+func observeClaudeDocument(t testing.TB, id string, document any, alternate bool) screenObservation {
+	t.Helper()
+	snapshot := replayNativeFixture(testJSONText(document), nil, alternate, none[[2]uint16]())
+	return observeBundled(t, codingAgentClaude, bundledFixtureByID(id).version, &snapshot)
+}
+
+func assertInteraction(t testing.TB, label string, observed *screenObservation) {
+	t.Helper()
+	if _, interaction := observed.kind.interaction(); !interaction {
+		t.Fatalf("%s: an interaction, got %s", label, observed.kind.debugString())
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_PrimaryScreenFixturesMatchTheirAlternateScreenRendering(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{"claude-2.1.312-primary-auto-default-nudge-1", "claude-2.1.312-primary-default-permission-1"} {
+		primary := observeClaudeDocument(t, id, fixtureDocument(id), false)
+		alternate := observeClaudeDocument(t, id, fixtureDocument(id), true)
+		assertPrimaryMatchesAlternate(t, id, &primary, &alternate)
+		assertInteraction(t, id, &primary)
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_SidebarFixturesMatchTheirFullWidthRendering(t *testing.T) {
+	t.Parallel()
+	panels := []struct {
+		id        string
+		separator int
+	}{
+		{"claude-2.1.312-panel-default-permission-1", 92},
+		{"claude-2.1.312-panel-default-permission-144-1", 80},
+		{"claude-2.1.312-panel-default-allow-pre-stage-1", 92},
+	}
+	for _, panel := range panels {
+		beside := observeClaudeDocument(t, panel.id, fixtureDocument(panel.id), true)
+		full := fixtureDocument(panel.id)
+		jobject(full).remove("cell_backgrounds")
+		lines := jarray(jget(full, "lines"))
+		for index, line := range lines.items {
+			text, _ := jstring(line)
+			if runes := []rune(text); len(runes) > panel.separator && runes[panel.separator] == '│' {
+				lines.items[index] = string(runes[:panel.separator])
+			}
+		}
+		fullWidth := observeClaudeDocument(t, panel.id, full, true)
+		assertPrimaryMatchesAlternate(t, panel.id, &beside, &fullWidth)
+		assertInteraction(t, panel.id, &beside)
+	}
+}
+
+var claudeHeadings = []string{" Read file", " Edit file", " Create file", " Bash command"}
+
+// headingRow is the one row whose first width characters are a form heading.
+func headingRow(t testing.TB, lines []string, width int) int {
+	t.Helper()
+	var rows []int
+	for row, line := range lines {
+		left := []rune(line)
+		if len(left) > width {
+			left = left[:width]
+		}
+		if slices.Contains(claudeHeadings, strings.TrimRight(string(left), " ")) {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) != 1 {
+		t.Fatalf("one heading row, got %v", rows)
+	}
+	return rows[0]
+}
+
+// withCounter right-aligns counter at width on the heading row, keeping the row's text past width.
+func withCounter(t testing.TB, width int, counter string) func(*[]string) {
+	return func(lines *[]string) {
+		row := headingRow(t, *lines, width)
+		runes := []rune((*lines)[row])
+		left, rest := runes, []rune(nil)
+		if len(runes) > width {
+			left, rest = runes[:width], runes[width:]
+		}
+		(*lines)[row] = padTo(strings.TrimRight(string(left), " "), width-utf8.RuneCountInString(counter)) + counter + string(rest)
+	}
+}
+
+var claudeHeadingCounter = regexp.MustCompile(`^( (?:Read file|Edit file|Create file|Bash command)) +(\d+ of \d+)$`)
+
+func withoutCounter(t testing.TB) func(*[]string) {
+	return func(lines *[]string) {
+		var rows []int
+		for row, line := range *lines {
+			if claudeHeadingCounter.MatchString(strings.TrimRight(line, " ")) {
+				rows = append(rows, row)
+			}
+		}
+		if len(rows) != 1 {
+			t.Fatalf("one counted heading, got %v", rows)
+		}
+		(*lines)[rows[0]] = claudeHeadingCounter.FindStringSubmatch(strings.TrimRight((*lines)[rows[0]], " "))[1]
+	}
+}
+
+var claudeBatchedReads = []string{
+	"claude-2.1.312-read-file-batched-permission-1",
+	"claude-2.1.312-read-file-batched-allow-post-stage-1",
+	"claude-2.1.312-read-file-batched-deny-pre-stage-1",
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_BatchedReadFixturesMatchTheirCounterFreeSingleForm(t *testing.T) {
+	t.Parallel()
+	for _, id := range claudeBatchedReads {
+		batched := observeClaudeFixture(t, id, nil)
+		single := observeClaudeFixture(t, id, withoutCounter(t))
+		assertPrimaryMatchesAlternate(t, id, &batched, &single)
+		assertInteraction(t, id, &batched)
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_AHeadingCounterChangesNoIdentityOnEveryHeadingAnchoredForm(t *testing.T) {
+	t.Parallel()
+	rules := map[string]bool{}
+	forms := []string{
+		"claude-2.1.312-read-file-permission-1",
+		"claude-2.1.312-edit-file-permission-1",
+		"claude-2.1.312-create-file-permission-1",
+		"claude-2.1.312-bash-no-tip-permission-1",
+		"claude-2.1.312-primary-default-permission-1",
+		"claude-2.1.302-access-permission-1",
+		"claude-2.1.302-auto-ask-permission-1",
+	}
+	for _, id := range forms {
+		single := observeClaudeFixture(t, id, nil)
+		assertInteraction(t, id, &single)
+		counted := observeClaudeFixture(t, id, withCounter(t, int(fixtureSize(id).cols), "10 of 12"))
+		assertPrimaryMatchesAlternate(t, id, &counted, &single)
+		rules[single.ruleID] = true
+	}
+	if len(rules) != len(forms) {
+		t.Fatalf("each heading-anchored form has its own rule, got %d rules for %d forms", len(rules), len(forms))
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_AHeadingCounterOfAnotherShapeLeavesTheFormUnmatched(t *testing.T) {
+	t.Parallel()
+	const id = "claude-2.1.312-read-file-permission-1"
+	edits := map[string]func(*[]string){}
+	for _, counter := range []string{"1 of", "of 2", "1/2", "1 of 2 queued", "one of two"} {
+		edits[counter] = withCounter(t, 120, counter)
+	}
+	assertEditedLeavesNoInteraction(t, id, edits, []opt[[2]uint16]{none[[2]uint16]()})
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_BatchedReadFormsResolveTheSingleRequestDigits(t *testing.T) {
+	t.Parallel()
+	bundled, ok := profileCatalogBundled().profile(codingAgentClaude)
+	if !ok {
+		t.Fatal("a bundled Claude profile")
+	}
+	for index, id := range claudeBatchedReads {
+		decision := permissionDecisionAllow
+		if index == 2 {
+			decision = permissionDecisionDeny
+		}
+		form := bundledFixtureByID(id)
+		plan, ok := bundled.answerPlan(observeFixture(t, form, nil).ruleID, answerKeyDecision{decision: decision})
+		if !ok {
+			t.Fatalf("%s: a decision plan of its rule", id)
+		}
+		if _, ok := matchFixture(t, form, nil, &plan); !ok {
+			t.Fatalf("%s: the batched form matches its %s plan", id, plan.choiceID)
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_DialogADeclineResolvesToTwoMarkerGatedStages(t *testing.T) {
+	t.Parallel()
+	const anchor = "claude-2.1.312-auto-default-decline-pre-stage-1"
+	for _, cited := range bundledCitedPlans(t, codingAgentClaude) {
+		if !slices.ContainsFunc(cited.fixtures, func(f bundledFixtureRecord) bool { return f.id == anchor }) {
+			continue
+		}
+		held := make([]bool, len(cited.plan.stages))
+		for index := range cited.plan.stages {
+			if _, gated := cited.plan.stages[index].requiredFocusChoiceID(); !gated {
+				t.Fatalf("stage %d of the %s plan is marker-gated", index, cited.plan.choiceID)
+			}
+		}
+		forms := append(slices.Clone(cited.fixtures), bundledFixtureByID("claude-2.1.312-primary-auto-default-nudge-1"))
+		for _, form := range forms {
+			if observed := observeFixture(t, form, nil); observed.ruleID != cited.plan.capability.requestRuleID {
+				if _, interaction := observed.kind.interaction(); interaction {
+					t.Fatalf("%s: a cited screen after the final stage is no interaction, got %s", form.id, observed.ruleID)
+				}
+				continue
+			}
+			matched, ok := matchFixture(t, form, nil, &cited.plan)
+			focus, focused := matched.focusedChoice.get()
+			if !ok || !focused {
+				t.Fatalf("%s: the %s plan matches its dialog with a focus", form.id, cited.plan.choiceID)
+			}
+			gated := false
+			for index := range cited.plan.stages {
+				if gate, _ := cited.plan.stages[index].requiredFocusChoiceID(); gate == focus {
+					held[index], gated = true, true
+				}
+			}
+			if !gated {
+				t.Fatalf("%s: focus %s holds no stage gate", form.id, focus)
+			}
+		}
+		if slices.Contains(held, false) {
+			t.Fatalf("a dialog holds each stage gate, got %v", held)
+		}
+		return
+	}
+	t.Fatalf("an answer plan cites %s", anchor)
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_DialogBOfferChoicesResolveToTheirSingleDigits(t *testing.T) {
+	t.Parallel()
+	offers := []string{"claude-2.1.312-auto-env-setup-offer-1", "claude-2.1.302-auto-env-setup-offer-1"}
+	bundled, ok := profileCatalogBundled().profile(codingAgentClaude)
+	if !ok {
+		t.Fatal("a bundled Claude profile")
+	}
+	plans := bundled.answerPlans(observeClaudeFixture(t, offers[0], nil).ruleID)
+	if len(plans) == 0 {
+		t.Fatal("the offer has answer plans")
+	}
+	for _, plan := range plans {
+		for _, id := range offers {
+			if _, ok := matchFixture(t, bundledFixtureByID(id), nil, &plan); !ok {
+				t.Fatalf("%s: the %s plan matches", id, plan.choiceID)
+			}
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_NoPlanSelectsAYesChoiceOfEitherNudgeDialog(t *testing.T) {
+	t.Parallel()
+	bundled, ok := profileCatalogBundled().profile(codingAgentClaude)
+	if !ok {
+		t.Fatal("a bundled Claude profile")
+	}
+	for _, id := range []string{
+		"claude-2.1.312-auto-default-nudge-1",
+		"claude-2.1.312-auto-env-setup-offer-1",
+		"claude-2.1.302-auto-env-setup-wizard-1",
+		"claude-2.1.312-question-pending-notice-1",
+	} {
+		form := bundledFixtureByID(id)
+		observed := observeFixture(t, form, nil)
+		assertInteraction(t, id, &observed)
+		for _, plan := range bundled.answerPlans(observed.ruleID) {
+			if _, decision := answerKeyDecisionOf(plan.capability.key); decision {
+				t.Fatalf("%s: a question answers by choice, not decision", id)
+			}
+			matched, ok := matchFixture(t, form, nil, &plan)
+			if ok && strings.HasPrefix(matched.choiceLabel, "Yes") {
+				t.Fatalf("%s: the %s plan selects %q", id, plan.choiceID, matched.choiceLabel)
+			}
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaude21312_FileAndNoTipDecisionsResolveToTheirSingleRequestDigits(t *testing.T) {
+	t.Parallel()
+	for _, anchor := range []string{
+		"claude-2.1.312-read-file-allow-pre-stage-1",
+		"claude-2.1.312-edit-file-allow-pre-stage-1",
+		"claude-2.1.312-create-file-allow-pre-stage-1",
+		"claude-2.1.312-bash-no-tip-allow-pre-stage-1",
+	} {
+		assertRequestPlansExclusive(t, codingAgentClaude, anchor)
+	}
+}
+
+func TestCodingAgentCatalog_BundledClaudeAskUserQuestion_EveryExistingClaudeFixtureKeepsItsObservationWithTheAskRulesPresent(t *testing.T) {
+	t.Parallel()
+	askCaptures := []string{
+		"claude-2.1.322-ask-single-tmux-120-1", "claude-2.1.322-ask-tabs-tmux-120-1", "claude-2.1.322-ask-tabs-tmux-120-2",
+		"claude-2.1.322-ask-multi-tmux-120-1", "claude-2.1.322-ask-multi-tmux-120-2", "claude-2.1.322-ask-multi-tmux-120-3",
+		"claude-2.1.322-ask-review-tmux-120-1", "claude-2.1.322-ask-review-narrow-tmux-060-1", "claude-2.1.322-ask-typing-tmux-120-1",
+		"claude-2.1.322-ask-typing-tmux-120-2", "claude-2.1.322-ask-narrow-tmux-060-1", "claude-2.1.322-ask-pending-tmux-120-1",
+		"claude-2.1.322-ask-single-herdr-359-1", "claude-2.1.322-ask-tabs-herdr-359-1", "claude-2.1.322-ask-tabs-herdr-359-2",
+		"claude-2.1.322-ask-multi-herdr-359-1", "claude-2.1.322-ask-multi-herdr-359-2", "claude-2.1.322-ask-multi-herdr-359-3",
+		"claude-2.1.322-ask-review-herdr-359-1",
+		"claude-2.1.322-ask-review-tmux-120-2", "claude-2.1.322-ask-review-narrow-tmux-060-2",
+		"claude-2.1.322-ask-review-narrow-tmux-040-2", "claude-2.1.322-ask-review-herdr-359-2",
+		"claude-2.1.322-ask-narrow-tmux-040-1", "claude-2.1.322-ask-review-narrow-tmux-040-1",
+		"claude-2.1.322-ask-single-closed-tmux-120-1", "claude-2.1.322-ask-single-closed-herdr-359-1",
+		"claude-2.1.302-auto-model-switch-question-1", "claude-2.1.322-ask-quoted-tmux-120-1",
+	}
+	askRules := []string{
+		observeClaudeFixture(t, "claude-2.1.322-ask-single-tmux-120-1", nil).ruleID,
+		observeClaudeFixture(t, "claude-2.1.322-ask-review-tmux-120-2", nil).ruleID,
+	}
+	files := bundledFiles()
+	isAsk := func(id any) bool { text, _ := jstring(id); return slices.Contains(askRules, text) }
+	rules := jarray(jget(files, "claude", "profile", "rules"))
+	rules.items = slices.DeleteFunc(rules.items, func(r any) bool { return isAsk(jget(r, "id")) })
+	detection := jarray(jget(files, "claude", "profile", "capabilities", "detection", "rule_ids"))
+	detection.items = slices.DeleteFunc(detection.items, isAsk)
+	without, err := profileCatalogFromFiles(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compared := 0
+	for _, fixture := range bundledFixtureRecords() {
+		if fixture.backend != codingAgentClaude || slices.Contains(askCaptures, fixture.id) {
+			continue
+		}
+		compared++
+		screen := replayAsCaptured(fixture.id, nil, none[[2]uint16]())
+		with := observeBundled(t, codingAgentClaude, fixture.version, &screen)
+		before, err := newDetector(without, codingAgentClaude, some(fixture.version)).observe(&screen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if with.kind != before.kind || with.ruleID != before.ruleID || with.verifiedNoninteraction != before.verifiedNoninteraction ||
+			with.rawEvidence.operation != before.rawEvidence.operation || with.rawEvidence.choices.set != before.rawEvidence.choices.set ||
+			!slices.Equal(with.rawEvidence.choices.values, before.rawEvidence.choices.values) || !fingerprintsEqual(with.fingerprint, before.fingerprint) {
+			t.Fatalf("%s: with the ask rules %s %s, without %s %s", fixture.id, with.kind.debugString(), with.ruleID, before.kind.debugString(), before.ruleID)
+		}
+	}
+	if compared == 0 {
+		t.Fatal("an existing Claude fixture")
+	}
+}
+
+const (
+	opencodePermissionFixture = "opencode-2.1.4-ask-permission-1"
+	opencodeDeny1Fixture      = "opencode-2.1.4-deny-pre-stage-1"
+	opencodeDeny2Fixture      = "opencode-2.1.4-deny-pre-stage-2"
+	opencodeDeny3Fixture      = "opencode-2.1.4-deny-pre-stage-3"
+	opencodeAlwaysFixture     = "opencode-2.1.4-focus-always-1"
+	opencodeIdleFixture       = "opencode-2.1.4-idle-composer-1"
+	opencodeHeading           = "  △ Permission required"
+	opencodeChoiceRow         = "   Allow once   Always allow   Reject                                             ⇆ select  enter confirm  esc reject"
+	opencodePlaceholder       = "Tell OpenCode what to do differently"
+)
+
+func opencodeReplay(t testing.TB, document any, change func(*[]string), cursor opt[[2]uint16]) screenObservation {
+	t.Helper()
+	snapshot := replayNativeFixture(testJSONText(document), change, false, cursor)
+	return observeBundled(t, codingAgentOpencode, opencodeLayoutVersion, &snapshot)
+}
+
+func opencodeFixture(t testing.TB, id string, change func(*[]string), cursor opt[[2]uint16]) screenObservation {
+	t.Helper()
+	return opencodeReplay(t, fixtureDocument(id), change, cursor)
+}
+
+// opencodeFocus is the one focus every bundled plan of the screen's request rule resolves on it.
+func opencodeFocus(t testing.TB, document any) opt[string] {
+	t.Helper()
+	request := opencodeReplay(t, document, nil, none[[2]uint16]()).ruleID
+	snapshot := replayNativeFixture(testJSONText(document), nil, false, none[[2]uint16]())
+	d := bundledDetector(codingAgentOpencode, opencodeLayoutVersion)
+	var focus []opt[string]
+	for _, cited := range bundledCitedPlans(t, codingAgentOpencode) {
+		if cited.plan.capability.requestRuleID != request {
+			continue
+		}
+		matched := mustMatchAnswer(t, d, snapshot, &cited.plan, "the form matches every plan of its rule whatever its focus")
+		focus = append(focus, matched.focusedChoice)
+	}
+	if len(focus) == 0 || slices.ContainsFunc(focus, func(f opt[string]) bool { return f != focus[0] }) {
+		t.Fatalf("every plan shares the focus matcher, got %v", focus)
+	}
+	return focus[0]
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeStageGatesHoldOnTheirPreStageFixtures(t *testing.T) {
+	t.Parallel()
+	plans := bundledCitedPlans(t, codingAgentOpencode)
+	for _, cited := range plans {
+		held := make([]bool, len(cited.plan.stages))
+		for _, fixture := range cited.fixtures {
+			observed := opencodeFixture(t, fixture.id, nil, none[[2]uint16]())
+			if observed.ruleID == cited.plan.capability.requestRuleID {
+				focus := opencodeFocus(t, fixtureDocument(fixture.id))
+				for index := range cited.plan.stages {
+					if gate, gated := cited.plan.stages[index].requiredFocusChoiceID(); gated && focus == some(gate) {
+						held[index] = true
+					}
+				}
+				continue
+			}
+			if observed.kind != observationKindPermissionContinuation || observed.matchEvidence != matchEvidenceComplete || observed.verifiedNoninteraction ||
+				observed.continuesRuleID != some(cited.plan.capability.requestRuleID) {
+				t.Fatalf("%s: a cited continuation of %s, got %s %s", fixture.id, cited.plan.capability.requestRuleID, observed.kind.debugString(), observed.ruleID)
+			}
+			for index := range cited.plan.stages {
+				if rule, gated := cited.plan.stages[index].requiredScreenRuleID(); gated && rule == observed.ruleID {
+					held[index] = true
+				}
+			}
+			for _, other := range plans {
+				if _, ok := matchFixture(t, fixture, nil, &other.plan); ok {
+					t.Fatalf("%s: the rejection-reason dialog is not an answerable form", fixture.id)
+				}
+			}
+		}
+		if slices.Contains(held, false) {
+			t.Fatalf("%s %s plan: a cited screen holds each stage gate, got %v", cited.plan.capability.requestRuleID, cited.plan.choiceID, held)
+		}
+	}
+	always := opencodeFocus(t, fixtureDocument(opencodeAlwaysFixture))
+	for _, cited := range plans {
+		for index := range cited.plan.stages {
+			if gate, gated := cited.plan.stages[index].requiredFocusChoiceID(); gated && always == some(gate) {
+				t.Fatalf("no focus gate holds on Always allow, %s does", gate)
+			}
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeNarrowStageGatesHoldOnTheirPreStageFixtures(t *testing.T) {
+	t.Parallel()
+	for _, cited := range bundledCitedPlans(t, codingAgentOpencode) {
+		for _, fixture := range cited.fixtures {
+			if fixtureSize(fixture.id).cols >= 120 {
+				continue
+			}
+			observed := opencodeFixture(t, fixture.id, nil, none[[2]uint16]())
+			if observed.ruleID != cited.plan.capability.requestRuleID && observed.continuesRuleID != some(cited.plan.capability.requestRuleID) {
+				t.Fatalf("%s: a narrow pre-stage screen of %s, got %s", fixture.id, cited.plan.capability.requestRuleID, observed.ruleID)
+			}
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeNarrowRejectDialogsRequireTheEmptyPlaceholder(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{
+		"opencode-2.1.4-narrow-deny-pre-stage-3-057-1",
+		"opencode-2.1.4-compact-deny-pre-stage-3-055-1",
+		"opencode-2.1.4-narrow-deny-pre-stage-3-min-1",
+	} {
+		empty := opencodeFixture(t, id, nil, none[[2]uint16]())
+		if empty.kind != observationKindPermissionContinuation {
+			t.Fatalf("%s: the empty dialog is a continuation, got %s", id, empty.kind.debugString())
+		}
+		row := lastRowContaining(fixtureLines(id), opencodePlaceholder)
+		typed := opencodeFixture(t, id, func(lines *[]string) {
+			(*lines)[row] = strings.Replace((*lines)[row], opencodePlaceholder, "run it in the sandbox instead       ", 1)
+		}, none[[2]uint16]())
+		if typed.kind == observationKindPermissionContinuation || typed.ruleID == empty.ruleID {
+			t.Fatalf("%s: a typed reason is %s %s", id, typed.kind.debugString(), typed.ruleID)
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeClippedLongCommandYieldsNoRequest(t *testing.T) {
+	t.Parallel()
+	const id = "opencode-2.1.4-narrow-long-command-057-1"
+	observed := opencodeFixture(t, id, nil, none[[2]uint16]())
+	if observed.kind == observationKindPermissionRequest || observed.fingerprint != nil {
+		t.Fatalf("%s: %s %s", id, observed.kind.debugString(), observed.ruleID)
+	}
+	snapshot := replayNativeFixture(bundledScreen(id), nil, false, none[[2]uint16]())
+	d := bundledDetector(codingAgentOpencode, opencodeLayoutVersion)
+	for _, cited := range bundledCitedPlans(t, codingAgentOpencode) {
+		assertNoAnswerMatch(t, d, snapshot, &cited.plan, id+" "+cited.plan.capability.requestRuleID)
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeDetectsEachNativeFormFromItsLiveRegion(t *testing.T) {
+	t.Parallel()
+	first := opencodeFixture(t, opencodeDeny1Fixture, nil, none[[2]uint16]())
+	second := opencodeFixture(t, opencodeDeny2Fixture, nil, none[[2]uint16]())
+	if first.kind != observationKindPermissionRequest || second.kind != observationKindPermissionRequest || fingerprintsEqual(first.fingerprint, second.fingerprint) {
+		t.Fatal("different cases carry different operations")
+	}
+	elsewhere := opencodeFixture(t, opencodeDeny1Fixture, nil, some([2]uint16{5, 0}))
+	assertSameRequestAs(t, "a cursor elsewhere", &elsewhere, &first)
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeFocusResolvesFromTheCapturedCellBackgrounds(t *testing.T) {
+	t.Parallel()
+	captured := opencodeFixture(t, opencodePermissionFixture, nil, none[[2]uint16]())
+	if _, focused := opencodeFocus(t, fixtureDocument(opencodePermissionFixture)).get(); !focused {
+		t.Fatal("the captured backgrounds focus a choice")
+	}
+	textOnly := fixtureDocument(opencodePermissionFixture)
+	jobject(textOnly).remove("cell_backgrounds")
+	observed := opencodeReplay(t, textOnly, nil, none[[2]uint16]())
+	assertSameRequestAs(t, "the text-only form", &observed, &captured)
+	if focus := opencodeFocus(t, textOnly); focus != none[string]() {
+		t.Fatalf("the form marks focus by cell background only, got %v", focus)
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeFocusResolutionIsIndependentOfTheThemeColours(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{opencodePermissionFixture, opencodeDeny2Fixture, opencodeAlwaysFixture} {
+		screen := fixtureDocument(id)
+		for _, run := range jarray(jget(screen, "cell_backgrounds")).items {
+			rgb := testJSONText(ja(jget(run, "bg", "r"), jget(run, "bg", "g"), jget(run, "bg", "b")))
+			switch rgb {
+			case "[250,178,131]":
+				jset(run, jsonf(`{"kind":"indexed","index":214}`), "bg")
+			case "[30,30,30]":
+				jset(run, jsonf(`{"kind":"rgb","r":238,"g":238,"b":238}`), "bg")
+			default:
+				jset(run, jsonf(`{"kind":"indexed","index":250}`), "bg")
+			}
+		}
+		if got, want := opencodeFocus(t, screen), opencodeFocus(t, fixtureDocument(id)); got != want {
+			t.Fatalf("%s: rethemed focus %v, captured %v", id, got, want)
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeRejectReasonRequiresTheEmptyPlaceholderTextarea(t *testing.T) {
+	t.Parallel()
+	empty := opencodeFixture(t, opencodeDeny3Fixture, nil, none[[2]uint16]())
+	if empty.kind != observationKindPermissionContinuation {
+		t.Fatalf("the empty dialog is a continuation, got %s", empty.kind.debugString())
+	}
+	cases := []struct {
+		name   string
+		change func(*[]string)
+	}{
+		{"a typed reason", func(lines *[]string) {
+			(*lines)[21] = strings.Replace((*lines)[21], opencodePlaceholder, "run it in the sandbox instead      ", 1)
+		}},
+		{"the span equals the placeholder exactly", func(lines *[]string) {
+			(*lines)[21] = strings.Replace((*lines)[21], opencodePlaceholder+" ", opencodePlaceholder+"!", 1)
+		}},
+		{"without its prompt", setRow(12, "")},
+	}
+	for _, c := range cases {
+		if observed := opencodeFixture(t, opencodeDeny3Fixture, c.change, none[[2]uint16]()); observed.ruleID == empty.ruleID {
+			t.Fatalf("%s: still %s", c.name, observed.ruleID)
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeIdleComposerIsAVerifiedNonInteractionBoundary(t *testing.T) {
+	t.Parallel()
+	idle := opencodeFixture(t, opencodeIdleFixture, nil, none[[2]uint16]())
+	assertVerifiedEmpty(t, "the idle composer", &idle)
+	if idle.rawEvidence.operation != none[string]() || idle.fingerprint != nil {
+		t.Fatal("an idle composer carries no request")
+	}
+	draft := opencodeFixture(t, opencodeIdleFixture, setRow(11, "┃ hello"), some([2]uint16{11, 7}))
+	away := opencodeFixture(t, opencodeIdleFixture, nil, some([2]uint16{11, 0}))
+	working := opencodeFixture(t, opencodePermissionFixture, nil, none[[2]uint16]())
+	for name, observed := range map[string]*screenObservation{"typed draft": &draft, "cursor before the prefix end": &away, "a permission form": &working} {
+		if observed.kind == observationKindComposerEmpty || observed.verifiedNoninteraction {
+			t.Fatalf("%s: %s verified=%v", name, observed.kind.debugString(), observed.verifiedNoninteraction)
+		}
+	}
+}
+
+func TestCodingAgentCatalog_BundledOpencode_BundledOpencodeDetectsNothingFromFormOrDialogTextOutsideALiveRegion(t *testing.T) {
+	t.Parallel()
+	form := fixtureLines(opencodePermissionFixture)
+	dialog := fixtureLines(opencodeDeny3Fixture)
+	formRule := opencodeFixture(t, opencodePermissionFixture, nil, none[[2]uint16]()).ruleID
+	reasonRule := opencodeFixture(t, opencodeDeny3Fixture, nil, none[[2]uint16]()).ruleID
+	cases := []struct {
+		name   string
+		change func(*[]string)
+	}{
+		{"idle screen", nil},
+		{"quoted heading and command in the transcript", func(lines *[]string) {
+			(*lines)[5] = opencodeHeading
+			(*lines)[6] = "  $ /tmp/cafleet-194/opencode-cells-001/permission-probe allow"
+		}},
+		{"quoted form without its control line", func(lines *[]string) { copy((*lines)[:11], form[10:21]) }},
+		{"quoted control line without its heading", setRow(5, opencodeChoiceRow)},
+		{"heading and control line too far apart", func(lines *[]string) {
+			(*lines)[0] = opencodeHeading
+			(*lines)[34] = opencodeChoiceRow
+		}},
+		{"quoted reject dialog without its control line", func(lines *[]string) {
+			(*lines)[5] = dialog[10]
+			(*lines)[7] = dialog[12]
+		}},
+	}
+	for _, c := range cases {
+		observed := opencodeFixture(t, opencodeIdleFixture, c.change, none[[2]uint16]())
+		if _, interaction := observed.kind.interaction(); interaction || observed.kind == observationKindPermissionContinuation ||
+			observed.ruleID == formRule || observed.ruleID == reasonRule {
+			t.Fatalf("%s must not open a request: %s %s", c.name, observed.kind.debugString(), observed.ruleID)
+		}
+	}
+}
+
+// assertSeparateSubmitStages asserts that backend's bundled prompt and exec plans type each
+// literal, with the exec plan's native prefix, in their first stage and submit it with one shared
+// second stage.
+func assertSeparateSubmitStages(t *testing.T, backend codingAgent, prompt, exec string) {
+	t.Helper()
+	stagesOf := func(operation composerOperation, literal string) [2][]byte {
+		plan, ok := profileCatalogBundled().composerPlan(backend, operation)
+		if !ok {
+			t.Fatalf("%s: a %s plan", backend.name(), composerOperationDebug(operation))
+		}
+		stages, err := plan.stages(literal, literalFramingPlain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stages
+	}
+	typed := stagesOf(composerOperationPrompt, prompt)
+	native := stagesOf(composerOperationExec, exec)
+	if !bytes.Equal(typed[0], []byte(prompt)) {
+		t.Fatalf("%s: the prompt stage %q types the literal %q", backend.name(), typed[0], prompt)
+	}
+	if !bytes.HasSuffix(native[0], []byte(exec)) || len(native[0]) == len(exec) {
+		t.Fatalf("%s: the exec stage %q types a native prefix and the literal %q", backend.name(), native[0], exec)
+	}
+	if len(typed[1]) == 0 || !bytes.Equal(typed[1], native[1]) {
+		t.Fatalf("%s: one separate submit stage, got %q and %q", backend.name(), typed[1], native[1])
+	}
+}
+
+func TestCodingAgentCatalog_BundledBackends_HermesComposerPlansSubmitAPromptAndANativeExecInSeparateStages(t *testing.T) {
+	t.Parallel()
+	assertSeparateSubmitStages(t, codingAgentHermes, "ok", "echo x")
+}
+
+func TestCodingAgentCatalog_BundledBackends_PiComposerPlansSubmitAPromptAndANativeExecInSeparateStages(t *testing.T) {
+	t.Parallel()
+	assertSeparateSubmitStages(t, codingAgentPi, "-leading dash", "echo cafleet-220-exec")
+}
+
+func TestCodingAgentCatalog_BundledBackends_BundledSubmissionFixturesReplayTheirComposerStagesThroughTheProductionCatalog(t *testing.T) {
+	t.Parallel()
+	cited := 0
+	for _, backend := range codingAgentAll() {
+		submission, ok := jget(parsedBundledFiles(), backend.name(), "profile", "capabilities", "composer", "submission").(*jsonObj)
+		if !ok {
+			continue
+		}
+		for _, member := range submission.members {
+			operation := map[string]composerOperation{"prompt": composerOperationPrompt, "exec": composerOperationExec}[member.key]
+			if operation == 0 {
+				t.Fatalf("%s: a submission operation %q", backend.name(), member.key)
+			}
+			if _, ok := profileCatalogBundled().composerPlan(backend, operation); !ok {
+				t.Fatalf("%s: a %s plan", backend.name(), member.key)
+			}
+			for _, id := range jarray(jget(member.value, "fixture_ids")).items {
+				name, _ := jstring(id)
+				cited++
+				fixture := bundledFixtureByID(name)
+				observed := observeFixture(t, fixture, nil)
+				if _, interaction := observed.kind.interaction(); interaction {
+					t.Fatalf("%s: a composer stage is never an interaction, got %s", name, observed.kind.debugString())
+				}
+			}
+		}
+	}
+	if cited == 0 {
+		t.Fatal("a bundled submission cites its fixtures")
 	}
 }

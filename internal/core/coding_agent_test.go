@@ -1,11 +1,16 @@
 package core
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // validateSpawnPolicyArgv is the Rust test-only CodingAgent::validate_spawn_policy_argv: argv
@@ -1225,4 +1230,331 @@ func (p *fakeProbe) envVar(name string) (opt[string], error) {
 		return some(value), nil
 	}
 	return none[string](), nil
+}
+
+// runStub retries run while it fails starting a fresh executable stub, whose write descriptor a
+// parallel test's fork can briefly inherit (ETXTBSY).
+func runStub[T any](t testing.TB, run func() (T, error)) (T, error) {
+	t.Helper()
+	for range 50 {
+		value, err := run()
+		if err == nil || !strings.Contains(err.Error(), "Text file busy") {
+			return value, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("an executable stub stayed busy")
+	panic("unreachable")
+}
+
+func writeTestFile(t testing.TB, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func availabilityFailure(t testing.TB, agent codingAgent, probe spawnProbe, mode string) *cafleetError {
+	t.Helper()
+	_, err := agent.ensureAvailable(probe, mode)
+	if err == nil {
+		t.Fatalf("%s %s: the preflight refuses the member", agent.name(), mode)
+	}
+	return cafleetErrorOf(err)
+}
+
+func TestCodingAgent_SelectedPreflightChecksPathsThenBinaryAndRelocatedRequiredPreset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, agent := range codingAgentAll() {
+		mode := mustResolvePolicy(t, agent, none[string]()).resolvedMode
+		config := filepath.Join(dir, agent.name())
+		probe := fakeProbeInstalled(dir).withEnv(agent.configVariable(), "relative")
+		if failure := availabilityFailure(t, agent, probe, mode); !strings.Contains(failure.message(), agent.configVariable()) {
+			t.Fatalf("%s: %q names the variable", agent.name(), failure.message())
+		}
+		probe.withEnv(agent.configVariable(), config)
+		installed := probe.binaries[agent.name()]
+		delete(probe.binaries, agent.name())
+		if failure := availabilityFailure(t, agent, probe, mode); !strings.Contains(failure.message(), "not found on PATH") {
+			t.Fatalf("%s: %q", agent.name(), failure.message())
+		}
+		probe.withBinary(agent.name(), installed)
+		if agent == codingAgentOpencode {
+			writeTestFile(t, filepath.Join(config, "agents", mode+".md"), "preset")
+		}
+		if agent == codingAgentPi {
+			writeTestFile(t, filepath.Join(config, "extensions", "cafleet.ts"), "extension")
+		}
+		if resolved, err := agent.ensureAvailable(probe, mode); err != nil || resolved != installed {
+			t.Fatalf("%s: resolved %q, %v", agent.name(), resolved, err)
+		}
+	}
+	for _, name := range []string{"Claude", "unknown"} {
+		if _, ok := codingAgentCodingAgent(name); ok {
+			t.Fatalf("%q is no registry token", name)
+		}
+	}
+}
+
+func assertMissingPreset(t testing.TB, probe spawnProbe, mode, preset string) {
+	t.Helper()
+	failure := availabilityFailure(t, codingAgentOpencode, probe, mode)
+	text := failure.message()
+	rest, prefixed := strings.CutPrefix(text, "cannot read opencode agent preset at "+preset+": ")
+	cause, suffixed := strings.CutSuffix(rest, "; run 'cafleet setup --coding-agent opencode' first")
+	if failure.kind != errorApp || !prefixed || !suffixed || cause == "" {
+		t.Fatalf("the shipped missing-preset error carrying its read cause: %q", text)
+	}
+}
+
+func TestCodingAgent_SelectedPreflightReadsOnlyTheSelectedOpencodePresetWithTheShippedError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	config := filepath.Join(dir, "preset-base")
+	probe := fakeProbeInstalled(dir).withEnv("OPENCODE_CONFIG_DIR", config)
+	denyPreset := filepath.Join(config, "agents", "cafleet.md")
+	askPreset := filepath.Join(config, "agents", "cafleet-ask.md")
+	writeTestFile(t, denyPreset, "deny preset")
+	if _, err := codingAgentOpencode.ensureAvailable(probe, "cafleet"); err != nil {
+		t.Fatal(err)
+	}
+	assertMissingPreset(t, probe, "cafleet-ask", askPreset)
+	if err := os.Remove(denyPreset); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, askPreset, "ask preset")
+	if resolved, err := codingAgentOpencode.ensureAvailable(probe, "cafleet-ask"); err != nil || resolved != "/fixture/bin/opencode" {
+		t.Fatalf("the unselected cafleet preset is not consulted: %q, %v", resolved, err)
+	}
+	assertMissingPreset(t, probe, "cafleet", denyPreset)
+	if err := os.Remove(askPreset); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(askPreset, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	assertMissingPreset(t, probe, "cafleet-ask", askPreset)
+}
+
+func TestCodingAgent_NativeLaunchProbesAndLaunchesTheSameResolvedExecutable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	versions := filepath.Join(dir, "versions", "2.1.302")
+	if err := os.MkdirAll(versions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := executableStub(t, versions, "claude", "[ \"$#\" -eq 1 ] && [ \"$1\" = --version ] || exit 3\nread -r ignored || true\nprintf '2.1.302 (Claude Code)\\n'\nprintf 'ignored\\n' >&2")
+	backend := codingAgentClaude
+	probe := fakeProbeInstalled(dir).withBinary("claude", executable).withEnv("CLAUDE_CONFIG_DIR", filepath.Join(dir, "claude-config"))
+	resolved, err := backend.ensureAvailable(probe, "dontAsk")
+	if err != nil || resolved != executable {
+		t.Fatalf("resolved %q, %v", resolved, err)
+	}
+	version, err := runStub(t, func() (string, error) { return backend.probeNativeVersion(resolved, time.Now().Add(2*time.Second)) })
+	if err != nil || version != "2.1.302" {
+		t.Fatalf("the probe runs the resolved executable: %q, %v", version, err)
+	}
+	policy := mustResolvePolicy(t, backend, none[string]())
+	bare := mustSpawnArgv(t, backend, "assignment", "worker", none[string](), some("high"), &policy)
+	launched, err := backend.launchArgv(resolved, "assignment", "worker", codingAgentTestCwd, none[string](), some("high"), &policy)
+	if err != nil || bare[0] != "claude" || launched[0] != executable || !slices.Equal(launched[1:], bare[1:]) {
+		t.Fatalf("argv[0] is the probed path: %q, bare %q, %v", launched, bare, err)
+	}
+	if _, err := backend.launchArgv("claude", "assignment", "worker", codingAgentTestCwd, none[string](), none[string](), &policy); err == nil {
+		t.Fatal("a launched argv[0] is always an absolute path")
+	}
+}
+
+func TestCodingAgent_NativeVersionProbe_BoundedRunsNameAnUnstartableProgramAndEachExpiredDeadline(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	run := func(program string) string {
+		t.Helper()
+		_, err := runStub(t, func() (boundedOutput, error) {
+			return runBoundedOutput(program, nil, nil, time.Now().Add(300*time.Millisecond))
+		})
+		if err == nil {
+			t.Fatalf("%s: the bounded run fails", program)
+		}
+		return cafleetErrorOf(err).message()
+	}
+	if got := run(filepath.Join(dir, "absent")); !strings.HasPrefix(got, "could not start: ") {
+		t.Fatalf("unstartable binary: %q", got)
+	}
+	if got := run(executableStub(t, dir, "sleeping", "exec /bin/sleep 30")); got != "did not finish within its deadline" {
+		t.Fatalf("a running child: %q", got)
+	}
+	if got := run(executableStub(t, dir, "holding", "/bin/sleep 30 & exit 0")); got != "output did not close within its deadline" {
+		t.Fatalf("a held output: %q", got)
+	}
+}
+
+func claudeProbe(t testing.TB, executable string) (string, error) {
+	t.Helper()
+	return runStub(t, func() (string, error) {
+		return codingAgentClaude.probeNativeVersion(executable, time.Now().Add(2*time.Second))
+	})
+}
+
+func TestCodingAgent_NativeVersionProbe_NativeVersionProbeRejectsFailedAmbiguousInvalidOrMissingVersions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cases := []struct{ name, body string }{
+		{"nonzero exit", "printf '2.1.302\\n'; exit 1"},
+		{"version outside the first line", "printf 'Claude Code\\n2.1.302\\n'"},
+		{"empty output", "exit 0"},
+		{"non-UTF-8 output", "printf '2.1.302 \\377\\n'"},
+	}
+	for index, c := range cases {
+		path := executableStub(t, dir, fmt.Sprintf("native-%d", index), c.body)
+		if version, err := claudeProbe(t, path); err == nil {
+			t.Fatalf("%s must not yield a version, got %q", c.name, version)
+		}
+	}
+	if _, err := claudeProbe(t, filepath.Join(dir, "absent")); err == nil {
+		t.Fatal("unstartable binary")
+	}
+}
+
+func TestCodingAgent_NativeVersionProbe_NativeVersionProbeKillsAndReapsAProbeRunningAtItsBound(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "probe.pid")
+	path := executableStub(t, dir, "native", fmt.Sprintf("printf '%%s' \"$$\" > '%s'\nexec /bin/sleep 30", pidFile))
+	// A loaded host can kill the stub before it records its pid; only an attempt whose stub
+	// recorded its pid can show the reap, so such an attempt is repeated.
+	const bound = 2 * time.Second
+	recorded := ""
+	for range 3 {
+		start := time.Now()
+		if _, err := codingAgentClaude.probeNativeVersion(path, start.Add(bound)); err == nil {
+			t.Fatal("a probe running at its bound fails")
+		}
+		if elapsed := time.Since(start); elapsed >= bound+time.Second {
+			t.Fatalf("the probe returns at its bound, after %v", elapsed)
+		}
+		if data, err := os.ReadFile(pidFile); err == nil && len(data) > 0 {
+			recorded = string(data)
+			break
+		}
+	}
+	if recorded == "" {
+		t.Fatal("the stub records its pid within the bound in one of three attempts")
+	}
+	pid, err := strconv.Atoi(recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("the timed-out probe is killed and reaped: %v", err)
+	}
+}
+
+func TestCodingAgent_Hermes_HermesNativeVersionProbeFailsWhenOnlyThePackageSemverIsPrinted(t *testing.T) {
+	t.Parallel()
+	path := executableStub(t, t.TempDir(), "hermes", "printf 'Hermes Agent v0.22.4\\n'")
+	_, err := runStub(t, func() (string, error) {
+		return codingAgentHermes.probeNativeVersion(path, time.Now().Add(2*time.Second))
+	})
+	if err == nil || cafleetErrorOf(err).message() != "hermes --version printed no Hermes version line" {
+		t.Fatalf("the package version is not the native version: %v", err)
+	}
+}
+
+func TestCodingAgent_Hermes_HermesAvailabilityChecksTheHomeThenTheBinary(t *testing.T) {
+	t.Parallel()
+	probe := fakeProbeInstalled(codingAgentTestHome)
+	for _, config := range []opt[string]{none[string](), some("/srv/hermes")} {
+		if value, set := config.get(); set {
+			probe.withEnv("HERMES_HOME", value)
+		}
+		if resolved, err := codingAgentHermes.ensureAvailable(probe, "smart"); err != nil || resolved != "/fixture/bin/hermes" {
+			t.Fatalf("HERMES_HOME %v: %q, %v", config, resolved, err)
+		}
+	}
+	probe.withEnv("HERMES_HOME", "relative")
+	if got := availabilityFailure(t, codingAgentHermes, probe, "smart").message(); got != "HERMES_HOME must be an absolute path (got 'relative')" {
+		t.Fatalf("a relative home: %q", got)
+	}
+	clear(probe.env)
+	clear(probe.binaries)
+	if got := availabilityFailure(t, codingAgentHermes, probe, "smart").message(); got != "binary hermes not found on PATH" {
+		t.Fatalf("a missing binary: %q", got)
+	}
+}
+
+var piLaunchModes = []string{"cafleet", "cafleet-ask"}
+
+func writePiExtension(t testing.TB, base string) string {
+	t.Helper()
+	extension := filepath.Join(base, "extensions", "cafleet.ts")
+	writeTestFile(t, extension, "export default function () {}")
+	return extension
+}
+
+func assertMissingPiExtension(t testing.TB, failure *cafleetError, extension string) {
+	t.Helper()
+	text := failure.message()
+	rest, prefixed := strings.CutPrefix(text, "cannot read the CAFleet pi extension at "+extension+": ")
+	cause, suffixed := strings.CutSuffix(rest, "; run 'cafleet setup --coding-agent pi' first")
+	if failure.kind != errorApp || !prefixed || !suffixed || cause == "" {
+		t.Fatalf("the shipped missing-extension error carrying its read cause: %q", text)
+	}
+}
+
+func TestCodingAgent_Pi_PiAvailabilityChecksTheBaseThenTheBinaryThenTheExtension(t *testing.T) {
+	t.Parallel()
+	base := filepath.Join(t.TempDir(), "pi agent")
+	for _, mode := range piLaunchModes {
+		probe := fakeProbeInstalled(codingAgentTestHome).withEnv("PI_CODING_AGENT_DIR", "relative")
+		clear(probe.binaries)
+		if got := availabilityFailure(t, codingAgentPi, probe, mode).message(); got != "PI_CODING_AGENT_DIR must be an absolute path (got 'relative')" {
+			t.Fatalf("%s: the base resolves first, got %q", mode, got)
+		}
+		probe.withEnv("PI_CODING_AGENT_DIR", base)
+		if got := availabilityFailure(t, codingAgentPi, probe, mode).message(); got != "binary pi not found on PATH" {
+			t.Fatalf("%s: the binary precedes the extension, got %q", mode, got)
+		}
+	}
+}
+
+func TestCodingAgent_Pi_PiAvailabilityReadsTheExtensionInEveryLaunchMode(t *testing.T) {
+	t.Parallel()
+	base := filepath.Join(t.TempDir(), "pi agent")
+	probe := fakeProbeInstalled(codingAgentTestHome).withEnv("PI_CODING_AGENT_DIR", base)
+	extension := filepath.Join(base, "extensions", "cafleet.ts")
+	for _, mode := range piLaunchModes {
+		assertMissingPiExtension(t, availabilityFailure(t, codingAgentPi, probe, mode), extension)
+	}
+	writePiExtension(t, base)
+	for _, mode := range piLaunchModes {
+		if resolved, err := codingAgentPi.ensureAvailable(probe, mode); err != nil || resolved != "/fixture/bin/pi" {
+			t.Fatalf("%s: %q, %v", mode, resolved, err)
+		}
+	}
+	if err := os.Remove(extension); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(extension, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range piLaunchModes {
+		assertMissingPiExtension(t, availabilityFailure(t, codingAgentPi, probe, mode), extension)
+	}
+}
+
+func TestCodingAgent_Pi_PiAvailabilityReadsTheExtensionUnderTheDefaultBase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	probe := fakeProbeInstalled(dir)
+	base := filepath.Join(dir, ".pi", "agent")
+	assertMissingPiExtension(t, availabilityFailure(t, codingAgentPi, probe, "cafleet"), filepath.Join(base, "extensions", "cafleet.ts"))
+	writePiExtension(t, base)
+	if _, err := codingAgentPi.ensureAvailable(probe, "cafleet"); err != nil {
+		t.Fatal(err)
+	}
 }

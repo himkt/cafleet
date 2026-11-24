@@ -50,6 +50,18 @@ coding_agent::detector::tests::claude_ask_user_question::every_form_state_of_one
 coding_agent::detector::tests::claude_ask_user_question::the_pending_notice_and_the_form_share_one_fingerprint -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
 coding_agent::detector::tests::bundled_claude_detector_replays_the_native_permission_fixture_from_unmasked_rows -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
 coding_agent::detector::tests::bundled_claude_detects_the_wrapped_native_form_and_reports_its_displayed_operation_rows -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::detector::tests::bundled_idle_composers_are_verified_non_interactions_distinct_from_the_form -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_auto::bundled_claude_auto_fixtures_produce_their_primary_observation -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_2_1_312::each_2_1_312_fixture_classifies_with_its_rule_and_evidence -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_ask_user_question::every_ask_user_question_form_capture_opens_a_choiceless_question -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_ask_user_question::a_native_dialog_drawn_with_the_same_component_opens_the_same_choiceless_question -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_ask_user_question::every_review_your_answers_capture_opens_a_choiceless_question -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_ask_user_question::a_form_narrower_than_its_w_min_is_unmatched -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_ask_user_question::the_quoted_form_and_the_transcript_viewers_yield_no_question -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_claude_ask_user_question::the_answered_form_returns_to_a_verified_idle_composer -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_opencode::bundled_opencode_detects_every_narrow_and_compact_form_fixture -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::bundled_opencode::bundled_opencode_narrow_idle_composer_is_a_verified_empty_composer -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
+coding_agent::catalog::tests::director_screens::hermes_composer_text_reads_a_tui_composer_rule_and_members_keep_the_classic_rules -> internal/core/coding_agent_catalog_test.go:TestCodingAgentCatalog_DirectorScreens_HermesTuiComposerTextReadsAWordWrappedPreviewBelowTheTranscriptAndStatusLine
 """
 GO_TEST_RE = re.compile(r"^func (Test\w+)\(t \*testing\.T\)", re.MULTILINE)
 OS_SUFFIX = {"linux": "Linux", "darwin": "Darwin"}

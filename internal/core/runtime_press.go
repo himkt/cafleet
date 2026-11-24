@@ -21,6 +21,28 @@ func pressEffectError(memberID int64, cause error, started bool) error {
 	return cafleetErrorOf(cause).withDiagnostic(diagnostic)
 }
 
+func pressMember(ctx context.Context, conn *dbConn, s settings, memberID int64, keys pressKeys, d deadline, c clock) (keyAcknowledgment, error) {
+	if _, err := d.remainingAt(c.now()); err != nil {
+		return keyAcknowledgment{}, pressEffectError(memberID, err, false)
+	}
+	type target struct {
+		member memberRecord
+		mux    multiplexer
+	}
+	resolved, err := withDatabaseBudget(ctx, conn, d, func(ctx context.Context, conn *dbConn) (target, error) {
+		member, err := activeMember(ctx, conn, memberID)
+		if err != nil {
+			return target{}, err
+		}
+		mux, err := muxForFleet(ctx, conn, member.fleetID, some(d))
+		return target{member: member, mux: mux}, err
+	})
+	if err != nil {
+		return keyAcknowledgment{}, pressEffectError(memberID, err, false)
+	}
+	return pressMemberWithMux(ctx, conn, s, resolved.member, keys, d, resolved.mux, c)
+}
+
 // pressMemberWithMux sends keys to member's pane through mux under its pane lock, inside a
 // termination-deferral span, after confirming the recorded placement.
 func pressMemberWithMux(ctx context.Context, conn *dbConn, s settings, member memberRecord, keys pressKeys, d deadline, mux multiplexer, c clock) (keyAcknowledgment, error) {

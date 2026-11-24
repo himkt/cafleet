@@ -2956,6 +2956,246 @@ func TestCodingAgentDetector_BundledClaudeWrappedFormKeepsTheFalsePositiveGuards
 	assertNotPermission(t, "a form taller than 24 rows", &taller)
 }
 
+const (
+	codexNativeApproval = "codex-0.163.0-on-request-permission-1"
+	codexFormVersion    = "0.163.0"
+)
+
+func codexForm(t testing.TB, change func(*[]string), cursor opt[[2]uint16]) screenObservation {
+	t.Helper()
+	snapshot := replayNativeFixture(bundledScreen(codexNativeApproval), change, true, cursor)
+	return observeBundled(t, codingAgentCodex, codexFormVersion, &snapshot)
+}
+
+// replayWithPendingWrap writes the full-width cursor row last, which leaves the terminal in its
+// pending-wrap state that an absolute cursor move cannot reach.
+func replayWithPendingWrap(t testing.TB, id string) screenSnapshot {
+	t.Helper()
+	at, ok := fixtureCursor(fixtureDocument(id)).get()
+	if !ok {
+		t.Fatalf("%s records its cursor", id)
+	}
+	lines := fixtureLines(id)
+	terminal := mustTerminalState(t, fixtureSize(id))
+	mustFeed(t, terminal, []byte("\x1b[?1049h\x1b[2J"))
+	for index, line := range lines {
+		if index != int(at[0]) && line != "" {
+			mustFeed(t, terminal, fmt.Appendf(nil, "\x1b[%d;1H%s", index+1, line))
+		}
+	}
+	mustFeed(t, terminal, fmt.Appendf(nil, "\x1b[%d;1H%s", at[0]+1, lines[at[0]]))
+	return terminal.snapshot()
+}
+
+func TestCodingAgentDetector_BundledCodexDetectorReplaysTheNativeApprovalFormFromUnmaskedRows(t *testing.T) {
+	t.Parallel()
+	observed := codexForm(t, nil, none[[2]uint16]())
+	if observed.kind != observationKindPermissionRequest || observed.matchEvidence != matchEvidenceComplete || observed.fingerprint == nil {
+		t.Fatalf("the native approval form: %s %s", observed.kind.debugString(), observed.matchEvidence.debugString())
+	}
+	replayed := codexForm(t, nil, none[[2]uint16]())
+	assertSameRequestAs(t, "a replay", &replayed, &observed)
+	snapshot := replayNativeFixture(bundledScreen(codexNativeApproval), nil, true, none[[2]uint16]())
+	reused := observeBundled(t, codingAgentCodex, "0.164.0", &snapshot)
+	if reused.kind != observed.kind || reused.ruleID != observed.ruleID || !fingerprintsEqual(reused.fingerprint, observed.fingerprint) ||
+		reused.rawEvidence.nativeVersion != some("0.164.0") {
+		t.Fatalf("another run version: %s %s %v", reused.kind.debugString(), reused.ruleID, reused.rawEvidence.nativeVersion)
+	}
+}
+
+func TestCodingAgentDetector_BundledCodexDetectionCountsAPendingWrapCursorOnTheFullWidthClosingRowAsInside(t *testing.T) {
+	t.Parallel()
+	forms := []bundledFixtureRecord{bundledFixtureByID(codexNativeApproval)}
+	forms = append(forms, citedForms(t, codingAgentCodex)...)
+	for _, form := range forms {
+		screen := replayWithPendingWrap(t, form.id)
+		at, _ := fixtureCursor(fixtureDocument(form.id)).get()
+		if cursor, _ := screen.cursor.get(); cursor != [2]uint16{at[0], fixtureSize(form.id).cols} {
+			t.Fatalf("%s: the live terminal reports the pending-wrap column, got %v", form.id, cursor)
+		}
+		captured := observeFixture(t, form, nil)
+		pending := observeBundled(t, form.backend, form.version, &screen)
+		assertSameRequestAs(t, form.id+": a pending-wrap cursor on the closing row lies inside the form", &pending, &captured)
+	}
+}
+
+func TestCodingAgentDetector_BundledCodexDetectorRejectsCopiesThatAreNotTheLiveApprovalForm(t *testing.T) {
+	t.Parallel()
+	primarySnapshot := replayNativeFixture(bundledScreen(codexNativeApproval), nil, false, none[[2]uint16]())
+	primary := observeBundled(t, codingAgentCodex, codexFormVersion, &primarySnapshot)
+	assertNotPermission(t, "primary-screen transcript copy", &primary)
+	cases := []struct {
+		name   string
+		change func(*[]string)
+		cursor opt[[2]uint16]
+	}{
+		{"form without a focus marker", func(lines *[]string) { (*lines)[31] = strings.Replace((*lines)[31], "›", " ", 1) }, none[[2]uint16]()},
+		{"only the prefix-approval choice remains", func(lines *[]string) { (*lines)[31], (*lines)[33] = "", "" }, none[[2]uint16]()},
+		{"form without its heading", setRow(22, ""), none[[2]uint16]()},
+		{"form without its reason line", setRow(26, ""), none[[2]uint16]()},
+		{"cursor outside the form", nil, some([2]uint16{12, 0})},
+	}
+	for _, c := range cases {
+		observed := codexForm(t, c.change, c.cursor)
+		assertNotPermission(t, c.name, &observed)
+	}
+}
+
+// codexContinuedChoiceTwo moves choice 2's "(p)" shortcut onto a continuation row.
+func codexContinuedChoiceTwo(lines *[]string) {
+	choice, ok := strings.CutSuffix((*lines)[32], " (p)")
+	if !ok {
+		panic("choice 2 fits one row")
+	}
+	moved := slices.Delete(slices.Clone(*lines), 12, 13)
+	moved[31] = choice
+	*lines = slices.Insert(moved, 32, "     (p)")
+}
+
+func TestCodingAgentDetector_BundledCodexFormWithChoiceTwoOnOneRowOrContinuedDetectsTheSameRequest(t *testing.T) {
+	t.Parallel()
+	single := codexForm(t, nil, none[[2]uint16]())
+	if single.kind != observationKindPermissionRequest || single.fingerprint == nil {
+		t.Fatalf("the single-row form: %s", single.kind.debugString())
+	}
+	continued := codexForm(t, codexContinuedChoiceTwo, none[[2]uint16]())
+	assertSameRequestAs(t, "a continued (p) row keeps the request identity", &continued, &single)
+	for _, form := range citedForms(t, codingAgentCodex) {
+		snapshot := replayNativeFixture(bundledScreen(form.id), nil, true, none[[2]uint16]())
+		preStage := observeBundled(t, codingAgentCodex, codexFormVersion, &snapshot)
+		if preStage.kind != observationKindPermissionRequest || !slices.Equal(preStage.rawEvidence.choices.values, single.rawEvidence.choices.values) {
+			t.Fatalf("%s: %s choices %q", form.id, preStage.kind.debugString(), preStage.rawEvidence.choices.values)
+		}
+	}
+}
+
+type preStageForms struct {
+	backend            codingAgent
+	version            string
+	fixtures           [2]string
+	glyph              string
+	focusRow           int
+	secondChoice       [2]string
+	cursorFollowsFocus bool
+}
+
+func TestCodingAgentDetector_BundledAnswerPlansMatchTheirMeasuredPreStageFormsAndBindFocus(t *testing.T) {
+	t.Parallel()
+	forms := []preStageForms{
+		{codingAgentClaude, claudeFormVersion, [2]string{"claude-2.1.302-allow-pre-stage-1", "claude-2.1.302-deny-pre-stage-1"}, "❯", 23, [2]string{"   2.", " ❯ 2."}, true},
+		{codingAgentClaude, claudeFormVersion, [2]string{"claude-2.1.302-wrapped-allow-pre-stage-1", "claude-2.1.302-wrapped-deny-pre-stage-1"}, "❯", 27, [2]string{"   2.", " ❯ 2."}, true},
+		{codingAgentCodex, codexFormVersion, [2]string{"codex-0.163.0-allow-pre-stage-1", "codex-0.163.0-deny-pre-stage-1"}, "›", 30, [2]string{"  2.", "› 2."}, false},
+	}
+	for _, f := range forms {
+		d := bundledDetector(f.backend, f.version)
+		citations := 0
+		for _, cited := range bundledCitedPlans(t, f.backend) {
+			for _, id := range f.fixtures {
+				if !slices.ContainsFunc(cited.fixtures, func(fixture bundledFixtureRecord) bool { return fixture.id == id }) {
+					continue
+				}
+				citations++
+				replay := func(change func(*[]string), cursor opt[[2]uint16]) screenSnapshot {
+					return replayNativeFixture(bundledScreen(id), change, true, cursor)
+				}
+				screen := replay(nil, none[[2]uint16]())
+				observed := observeOn(t, d, screen)
+				matched := mustMatchAnswer(t, d, screen, &cited.plan, id)
+				if !slices.Equal(matched.choices, observed.rawEvidence.choices.values) || matched.plan.choiceID != cited.plan.choiceID || matched.focus == "" ||
+					!fingerprintsEqual(&matched.semantic, observed.fingerprint) {
+					t.Fatalf("%s: the pre-stage form matches its %s plan with the observed request", id, cited.plan.choiceID)
+				}
+				cursor := none[[2]uint16]()
+				if f.cursorFollowsFocus {
+					cursor = some([2]uint16{uint16(f.focusRow + 1), 1}) //nolint:gosec // a screen row
+				}
+				moved := replay(func(lines *[]string) {
+					(*lines)[f.focusRow] = strings.Replace((*lines)[f.focusRow], f.glyph, " ", 1)
+					(*lines)[f.focusRow+1] = strings.Replace((*lines)[f.focusRow+1], f.secondChoice[0], f.secondChoice[1], 1)
+				}, cursor)
+				refocused := mustMatchAnswer(t, d, moved, &cited.plan, id+" with a moved focus")
+				if !refocused.semantic.equal(&matched.semantic) || refocused.focus == matched.focus {
+					t.Fatalf("%s: a moved focus keeps the form and changes the bound focus", id)
+				}
+				unfocused := replay(func(lines *[]string) {
+					(*lines)[f.focusRow] = strings.Replace((*lines)[f.focusRow], f.glyph, " ", 1)
+				}, none[[2]uint16]())
+				assertNoAnswerMatch(t, d, unfocused, &cited.plan, id+" without its focus glyph")
+			}
+		}
+		if citations < len(f.fixtures) {
+			t.Fatalf("%q: an answer plan cites each pre-stage form", f.fixtures)
+		}
+	}
+}
+
+func assertVerifiedEmpty(t testing.TB, label string, observed *screenObservation) {
+	t.Helper()
+	if observed.kind != observationKindComposerEmpty || !observed.verifiedNoninteraction {
+		t.Fatalf("%s: %s verified=%v, want a verified empty composer", label, observed.kind.debugString(), observed.verifiedNoninteraction)
+	}
+}
+
+func TestCodingAgentDetector_BundledIdleRulesRejectDraftsPrimaryCopiesAndACursorOffThePrefixEnd(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		backend   codingAgent
+		version   string
+		idle      string
+		promptRow uint16
+		draft     string
+	}{
+		{codingAgentClaude, claudeFormVersion, "claude-2.1.302-idle-composer-1", 31, "❯\U000000a0hello"},
+		{codingAgentCodex, "0.167.0", "codex-0.167.0-composer-idle-empty-tmux-120-1", 35, "› hello"},
+	}
+	for _, c := range cases {
+		d := bundledDetector(c.backend, c.version)
+		replay := func(change func(*[]string), cursor opt[[2]uint16]) screenObservation {
+			return observeOn(t, d, replayNativeFixture(bundledScreen(c.idle), change, true, cursor))
+		}
+		idle := replay(nil, none[[2]uint16]())
+		assertVerifiedEmpty(t, c.idle, &idle)
+		draft := replay(setRow(int(c.promptRow), c.draft), some([2]uint16{c.promptRow, 7}))
+		if draft.kind == observationKindComposerEmpty || draft.verifiedNoninteraction {
+			t.Fatalf("%s: a typed draft is %s verified=%v", c.idle, draft.kind.debugString(), draft.verifiedNoninteraction)
+		}
+		away := replay(nil, some([2]uint16{c.promptRow, 0}))
+		if away.kind == observationKindComposerEmpty || away.verifiedNoninteraction {
+			t.Fatalf("%s: a cursor before the prefix end is %s verified=%v", c.idle, away.kind.debugString(), away.verifiedNoninteraction)
+		}
+	}
+}
+
+func TestCodingAgentDetector_CursorFree_BundledIdleComposersStayEmptyAndDraftsStayNotEmptyWithoutACursor(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		backend codingAgent
+		fixture string
+		draft   string
+	}{
+		{codingAgentClaude, "claude-2.1.302-idle-composer-1", "\x1b[32;3H\x1b[0mdraft text"},
+		{codingAgentCodex, "codex-0.167.0-composer-idle-empty-tmux-120-1", "\x1b[36;3H\x1b[0m\x1b[Kdraft text"},
+		{codingAgentOpencode, "opencode-2.1.4-idle-composer-1", "\x1b[12;3H\x1b[0mdraft text"},
+		{codingAgentPi, "pi-1.5.0-idle-composer-tmux-120-1", "\x1b[32;1H\x1b[0mdraft text"},
+	}
+	for _, c := range cases {
+		d := newDetector(profileCatalogBundled(), c.backend, none[string]())
+		cursorFree := func(extra string) screenObservation {
+			terminal := mustTerminalState(t, fixtureSize(c.fixture))
+			mustFeed(t, terminal, append(nativeFixtureBytes(bundledScreen(c.fixture)), extra...))
+			return observeOn(t, d, cursorFreeScreen(terminal.snapshot()))
+		}
+		captured := observeFixture(t, bundledFixtureByID(c.fixture), nil)
+		assertVerifiedEmpty(t, c.fixture+" as captured", &captured)
+		if idle := cursorFree(""); idle.kind != observationKindComposerEmpty {
+			t.Fatalf("%s: the cursor-free idle composer is %s", c.fixture, idle.kind.debugString())
+		}
+		if drafted := cursorFree(c.draft); drafted.kind == observationKindComposerEmpty {
+			t.Fatalf("%s: a drafted composer is not empty", c.fixture)
+		}
+	}
+}
+
 // claudeAutoTipForm is the Claude auto-tip permission form; padding written spaces follow the
 // question and operation rows, as Claude leaves them when it repaints only the changed cells of
 // a row that was earlier wider.
