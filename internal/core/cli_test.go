@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -658,5 +659,90 @@ func TestCli_DirectorOnlyGuard_DirectorOnlyCommandsRequireAPositiveFromMemberId(
 				t.Fatalf("%s: %q exits %d, want 2: %s", tc.name, zero, outcome.exitCode(), outcome.text)
 			}
 		})
+	}
+}
+
+func TestCli_OrdinaryCommandsPreserveRefusedWalDatabaseAndSidecarBytes(t *testing.T) {
+	t.Parallel()
+	const mutation = "PRAGMA application_id=42"
+	path := filepath.Join(t.TempDir(), "registry.db")
+	selected := settingsForDatabase(path)
+	conn := fileConn(t, selected.databaseURL)
+	if err := initialize(conn, selected.databaseURL); err != nil {
+		t.Fatal(err)
+	}
+	mustExecBatch(t, conn, "PRAGMA journal_mode=WAL")
+	mustExecBatch(t, conn, mutation)
+	mustExecBatch(t, conn, "BEGIN; SELECT * FROM cafleet_database")
+	before := walSnapshot(t, path)
+	for _, args := range [][]string{
+		{"fleet", "list", "--json"},
+		{"member", "press", "1", "--from-member-id", "1", "Enter"},
+		{"permission", "inspect", "1", "--event-id", "1", "--from-member-id", "1"},
+	} {
+		if err := dispatch(selected, mustParse(t, mutation, args...)); err == nil {
+			t.Fatalf("%s: %q succeeds on a refused database", mutation, args)
+		}
+		for _, file := range before {
+			data, err := os.ReadFile(file.path)
+			if err != nil || !bytes.Equal(data, file.bytes) {
+				t.Fatalf("%s: %q: %s changed: %v", mutation, args, file.path, err)
+			}
+		}
+	}
+	mustExecBatch(t, conn, "ROLLBACK")
+}
+
+func TestCli_OrdinaryCommandsRequireStorageWithoutCreatingAMissingFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "missing.db")
+	conn, err := invocationConnection(context.Background(), "sqlite:///"+path, newDeadline())
+	if err == nil {
+		closeConnection(t, conn)
+		t.Fatal("a missing database is refused")
+	}
+	if err.Error() != "no cafleet database; run 'cafleet setup'" {
+		t.Fatalf("invocationConnection = %v", err)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("the missing database stays absent: %v", err)
+	}
+}
+
+func TestCli_NativeCommandFilesStripOnlyOneTerminalLineEnding(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "command.txt")
+	write := func(source string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accepted := []struct {
+		source string
+		want   string
+	}{
+		{"printf '界🙂'", "printf '界🙂'"},
+		{"echo literal\n", "echo literal"},
+		{"echo literal\r\n", "echo literal"},
+		{"  echo literal  \n", "  echo literal  "},
+	}
+	for _, tc := range accepted {
+		write(tc.source)
+		if got, err := resolveCommandBody(none[string](), some(path)); err != nil || got != tc.want {
+			t.Fatalf("%q: resolveCommandBody = %q %v, want %q", tc.source, got, err, tc.want)
+		}
+	}
+	for _, source := range []string{"", "echo x\n\n", "echo x\r"} {
+		write(source)
+		if got, err := resolveCommandBody(none[string](), some(path)); err == nil {
+			t.Fatalf("%q: resolveCommandBody accepted %q", source, got)
+		}
+	}
+	if got, err := resolveCommandBody(some("echo literal"), none[string]()); err != nil || got != "echo literal" {
+		t.Fatalf("an inline command = %q %v", got, err)
+	}
+	if got, err := resolveCommandBody(some("echo literal\n"), none[string]()); err == nil {
+		t.Fatalf("an inline command keeps its line ending and is refused, got %q", got)
 	}
 }

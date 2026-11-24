@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+const messageRecordFixtureStamp = "2026-10-25T01:00:00.000000+00:00"
+
+func messageRecordFixture(id, from, to int64, text string) messageRecord {
+	return messageRecord{
+		messageID:       id,
+		fromMemberID:    from,
+		toMemberID:      to,
+		createdAt:       messageRecordFixtureStamp,
+		status:          messageStatusInputRequired,
+		statusTimestamp: messageRecordFixtureStamp,
+		text:            text,
+	}
+}
+
 func TestBroker_CorruptDirectorStatusReturnsTheDomainVariantFromALiveTypedRead(t *testing.T) {
 	t.Parallel()
 	conn, _ := initializedFileConn(t)
