@@ -105,6 +105,20 @@ func decodeStrict(data []byte, target any) error {
 	return nil
 }
 
+// decodeStrictThrough decodes the JSON object's members into the struct target points to as
+// decodeStrict does, and stops reading once the member named last is decoded: the bytes after it
+// are never read, and the fields it would have carried keep their zero values (F21).
+func decodeStrictThrough(data []byte, target any, last string) error {
+	destination := reflect.ValueOf(target)
+	if destination.Kind() != reflect.Pointer || destination.Elem().Kind() != reflect.Struct {
+		panic(fmt.Sprintf("decodeStrictThrough decodes into a pointer to a struct, not %T", target))
+	}
+	if !slices.ContainsFunc(strictFields(destination.Elem().Type()), func(f strictField) bool { return f.name == last }) {
+		panic(fmt.Sprintf("%s has no member %q to stop after", destination.Elem().Type(), last))
+	}
+	return decodeStrictMembers(jsontext.NewDecoder(bytes.NewReader(data)), destination.Elem(), last)
+}
+
 func decodeStrictValue(decoder *jsontext.Decoder, destination reflect.Value) error {
 	if target, ok := destination.Addr().Interface().(optTarget); ok {
 		if decoder.PeekKind() == 'n' {
@@ -188,6 +202,12 @@ type unknownFieldsIgnored interface {
 }
 
 func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) error {
+	return decodeStrictMembers(decoder, destination, "")
+}
+
+// decodeStrictMembers decodes one JSON object into destination; a non-empty last ends the read
+// right after that member's value.
+func decodeStrictMembers(decoder *jsontext.Decoder, destination reflect.Value, last string) error {
 	if kind := decoder.PeekKind(); kind != '{' {
 		return appErrorf("invalid type: expected a JSON object for %s, found %v", destination.Type(), kind)
 	}
@@ -225,10 +245,11 @@ func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) er
 				return err
 			}
 			target.markSet()
-			continue
-		}
-		if err := decodeStrictValue(decoder, value); err != nil {
+		} else if err := decodeStrictValue(decoder, value); err != nil {
 			return err
+		}
+		if name == last {
+			return nil
 		}
 	}
 	if _, err := decoder.ReadToken(); err != nil {

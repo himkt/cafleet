@@ -1725,12 +1725,12 @@ func decodeFile(backend codingAgent, raw rawProfileFile) (profile, error) {
 	return compileProfile(backend, raw.Profile)
 }
 
-// decodeProfileFileText strictly decodes one profile file for backend and compiles it; the
-// file's screens and every fixture_ids value are provenance the bundled-catalog guard test
-// checks, and the decoder skips them unread (F21).
+// decodeProfileFileText strictly decodes one profile file for backend through its profile member
+// and compiles it; the file's screens and every fixture_ids value are provenance the
+// bundled-catalog guard test checks, and the decoder leaves them unread (F21).
 func decodeProfileFileText(backend codingAgent, text []byte) (profile, error) {
 	var raw rawProfileFile
-	if err := decodeStrict(text, &raw); err != nil {
+	if err := decodeStrictThrough(text, &raw, "profile"); err != nil {
 		return profile{}, invalidProfile(cafleetErrorOf(err).message())
 	}
 	return decodeFile(backend, raw)

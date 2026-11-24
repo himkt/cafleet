@@ -2015,7 +2015,8 @@ func withSyntheticComposerEvidence(files any) (any, error) {
 const syntheticLiteral = "synthetic literal"
 
 // profileCatalogFromFiles is the Rust test-only ProfileCatalog::from_files: it decodes a JSON
-// object mapping each backend name to its profile file.
+// object mapping each backend name to its profile file, strictly validating every whole file
+// where the production loader stops after the profile member (F21).
 func profileCatalogFromFiles(files any) (*profileCatalog, error) {
 	object, ok := files.(*jsonObj)
 	if !ok {
@@ -2027,7 +2028,11 @@ func profileCatalogFromFiles(files any) (*profileCatalog, error) {
 		if !ok {
 			return nil, invalidProfile("unknown backend")
 		}
-		decoded, err := decodeProfileFileText(backend, jsonBytes(member.value))
+		var raw rawProfileFile
+		if err := decodeStrict(jsonBytes(member.value), &raw); err != nil {
+			return nil, invalidProfile(cafleetErrorOf(err).message())
+		}
+		decoded, err := decodeFile(backend, raw)
 		if err != nil {
 			return nil, err
 		}

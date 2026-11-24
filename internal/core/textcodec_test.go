@@ -191,6 +191,43 @@ func TestTextcodec_DecodeStrictRejectsWhatTheRustDecoderRejects(t *testing.T) {
 	}
 }
 
+func TestTextcodec_DecodeStrictThroughStopsAfterTheNamedMember(t *testing.T) {
+	t.Parallel()
+	head := `{"name":"n","count":1,"nested":{"id":"x"}`
+	cases := []struct {
+		name   string
+		input  string
+		accept bool
+	}{
+		{name: "unterminated tail", input: head + `,"items":[{"unterminated`, accept: true},
+		{name: "unknown member after", input: head + `,"extra":1}`, accept: true},
+		{name: "trailing bytes", input: head + `}trailing`, accept: true},
+		{name: "unknown member before", input: `{"extra":1,` + head[1:] + `}`},
+		{name: "duplicate member before", input: `{"name":"m",` + head[1:] + `}`},
+		{name: "malformed stop member", input: `{"name":"n","count":1,"nested":{"id":1}}`},
+		{name: "stop member absent", input: `{"name":"n","count":1}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var got sampleStrict
+			err := decodeStrictThrough([]byte(tc.input), &got, "nested")
+			if !tc.accept {
+				if err == nil {
+					t.Fatalf("%s: decodeStrictThrough accepted %+v", tc.name, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s: decodeStrictThrough: %v", tc.name, err)
+			}
+			if got.Name != "n" || got.Count != 1 || got.Nested.ID != "x" || got.Items != nil {
+				t.Fatalf("%s: decodeStrictThrough = %+v", tc.name, got)
+			}
+		})
+	}
+}
+
 type sampleColour interface {
 	isSampleColour()
 }
