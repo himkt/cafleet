@@ -22,13 +22,11 @@ const cliDirectorHelp = "The root Director issuing this Director-only command"
 
 // codingAgentNames lists the backend registry's names in registry order.
 func codingAgentNames() []string {
-	return []string{"claude", "codex", "opencode", "hermes", "pi"}
-}
-
-// codingAgentPermissionModeHelp is the `member create --permission-mode` help: each backend's
-// accepted launch modes and its omitted default, in registry order.
-func codingAgentPermissionModeHelp() string {
-	return "Launch-only native permission policy for the resolved backend — claude: default, manual, dontAsk, acceptEdits, auto, bypassPermissions, plan (default auto); codex: on-request, never, approve-for-me (default approve-for-me); opencode: cafleet, cafleet-ask (default cafleet-ask); hermes: smart (default smart); pi: cafleet, cafleet-ask (default cafleet-ask)"
+	names := make([]string, 0, len(codingAgentAll()))
+	for _, agent := range codingAgentAll() {
+		names = append(names, agent.name())
+	}
+	return names
 }
 
 // permissionDecisionValues lists the stored permission decisions in declaration order.
