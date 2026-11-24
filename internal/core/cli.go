@@ -1680,13 +1680,15 @@ func dispatch(s settings, command cliCommand) (err error) {
 	switch command := command.(type) {
 	case setupArgs:
 		return setupRun(s, command)
-	case doctorArgs, memberRunCommand, permissionCommandInspect:
+	case doctorArgs, memberRunCommand:
 		return commandNotYetPorted()
+	case permissionCommandInspect, permissionCommandRespond:
+		return permissionDispatch(ctx, s, command.(permissionCommand))
 	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete,
 		memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
 		memberCommandPrompt, memberCommandExec, memberCommandPress, memberCommandCapture,
 		messageCommandSend, messageCommandPoll, messageCommandShow,
-		eventCommandShow, inputCommandShow, inputCommandReconcile, permissionCommandRespond:
+		eventCommandShow, inputCommandShow, inputCommandReconcile:
 	default:
 		panic("invalid cliCommand")
 	}
@@ -1707,21 +1709,20 @@ func dispatch(s settings, command cliCommand) (err error) {
 			return err
 		}
 	}
+	d := newDeadline()
 	switch command.(type) {
 	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete:
 		return fleetRun(ctx, conn, command.(fleetCommand))
 	case memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
 		memberCommandPrompt, memberCommandExec, memberCommandPress, memberCommandCapture:
-		return memberRun(ctx, conn, command.(memberCommand))
+		return memberRun(ctx, conn, s, command.(memberCommand), d)
 	case messageCommandSend, messageCommandPoll, messageCommandShow:
 		return messageRun(ctx, conn, command.(messageCommand))
 	case eventCommandShow:
 		return eventRun(ctx, conn, command.(eventCommand))
 	case inputCommandShow, inputCommandReconcile:
-		return inputRun(ctx, conn, command.(inputCommand))
-	case permissionCommandRespond:
-		return commandNotYetPorted()
-	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect:
+		return inputRun(ctx, conn, s, command.(inputCommand), d)
+	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect, permissionCommandRespond:
 		panic("a command without a guarded connection is dispatched before one is opened")
 	default:
 		panic("invalid cliCommand")

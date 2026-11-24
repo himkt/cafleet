@@ -256,3 +256,59 @@ func formatInputOperation(input inputOperation) string {
 	}
 	return fmt.Sprintf("Input: %d run=%d kind=%s state=%s disposition=%s", input.inputID, input.runID, input.kind.asStr(), input.state.asStr(), disposition)
 }
+
+func formatPermissionResponseResult(row permissionResponseResult) string {
+	decision := "-"
+	if value, set := answerKeyDecisionOf(row.Key); set {
+		decision = value.asStr()
+	}
+	choice := "-"
+	if value, set := answerKeyChoiceOf(row.Key); set {
+		choice = value
+	}
+	outputSeq := "-"
+	if value, set := row.Submission.OutputSeq.get(); set {
+		outputSeq = strconv.FormatUint(value, 10)
+	}
+	text := fmt.Sprintf("Permission response: interaction=%d run=%d decision=%s choice=%s status=%s stage=%s output_seq=%s",
+		row.InteractionID, row.RunID, decision, choice, row.Submission.Status.asStr(), row.Submission.Stage.asStr(), outputSeq)
+	if reason, set := row.Submission.Reason.get(); set {
+		text += "\nReason: " + reason
+	}
+	return text
+}
+
+func formatPermissionInspection(row permissionInspection) string {
+	answers := make([]string, 0, len(row.SupportedDecisions)+len(row.SupportedChoices))
+	for _, decision := range row.SupportedDecisions {
+		answers = append(answers, decision.asStr())
+	}
+	for _, choice := range row.SupportedChoices {
+		answers = append(answers, choice.ChoiceID)
+	}
+	offered := "-"
+	if len(answers) > 0 {
+		offered = strings.Join(answers, ",")
+	}
+	token := "-"
+	if value, set := row.RequestToken.get(); set {
+		token = value
+	}
+	rule := "-"
+	if value, set := row.AnswerRuleID.get(); set {
+		rule = value
+	}
+	text := fmt.Sprintf("Permission: interaction=%d event=%d member=%d run=%d epoch=%d visibility=%s answers=%s\nRequest: token=%s output_seq=%d rule=%s",
+		row.InteractionID, row.EventID, row.MemberID, row.RunID, row.OwnerEpoch, row.Visibility.asStr(), offered, token, row.OutputSeq, rule)
+	if reason, set := row.CapabilityReason.get(); set {
+		text += "\nCapability: " + reason
+	}
+	if len(row.MissingEvidence) > 0 {
+		missing := make([]string, 0, len(row.MissingEvidence))
+		for _, value := range row.MissingEvidence {
+			missing = append(missing, value.asStr())
+		}
+		text += "\nMissing evidence: " + strings.Join(missing, ",")
+	}
+	return text
+}
