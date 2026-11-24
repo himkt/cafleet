@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -484,6 +485,13 @@ type currentRequest struct {
 	messageID         int64
 	manualGeneration  uint64
 	pointerGeneration uint64
+}
+
+func (currentRequest) String() string             { return redacted }
+func (currentRequest) GoString() string           { return redacted }
+func (currentRequest) Format(f fmt.State, _ rune) { writeRedacted(f) }
+func (currentRequest) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("current permission requests are not serializable")
 }
 
 func (r *currentRequest) sameRequest(other *currentRequest) bool {
