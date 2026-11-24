@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1180,4 +1181,48 @@ func TestCodingAgent_SharedServerSignatures_LabelsNameTheBackendAndItsSubcommand
 	if got := label(codingAgentHermes); got != "hermes gateway run" {
 		t.Fatalf("hermes label %q", got)
 	}
+}
+
+// fakeProbe resolves binaries, the home directory and variables from fixed tables.
+type fakeProbe struct {
+	home     string
+	binaries map[string]string
+	env      map[string]string
+}
+
+// fakeProbeInstalled resolves every backend binary to /fixture/bin/<name> and sets no variable.
+func fakeProbeInstalled(home string) *fakeProbe {
+	probe := &fakeProbe{home: home, binaries: map[string]string{}, env: map[string]string{}}
+	for _, agent := range codingAgentAll() {
+		probe.binaries[agent.name()] = filepath.Join("/fixture/bin", agent.name())
+	}
+	return probe
+}
+
+func (p *fakeProbe) withBinary(name, path string) *fakeProbe {
+	p.binaries[name] = path
+	return p
+}
+
+func (p *fakeProbe) withEnv(name, value string) *fakeProbe {
+	p.env[name] = value
+	return p
+}
+
+func (p *fakeProbe) resolveBinary(name string) opt[string] {
+	if path, ok := p.binaries[name]; ok {
+		return some(path)
+	}
+	return none[string]()
+}
+
+func (p *fakeProbe) homeDir() (string, error) {
+	return p.home, nil
+}
+
+func (p *fakeProbe) envVar(name string) (opt[string], error) {
+	if value, ok := p.env[name]; ok {
+		return some(value), nil
+	}
+	return none[string](), nil
 }
