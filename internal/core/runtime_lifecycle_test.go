@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -286,10 +287,23 @@ func withNativeLaunchHost[T any](t *testing.T, operation func(*nativeLaunchHost)
 	return result
 }
 
+// cloexecAccept accepts one connection and marks it close-on-exec under the fork lock, so a
+// child started concurrently never inherits it.
+func cloexecAccept(listener int) (int, error) {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	fd, _, err := unix.Accept(listener)
+	if err != nil {
+		return -1, err
+	}
+	unix.CloseOnExec(fd)
+	return fd, nil
+}
+
 // acceptBefore accepts one connection on the nonblocking listener until finished or deadline.
 func acceptBefore(t *testing.T, listener int, finished *atomic.Bool, deadline time.Time) (int, bool) {
 	for {
-		fd, _, err := unix.Accept4(listener, unix.SOCK_CLOEXEC)
+		fd, err := cloexecAccept(listener)
 		if err == nil {
 			if err := unix.SetNonblock(fd, true); err != nil {
 				t.Error(err)
@@ -382,7 +396,7 @@ func readinessSuccess(t *testing.T, interval startupInterval) {
 		premature := 0
 		for time.Now().Before(readyAt) {
 			if interval == startupIntervalBeforePrivateMode {
-				if fd, _, err := unix.Accept4(listener, unix.SOCK_CLOEXEC); err == nil {
+				if fd, err := cloexecAccept(listener); err == nil {
 					premature++
 					closeFD(t, fd)
 				}
@@ -489,7 +503,7 @@ func TestRuntimeLifecycle_LaunchReadinessTests_RunnerReadinessSymlinkToAPrivateS
 	if time.Since(started) >= 500*time.Millisecond {
 		t.Fatalf("failed after %v", time.Since(started))
 	}
-	if _, _, err := unix.Accept4(listener, unix.SOCK_CLOEXEC); !errors.Is(err, unix.EAGAIN) {
+	if _, err := cloexecAccept(listener); !errors.Is(err, unix.EAGAIN) {
 		t.Fatalf("readiness never connects through the symlink: %v", err)
 	}
 }
