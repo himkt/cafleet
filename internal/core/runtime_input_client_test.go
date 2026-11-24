@@ -1084,7 +1084,7 @@ func openedInteraction(t *testing.T, f *serviceFixture, until time.Time) (int64,
 	}
 }
 
-func inputRows(t *testing.T, conn *dbConn) int64 {
+func inputClientRows(t *testing.T, conn *dbConn) int64 {
 	t.Helper()
 	return queryInt64(t, conn, "SELECT COUNT(*) FROM member_input_operations")
 }
@@ -1173,7 +1173,7 @@ func TestRuntimeInputClient_PermissionInspectionActualServiceProjectsCurrentUnsu
 	outputStart := len(f.output)
 	eventID, interactionID, messageID := openedInteraction(t, f, until)
 	run := mustRun(t, f.fixture.conn, f.fixture.run.runID)
-	before := inputRows(t, f.fixture.conn)
+	before := inputClientRows(t, f.fixture.conn)
 	inspected, failure := inspectPermission(context.Background(), f.fixture.conn, settingsForDatabase(f.fixture.databaseFile(t)),
 		permissionInspectInput{InteractionID: interactionID, EventID: eventID, DirectorMemberID: run.directorMemberID}, deadlineUntil(until))
 	if failure != nil {
@@ -1201,7 +1201,7 @@ func TestRuntimeInputClient_PermissionInspectionActualServiceProjectsCurrentUnsu
 	if want := []string{"operation", "arguments", "cwd", "environment", "targets", "effects", "choice_scope"}; !slices.Equal(missing, want) {
 		t.Fatalf("missing evidence %q", missing)
 	}
-	if inputRows(t, f.fixture.conn) != before || messageStamped(t, f.fixture.conn, messageID) {
+	if inputClientRows(t, f.fixture.conn) != before || messageStamped(t, f.fixture.conn, messageID) {
 		t.Fatal("inspection writes no receipt and stamps nothing")
 	}
 	inspectionBarrier(t, f, outputStart, "inspection-barrier")
@@ -1379,7 +1379,7 @@ func TestRuntimeInputClient_PermissionInspectionClientUsesRealGuardOriginalSqlBo
 	if changed.calls != [3]int{1, 1, 0} {
 		t.Fatalf("durable association is reread after actual health wait: %v", changed.calls)
 	}
-	if sender(f.fixture.conn) != replacementSender || inputRows(t, f.fixture.conn) != 0 || messageStamped(t, f.fixture.conn, messageID) {
+	if sender(f.fixture.conn) != replacementSender || inputClientRows(t, f.fixture.conn) != 0 || messageStamped(t, f.fixture.conn, messageID) {
 		t.Fatal("the refusal writes nothing")
 	}
 	inspectionBarrier(t, f, outputStart, "inspection-client-barrier")
