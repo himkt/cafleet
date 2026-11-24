@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -1180,6 +1181,38 @@ func (t *terminalState) resize(size terminalSize) error {
 	}
 	t.parser.SetSize(size.rows, screenCols(size))
 	return nil
+}
+
+// terminalStateReplay renders a multiplexer capture into a fresh terminal model, keeping the
+// capture's own cursor and screen mode, which a capture may lack.
+func terminalStateReplay(capture screenCapture) (screenSnapshot, error) {
+	terminal, err := newTerminalState(terminalSize{rows: capture.rows, cols: capture.cols})
+	if err != nil {
+		return screenSnapshot{}, err
+	}
+	var replay []byte
+	if alternate, set := capture.alternateScreen.get(); set && alternate {
+		replay = append(replay, "\x1b[?1049h"...)
+	}
+	body := strings.TrimSuffix(capture.body, "\n")
+	for row, line := range strings.Split(body, "\n") {
+		if row >= int(capture.rows) {
+			break
+		}
+		replay = fmt.Appendf(replay, "\x1b[%d;1H", row+1)
+		replay = append(replay, strings.TrimSuffix(line, "\r")...)
+		replay = append(replay, "\x1b[0m"...)
+	}
+	if cursor, set := capture.cursor.get(); set {
+		replay = fmt.Appendf(replay, "\x1b[%d;%dH", int(cursor[0])+1, int(cursor[1])+1)
+	}
+	if err := terminal.feed(replay); err != nil {
+		return screenSnapshot{}, err
+	}
+	snapshot := terminal.snapshot()
+	snapshot.cursor = capture.cursor
+	snapshot.alternateScreen = capture.alternateScreen
+	return snapshot, nil
 }
 
 // view is the current screen without a copy; it is valid until the next feed or resize.

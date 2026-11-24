@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -1402,6 +1403,43 @@ func insertRun(ctx context.Context, conn *dbConn, run newRun) (runRecord, error)
 		return runRecord{}, err
 	}
 	return getRun(ctx, conn, conn.raw.LastInsertRowID())
+}
+
+func brokerRuntimeNativeSession(_ context.Context, conn *dbConn, runID int64) (opt[nativeSession], error) {
+	stored, err := queryRow(conn, "SELECT native_session_json FROM member_runs WHERE run_id=?1", []any{runID},
+		func(row sqlRow) (opt[string], error) { return row.optText(0) })
+	if err != nil {
+		return none[nativeSession](), err
+	}
+	text, set := stored.get()
+	if !set {
+		return none[nativeSession](), nil
+	}
+	var session nativeSession
+	if err := json.Unmarshal([]byte(text), &session); err != nil {
+		cause := err.Error()
+		var decoded *cafleetError
+		if errors.As(err, &decoded) {
+			cause = decoded.message()
+		}
+		return none[nativeSession](), appErrorf("member_runs.native_session_json of run %d is invalid: %s", runID, cause)
+	}
+	return some(session), nil
+}
+
+func setNativeSession(_ context.Context, conn *dbConn, runID int64, session nativeSession) error {
+	encoded, err := encodeJSON(session)
+	if err != nil {
+		panic("a native session serializes: " + err.Error())
+	}
+	changed, err := conn.execute("UPDATE member_runs SET native_session_json=?1 WHERE run_id=?2", string(encoded), runID)
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return appErrorf("member run %d is missing", runID)
+	}
+	return nil
 }
 
 func brokerRuntimeSnapshot(ctx context.Context, conn *dbConn, runID int64) (runtimeSnapshot, error) {
