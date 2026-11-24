@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 25/70 tasks complete
+**Progress**: 29/80 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -467,9 +467,9 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 
 ### Step 8: Stage 1 — foundation, broker and CLI surface
 
-- [ ] `error.go`, `time.go` (clock, test clock, deadlines, deferral spans), `config.go`, `digest.go` <!-- completed: -->
-- [ ] `textcodec.go`: F6–F8, F10–F11 and F17 helpers; F9 and F18 in their Rust-home files <!-- completed: -->
-- [ ] `db.go`: `schemaSQL`, connection pragmas, format diagnosis, deadline budget (F20), test fault plans on ncruces hooks <!-- completed: -->
+- [x] `error.go`, `time.go` (clock, test clock, deadlines, deferral spans), `config.go`, `digest.go` <!-- completed: 2026-11-24T12:51 -->
+- [x] `textcodec.go`: F6–F8, F10–F11 and F17 helpers; F9 and F18 in their Rust-home files <!-- completed: 2026-11-24T12:51 -->
+- [x] `db.go`: `schemaSQL`, connection pragmas, format diagnosis, deadline budget (F20), test fault plans on ncruces hooks <!-- completed: 2026-11-24T12:51 -->
 - [ ] `broker*.go` including `broker_runtime*.go` row mapping <!-- completed: -->
 - [ ] `output*.go` presenters and the CLI parser, help generation and parse-error rendering (A11) <!-- completed: -->
 - [ ] `assets.go` (F12), `setup`, `doctor`, `message *`, `fleet list/show`, `member list/show`, `event`/`input`/`permission` read commands <!-- completed: -->
@@ -479,7 +479,7 @@ COMMENT(tester): U1 defers four `src/time.rs` thread-mask tests to Step 10 (F5 m
 
 ### Step 9: Stage 2 — emulator, detector, backends and multiplexer
 
-- [ ] `internal/vt` from the exp-vt port, with the read-only view and `CopyInto` (F15), generated width tables and per-file notices <!-- completed: -->
+- [x] `internal/vt` from the exp-vt port, with the read-only view and `CopyInto` (F15), generated width tables and per-file notices <!-- completed: 2026-11-24T12:50 -->
 - [ ] `runtime_transport.go` `TerminalState` and its screen snapshot types; G3 passes in CI and locally with `--corpus`; add `TestRuntimeTransport_SeededScreens` to `runtime_transport_test.go` and write its generated block with the update mode <!-- completed: -->
 - [ ] `coding_agent_catalog.go` strict decode (F7, F21), validation, catalog runtime and the provenance guard test <!-- completed: -->
 - [ ] `coding_agent_detector.go`, `coding_agent.go` (backend argv, version probe), `coding_agent_hermes.go` (F14) <!-- completed: -->

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"math/bits"
 	"os"
@@ -116,6 +117,15 @@ type deadline struct {
 
 func (d deadline) instant() time.Time {
 	return d.at
+}
+
+// deadlineInheritedOrNew is the innermost deadline of the database scopes ctx carries, or a fresh
+// five-second deadline outside them.
+func deadlineInheritedOrNew(ctx context.Context) deadline {
+	if inherited, set := inheritedDeadline(ctx).get(); set {
+		return inherited
+	}
+	return newDeadline()
 }
 
 func newDeadline() deadline {
