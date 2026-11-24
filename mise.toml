@@ -6,7 +6,7 @@ config_roots = [
 ]
 
 [tools]
-"aqua:pnpm/pnpm" = "12.21.0"
+"aqua:pnpm/pnpm" = "12.22.0"
 "core:node" = "26.13.1"
 "core:go" = "1.27.4"
 "aqua:golangci/golangci-lint" = "2.15.0"
