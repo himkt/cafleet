@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 33/70 tasks complete
+**Progress**: 36/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -440,13 +440,13 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 
 ### Step 5: SPEC amendments
 
-- [ ] A1: the error strings from Step 4, at their owning sections <!-- completed: -->
+- [x] A1: the error strings from Step 4, at their owning sections <!-- completed: 2026-11-24T13:38 -->
 - [x] A2: library-defined cause texts <!-- completed: 2026-11-24T11:38 -->
 - [x] A3: the `--database-url` repeat rule <!-- completed: 2026-11-24T11:38 -->
 - [x] A4: body validation after the schema guard <!-- completed: 2026-11-24T11:38 -->
 - [x] A6: inherited signal dispositions and blocked signals are not part of the contract <!-- completed: 2026-11-24T11:38 -->
 - [x] A7: observable subprocess-runner guarantees <!-- completed: 2026-11-24T11:38 -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md` for the facts it carries from A1, A3 and A4 <!-- completed: -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` for the facts it carries from A1, A3 and A4 <!-- completed: 2026-11-24T13:38 -->
 
 ### Step 6: Documentation and rules
 

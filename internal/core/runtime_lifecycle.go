@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"encoding/json/jsontext"
+	"time"
+)
 
 // childExit is how the native child ended: an exit code or a terminating signal.
 //
@@ -138,4 +141,36 @@ func note[T any](diagnostics *[]string, value T, err error) (T, bool) {
 		return zero, false
 	}
 	return value, true
+}
+
+type controlIdentity struct {
+	DatabaseIdentityJSON jsontext.Value `json:"database_identity_json"`
+	FleetID              int64          `json:"fleet_id"`
+	MemberID             int64          `json:"member_id"`
+	DirectorMemberID     int64          `json:"director_member_id"`
+	RunID                int64          `json:"run_id"`
+	OwnerEpoch           int64          `json:"owner_epoch"`
+	LaunchNonce          string         `json:"launch_nonce"`
+}
+
+func controlIdentityFromRun(run runRecord) controlIdentity {
+	return controlIdentity{
+		DatabaseIdentityJSON: run.databaseIdentityJSON,
+		FleetID:              run.fleetID,
+		MemberID:             run.memberID,
+		DirectorMemberID:     run.directorMemberID,
+		RunID:                run.runID,
+		OwnerEpoch:           run.ownerEpoch,
+		LaunchNonce:          run.launchNonce,
+	}
+}
+
+func (c controlIdentity) equal(other controlIdentity) bool {
+	return jsonEqual(c.DatabaseIdentityJSON, other.DatabaseIdentityJSON) && c.FleetID == other.FleetID &&
+		c.MemberID == other.MemberID && c.DirectorMemberID == other.DirectorMemberID && c.RunID == other.RunID &&
+		c.OwnerEpoch == other.OwnerEpoch && c.LaunchNonce == other.LaunchNonce
+}
+
+func (c controlIdentity) validate(run runRecord) error {
+	return ensure(c.equal(controlIdentityFromRun(run)), "control run/database/nonce/epoch identity mismatch")
 }

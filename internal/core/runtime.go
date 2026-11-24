@@ -59,3 +59,49 @@ func (s spawnSpec) validate() error {
 	}
 	return s.size.validate()
 }
+
+func checkDeadline(now, deadline time.Time) error {
+	if !now.Before(deadline) {
+		return deadlineExceededError()
+	}
+	return nil
+}
+
+// spawnSpecWire is the serde encoding of a spawnSpec: environment pairs are two-element arrays,
+// and unknown members are ignored as SpawnSpec and TerminalSize do not deny them.
+type spawnSpecWire struct {
+	Argv        []string         `json:"argv"`
+	Cwd         string           `json:"cwd"`
+	Environment [][2]string      `json:"environment"`
+	Size        terminalSizeWire `json:"size"`
+}
+
+type terminalSizeWire struct {
+	Rows uint16 `json:"rows"`
+	Cols uint16 `json:"cols"`
+}
+
+func (*spawnSpecWire) ignoresUnknownFields()    {}
+func (*terminalSizeWire) ignoresUnknownFields() {}
+
+func (s spawnSpec) wire() spawnSpecWire {
+	environment := s.environment
+	if environment == nil {
+		environment = [][2]string{}
+	}
+	return spawnSpecWire{
+		Argv:        s.argv,
+		Cwd:         s.cwd,
+		Environment: environment,
+		Size:        terminalSizeWire{Rows: s.size.rows, Cols: s.size.cols},
+	}
+}
+
+func (w spawnSpecWire) spawnSpec() spawnSpec {
+	return spawnSpec{
+		argv:        w.Argv,
+		cwd:         w.Cwd,
+		environment: w.Environment,
+		size:        terminalSize{rows: w.Size.Rows, cols: w.Size.Cols},
+	}
+}

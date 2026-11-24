@@ -1856,6 +1856,26 @@ func (r runRecord) owner() runOwner {
 	}
 }
 
+func (r runRecord) equal(other runRecord) bool {
+	return r.runID == other.runID && r.memberID == other.memberID && r.fleetID == other.fleetID &&
+		r.directorMemberID == other.directorMemberID && r.backend == other.backend &&
+		jsonEqual(r.databaseIdentityJSON, other.databaseIdentityJSON) && r.launchNonce == other.launchNonce &&
+		r.runtimePath == other.runtimePath && r.requestedMode == other.requestedMode &&
+		r.resolvedMode == other.resolvedMode && r.modeSource == other.modeSource &&
+		jsonEqual(r.permissionArgvJSON, other.permissionArgvJSON) && r.coverage == other.coverage &&
+		r.status == other.status && r.nativeVersion == other.nativeVersion && r.ownerEpoch == other.ownerEpoch &&
+		r.ownerKind == other.ownerKind && r.ownerPID == other.ownerPID &&
+		r.ownerStartIdentity == other.ownerStartIdentity && r.cleanupState == other.cleanupState &&
+		jsonOptionalEqual(r.runtimeDirIdentityJSON, other.runtimeDirIdentityJSON) &&
+		jsonOptionalEqual(r.runLockIdentityJSON, other.runLockIdentityJSON) &&
+		r.runnerPID == other.runnerPID && r.runnerStartIdentity == other.runnerStartIdentity &&
+		r.childPID == other.childPID && r.childStartIdentity == other.childStartIdentity &&
+		r.startedAt == other.startedAt && r.lastHealthAt == other.lastHealthAt && r.endedAt == other.endedAt &&
+		r.exitCode == other.exitCode &&
+		jsonOptionalEqual(r.cleanupDiagnosticsJSON, other.cleanupDiagnosticsJSON) &&
+		r.recoveryOriginStatus == other.recoveryOriginStatus
+}
+
 func (r runRecord) ownerProcess() processIdentity {
 	return processIdentity{pid: r.ownerPID, startIdentity: r.ownerStartIdentity}
 }
