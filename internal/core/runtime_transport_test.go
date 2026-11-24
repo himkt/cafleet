@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/himkt/cafleet/internal/vt"
 )
@@ -2136,3 +2138,2708 @@ var (
 	_ ptyIo     = (*fakePty)(nil)
 	_ display   = (*fakeDisplay)(nil)
 )
+
+func newTestTransport(t *testing.T) *transport {
+	t.Helper()
+	return newTransportWith(t, transportLimits{inputBytes: 32, displayBytes: 64, bytesPerTick: 16})
+}
+
+func newServiceTransport(t *testing.T) *transport {
+	t.Helper()
+	return newTransportWith(t, transportLimits{inputBytes: 65536, displayBytes: 65536, bytesPerTick: 16384})
+}
+
+func newTransportWith(t *testing.T, limits transportLimits) *transport {
+	t.Helper()
+	created, err := newTransport(terminalSize{rows: 24, cols: 80}, limits, testClockStartingAt(time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return created
+}
+
+// patternResidues is the bytes 0 through 250, the residues patterned cycles through.
+var patternResidues = func() []byte {
+	residues := make([]byte, 251)
+	for index := range residues {
+		residues[index] = byte(index)
+	}
+	return residues
+}()
+
+func patterned(length, salt int) []byte {
+	data := make([]byte, length)
+	for index := range data {
+		data[index] = patternResidues[(index+salt)%len(patternResidues)]
+	}
+	return data
+}
+
+func reads(sizes ...int) (*fakeInput, []byte) {
+	input := &fakeInput{}
+	var all []byte
+	for salt, size := range sizes {
+		chunk := patterned(size, salt*7)
+		all = append(all, chunk...)
+		input.push(chunk)
+	}
+	return input, all
+}
+
+func unread(input *fakeInput) int {
+	total := 0
+	for _, chunk := range input.chunks {
+		total += len(chunk)
+	}
+	return total
+}
+
+func oneTick(t *testing.T, tr *transport, human *fakeInput, pty *fakePty) transportProgress {
+	t.Helper()
+	progress, err := tr.tick(human, pty, &fakeDisplay{}, &transportTestObserver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return progress
+}
+
+func tickWith(t *testing.T, tr *transport, human *fakeInput, pty *fakePty, out *fakeDisplay, observer *transportTestObserver) {
+	t.Helper()
+	if _, err := tr.tick(human, pty, out, observer); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func offerLengths(offers [][]byte) []int {
+	lengths := make([]int, len(offers))
+	for index, offer := range offers {
+		lengths[index] = len(offer)
+	}
+	return lengths
+}
+
+func assertBytes(t *testing.T, got, want []byte, context string) {
+	t.Helper()
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s: %q, want %q", context, got, want)
+	}
+}
+
+// backdateReplyPrefix is Rust's test-only Transport::backdate_reply_prefix.
+func (t *transport) backdateReplyPrefix(by time.Duration) {
+	last, set := t.replies.lastByte.get()
+	if !set {
+		panic("backdating requires a pending reply prefix")
+	}
+	t.replies.lastByte = some(last.Add(-by))
+}
+
+func TestRuntimeTransport_RunnerTransportBracketedPasteSelectionFollowsTheChildMode2004(t *testing.T) {
+	t.Parallel()
+	tr := newTestTransport(t)
+	pty := newFakePty(nil, 1)
+	if tr.bracketedPaste() {
+		t.Fatal("bracketed paste starts off")
+	}
+	pty.output.push([]byte("\x1b[?2004h"))
+	oneTick(t, tr, &fakeInput{}, pty)
+	if !tr.bracketedPaste() {
+		t.Fatal("mode 2004 enables bracketed paste")
+	}
+	pty.output.push([]byte("\x1b[?2004l"))
+	oneTick(t, tr, &fakeInput{}, pty)
+	if tr.bracketedPaste() {
+		t.Fatal("mode 2004 reset disables bracketed paste")
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportResizesThePtyToThePaneSizeWhileTheScreenStaysTwoColumnsWide(t *testing.T) {
+	t.Parallel()
+	tr, err := newTransport(terminalSize{rows: 1, cols: 1}, transportLimits{inputBytes: 65536, displayBytes: 65536, bytesPerTick: 16384}, testClockStartingAt(time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created := tr.snapshot(); created.rows != 1 || created.cols != 2 {
+		t.Fatalf("created %dx%d", created.rows, created.cols)
+	}
+	pty := newFakePty(emojiWithTwoPresentationSelectors, len(emojiWithTwoPresentationSelectors))
+	oneTick(t, tr, &fakeInput{}, pty)
+	panes := []terminalSize{{rows: 1, cols: 2}, {rows: 1, cols: 1}}
+	for _, pane := range panes {
+		before := tr.snapshot().screenSeq
+		if err := tr.resize(pty, pane); err != nil {
+			t.Fatal(err)
+		}
+		pty.output.push(emojiWithTwoPresentationSelectors)
+		oneTick(t, tr, &fakeInput{}, pty)
+		resized := tr.snapshot()
+		if resized.rows != 1 || resized.cols != 2 {
+			t.Fatalf("the screen model after the pane resize to %+v: %dx%d", pane, resized.rows, resized.cols)
+		}
+		if resized.screenSeq <= before {
+			t.Fatalf("the runner keeps consuming child output after the pane resize to %+v", pane)
+		}
+	}
+	if !slices.Equal(pty.sizes, panes) {
+		t.Fatalf("the PTY receives every pane size unchanged: %+v", pty.sizes)
+	}
+}
+
+func replayCapture(rows, cols uint16, cursor opt[[2]uint16], alternate opt[bool], body string) screenCapture {
+	return screenCapture{rows: rows, cols: cols, cursor: cursor, alternateScreen: alternate, body: body}
+}
+
+func mustReplay(t *testing.T, capture screenCapture) screenSnapshot {
+	t.Helper()
+	snapshot, err := terminalStateReplay(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func rowsOf(snapshot screenSnapshot) []string {
+	return snapshot.screen.Rows(0, snapshot.cols)
+}
+
+func TestRuntimeTransport_CaptureReplay_ATmuxCaptureReplaysEveryRowAtItsPositionWithItsCursorAndScreenMode(t *testing.T) {
+	t.Parallel()
+	for _, alternate := range []bool{false, true} {
+		snapshot := mustReplay(t, replayCapture(4, 20, some([2]uint16{3, 8}), some(alternate), "row one\nrow two\n\nlast row\n"))
+		if snapshot.rows != 4 || snapshot.cols != 20 || !slices.Equal(rowsOf(snapshot), []string{"row one", "row two", "", "last row"}) {
+			t.Fatalf("%v: %dx%d %q", alternate, snapshot.rows, snapshot.cols, rowsOf(snapshot))
+		}
+		if snapshot.cursor != some([2]uint16{3, 8}) || snapshot.alternateScreen != some(alternate) || snapshot.screen.AlternateScreen() != alternate {
+			t.Fatalf("%v: the replay enters the alternate screen exactly when the capture is on it: %+v", alternate, snapshot)
+		}
+	}
+}
+
+func TestRuntimeTransport_CaptureReplay_AFullWidthRowLeavesTheNextRowAtItsOwnPosition(t *testing.T) {
+	t.Parallel()
+	const full = "0123456789"
+	snapshot := mustReplay(t, replayCapture(3, 10, some([2]uint16{2, 0}), some(false), full+"\nnext\nlast\n"))
+	if !slices.Equal(rowsOf(snapshot), []string{full, "next", "last"}) {
+		t.Fatalf("rows = %q", rowsOf(snapshot))
+	}
+}
+
+func TestRuntimeTransport_CaptureReplay_AHerdrCaptureReplaysCrlfStyledRowsWithoutCursorOrScreenMode(t *testing.T) {
+	t.Parallel()
+	snapshot := mustReplay(t, replayCapture(3, 30, none[[2]uint16](), none[bool](), "› \x1b[2mAsk anything\x1b[0m\r\n\r\nstatus line\r\n"))
+	if snapshot.rows != 3 || snapshot.cols != 30 || !slices.Equal(rowsOf(snapshot), []string{"› Ask anything", "", "status line"}) {
+		t.Fatalf("%dx%d %q", snapshot.rows, snapshot.cols, rowsOf(snapshot))
+	}
+	if !snapshot.screen.Cell(0, 2).Dim() || snapshot.screen.Cell(2, 0).Dim() {
+		t.Fatal("the replay keeps the captured cell styles")
+	}
+	if snapshot.cursor != none[[2]uint16]() || snapshot.alternateScreen != none[bool]() || snapshot.screen.AlternateScreen() {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestRuntimeTransport_CaptureReplay_ABodyWithoutItsTrailingBlankRowsReplaysAtTheViewportHeight(t *testing.T) {
+	t.Parallel()
+	snapshot := mustReplay(t, replayCapture(5, 20, none[[2]uint16](), none[bool](), "\r\nfirst row\r\n\r\nlast row\r\n"))
+	if snapshot.rows != 5 || snapshot.cols != 20 || !slices.Equal(rowsOf(snapshot), []string{"", "first row", "", "last row", ""}) {
+		t.Fatalf("%dx%d %q", snapshot.rows, snapshot.cols, rowsOf(snapshot))
+	}
+}
+
+var pointerReports = []string{
+	"\x1b[<0;10;20M",
+	"\x1b[<0;10;20m",
+	"\x1b[<35;120;40M",
+	"\x1b[<64;5;5M",
+	"\x1b[<65;5;5M",
+	"\x1b[M !!",
+	"\x1b[M\xff\x80\x7f",
+}
+
+func assertClassified(t *testing.T, got classified, manual, pointer int, context string) {
+	t.Helper()
+	if got.manual != manual || got.pointer != pointer {
+		t.Fatalf("%s: classified (%d, %d), want (%d, %d)", context, got.manual, got.pointer, manual, pointer)
+	}
+}
+
+func TestRuntimeTransport_Pointer_PointerReportsSplitAtEveryBoundaryClassifyOnlyWhenComplete(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	for _, report := range pointerReports {
+		for split := 1; split < len(report); split++ {
+			context := fmt.Sprintf("%q split=%d", report, split)
+			var classifier replyClassifier
+			assertClassified(t, classifier.feed([]byte(report[:split]), start), 0, 0, context)
+			if !classifier.pending() {
+				t.Fatalf("%s: the prefix is pending", context)
+			}
+			assertClassified(t, classifier.feed([]byte(report[split:]), start), 0, len(report), context)
+			if classifier.pending() {
+				t.Fatalf("%s: nothing stays pending", context)
+			}
+		}
+	}
+}
+
+func TestRuntimeTransport_Pointer_PointerX10AcceptsEachPayloadByteFromSpaceThroughFf(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	for position := 3; position < 6; position++ {
+		for value := 0x20; value <= 0xff; value++ {
+			report := []byte("\x1b[M !!")
+			report[position] = byte(value)
+			var classifier replyClassifier
+			context := fmt.Sprintf("position=%d byte=%#04x", position, value)
+			assertClassified(t, classifier.feed(report, now), 0, len(report), context)
+			if classifier.pending() {
+				t.Fatalf("%s: pending", context)
+			}
+		}
+	}
+}
+
+func TestRuntimeTransport_Pointer_PointerX10LowPayloadBytesResolveTheReportAsManual(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	for position := 3; position < 6; position++ {
+		for value := range 0x20 {
+			report := []byte("\x1b[M !!")
+			report[position] = byte(value)
+			var classifier replyClassifier
+			first := classifier.feed(report, now)
+			remaining := classifier.finish()
+			context := fmt.Sprintf("position=%d byte=%#04x", position, value)
+			assertClassified(t, classified{manual: first.manual + remaining.manual, pointer: first.pointer + remaining.pointer}, len(report), 0, context)
+			if classifier.pending() {
+				t.Fatalf("%s: pending", context)
+			}
+		}
+	}
+}
+
+func TestRuntimeTransport_Pointer_PointerX10PrefixExpiresAsManualAtTheBound(t *testing.T) {
+	t.Parallel()
+	report := []byte("\x1b[M !!")
+	start := time.Now()
+	for split := 1; split < len(report); split++ {
+		context := fmt.Sprintf("split=%d", split)
+		var classifier replyClassifier
+		assertClassified(t, classifier.feed(report[:split], start), 0, 0, context)
+		assertClassified(t, classifier.expire(start.Add(replyPrefixBound-time.Nanosecond)), 0, 0, context)
+		if !classifier.pending() {
+			t.Fatalf("%s: pending before the bound", context)
+		}
+		assertClassified(t, classifier.expire(start.Add(replyPrefixBound)), split, 0, context)
+		if classifier.pending() {
+			t.Fatalf("%s: resolved at the bound", context)
+		}
+		assertClassified(t, classifier.feed(report[split:], start.Add(replyPrefixBound)), len(report)-split, 0, context)
+		if classifier.pending() {
+			t.Fatalf("%s: the suffix is manual", context)
+		}
+	}
+}
+
+func TestRuntimeTransport_Pointer_PointerX10OuterEofResolvesEachIncompletePrefixAsManual(t *testing.T) {
+	t.Parallel()
+	report := []byte("\x1b[M !!")
+	for split := 1; split < len(report); split++ {
+		context := fmt.Sprintf("split=%d", split)
+		var classifier replyClassifier
+		assertClassified(t, classifier.feed(report[:split], time.Now()), 0, 0, context)
+		assertClassified(t, classifier.finish(), split, 0, context)
+		if classifier.pending() {
+			t.Fatalf("%s: pending after finish", context)
+		}
+		assertClassified(t, classifier.finish(), 0, 0, context+": repeated")
+	}
+}
+
+func TestRuntimeTransport_Pointer_PointerReportsInsideAFragmentedHumanPasteRemainManual(t *testing.T) {
+	t.Parallel()
+	paste := []byte("\x1b[200~\x1b[<0;10;20M\x1b[M !!\x1b[<35;10;20m\x1b[201~")
+	now := time.Now()
+	for width := 1; width <= len(paste); width++ {
+		var classifier replyClassifier
+		manual := 0
+		for _, part := range chunks(paste, width) {
+			result := classifier.feed(part, now)
+			manual += result.manual
+			if result.pointer != 0 {
+				t.Fatalf("width=%d: pointer bytes inside a paste", width)
+			}
+		}
+		if manual != len(paste) || classifier.pending() {
+			t.Fatalf("width=%d: manual %d", width, manual)
+		}
+		assertClassified(t, classifier.feed([]byte("\x1b[M !!"), now), 0, 6, fmt.Sprintf("width=%d: after", width))
+		if classifier.pending() {
+			t.Fatalf("width=%d: pending after", width)
+		}
+	}
+}
+
+func TestRuntimeTransport_Pointer_PointerTransportPacingCountsAllOuterBytes(t *testing.T) {
+	t.Parallel()
+	tr := newTestTransport(t)
+	payload := bytes.Repeat([]byte("\x1b[M !!"), 8)
+	human := newFakeInput(payload, len(payload))
+	pty := newFakePty(nil, 1)
+	for _, step := range []struct {
+		read, consumed int
+		pointer        uint64
+	}{{32, 32, 30}, {16, 48, 48}} {
+		progress := oneTick(t, tr, human, pty)
+		if progress.humanBytes != step.read || len(human.consumed) != step.consumed || tr.humanGeneration != 0 || tr.pointerGeneration != step.pointer {
+			t.Fatalf("step %+v: progress %+v consumed %d generations %d/%d", step, progress, len(human.consumed), tr.humanGeneration, tr.pointerGeneration)
+		}
+		assertBytes(t, pty.written, payload[:step.consumed], "written")
+	}
+	if got := unread(human); got != 0 {
+		t.Fatalf("unread = %d", got)
+	}
+}
+
+type classifiedAs uint8
+
+const (
+	classifiedAsReply classifiedAs = iota + 1
+	classifiedAsManual
+	classifiedAsPointer
+	classifiedAsCounts
+)
+
+type expectedClassification struct {
+	as              classifiedAs
+	manual, pointer int
+}
+
+var (
+	expectReply   = expectedClassification{as: classifiedAsReply}
+	expectManual  = expectedClassification{as: classifiedAsManual}
+	expectPointer = expectedClassification{as: classifiedAsPointer}
+)
+
+func expectCounts(manual, pointer int) expectedClassification {
+	return expectedClassification{as: classifiedAsCounts, manual: manual, pointer: pointer}
+}
+
+var oneReads = []struct {
+	name       string
+	inputs     []string
+	classified expectedClassification
+}{
+	{"cursor position reports are replies", []string{"\x1b[24;80R", "\x1b[1;1R", "\x1b[?24;80R", "\x1b[?24;80;1R"}, expectReply},
+	{"a modified F3 collides with a cursor position report", []string{"\x1b[1;5R"}, expectReply},
+	{"device status reports are replies", []string{"\x1b[0n", "\x1b[3n", "\x1b[?1n", "\x1b[?997;1n", "\x1b[?1;2;3;4n"}, expectReply},
+	{"device attribute reports are replies", []string{"\x1b[?1;2c", "\x1b[?62;22c", "\x1b[>0c", "\x1b[>1;10;0c", "\x1b[>41;380;0;1c"}, expectReply},
+	{"mode reports are replies", []string{"\x1b[?1004;1$y", "\x1b[?2026;2$y", "\x1b[4;2$y"}, expectReply},
+	{"window reports are replies", []string{"\x1b[1t", "\x1b[2t", "\x1b[4;600;800t", "\x1b[8;24;80t"}, expectReply},
+	{"the kitty keyboard flags report is a reply", []string{"\x1b[?1u", "\x1b[?31u"}, expectReply},
+	{"focus events are replies", []string{"\x1b[I", "\x1b[O"}, expectReply},
+	{"OSC replies terminate with BEL or ST", []string{"\x1b]11;rgb:0000/0000/0000\x07", "\x1b]10;rgb:ffff/ffff/ffff\x1b\\", "\x1b]4;1;rgb:cdcd/0000/0000\x1b\\"}, expectReply},
+	{"an OSC body accepts bytes at or above 0x80", []string{"\x1b]2;caf\xc3\xa9\x07"}, expectReply},
+	{"DCS replies terminate with ST", []string{"\x1bP>|XTerm(380)\x1b\\", "\x1bP1+r544e=787465726d\x1b\\", "\x1bP1$r0m\x1b\\", "\x1bP!|00000000\x1b\\"}, expectReply},
+	{"APC replies terminate with ST", []string{"\x1b_Gi=31;OK\x1b\\", "\x1b_Gi=1;ENOENT:file not found\x1b\\"}, expectReply},
+	{"a burst of replies counts zero", []string{"\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R\x1b[O\x1bP>|XTerm(380)\x1b\\"}, expectReply},
+	{"a window report with four parameters is manual", []string{"\x1b[8;24;80;1t"}, expectManual},
+	{"a cursor position report with one parameter is manual", []string{"\x1b[5R", "\x1b[?5R", "\x1b[?1;2;3;4R"}, expectManual},
+	{"empty parameters are manual", []string{"\x1b[8;t", "\x1b[;24R", "\x1b[24;;80R", "\x1b[?n", "\x1b[?c"}, expectManual},
+	{"device status outside its forms is manual", []string{"\x1b[1n", "\x1b[5n", "\x1b[?1;2;3;4;5n"}, expectManual},
+	{"device attributes outside their arity are manual", []string{"\x1b[>1;2;3;4;5c", "\x1b[1c"}, expectManual},
+	{"mode reports outside their arity are manual", []string{"\x1b[?1$y", "\x1b[?1;2;3$y", "\x1b[4$y"}, expectManual},
+	{"kitty flags with more than one parameter are manual", []string{"\x1b[?1;2u"}, expectManual},
+	{"focus with parameters or intermediates is manual", []string{"\x1b[1I", "\x1b[?I", "\x1b[ O"}, expectManual},
+	{"an unlisted intermediate is manual", []string{"\x1b[1;1 R", "\x1b[1$t"}, expectManual},
+	{"text and C0 controls are manual immediately", []string{"hello", "caf\xc3\xa9 \xe6\x97\xa5\xe6\x9c\xac", "\r", "\t", "\x03", "\x7f", "\x07"}, expectManual},
+	{"cursor and function keys are manual", []string{"\x1b[A", "\x1b[1;5C", "\x1b[3~", "\x1b[15;2~", "\x1b[Z"}, expectManual},
+	{"kitty key events are manual", []string{"\x1b[97u", "\x1b[97;5u", "\x1b[97;5;97u"}, expectManual},
+	{"SS3 and alt-modified keys are manual", []string{"\x1bOP", "\x1bOA", "\x1ba", "\x1bx", "\x1b\r"}, expectManual},
+	{"SOS and PM strings are manual", []string{"\x1bXhello\x1b\\", "\x1b^hi\x1b\\"}, expectManual},
+	{"eight-bit C1 bytes are manual", []string{"\x9b", "\x9d", "\x90", "\x9f", "\x9b1;1R", "\x9bI"}, expectManual},
+	{"a mixed read counts only the text around a reply", []string{"ab\x1b[Icd"}, expectCounts(4, 0)},
+	{"a bracketed paste counts every byte including reply forms", []string{"\x1b[200~\x1b[1;1R\x1b[Ipasted\x1b]11;x\x07\x1b[201~"}, expectManual},
+	{"an escape inside CSI restarts a reply", []string{"\x1b[1;\x1b[I"}, expectCounts(4, 0)},
+	{"an escape before a reply counts one", []string{"\x1b\x1b[I"}, expectCounts(1, 0)},
+	{"a control byte inside CSI counts the prefix and the byte", []string{
+		"\x1b[1\x18", "\x1b[1\x1a", "\x1b[1\x00", "\x1b[1\x03", "\x1b[1\x07", "\x1b[1\x0d", "\x1b[1\x7f", "\x1b[1\x80", "\x1b[1\xc3", "\x1b[1\xff",
+	}, expectCounts(4, 0)},
+	{"a control byte inside CSI is followed by classification from ground", []string{"\x1b[1\x18\x1b[I"}, expectCounts(4, 0)},
+	{"a parameter byte after an intermediate is manual", []string{"\x1b[1$1y"}, expectManual},
+	{"BEL inside DCS or APC is manual", []string{"\x1bP1$r\x07", "\x1b_Gi=1\x07"}, expectManual},
+	{"BEL inside DCS resolves before a following reply", []string{"\x1bP1$r\x07\x1b[I"}, expectCounts(6, 0)},
+	{"an escape without backslash inside OSC is manual", []string{"\x1b]11;x\x1ba", "\x1b]1\x1b[I"}, expectManual},
+	{"an escape without backslash inside OSC reclassifies the next byte", []string{"\x1b]1\x1b\x1b[I"}, expectCounts(4, 0)},
+	{"an escape without backslash inside DCS or APC is manual", []string{"\x1bP1$r\x1bq", "\x1b_G\x1bq"}, expectManual},
+	{"a control byte inside a string body is manual", []string{"\x1b]11;x\x18", "\x1bP1\r"}, expectManual},
+	{"an escape with an invalid continuation counts both bytes", []string{"\x1b1", "\x1b\x7f"}, expectManual},
+	{"pointer reports classify every byte as pointer input", pointerReports, expectPointer},
+	{"an X10 report consumes exactly three payload bytes", []string{"\x1b[M !!xy\x1b[I"}, expectCounts(2, 6)},
+	{"an SGR report requires exactly three numeric parameters", []string{
+		"\x1b[<0;10M", "\x1b[<0;10;20;30M", "\x1b[<;10;20M", "\x1b[<0;;20m", "\x1b[<0;10;m", "\x1b[<0:10:20M", "\x1b[<0;10;20 M", "\x1b[?0;10;20M", "\x1b[0;10;20M", "\x1b[<0;10;20R",
+	}, expectManual},
+	{"an X10 report requires a parameterless CSI without intermediates", []string{"\x1b[1M !!", "\x1b[?M !!", "\x1b[ M !!", "\x1b[1 M !!"}, expectManual},
+	{"an invalid escape inside an X10 report restarts the reply classifier", []string{"\x1b[M \x1b[I"}, expectCounts(4, 0)},
+	{"mixed keyboard, reports and replies keep independent counts", []string{"ab\x1b[<0;10;20M\x1b[I\x1b[M !!cd\x1b[24;80R"}, expectCounts(4, 17)},
+}
+
+func stringBody(open string, body byte, count int, terminator string) string {
+	return open + strings.Repeat(string(body), count) + terminator
+}
+
+var builtReads = []struct {
+	name       string
+	input      func(t *testing.T) string
+	classified expectedClassification
+}{
+	{"primary device attributes accept thirty-two parameters", func(t *testing.T) string {
+		parameters := make([]string, 32)
+		for index := range parameters {
+			parameters[index] = "1"
+		}
+		reply := "\x1b[?" + strings.Join(parameters, ";") + "c"
+		if len(reply)-3 != csiParameterLimit {
+			t.Fatal("the private marker and 32 parameters fill the CSI parameter limit exactly")
+		}
+		return reply
+	}, expectReply},
+	{"a string body at the limit is a reply", func(*testing.T) string { return stringBody("\x1b]", 'x', stringBodyLimit, "\x07") }, expectReply},
+	{"an OSC 52 clipboard read over the limit counts every byte", func(*testing.T) string { return stringBody("\x1b]52;c;", 'A', stringBodyLimit, "\x07") }, expectManual},
+	{"a DCS body over the limit counts every byte", func(*testing.T) string { return stringBody("\x1bP", 'x', stringBodyLimit+1, "\x1b\\") }, expectManual},
+	{"an APC body over the limit counts every byte", func(*testing.T) string { return stringBody("\x1b_", 'x', stringBodyLimit+1, "\x1b\\") }, expectManual},
+}
+
+func assertOneRead(t *testing.T, name, input string, expected expectedClassification) {
+	t.Helper()
+	manual, pointer := expected.manual, expected.pointer
+	switch expected.as {
+	case classifiedAsReply:
+		manual, pointer = 0, 0
+	case classifiedAsManual:
+		manual, pointer = len(input), 0
+	case classifiedAsPointer:
+		manual, pointer = 0, len(input)
+	case classifiedAsCounts:
+	default:
+		panic("invalid classifiedAs")
+	}
+	var classifier replyClassifier
+	assertClassified(t, classifier.feed([]byte(input), time.Now()), manual, pointer, fmt.Sprintf("%s: %q", name, input))
+	if classifier.pending() {
+		t.Fatalf("%s: %q leaves a prefix pending", name, input)
+	}
+}
+
+func TestRuntimeTransport_Classification_ReplyClassifierOneReadClassifiesEveryByteAndLeavesNothingPending(t *testing.T) {
+	t.Parallel()
+	for _, tc := range oneReads {
+		for _, input := range tc.inputs {
+			assertOneRead(t, tc.name, input, tc.classified)
+		}
+	}
+	for _, tc := range builtReads {
+		assertOneRead(t, tc.name, tc.input(t), tc.classified)
+	}
+}
+
+type classifierOp uint8
+
+const (
+	classifierFeed classifierOp = iota + 1
+	classifierExpire
+	classifierFinish
+)
+
+type classifierStep struct {
+	op      classifierOp
+	bytes   string
+	at      time.Duration
+	manual  int
+	pending bool
+}
+
+func feedStep(bytes string, at time.Duration, manual int, pending bool) classifierStep {
+	return classifierStep{op: classifierFeed, bytes: bytes, at: at, manual: manual, pending: pending}
+}
+
+func expireStep(at time.Duration, manual int, pending bool) classifierStep {
+	return classifierStep{op: classifierExpire, at: at, manual: manual, pending: pending}
+}
+
+func finishStep(manual int, pending bool) classifierStep {
+	return classifierStep{op: classifierFinish, manual: manual, pending: pending}
+}
+
+func TestRuntimeTransport_Classification_ReplyClassifierSequencesResolvePrefixesAtTheBoundOrAtFinish(t *testing.T) {
+	t.Parallel()
+	const (
+		bound      = replyPrefixBound
+		justBefore = bound - time.Millisecond
+		half       = bound / 2
+		twice      = 2 * bound
+		second     = 60 * time.Millisecond
+		third      = 120 * time.Millisecond
+	)
+	cases := []struct {
+		name  string
+		steps []classifierStep
+	}{
+		{"a reply split across reads at different instants counts zero", []classifierStep{feedStep("\x1b[24", 0, 0, true), expireStep(half, 0, true), feedStep(";80R", half, 0, false)}},
+		{"a lone escape resolves as manual at the bound", []classifierStep{feedStep("\x1b", 0, 0, true), expireStep(justBefore, 0, true), expireStep(bound, 1, false)}},
+		{"a CSI prefix resolves as manual at the bound", []classifierStep{feedStep("\x1b[12;", 0, 0, true), expireStep(justBefore, 0, true), expireStep(bound, 5, false)}},
+		{"the bound restarts at each new prefix byte", []classifierStep{feedStep("\x1b", 0, 0, true), feedStep("[", second, 0, true), expireStep(bound, 0, true), expireStep(second+bound, 2, false)}},
+		{"bytes after an expired prefix classify from ground", []classifierStep{feedStep("\x1b", 0, 0, true), expireStep(bound, 1, false), feedStep("[I", bound, 2, false), feedStep("\x1b[I", bound, 0, false)}},
+		{"expiry without a pending prefix counts zero", []classifierStep{expireStep(bound, 0, false), feedStep("\x1b[I", 0, 0, false), expireStep(twice, 0, false)}},
+		{"finish resolves a pending prefix as manual", []classifierStep{feedStep("\x1b[1;", 0, 0, true), finishStep(4, false)}},
+		{"finish resolves a pending string body as manual", []classifierStep{feedStep("\x1b]11;rgb:00", 0, 0, true), finishStep(11, false)}},
+		{"finish resolves a pending string escape as manual", []classifierStep{feedStep("\x1bP1$r0m\x1b", 0, 0, true), finishStep(8, false)}},
+		{"finish without a pending prefix counts zero", []classifierStep{finishStep(0, false), feedStep("ab", 0, 2, false), finishStep(0, false)}},
+		{"text before a pending prefix counts in the same read", []classifierStep{feedStep("ab\x1b[", 0, 2, true), feedStep("O", 0, 0, false)}},
+		{"a reply after a bracketed paste counts zero", []classifierStep{feedStep("\x1b[200~text\x1b[201~", 0, 16, false), feedStep("\x1b[I", 0, 0, false)}},
+		{"the X10 pending bound restarts at each payload byte", []classifierStep{
+			feedStep("\x1b[M", 0, 0, true), feedStep(" ", second, 0, true), expireStep(bound, 0, true),
+			feedStep("!", third, 0, true), expireStep(second+bound, 0, true), expireStep(third+bound, 5, false),
+		}},
+	}
+	for _, tc := range cases {
+		start := time.Now()
+		var classifier replyClassifier
+		for index, step := range tc.steps {
+			var result classified
+			switch step.op {
+			case classifierFeed:
+				result = classifier.feed([]byte(step.bytes), start.Add(step.at))
+			case classifierExpire:
+				result = classifier.expire(start.Add(step.at))
+			case classifierFinish:
+				result = classifier.finish()
+			default:
+				panic("invalid classifierOp")
+			}
+			context := fmt.Sprintf("%s: step %d", tc.name, index)
+			assertClassified(t, result, step.manual, 0, context)
+			if classifier.pending() != step.pending {
+				t.Fatalf("%s: pending %v", context, classifier.pending())
+			}
+		}
+	}
+}
+
+func TestRuntimeTransport_Classification_ReplyClassifierTheByteExceedingALimitResolvesTheWholePrefix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, prefix, overflow, terminator string
+	}{
+		{"an overlong CSI is manual at the parameter byte exceeding the limit", "\x1b[" + strings.Repeat("1", csiParameterLimit), "1", "R"},
+		{"an OSC body over the limit is manual at the body byte exceeding the limit", "\x1b]" + strings.Repeat("x", stringBodyLimit), "x", "\x07"},
+	}
+	for _, tc := range cases {
+		var classifier replyClassifier
+		now := time.Now()
+		if got := classifier.feed([]byte(tc.prefix), now).manual; got != 0 || !classifier.pending() {
+			t.Fatalf("%s: prefix manual %d", tc.name, got)
+		}
+		if got := classifier.feed([]byte(tc.overflow), now).manual; got != len(tc.prefix)+1 || classifier.pending() {
+			t.Fatalf("%s: overflow manual %d", tc.name, got)
+		}
+		if got := classifier.feed([]byte(tc.terminator), now).manual; got != 1 {
+			t.Fatalf("%s: terminator manual %d", tc.name, got)
+		}
+	}
+}
+
+func TestRuntimeTransport_Classification_ReplyClassifierReplySplitAtEveryBoundaryCountsZero(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	for _, reply := range []string{
+		"\x1b[I", "\x1b[24;80R", "\x1b[?62;22c", "\x1b]11;rgb:0000/0000/0000\x07", "\x1b]10;rgb:ffff/ffff/ffff\x1b\\", "\x1bP>|XTerm(380)\x1b\\", "\x1b_Gi=31;OK\x1b\\",
+	} {
+		for split := 1; split < len(reply); split++ {
+			context := fmt.Sprintf("%q split at %d", reply, split)
+			var classifier replyClassifier
+			if got := classifier.feed([]byte(reply[:split]), now).manual; got != 0 || !classifier.pending() {
+				t.Fatalf("%s: prefix manual %d", context, got)
+			}
+			if got := classifier.feed([]byte(reply[split:]), now).manual; got != 0 || classifier.pending() {
+				t.Fatalf("%s: suffix manual %d", context, got)
+			}
+		}
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportOneTickDrainsASplitOuterReplyAndWritesItInOneOffer(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	human, reply := reads(4096, 3600)
+	pty := newFakePty(nil, 1)
+	generation := tr.humanGeneration
+	progress := oneTick(t, tr, human, pty)
+	if unread(human) != 0 {
+		t.Fatal("the tick reads until the outer input would block")
+	}
+	assertBytes(t, pty.written, reply, "all 7696 bytes reach the child in order")
+	if !slices.Equal(offerLengths(pty.offers), []int{7696}) {
+		t.Fatalf("the whole queue is offered in one write: %v", offerLengths(pty.offers))
+	}
+	if tr.pendingInputBytes() != 0 || progress.humanBytes != 7696 || progress.forwardedBytes != 7696 || progress.outerEOF || tr.humanGeneration != generation+7696 {
+		t.Fatalf("progress %+v pending %d generation %d", progress, tr.pendingInputBytes(), tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportOuterReadsStopAtTheFullInputQueueAndResumeNextTick(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	human, payload := reads(16384, 16384, 16384, 16384, 16384)
+	pty := newFakePty(nil, 1)
+	first := oneTick(t, tr, human, pty)
+	if first.humanBytes != 65536 || tr.humanGeneration != 65536 || unread(human) != 16384 {
+		t.Fatalf("reads stop once the queue holds 65536 bytes: %+v unread %d", first, unread(human))
+	}
+	assertBytes(t, pty.written, payload[:65536], "first tick")
+	second := oneTick(t, tr, human, pty)
+	if second.humanBytes != 16384 || unread(human) != 0 || tr.humanGeneration != 81920 {
+		t.Fatalf("the remaining reply is read on the next tick: %+v", second)
+	}
+	assertBytes(t, pty.written, payload, "second tick")
+}
+
+func TestRuntimeTransport_RunnerTransportBlockedMasterKeepsTheFullQueueAndReadsNothingMore(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	human, payload := reads(16384, 16384, 16384, 16384, 16384)
+	pty := newFakePty(nil, 1)
+	pty.blocked = true
+	oneTick(t, tr, human, pty)
+	if tr.pendingInputBytes() != 65536 || unread(human) != 16384 {
+		t.Fatalf("pending %d unread %d", tr.pendingInputBytes(), unread(human))
+	}
+	held := oneTick(t, tr, human, pty)
+	if held.humanBytes != 0 || held.forwardedBytes != 0 || tr.pendingInputBytes() != 65536 || unread(human) != 16384 {
+		t.Fatalf("a full queue admits no further read and the blocked master accepted none: %+v", held)
+	}
+	pty.blocked = false
+	for range 3 {
+		oneTick(t, tr, human, pty)
+	}
+	assertBytes(t, pty.written, payload, "after unblocking")
+	if tr.humanGeneration != 81920 {
+		t.Fatalf("generation %d", tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportForwardsDataReadBeforeOuterEofAndReportsEof(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	human, reply := reads(4096, 12)
+	human.eof = true
+	pty := newFakePty(nil, 1)
+	progress := oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, reply, "written")
+	if !progress.outerEOF || progress.humanBytes != 4108 || tr.humanGeneration != 4108 {
+		t.Fatalf("progress %+v generation %d", progress, tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportPartialMasterWriteKeepsTheRemainderQueuedInOrder(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	human, reply := reads(4096, 3600)
+	pty := newFakePty(nil, 1)
+	pty.maxWrite = 5000
+	oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, reply[:5000], "first write")
+	if tr.pendingInputBytes() != 2696 {
+		t.Fatalf("pending %d", tr.pendingInputBytes())
+	}
+	later := patterned(10, 99)
+	human.push(later)
+	oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, append(slices.Clone(reply), later...), "queued bytes precede later reads")
+	if !slices.Equal(offerLengths(pty.offers), []int{7696, 2706}) || tr.pendingInputBytes() != 0 {
+		t.Fatalf("offers %v pending %d", offerLengths(pty.offers), tr.pendingInputBytes())
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportPassesEscapeSequencesUnframed(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	reply := []byte("\x1b]4;0;rgb:0000/0000/0000\x1b\\\x1b]11;rgb:afaf/d7d7/8787\x07\x1b[")
+	human := &fakeInput{}
+	human.push(reply)
+	pty := newFakePty(nil, 1)
+	oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, reply, "an unterminated sequence is forwarded, not held")
+	if tr.pendingInputBytes() != 0 || tr.humanGeneration != 0 {
+		t.Fatalf("complete OSC replies and a pending prefix are not yet manual: generation %d", tr.humanGeneration)
+	}
+	tr.backdateReplyPrefix(replyPrefixBound)
+	progress := oneTick(t, tr, human, pty)
+	if progress.humanBytes != 0 {
+		t.Fatalf("progress %+v", progress)
+	}
+	assertBytes(t, pty.written, reply, "classification never synthesizes bytes")
+	if tr.humanGeneration != 2 {
+		t.Fatalf("the trailing ESC [ counts as manual once its bound passes: %d", tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportPreservesFragmentedChildAndHumanBytesThroughPartialWrites(t *testing.T) {
+	t.Parallel()
+	child := []byte("\x1b[2J許可 ✓\r\n\x1b]0;title\x07")
+	humanBytes := []byte("\x1b[200~literal 世界\x1b[201~\r\x03")
+	tr := newTestTransport(t)
+	pty := newFakePty(child, 1)
+	pty.maxWrite = 1
+	human := newFakeInput(humanBytes, 2)
+	out := &fakeDisplay{maxWrite: some(1)}
+	observer := &transportTestObserver{}
+	for range 1024 {
+		tickWith(t, tr, human, pty, out, observer)
+	}
+	assertBytes(t, pty.written, humanBytes, "human bytes")
+	assertBytes(t, out.bytes, child, "child bytes")
+	if tr.pendingInputBytes() != 0 || tr.pendingDisplayBytes() != 0 {
+		t.Fatalf("pending %d/%d", tr.pendingInputBytes(), tr.pendingDisplayBytes())
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportObservesReconstructedOutputBeforeDisplayingIt(t *testing.T) {
+	t.Parallel()
+	var ordering []string
+	tr := newTestTransport(t)
+	pty := newFakePty([]byte("request"), 7)
+	human := newFakeInput(nil, 1)
+	out := &fakeDisplay{ordering: &ordering}
+	observer := &transportTestObserver{ordering: &ordering}
+	for range 10 {
+		tickWith(t, tr, human, pty, out, observer)
+	}
+	observe := slices.Index(ordering, "observe")
+	displayed := slices.Index(ordering, "display")
+	if observe < 0 || displayed < 0 || observe >= displayed {
+		t.Fatalf("ordering = %q", ordering)
+	}
+	if !slices.ContainsFunc(observer.screens, func(screen observedScreen) bool { return strings.Contains(screen.contents, "request") }) {
+		t.Fatal("the observer saw the request")
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportFullDisplayQueueBoundsMemoryWhileHumanInputContinues(t *testing.T) {
+	t.Parallel()
+	payload := bytes.Repeat([]byte("x"), 4096)
+	tr := newTestTransport(t)
+	pty := newFakePty(payload, 16)
+	human := newFakeInput([]byte("human native answer\r"), 1)
+	out := &fakeDisplay{blocked: true}
+	observer := &transportTestObserver{}
+	for range 128 {
+		tickWith(t, tr, human, pty, out, observer)
+		if tr.pendingDisplayBytes() > 64 || tr.pendingInputBytes() > 32 {
+			t.Fatalf("pending %d/%d", tr.pendingInputBytes(), tr.pendingDisplayBytes())
+		}
+	}
+	assertBytes(t, pty.written, []byte("human native answer\r"), "human input continues")
+	if len(pty.output.chunks) == 0 {
+		t.Fatal("child output stays unread while the display is full")
+	}
+	out.blocked = false
+	for range 1024 {
+		tickWith(t, tr, human, pty, out, observer)
+	}
+	assertBytes(t, out.bytes, payload, "displayed")
+}
+
+func TestRuntimeTransport_RunnerTransportBoundedInputBackpressurePreservesAllPendingHumanBytes(t *testing.T) {
+	t.Parallel()
+	payload := bytes.Repeat([]byte("a"), 512)
+	tr := newTestTransport(t)
+	pty := newFakePty(nil, 1)
+	pty.blocked = true
+	human := newFakeInput(payload, 16)
+	out := &fakeDisplay{}
+	observer := &transportTestObserver{}
+	for range 64 {
+		tickWith(t, tr, human, pty, out, observer)
+		if tr.pendingInputBytes() > 32 {
+			t.Fatalf("pending %d", tr.pendingInputBytes())
+		}
+	}
+	if len(human.chunks) == 0 {
+		t.Fatal("human input stays unread under backpressure")
+	}
+	pty.blocked = false
+	pty.maxWrite = 1
+	for range 2048 {
+		tickWith(t, tr, human, pty, out, observer)
+	}
+	assertBytes(t, pty.written, payload, "written")
+}
+
+func TestRuntimeTransport_RunnerTransportForwardsOneOuterTerminalQueryAnswerWithoutParserDuplicates(t *testing.T) {
+	t.Parallel()
+	tr := newTestTransport(t)
+	pty := newFakePty([]byte("\x1b[6n"), 1)
+	human := newFakeInput([]byte("\x1b[1;1R"), 1)
+	out := &fakeDisplay{}
+	observer := &transportTestObserver{}
+	for range 64 {
+		tickWith(t, tr, human, pty, out, observer)
+	}
+	assertBytes(t, pty.written, []byte("\x1b[1;1R"), "written")
+	assertBytes(t, out.bytes, []byte("\x1b[6n"), "displayed")
+	if tr.humanGeneration != 0 {
+		t.Fatalf("a cursor-position report is not manual input: %d", tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportForwardsATerminalReplyBurstUnchangedWithoutManualGeneration(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	burst := []byte("\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b[O")
+	human := newFakeInput(burst, 5)
+	pty := newFakePty(nil, 1)
+	progress := oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, burst, "replies are forwarded byte-for-byte in order")
+	if progress.humanBytes != len(burst) || tr.pendingInputBytes() != 0 || tr.humanGeneration != 0 {
+		t.Fatalf("pacing counts bytes read: %+v generation %d", progress, tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportReplySplitAcrossTicksStaysOutOfManualGeneration(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	human := newFakeInput([]byte("\x1b[24"), 16)
+	pty := newFakePty(nil, 1)
+	oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, []byte("\x1b[24"), "the prefix is forwarded, not held")
+	if tr.humanGeneration != 0 {
+		t.Fatalf("generation %d", tr.humanGeneration)
+	}
+	human.push([]byte(";80R"))
+	oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, []byte("\x1b[24;80R"), "the completed reply")
+	if tr.humanGeneration != 0 {
+		t.Fatalf("generation %d", tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportCountsOnlyManualBytesAroundAReply(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	input := []byte("ab\x1b[Icd")
+	pty := newFakePty(nil, 1)
+	progress := oneTick(t, tr, newFakeInput(input, 16), pty)
+	assertBytes(t, pty.written, input, "written")
+	if progress.humanBytes != len(input) || tr.humanGeneration != 4 {
+		t.Fatalf("progress %+v generation %d", progress, tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportOuterEofCountsAPendingReplyPrefixAsManual(t *testing.T) {
+	t.Parallel()
+	tr := newServiceTransport(t)
+	human := newFakeInput([]byte("ab\x1b["), 16)
+	human.eof = true
+	pty := newFakePty(nil, 1)
+	progress := oneTick(t, tr, human, pty)
+	assertBytes(t, pty.written, []byte("ab\x1b["), "written")
+	if !progress.outerEOF || tr.humanGeneration != 4 {
+		t.Fatalf("outer EOF resolves the pending prefix as manual before EOF is reported: %+v %d", progress, tr.humanGeneration)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportResizeReachesThePtyAndScreenTogether(t *testing.T) {
+	t.Parallel()
+	tr := newTestTransport(t)
+	pty := newFakePty(nil, 1)
+	size := terminalSize{rows: 40, cols: 100}
+	if err := tr.resize(pty, size); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(pty.sizes, []terminalSize{size}) {
+		t.Fatalf("sizes = %+v", pty.sizes)
+	}
+	if snapshot := tr.snapshot(); snapshot.rows != 40 || snapshot.cols != 100 {
+		t.Fatalf("screen %dx%d", snapshot.rows, snapshot.cols)
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportReportsOuterAndChildEofAsDistinctObservations(t *testing.T) {
+	t.Parallel()
+	for _, outer := range []bool{false, true} {
+		tr := newTestTransport(t)
+		pty := newFakePty(nil, 1)
+		pty.output.eof = !outer
+		human := newFakeInput(nil, 1)
+		human.eof = outer
+		progress, err := tr.tick(human, pty, &fakeDisplay{}, &transportTestObserver{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if progress.outerEOF != outer || progress.childEOF != !outer {
+			t.Fatalf("outer=%v: progress %+v", outer, progress)
+		}
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportBrokenDisplayFailsAndTailDiscardCountsOnlyPendingBytes(t *testing.T) {
+	t.Parallel()
+	tr := newTestTransport(t)
+	pty := newFakePty([]byte("undelivered tail"), 16)
+	human := newFakeInput(nil, 1)
+	out := &fakeDisplay{blocked: true}
+	observer := &transportTestObserver{}
+	for range 4 {
+		tickWith(t, tr, human, pty, out, observer)
+	}
+	pending := tr.pendingDisplayBytes()
+	if pending == 0 || tr.discardDisplayTail() != pending || tr.discardDisplayTail() != 0 {
+		t.Fatalf("pending %d", pending)
+	}
+	pty.output = newFakeInput([]byte("broken"), 6)
+	out.blocked = false
+	out.broken = true
+	if _, err := tr.tick(human, pty, out, observer); err == nil {
+		t.Fatal("a broken display fails the tick")
+	}
+}
+
+func TestRuntimeTransport_RunnerTransportRequiresPositiveFiniteLimits(t *testing.T) {
+	t.Parallel()
+	for _, field := range []string{"input", "display", "tick"} {
+		limits := transportLimits{inputBytes: 32, displayBytes: 64, bytesPerTick: 16}
+		switch field {
+		case "input":
+			limits.inputBytes = 0
+		case "display":
+			limits.displayBytes = 0
+		case "tick":
+			limits.bytesPerTick = 0
+		}
+		if _, err := newTransport(terminalSize{rows: 24, cols: 80}, limits, testClockStartingAt(time.Now())); err == nil {
+			t.Fatalf("%s: a zero limit is refused", field)
+		}
+	}
+}
+
+type drainSite uint8
+
+const (
+	siteHuman drainSite = iota + 1
+	siteManualWrite
+	siteChild
+	siteDisplayWrite
+	siteFlush
+	siteObserve
+	siteHealth
+)
+
+// drainRecorder is the harness's endpoint call trace and the virtual clock every fake endpoint
+// reads.
+type drainRecorder struct {
+	sites []drainSite
+	clock *testClock
+}
+
+func (r *drainRecorder) push(site drainSite) {
+	r.sites = append(r.sites, site)
+}
+
+// blockPast advances the virtual clock just past deadline, as a call blocking that long would.
+func (r *drainRecorder) blockPast(deadline time.Time) {
+	r.clock.advance(max(deadline.Sub(r.clock.now()), 0) + time.Millisecond)
+}
+
+//sumtype:decl
+type drainRead interface{ isDrainRead() }
+
+type readData struct{ bytes []byte }
+
+type readInterrupted struct{}
+
+type readEOF struct{}
+
+type readError struct{ kind syscall.Errno }
+
+func (readData) isDrainRead()        {}
+func (readInterrupted) isDrainRead() {}
+func (readEOF) isDrainRead()         {}
+func (readError) isDrainRead()       {}
+
+type readRecord struct {
+	capacity          int
+	count             opt[int]
+	entered, returned time.Time
+}
+
+type drainReader struct {
+	steps      []drainRead
+	fill       opt[byte]
+	width      int
+	delayUntil opt[time.Time]
+	calls      []readRecord
+	bytes      []byte
+	trace      *drainRecorder
+	site       drainSite
+}
+
+func newDrainReader(site drainSite, trace *drainRecorder, steps ...drainRead) *drainReader {
+	return &drainReader{steps: steps, width: math.MaxInt, trace: trace, site: site}
+}
+
+func drainReaderData(site drainSite, trace *drainRecorder, data []byte, width int) *drainReader {
+	reader := newDrainReader(site, trace)
+	for _, part := range chunks(data, width) {
+		reader.steps = append(reader.steps, readData{bytes: slices.Clone(part)})
+	}
+	return reader
+}
+
+func (r *drainReader) tryRead(target []byte) (int, error) {
+	if len(target) == 0 {
+		panic("an actual read has positive capacity")
+	}
+	entered := r.trace.clock.now()
+	r.trace.push(r.site)
+	if until, set := r.delayUntil.get(); set {
+		r.delayUntil = none[time.Time]()
+		r.trace.blockPast(until)
+	}
+	count, err := r.next(target)
+	if err == nil {
+		r.bytes = append(r.bytes, target[:count]...)
+	}
+	record := readRecord{capacity: len(target), entered: entered, returned: r.trace.clock.now()}
+	if err == nil {
+		record.count = some(count)
+	}
+	r.calls = append(r.calls, record)
+	return count, err
+}
+
+func (r *drainReader) next(target []byte) (int, error) {
+	if len(r.steps) == 0 {
+		value, set := r.fill.get()
+		if !set {
+			return 0, syscall.EAGAIN
+		}
+		count := min(len(target), r.width)
+		for index := range count {
+			target[index] = value
+		}
+		return count, nil
+	}
+	step := r.steps[0]
+	r.steps = r.steps[1:]
+	switch step := step.(type) {
+	case readData:
+		count := min(len(target), len(step.bytes), r.width)
+		copy(target, step.bytes[:count])
+		if count < len(step.bytes) {
+			r.steps = append([]drainRead{readData{bytes: step.bytes[count:]}}, r.steps...)
+		}
+		return count, nil
+	case readInterrupted:
+		return 0, syscall.EINTR
+	case readEOF:
+		return 0, nil
+	case readError:
+		return 0, fixtureIOError{kind: step.kind, message: "fixture read failure"}
+	default:
+		panic("invalid drainRead")
+	}
+}
+
+type drainPty struct {
+	reader      *drainReader
+	offered     [][]byte
+	bytes       []byte
+	maxWrite    int
+	writeError  opt[syscall.Errno]
+	resizeError bool
+}
+
+func newDrainPty(trace *drainRecorder) *drainPty {
+	return &drainPty{reader: newDrainReader(siteChild, trace), maxWrite: math.MaxInt}
+}
+
+func (p *drainPty) tryRead(target []byte) (int, error) {
+	return p.reader.tryRead(target)
+}
+
+func (p *drainPty) tryWrite(data []byte) (int, error) {
+	if len(data) == 0 {
+		panic("a PTY write offers bytes")
+	}
+	p.reader.trace.push(siteManualWrite)
+	p.offered = append(p.offered, slices.Clone(data))
+	if kind, set := p.writeError.get(); set {
+		return 0, fixtureIOError{kind: kind, message: "fixture PTY write failure"}
+	}
+	count := min(len(data), p.maxWrite)
+	p.bytes = append(p.bytes, data[:count]...)
+	return count, nil
+}
+
+func (p *drainPty) resize(terminalSize) error {
+	if p.resizeError {
+		return runtimeError("fixture resize failure")
+	}
+	return nil
+}
+
+func (p *drainPty) close() error {
+	return nil
+}
+
+type drainOutput struct {
+	trace      *drainRecorder
+	offered    [][]byte
+	bytes      []byte
+	maxWrite   int
+	writeError opt[syscall.Errno]
+	flushError opt[syscall.Errno]
+	flushes    int
+}
+
+func newDrainOutput(trace *drainRecorder) *drainOutput {
+	return &drainOutput{trace: trace, maxWrite: math.MaxInt}
+}
+
+func (o *drainOutput) tryWrite(data []byte) (int, error) {
+	if len(data) == 0 {
+		panic("a display write offers bytes")
+	}
+	o.trace.push(siteDisplayWrite)
+	o.offered = append(o.offered, slices.Clone(data))
+	if kind, set := o.writeError.get(); set {
+		return 0, fixtureIOError{kind: kind, message: "fixture display write failure"}
+	}
+	count := min(len(data), o.maxWrite)
+	o.bytes = append(o.bytes, data[:count]...)
+	return count, nil
+}
+
+func (o *drainOutput) tryFlush() error {
+	o.trace.push(siteFlush)
+	o.flushes++
+	if kind, set := o.flushError.get(); set {
+		return fixtureIOError{kind: kind, message: "fixture flush failure"}
+	}
+	return nil
+}
+
+type drainObservations struct {
+	screens     []uint64
+	healthReads int
+	lastHealth  opt[observationHealth]
+}
+
+// measuredObserver records each observation and health read of inner on the trace.
+type measuredObserver struct {
+	inner screenObserver
+	trace *drainRecorder
+	facts *drainObservations
+}
+
+func (m *measuredObserver) observe(screen *screenSnapshot) error {
+	m.trace.push(siteObserve)
+	m.facts.screens = append(m.facts.screens, screen.screenSeq)
+	return m.inner.observe(screen)
+}
+
+func (m *measuredObserver) parserFailure() error {
+	return m.inner.parserFailure()
+}
+
+func (m *measuredObserver) inputHealth() observationHealth {
+	m.trace.push(siteHealth)
+	m.facts.healthReads++
+	health := m.inner.inputHealth()
+	m.facts.lastHealth = some(health)
+	return health
+}
+
+type drainEndpoints struct {
+	human  *drainReader
+	pty    *drainPty
+	output *drainOutput
+}
+
+func newDrainEndpoints(trace *drainRecorder, human *drainReader) *drainEndpoints {
+	return &drainEndpoints{human: human, pty: newDrainPty(trace), output: newDrainOutput(trace)}
+}
+
+type drainHarness struct {
+	t            *testing.T
+	fixture      *writerFixture
+	writer       *eventWriter
+	controller   *observationController
+	clock        *testClock
+	hooks        *writerTestHooks
+	until        time.Time
+	trace        *drainRecorder
+	observations *drainObservations
+}
+
+// withHarness runs body against a fresh harness and then confirms the writer joined clean.
+func withHarness(t *testing.T, body func(h *drainHarness)) {
+	t.Helper()
+	virtual := testClockStartingAt(time.Now())
+	fixture := newWriterFixture(t)
+	controller, err := newObservationController(fixture.run, profileCatalogBundled())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks := &writerTestHooks{}
+	h := &drainHarness{
+		t:            t,
+		fixture:      fixture,
+		writer:       startReal(t, fixture, hooks),
+		controller:   controller,
+		clock:        observationFixtureClock(t),
+		hooks:        hooks,
+		until:        virtual.now().Add(4 * time.Second),
+		trace:        &drainRecorder{clock: virtual},
+		observations: &drainObservations{},
+	}
+	h.writer.setDeadline(h.until)
+	defer h.finish()
+	body(h)
+}
+
+func (h *drainHarness) time() *testClock {
+	return h.trace.clock
+}
+
+// transport is a transport with these limits on the harness's virtual clock.
+func (h *drainHarness) transport(perTick, input, display int) *transport {
+	h.t.Helper()
+	created, err := newTransport(terminalSize{rows: 24, cols: 80}, transportLimits{inputBytes: input, displayBytes: display, bytesPerTick: perTick}, h.time())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return created
+}
+
+func (h *drainHarness) drain(tr *transport, human *drainReader, pty *drainPty, output *drainOutput, until time.Time) (inputDrain, error) {
+	return tr.quiesceForInput(human, pty, output, &measuredObserver{inner: h.controller.observer(h.writer, h.clock), trace: h.trace, facts: h.observations}, until)
+}
+
+func (h *drainHarness) drainWith(tr *transport, io *drainEndpoints) (inputDrain, error) {
+	return h.drain(tr, io.human, io.pty, io.output, h.until)
+}
+
+func (h *drainHarness) tickWith(tr *transport, io *drainEndpoints) (transportProgress, error) {
+	return tr.tick(io.human, io.pty, io.output, h.controller.observer(h.writer, h.clock))
+}
+
+func (h *drainHarness) seal(tr *transport) {
+	h.t.Helper()
+	human := newDrainReader(siteHuman, h.trace)
+	pty := newDrainPty(h.trace)
+	output := newDrainOutput(h.trace)
+	result, err := h.drain(tr, human, pty, output, h.until)
+	if err != nil || result != inputDrainQuiescent {
+		h.t.Fatalf("seal: %v %v", result, err)
+	}
+	if got, want := drainedOf(tr), some([2]uint64{tr.humanGeneration, tr.snapshot().screenSeq}); got != want {
+		h.t.Fatalf("drained = %v, want %v", got, want)
+	}
+	if len(human.calls) != 1 || len(pty.reader.calls) != 1 {
+		h.t.Fatalf("seal reads human %d child %d times", len(human.calls), len(pty.reader.calls))
+	}
+}
+
+func (h *drainHarness) control() {
+	h.t.Helper()
+	tr := h.transport(64, 64, 64)
+	h.seal(tr)
+	if tr.takeInputDrain() == nil || tr.takeInputDrain() != nil {
+		h.t.Fatal("a seal yields exactly one proof")
+	}
+	h.resetObservations()
+}
+
+func (h *drainHarness) resetObservations() {
+	h.trace.sites = nil
+	h.observations = &drainObservations{}
+}
+
+func (h *drainHarness) release() {
+	h.hooks.releaseForCleanup()
+}
+
+func (h *drainHarness) finish() {
+	h.release()
+	pending, unsaved := h.writer.finish(h.until)
+	if !h.writer.joined || pending != 0 || unsaved != 0 {
+		h.t.Errorf("writer cleanup: joined %v (%d, %d)", h.writer.joined, pending, unsaved)
+	}
+}
+
+// drainedOf is Rust's test-only Transport::drained: the retained proof's human generation and
+// output sequence.
+func drainedOf(tr *transport) opt[[2]uint64] {
+	if tr.inputDrain == nil {
+		return none[[2]uint64]()
+	}
+	return some([2]uint64{tr.inputDrain.humanGeneration, tr.inputDrain.outputSeq})
+}
+
+// prefetchChildBytes is Rust's test-only Transport::prefetch_child_bytes.
+func (t *transport) prefetchChildBytes(pty ptyIo) (int, error) {
+	t.invalidateInputDrain()
+	if t.deferredChildBytes != nil {
+		return 0, nil
+	}
+	data, read, err := t.readChild(pty)
+	if err != nil || !read {
+		return 0, err
+	}
+	if len(data) == 0 {
+		t.childEOF = true
+		return 0, nil
+	}
+	t.deferredChildBytes = data
+	return len(data), nil
+}
+
+func assertPending(t *testing.T, result inputDrain, err error, tr *transport) {
+	t.Helper()
+	if err != nil || result != inputDrainPending || tr.takeInputDrain() != nil {
+		t.Fatalf("pending: %v %v", result, err)
+	}
+}
+
+func assertDeadline(t *testing.T, err error, tr *transport) {
+	t.Helper()
+	if cafleetErrorOf(err).kind != errorDeadlineExceeded || tr.takeInputDrain() != nil {
+		t.Fatalf("deadline: %v", err)
+	}
+}
+
+func assertQuiescent(t *testing.T, result inputDrain, err error) {
+	t.Helper()
+	if err != nil || result != inputDrainQuiescent {
+		t.Fatalf("quiescent: %v %v", result, err)
+	}
+}
+
+func assertBounds(t *testing.T, human *drainReader, pty *drainPty, output *drainOutput, limit int) {
+	t.Helper()
+	for _, count := range []int{len(human.calls), len(pty.reader.calls), len(pty.offered), len(output.offered), output.flushes} {
+		if count > 8 {
+			t.Fatalf("a drain makes at most 8 calls per endpoint: %d", count)
+		}
+	}
+	for _, count := range []int{len(human.bytes), len(pty.reader.bytes), len(pty.bytes), len(output.bytes)} {
+		if count > limit {
+			t.Fatalf("a drain moves at most %d bytes per endpoint: %d", limit, count)
+		}
+	}
+	for _, record := range append(slices.Clone(human.calls), pty.reader.calls...) {
+		if record.capacity > min(limit, 16384) {
+			t.Fatalf("read capacity %d", record.capacity)
+		}
+	}
+}
+
+func TestRuntimeTransport_DrainActualQuietRoundSealsHealthWithoutGrantingComposerEligibility(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(32, 32, 32)
+		if tr.humanGeneration != 0 || tr.takeInputDrain() != nil {
+			t.Fatal("a fresh transport has no proof")
+		}
+		h.seal(tr)
+		if h.observations.healthReads != 1 || !slices.Equal(h.trace.sites, []drainSite{siteHuman, siteChild, siteFlush, siteHealth}) {
+			t.Fatalf("reads %d, trace %v", h.observations.healthReads, h.trace.sites)
+		}
+		health, ok := h.observations.lastHealth.get()
+		if !ok || health.Degraded || health.PendingCount != 0 || health.Eligibility != (inputEligibilityHold{reason: gateReasonUnknown}) {
+			t.Fatalf("health = %+v", health)
+		}
+		assertJSONEqual(t, mustJSON(t, health), mustJSON(t, h.controller.health(h.writer)), "the adapter supplies the controller's health")
+		if tr.takeInputDrain() == nil || tr.takeInputDrain() != nil {
+			t.Fatal("a seal yields exactly one proof")
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainFragmentedReadsAndPartialWritesPreserveRealBytesAndSequence(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		humanBytes := []byte("literal 世界\r")
+		childBytes := []byte("child\r\n")
+		tr := h.transport(64, 64, 64)
+		human := drainReaderData(siteHuman, h.trace, humanBytes, 4)
+		pty := newDrainPty(h.trace)
+		pty.reader = drainReaderData(siteChild, h.trace, childBytes, 2)
+		pty.maxWrite = 3
+		output := newDrainOutput(h.trace)
+		output.maxWrite = 3
+		result, err := h.drain(tr, human, pty, output, h.until)
+		assertQuiescent(t, result, err)
+		if got := drainedOf(tr); got != some([2]uint64{uint64(len(humanBytes)), uint64(len(childBytes))}) {
+			t.Fatalf("drained = %v", got)
+		}
+		assertBytes(t, pty.bytes, humanBytes, "human bytes")
+		assertBytes(t, output.bytes, childBytes, "child bytes")
+		snapshot := tr.snapshot()
+		if snapshot.screenSeq != uint64(len(childBytes)) || !strings.Contains(snapshot.screen.Contents(), "child") {
+			t.Fatalf("snapshot seq %d", snapshot.screenSeq)
+		}
+		if tr.pendingInputBytes() != 0 || tr.pendingDisplayBytes() != 0 || h.observations.healthReads != 1 {
+			t.Fatalf("pending %d/%d, health reads %d", tr.pendingInputBytes(), tr.pendingDisplayBytes(), h.observations.healthReads)
+		}
+		if !slices.IsSorted(h.observations.screens) {
+			t.Fatalf("screens %v", h.observations.screens)
+		}
+		assertBounds(t, human, pty, output, 64)
+		if tr.takeInputDrain() == nil {
+			t.Fatal("the drain seals a proof")
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainInterruptedReadsRequireALaterActualSameRoundWouldblockPair(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		step    drainRead
+		onHuman bool
+	}{{readInterrupted{}, true}, {readInterrupted{}, false}, {readEOF{}, true}, {readEOF{}, false}} {
+		withHarness(t, func(h *drainHarness) {
+			tr := h.transport(32, 32, 32)
+			io := newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace))
+			if tc.onHuman {
+				io.human.steps = append(io.human.steps, tc.step)
+			} else {
+				io.pty.reader.steps = append(io.pty.reader.steps, tc.step)
+			}
+			result, err := h.drainWith(tr, io)
+			assertPending(t, result, err, tr)
+			if tr.humanGeneration != 0 || h.observations.healthReads != 0 || len(io.human.calls) > 1 || len(io.pty.reader.calls) > 1 {
+				t.Fatalf("%+v: generation %d, health reads %d", tc, tr.humanGeneration, h.observations.healthReads)
+			}
+			assertBounds(t, io.human, io.pty, io.output, 32)
+			if _, interrupted := tc.step.(readInterrupted); interrupted {
+				h.seal(tr)
+				if tr.takeInputDrain() == nil {
+					t.Fatal("a later quiet round seals")
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeTransport_DrainRoundAndSeparateByteQuotasBoundContinuouslyReadableSources(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ perTick, width, reads, bytes int }{{64, 1, 8, 8}, {4, math.MaxInt, 1, 4}} {
+		withHarness(t, func(h *drainHarness) {
+			h.control()
+			tr := h.transport(tc.perTick, 128, 128)
+			human := newDrainReader(siteHuman, h.trace)
+			human.fill = some(byte('h'))
+			human.width = tc.width
+			pty := newDrainPty(h.trace)
+			pty.reader.fill = some(byte('c'))
+			pty.reader.width = tc.width
+			output := newDrainOutput(h.trace)
+			result, err := h.drain(tr, human, pty, output, h.until)
+			assertPending(t, result, err, tr)
+			if len(human.calls) != tc.reads || len(pty.reader.calls) != tc.reads {
+				t.Fatalf("%+v: reads %d/%d", tc, len(human.calls), len(pty.reader.calls))
+			}
+			for _, count := range []int{len(human.bytes), len(pty.reader.bytes), len(pty.bytes), len(output.bytes)} {
+				if count != tc.bytes {
+					t.Fatalf("%+v: moved %d bytes", tc, count)
+				}
+			}
+			if h.observations.healthReads != 0 {
+				t.Fatalf("health reads %d", h.observations.healthReads)
+			}
+			assertBounds(t, human, pty, output, tc.perTick)
+			human.fill = none[byte]()
+			pty.reader.fill = none[byte]()
+			result, err = h.drain(tr, human, pty, output, h.until)
+			assertQuiescent(t, result, err)
+		})
+	}
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(64, 64, 64)
+		human := drainReaderData(siteHuman, h.trace, []byte("1234567"), 1)
+		result, err := h.drain(tr, human, newDrainPty(h.trace), newDrainOutput(h.trace), h.until)
+		assertQuiescent(t, result, err)
+		if drained, _ := drainedOf(tr).get(); drained[0] != 7 || len(human.calls) != 8 || h.observations.healthReads != 1 {
+			t.Fatalf("drained %v, calls %d, health reads %d", drained, len(human.calls), h.observations.healthReads)
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainFullManualQueueSuppliesNoReadProofAndPreservesOrderOnRelease(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(16, 4, 32)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("abcdefgh"), 8))
+		io.pty.writeError = some(syscall.EAGAIN)
+		result, err := h.drainWith(tr, io)
+		assertPending(t, result, err, tr)
+		if len(io.human.calls) != 1 || io.human.calls[0].capacity != 4 || tr.pendingInputBytes() != 4 || tr.humanGeneration != 4 || len(io.pty.bytes) != 0 || len(io.pty.offered) > 8 {
+			t.Fatalf("calls %+v pending %d generation %d", io.human.calls, tr.pendingInputBytes(), tr.humanGeneration)
+		}
+		io.pty.writeError = none[syscall.Errno]()
+		result, err = h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if drained, _ := drainedOf(tr).get(); drained[0] != 8 || tr.pendingInputBytes() != 0 {
+			t.Fatalf("drained %v pending %d", drained, tr.pendingInputBytes())
+		}
+		assertBytes(t, io.pty.bytes, []byte("abcdefgh"), "released in order")
+	})
+}
+
+func TestRuntimeTransport_DrainDisplayAndPrefetchedChildPressureRequireRealLaterDrain(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(16, 32, 4)
+		human := drainReaderData(siteHuman, h.trace, []byte("manual"), 6)
+		pty := newDrainPty(h.trace)
+		pty.reader = drainReaderData(siteChild, h.trace, []byte("abcdefgh"), 8)
+		output := newDrainOutput(h.trace)
+		output.writeError = some(syscall.EAGAIN)
+		result, err := h.drain(tr, human, pty, output, h.until)
+		assertPending(t, result, err, tr)
+		if len(pty.reader.calls) != 1 || tr.pendingDisplayBytes() != 4 {
+			t.Fatalf("child reads %d, pending display %d", len(pty.reader.calls), tr.pendingDisplayBytes())
+		}
+		assertBytes(t, pty.bytes, []byte("manual"), "manual bytes")
+		output.writeError = none[syscall.Errno]()
+		result, err = h.drain(tr, human, pty, output, h.until)
+		assertQuiescent(t, result, err)
+		assertBytes(t, output.bytes, []byte("abcdefgh"), "displayed")
+	})
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(16, 32, 32)
+		human := newDrainReader(siteHuman, h.trace)
+		pty := newDrainPty(h.trace)
+		pty.reader.steps = []drainRead{readData{bytes: []byte("first")}, readInterrupted{}, readData{bytes: []byte("rest")}}
+		output := newDrainOutput(h.trace)
+		if count, err := tr.prefetchChildBytes(pty); err != nil || count != 5 {
+			t.Fatalf("prefetch = %d %v", count, err)
+		}
+		result, err := h.drain(tr, human, pty, output, h.until)
+		assertPending(t, result, err, tr)
+		if tr.snapshot().screenSeq != 5 {
+			t.Fatalf("seq %d", tr.snapshot().screenSeq)
+		}
+		assertBytes(t, output.bytes, []byte("first"), "prefetched bytes")
+		observed := slices.Index(h.trace.sites, siteObserve)
+		childReads := 0
+		secondRead := -1
+		for index, site := range h.trace.sites {
+			if site == siteChild {
+				childReads++
+				if childReads == 2 {
+					secondRead = index
+					break
+				}
+			}
+		}
+		if observed < 0 || secondRead < 0 || observed >= secondRead {
+			t.Fatalf("the prefetched bytes are observed before the second child read: %v", h.trace.sites)
+		}
+		result, err = h.drain(tr, human, pty, output, h.until)
+		assertQuiescent(t, result, err)
+		assertBytes(t, output.bytes, []byte("firstrest"), "all child bytes")
+		if tr.snapshot().screenSeq != 9 {
+			t.Fatalf("seq %d", tr.snapshot().screenSeq)
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainActualControllerGapHealthPreventsQuietProof(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		if err := h.controller.observerFailed(observationFailureParser, h.clock); err != nil {
+			t.Fatal(err)
+		}
+		expected := h.controller.health(h.writer)
+		if !expected.Degraded || expected.GapCount == 0 {
+			t.Fatalf("health = %+v", expected)
+		}
+		tr := h.transport(32, 32, 32)
+		result, err := h.drainWith(tr, newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace)))
+		assertPending(t, result, err, tr)
+		last, ok := h.observations.lastHealth.get()
+		if h.observations.healthReads != 1 || !ok {
+			t.Fatalf("health reads %d", h.observations.healthReads)
+		}
+		assertJSONEqual(t, mustJSON(t, last), mustJSON(t, expected), "the gap health")
+	})
+}
+
+func TestRuntimeTransport_DrainRealPendingWriterCommitBlocksHealthUntilReleaseAndPersistence(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		h.hooks.pause(writerBoundaryPersist)
+		mustAccept(t, h.writer, writerTransition(t, h.fixture, 1))
+		h.hooks.wait(t, writerBoundaryPersist, 1)
+		if pending := h.writer.status().pendingCount; pending != 1 {
+			t.Fatalf("pending %d", pending)
+		}
+		tr := h.transport(32, 32, 32)
+		result, err := h.drainWith(tr, newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace)))
+		assertPending(t, result, err, tr)
+		if last, ok := h.observations.lastHealth.get(); !ok || last.PendingCount != 1 {
+			t.Fatalf("last health %+v", last)
+		}
+		h.release()
+		yieldUntil(t, func() bool { return h.writer.status().pendingCount == 0 })
+		if got := committed(t, h.fixture); got != 1 {
+			t.Fatalf("committed %d", got)
+		}
+		h.seal(tr)
+		if tr.takeInputDrain() == nil {
+			t.Fatal("the drain seals once the commit persists")
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainTickAndDrainKeepActualHumanCountsBeforeLaterErrors(t *testing.T) {
+	t.Parallel()
+	for _, quiesce := range []bool{false, true} {
+		for _, failure := range []string{"pty", "child", "display", "flush", "observer", "zero"} {
+			withHarness(t, func(h *drainHarness) {
+				tr := h.transport(32, 32, 32)
+				h.seal(tr)
+				io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("世x"), 4))
+				io.pty.reader = drainReaderData(siteChild, h.trace, []byte("output"), 6)
+				var expected string
+				switch failure {
+				case "pty":
+					io.pty.writeError = some(syscall.EPIPE)
+					expected = "fixture PTY write failure"
+				case "child":
+					io.pty.reader.steps = []drainRead{readError{kind: syscall.EPIPE}}
+					expected = "fixture read failure"
+				case "display":
+					io.output.writeError = some(syscall.EPIPE)
+					expected = "fixture display write failure"
+				case "flush":
+					io.output.flushError = some(syscall.EPIPE)
+					expected = "fixture flush failure"
+				case "observer":
+					h.clock.setElapsed(time.Millisecond)
+					snapshot := tr.snapshot()
+					if err := h.controller.observer(h.writer, h.clock).observe(&snapshot); err != nil {
+						t.Fatal(err)
+					}
+					h.clock.setElapsed(0)
+					expected = "observation clock regressed"
+				case "zero":
+					io.pty.maxWrite = 0
+					expected = "terminal write made no progress"
+				}
+				var err error
+				if quiesce {
+					_, err = h.drainWith(tr, io)
+				} else {
+					_, err = h.tickWith(tr, io)
+				}
+				if err == nil || !strings.Contains(cafleetErrorOf(err).message(), expected) {
+					t.Fatalf("quiesce=%v %s: %v", quiesce, failure, err)
+				}
+				assertBytes(t, io.human.bytes, []byte("世x"), failure)
+				if tr.humanGeneration != 4 || tr.takeInputDrain() != nil {
+					t.Fatalf("%s: generation %d", failure, tr.humanGeneration)
+				}
+			})
+		}
+	}
+}
+
+func TestRuntimeTransport_DrainMutatingEntrypointsInvalidateBeforeSuccessOrLaterFailure(t *testing.T) {
+	t.Parallel()
+	operations := []string{
+		"tick", "tick-error", "resize", "resize-invalid", "resize-error", "prefetch", "prefetch-data",
+		"flush", "flush-error", "discard", "drain-interrupted", "drain-error", "drain-expired",
+	}
+	for _, operation := range operations {
+		withHarness(t, func(h *drainHarness) {
+			tr := h.transport(32, 32, 32)
+			h.seal(tr)
+			io := newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace))
+			mustFail := func(err error) {
+				t.Helper()
+				if err == nil {
+					t.Fatalf("%s fails", operation)
+				}
+			}
+			mustSucceed := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatalf("%s: %v", operation, err)
+				}
+			}
+			mustCount := func(count, want int, err error) {
+				t.Helper()
+				if err != nil || count != want {
+					t.Fatalf("%s: %d %v, want %d", operation, count, err, want)
+				}
+			}
+			switch operation {
+			case "tick":
+				_, err := h.tickWith(tr, io)
+				mustSucceed(err)
+			case "tick-error":
+				io.human.steps = append(io.human.steps, readError{kind: syscall.EPIPE})
+				_, err := h.tickWith(tr, io)
+				mustFail(err)
+			case "resize":
+				mustSucceed(tr.resize(io.pty, terminalSize{rows: 25, cols: 80}))
+			case "resize-invalid":
+				mustFail(tr.resize(io.pty, terminalSize{rows: 0, cols: 80}))
+			case "resize-error":
+				io.pty.resizeError = true
+				mustFail(tr.resize(io.pty, terminalSize{rows: 25, cols: 80}))
+			case "prefetch":
+				count, err := tr.prefetchChildBytes(io.pty)
+				mustCount(count, 0, err)
+			case "prefetch-data":
+				io.pty.reader.steps = append(io.pty.reader.steps, readData{bytes: []byte("tail")})
+				count, err := tr.prefetchChildBytes(io.pty)
+				mustCount(count, 4, err)
+			case "flush":
+				count, err := tr.flushDisplay(io.output)
+				mustCount(count, 0, err)
+			case "flush-error":
+				io.output.flushError = some(syscall.EPIPE)
+				_, err := tr.flushDisplay(io.output)
+				mustFail(err)
+			case "discard":
+				mustCount(tr.discardDisplayTail(), 0, nil)
+			case "drain-interrupted":
+				io.human.steps = append(io.human.steps, readInterrupted{})
+				result, err := h.drainWith(tr, io)
+				assertPending(t, result, err, tr)
+			case "drain-error":
+				io.human.steps = append(io.human.steps, readError{kind: syscall.EPIPE})
+				_, err := h.drainWith(tr, io)
+				mustFail(err)
+			case "drain-expired":
+				_, err := h.drain(tr, io.human, io.pty, io.output, h.time().now())
+				assertDeadline(t, err, tr)
+			}
+			if tr.takeInputDrain() != nil {
+				t.Fatalf("%s invalidates the proof", operation)
+			}
+		})
+	}
+}
+
+func (h *drainHarness) measured() *measuredObserver {
+	return &measuredObserver{inner: h.controller.observer(h.writer, h.clock), trace: h.trace, facts: h.observations}
+}
+
+func TestRuntimeTransport_DrainOriginalExpiryPreventsLaterIoAndProofWhileRetainingCompletedReads(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(32, 32, 32)
+		h.seal(tr)
+		h.resetObservations()
+		io := newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace))
+		_, err := h.drain(tr, io.human, io.pty, io.output, h.time().now())
+		assertDeadline(t, err, tr)
+		if len(h.trace.sites) != 0 || len(io.human.calls) != 0 || len(io.pty.reader.calls) != 0 || len(io.pty.offered) != 0 || len(io.output.offered) != 0 || io.output.flushes != 0 {
+			t.Fatalf("an expired drain does no I/O: %v", h.trace.sites)
+		}
+	})
+	for _, fails := range []bool{false, true} {
+		withHarness(t, func(h *drainHarness) {
+			tr := h.transport(32, 32, 32)
+			var step drainRead = readData{bytes: []byte("read")}
+			if fails {
+				step = readError{kind: syscall.EPIPE}
+			}
+			io := newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace, step))
+			until := h.time().now().Add(100 * time.Millisecond)
+			io.human.delayUntil = some(until)
+			_, err := h.drain(tr, io.human, io.pty, io.output, until)
+			returned := h.time().now()
+			if len(io.human.calls) != 1 {
+				t.Fatalf("fails=%v: calls %d", fails, len(io.human.calls))
+			}
+			call := io.human.calls[0]
+			if !call.entered.Before(until) || call.returned.Before(until) || returned.Before(call.returned) {
+				t.Fatalf("fails=%v: call %+v", fails, call)
+			}
+			if fails {
+				if err == nil || !strings.Contains(cafleetErrorOf(err).message(), "fixture read failure") || call.count != none[int]() || tr.humanGeneration != 0 || tr.takeInputDrain() != nil {
+					t.Fatalf("failed read: %v %+v", err, call)
+				}
+			} else {
+				assertDeadline(t, err, tr)
+				if call.count != some(4) || tr.humanGeneration != 4 || tr.pendingInputBytes() != 4 {
+					t.Fatalf("completed read: %+v generation %d", call, tr.humanGeneration)
+				}
+			}
+			if !slices.Equal(h.trace.sites, []drainSite{siteHuman}) || len(io.pty.reader.calls) != 0 || len(io.pty.offered) != 0 || len(io.output.offered) != 0 || io.output.flushes != 0 || h.observations.healthReads != 0 {
+				t.Fatalf("fails=%v: trace %v", fails, h.trace.sites)
+			}
+		})
+	}
+}
+
+type callbackFault uint8
+
+const (
+	callbackFaultNone callbackFault = iota + 1
+	callbackFaultExpire
+	callbackFaultFail
+	callbackFaultExpireAndFail
+)
+
+type callbackRecord struct {
+	sequence          uint64
+	contents          string
+	entered, returned time.Time
+}
+
+type controlledObservation struct {
+	inner    screenObserver
+	records  *[]callbackRecord
+	fault    callbackFault
+	deadline time.Time
+	trace    *drainRecorder
+}
+
+func (c *controlledObservation) observe(screen *screenSnapshot) error {
+	entered := c.trace.clock.now()
+	actual := c.inner.observe(screen)
+	targeted := len(*c.records) == 1
+	if targeted && (c.fault == callbackFaultExpire || c.fault == callbackFaultExpireAndFail) {
+		c.trace.blockPast(c.deadline)
+	}
+	*c.records = append(*c.records, callbackRecord{sequence: screen.screenSeq, contents: screen.screen.Contents(), entered: entered, returned: c.trace.clock.now()})
+	if actual != nil {
+		return actual
+	}
+	if targeted && (c.fault == callbackFaultFail || c.fault == callbackFaultExpireAndFail) {
+		return appError("fixture observation stopped")
+	}
+	return nil
+}
+
+func (c *controlledObservation) parserFailure() error {
+	return c.inner.parserFailure()
+}
+
+func (c *controlledObservation) inputHealth() observationHealth {
+	return c.inner.inputHealth()
+}
+
+func assertHealthy(t *testing.T, h *drainHarness) {
+	t.Helper()
+	actual := h.controller.health(h.writer)
+	if actual.Degraded || actual.PendingCount != 0 || actual.Eligibility != (inputEligibilityHold{reason: gateReasonUnknown}) {
+		t.Fatalf("health = %+v", actual)
+	}
+}
+
+func assertAppError(t *testing.T, err error, message string) {
+	t.Helper()
+	failure := cafleetErrorOf(err)
+	if err == nil || failure.kind != errorApp || failure.message() != message {
+		t.Fatalf("error = %v, want App(%q)", err, message)
+	}
+}
+
+func assertIncompleteObservationStaysFenced(t *testing.T, h *drainHarness, tr *transport, io *drainEndpoints, childBytes []byte, prefixSequence uint64) {
+	t.Helper()
+	generation := tr.humanGeneration
+	callbacks := len(h.observations.screens)
+	assertHealthy(t, h)
+	first, firstErr := h.drainWith(tr, io)
+	firstProof := tr.takeInputDrain() != nil
+	if tr.snapshot().screenSeq != prefixSequence || len(h.observations.screens) != callbacks || tr.pendingDisplayBytes() != 0 {
+		t.Fatalf("first drain: seq %d", tr.snapshot().screenSeq)
+	}
+	assertBytes(t, io.output.bytes, childBytes, "displayed")
+	io.human.steps = append(io.human.steps, readData{bytes: []byte("manual\r")})
+	io.pty.reader.steps = append(io.pty.reader.steps, readData{bytes: []byte("live\r\n")})
+	progress, err := tr.tick(io.human, io.pty, io.output, h.measured())
+	if err != nil || progress.humanBytes != 7 || tr.humanGeneration != generation+7 {
+		t.Fatalf("tick %+v %v", progress, err)
+	}
+	assertBytes(t, io.pty.bytes, []byte("typedmanual\r"), "manual bytes")
+	assertBytes(t, io.output.bytes, append(slices.Clone(childBytes), "live\r\n"...), "displayed after the tick")
+	if tr.snapshot().screenSeq != prefixSequence+6 {
+		t.Fatalf("seq %d", tr.snapshot().screenSeq)
+	}
+	assertHealthy(t, h)
+	afterTick, afterTickErr := h.drainWith(tr, io)
+	tickProof := tr.takeInputDrain() != nil
+	if err := tr.resize(io.pty, terminalSize{rows: 25, cols: 80}); err != nil {
+		t.Fatal(err)
+	}
+	if tr.snapshot().screenSeq != prefixSequence+7 {
+		t.Fatalf("seq %d", tr.snapshot().screenSeq)
+	}
+	assertHealthy(t, h)
+	afterResize, afterResizeErr := h.drainWith(tr, io)
+	resizeProof := tr.takeInputDrain() != nil
+	for _, outcome := range []struct {
+		result inputDrain
+		err    error
+		proof  bool
+	}{{first, firstErr, firstProof}, {afterTick, afterTickErr, tickProof}, {afterResize, afterResizeErr, resizeProof}} {
+		if outcome.err != nil || outcome.result != inputDrainPending || outcome.proof {
+			t.Fatalf("an incomplete observation stays fenced for this transport lifetime: %+v", outcome)
+		}
+	}
+}
+
+var resumedChild = []byte("live\r\n")
+
+func referenceScreen(t *testing.T, data []byte) screenSnapshot {
+	t.Helper()
+	reference := mustTerminalState(t, terminalSize{rows: 24, cols: 80})
+	mustFeed(t, reference, data)
+	return reference.snapshot()
+}
+
+func observesBeforeFirstChildRead(trace []drainSite) int {
+	count := 0
+	for _, site := range trace {
+		if site == siteChild {
+			break
+		}
+		if site == siteObserve {
+			count++
+		}
+	}
+	return count
+}
+
+// assertRetainedRemainderIsObservedAndSeals checks that the next drain feeds the retained
+// remainder of the interrupted chunk before any newly read child output, so the screen holds
+// every byte and the drain seals again.
+func assertRetainedRemainderIsObservedAndSeals(t *testing.T, h *drainHarness, tr *transport, io *drainEndpoints, childBytes []byte, remainderScreens []uint64) {
+	t.Helper()
+	generation := tr.humanGeneration
+	callbacks := len(h.observations.screens)
+	traced := len(h.trace.sites)
+	assertHealthy(t, h)
+	io.pty.reader.steps = append(io.pty.reader.steps, readData{bytes: slices.Clone(resumedChild)})
+	result, err := h.drainWith(tr, io)
+	assertQuiescent(t, result, err)
+	all := append(slices.Clone(childBytes), resumedChild...)
+	full := uint64(len(all))
+	if got := drainedOf(tr); got != some([2]uint64{generation, full}) || tr.takeInputDrain() == nil {
+		t.Fatalf("drained = %v", got)
+	}
+	expected := append(slices.Clone(remainderScreens), full-2, full-1, full)
+	if got := h.observations.screens[callbacks:]; !slices.Equal(got, expected) {
+		t.Fatalf("screens %v, want %v", got, expected)
+	}
+	if got := observesBeforeFirstChildRead(h.trace.sites[traced:]); got != len(remainderScreens) {
+		t.Fatalf("the retained remainder is observed before any newly read child output: %d", got)
+	}
+	reference := referenceScreen(t, all)
+	if snapshot := tr.snapshot(); snapshot.screenSeq != reference.screenSeq || snapshot.screen.Contents() != reference.screen.Contents() {
+		t.Fatalf("screen %d %q, want %d %q", snapshot.screenSeq, snapshot.screen.Contents(), reference.screenSeq, reference.screen.Contents())
+	}
+	assertBytes(t, io.output.bytes, all, "displayed")
+	if tr.pendingDisplayBytes() != 0 {
+		t.Fatalf("pending display %d", tr.pendingDisplayBytes())
+	}
+	io.human.steps = append(io.human.steps, readData{bytes: []byte("manual\r")})
+	io.pty.reader.steps = append(io.pty.reader.steps, readData{bytes: []byte("more\r\n")})
+	if _, err := tr.tick(io.human, io.pty, io.output, h.measured()); err != nil {
+		t.Fatal(err)
+	}
+	if tr.humanGeneration != generation+7 {
+		t.Fatalf("generation %d", tr.humanGeneration)
+	}
+	result, err = h.drainWith(tr, io)
+	assertQuiescent(t, result, err)
+	if tr.takeInputDrain() == nil {
+		t.Fatal("a fed remainder leaves no fence behind")
+	}
+}
+
+func TestRuntimeTransport_DrainIncompleteDelayedPositiveChildReadFeedsTheRetainedChunkOnTheNextDrain(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		h.seal(tr)
+		h.resetObservations()
+		childBytes := []byte("unseen\r\nsuffix")
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("typed"), 5))
+		io.pty.reader = drainReaderData(siteChild, h.trace, childBytes, len(childBytes))
+		until := h.time().now().Add(100 * time.Millisecond)
+		io.pty.reader.delayUntil = some(until)
+		_, err := h.drain(tr, io.human, io.pty, io.output, until)
+		assertDeadline(t, err, tr)
+		assertBytes(t, io.human.bytes, []byte("typed"), "human bytes")
+		assertBytes(t, io.pty.bytes, []byte("typed"), "forwarded")
+		if tr.humanGeneration != 5 || len(io.pty.reader.calls) != 1 {
+			t.Fatalf("generation %d, child reads %d", tr.humanGeneration, len(io.pty.reader.calls))
+		}
+		call := io.pty.reader.calls[0]
+		if !call.entered.Before(until) || call.returned.Before(until) || call.count != some(len(childBytes)) {
+			t.Fatalf("call %+v", call)
+		}
+		assertBytes(t, io.pty.reader.bytes, childBytes, "child bytes")
+		if tr.pendingDisplayBytes() != len(childBytes) || tr.snapshot().screenSeq != 0 || tr.snapshot().screen.Contents() != "" || len(h.observations.screens) != 0 {
+			t.Fatalf("pending %d seq %d", tr.pendingDisplayBytes(), tr.snapshot().screenSeq)
+		}
+		if !slices.Equal(h.trace.sites, []drainSite{siteHuman, siteManualWrite, siteChild}) || len(io.output.bytes) != 0 || len(io.output.offered) != 0 || io.output.flushes != 0 || h.observations.healthReads != 0 {
+			t.Fatalf("trace %v", h.trace.sites)
+		}
+		assertRetainedRemainderIsObservedAndSeals(t, h, tr, io, childBytes, []uint64{6, 7, 8, 14})
+	})
+}
+
+var controlSeparatedChild = []byte("head\rTAIL\r\nsuffix")
+
+func (h *drainHarness) callbackDrain(tr *transport, io *drainEndpoints, fault callbackFault, until time.Time, records *[]callbackRecord) (inputDrain, error) {
+	return tr.quiesceForInput(io.human, io.pty, io.output, &controlledObservation{inner: h.measured(), records: records, fault: fault, deadline: until, trace: h.trace}, until)
+}
+
+func callbackSequences(records []callbackRecord) []uint64 {
+	sequences := make([]uint64, len(records))
+	for index, record := range records {
+		sequences[index] = record.sequence
+	}
+	return sequences
+}
+
+func TestRuntimeTransport_DrainIncompleteCompleteControlObservesEveryFragmentAndCanSeal(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("typed"), 5))
+		io.pty.reader = drainReaderData(siteChild, h.trace, controlSeparatedChild, len(controlSeparatedChild))
+		var records []callbackRecord
+		result, err := h.callbackDrain(tr, io, callbackFaultNone, h.until, &records)
+		assertQuiescent(t, result, err)
+		if got := drainedOf(tr); got != some([2]uint64{5, 17}) {
+			t.Fatalf("drained %v", got)
+		}
+		assertBytes(t, io.output.bytes, controlSeparatedChild, "displayed")
+		want := []uint64{4, 5, 9, 10, 11, 17}
+		if tr.pendingDisplayBytes() != 0 || tr.snapshot().screen.Contents() != "TAIL\nsuffix" || tr.snapshot().screenSeq != 17 || !slices.Equal(h.observations.screens, want) || !slices.Equal(callbackSequences(records), want) {
+			t.Fatalf("screens %v records %v", h.observations.screens, callbackSequences(records))
+		}
+		if records[0].contents != "head" || records[1].contents != "head" || records[len(records)-1].contents != "TAIL\nsuffix" {
+			t.Fatalf("records %+v", records)
+		}
+		for _, record := range records {
+			if record.returned.Before(record.entered) || !record.returned.Before(h.until) {
+				t.Fatalf("record %+v", record)
+			}
+		}
+		assertHealthy(t, h)
+		if tr.takeInputDrain() == nil {
+			t.Fatal("the drain seals")
+		}
+	})
+}
+
+func incompleteCallbackCase(t *testing.T, fault callbackFault) {
+	t.Helper()
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(64, 64, 64)
+		h.seal(tr)
+		h.resetObservations()
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("typed"), 5))
+		io.pty.reader = drainReaderData(siteChild, h.trace, controlSeparatedChild, len(controlSeparatedChild))
+		until := h.time().now().Add(100 * time.Millisecond)
+		var records []callbackRecord
+		_, err := h.callbackDrain(tr, io, fault, until, &records)
+		if fault == callbackFaultExpire {
+			assertDeadline(t, err, tr)
+		} else {
+			assertAppError(t, err, "fixture observation stopped")
+			if tr.takeInputDrain() != nil {
+				t.Fatal("no proof")
+			}
+		}
+		assertBytes(t, io.pty.bytes, []byte("typed"), "forwarded")
+		assertBytes(t, io.pty.reader.bytes, controlSeparatedChild, "child bytes")
+		if tr.humanGeneration != 5 || len(io.pty.reader.calls) != 1 || io.pty.reader.calls[0].count != some(17) || tr.pendingDisplayBytes() != 17 {
+			t.Fatalf("generation %d reads %+v pending %d", tr.humanGeneration, io.pty.reader.calls, tr.pendingDisplayBytes())
+		}
+		if len(io.output.bytes) != 0 || len(io.output.offered) != 0 || io.output.flushes != 0 || h.observations.healthReads != 0 {
+			t.Fatal("the display is untouched")
+		}
+		snapshot := tr.snapshot()
+		if snapshot.screenSeq != 5 || snapshot.screen.Contents() != "head" || snapshot.cursor != some([2]uint16{0, 0}) || !slices.Equal(h.observations.screens, []uint64{4, 5}) {
+			t.Fatalf("snapshot %d %q %v screens %v", snapshot.screenSeq, snapshot.screen.Contents(), snapshot.cursor, h.observations.screens)
+		}
+		if !slices.Equal(h.trace.sites, []drainSite{siteHuman, siteManualWrite, siteChild, siteObserve, siteObserve}) {
+			t.Fatalf("trace %v", h.trace.sites)
+		}
+		if len(records) != 2 || !slices.Equal(callbackSequences(records), []uint64{4, 5}) {
+			t.Fatalf("records %+v", records)
+		}
+		for _, record := range records {
+			if record.contents != "head" || !record.entered.Before(until) {
+				t.Fatalf("record %+v", record)
+			}
+		}
+		if records[1].entered.Before(records[0].returned) {
+			t.Fatal("callbacks are ordered")
+		}
+		expired := fault == callbackFaultExpire || fault == callbackFaultExpireAndFail
+		if expired == records[1].returned.Before(until) {
+			t.Fatalf("expired=%v: second callback returned %v, deadline %v", expired, records[1].returned, until)
+		}
+		assertRetainedRemainderIsObservedAndSeals(t, h, tr, io, controlSeparatedChild, []uint64{9, 10, 11, 17})
+	})
+}
+
+func TestRuntimeTransport_DrainIncompleteMidObserverExpiryFeedsTheRetainedRemainderOnTheNextDrain(t *testing.T) {
+	t.Parallel()
+	incompleteCallbackCase(t, callbackFaultExpire)
+}
+
+func TestRuntimeTransport_DrainIncompleteMidObserverErrorBeforeExpiryKeepsPrimaryAndFeedsTheRemainder(t *testing.T) {
+	t.Parallel()
+	incompleteCallbackCase(t, callbackFaultFail)
+}
+
+func TestRuntimeTransport_DrainIncompleteMidObserverErrorAfterExpiryKeepsPrimaryAndFeedsTheRemainder(t *testing.T) {
+	t.Parallel()
+	incompleteCallbackCase(t, callbackFaultExpireAndFail)
+}
+
+func TestRuntimeTransport_DrainIncompleteRemainderFeedsOnTheNextTickBeforeNewChildOutput(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(64, 64, 64)
+		h.seal(tr)
+		h.resetObservations()
+		io := newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace))
+		io.pty.reader = drainReaderData(siteChild, h.trace, controlSeparatedChild, len(controlSeparatedChild))
+		until := h.time().now().Add(100 * time.Millisecond)
+		var records []callbackRecord
+		_, err := h.callbackDrain(tr, io, callbackFaultExpire, until, &records)
+		assertDeadline(t, err, tr)
+		if tr.snapshot().screenSeq != 5 {
+			t.Fatalf("seq %d", tr.snapshot().screenSeq)
+		}
+		traced := len(h.trace.sites)
+		io.pty.reader.steps = append(io.pty.reader.steps, readData{bytes: slices.Clone(resumedChild)})
+		if _, err := tr.tick(io.human, io.pty, io.output, h.measured()); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(h.observations.screens, []uint64{4, 5, 9, 10, 11, 17, 21, 22, 23}) {
+			t.Fatalf("screens %v", h.observations.screens)
+		}
+		if got := observesBeforeFirstChildRead(h.trace.sites[traced:]); got != 4 {
+			t.Fatalf("the tick feeds the retained remainder before its own child read: %d", got)
+		}
+		all := append(slices.Clone(controlSeparatedChild), resumedChild...)
+		reference := referenceScreen(t, all)
+		if snapshot := tr.snapshot(); snapshot.screenSeq != reference.screenSeq || snapshot.screen.Contents() != reference.screen.Contents() {
+			t.Fatalf("screen %d %q", snapshot.screenSeq, snapshot.screen.Contents())
+		}
+		assertBytes(t, io.output.bytes, all, "displayed")
+		result, err := h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if got := drainedOf(tr); got != some([2]uint64{0, uint64(len(all))}) || tr.takeInputDrain() == nil {
+			t.Fatalf("drained %v", got)
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainIncompleteFatalObserverErrorFeedsTheRetainedRemainderOnTheNextDrain(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("typed"), 5))
+		io.pty.reader = drainReaderData(siteChild, h.trace, controlSeparatedChild, 17)
+		var records []callbackRecord
+		_, err := tr.tick(io.human, io.pty, io.output, &controlledObservation{inner: h.measured(), records: &records, fault: callbackFaultFail, deadline: h.until, trace: h.trace})
+		assertBytes(t, io.pty.bytes, []byte("typed"), "forwarded")
+		assertBytes(t, io.pty.reader.bytes, controlSeparatedChild, "child bytes")
+		if tr.humanGeneration != 5 || len(io.pty.reader.calls) != 1 || io.pty.reader.calls[0].count != some(17) || tr.takeInputDrain() != nil {
+			t.Fatalf("generation %d reads %+v", tr.humanGeneration, io.pty.reader.calls)
+		}
+		assertAppError(t, err, "fixture observation stopped")
+		if !slices.Equal(h.observations.screens, []uint64{4, 5}) || len(records) != 2 || tr.snapshot().screen.Contents() != "head" || len(io.output.bytes) != 0 || len(io.output.offered) != 0 {
+			t.Fatalf("screens %v records %d", h.observations.screens, len(records))
+		}
+		if tr.pendingDisplayBytes() != 17 || tr.snapshot().screenSeq != 5 {
+			t.Fatalf("a completed child read remains queued after a failed observation: %d seq %d", tr.pendingDisplayBytes(), tr.snapshot().screenSeq)
+		}
+		assertRetainedRemainderIsObservedAndSeals(t, h, tr, io, controlSeparatedChild, []uint64{9, 10, 11, 17})
+	})
+}
+
+type observationRefusal uint8
+
+const (
+	// refusalExpire is what the deadline guard returns when the deadline passed before the
+	// callback: the inner observer never sees the screen.
+	refusalExpire observationRefusal = iota + 1
+	refusalFail
+)
+
+// refusingObservation refuses the refuseAt-th observer callback without passing its screen on,
+// then forwards every later callback.
+type refusingObservation struct {
+	inner    screenObserver
+	calls    int
+	refuseAt opt[int]
+	refusal  observationRefusal
+	deadline time.Time
+	trace    *drainRecorder
+}
+
+func (r *refusingObservation) observe(screen *screenSnapshot) error {
+	call := r.calls
+	r.calls++
+	if r.refuseAt == some(call) {
+		switch r.refusal {
+		case refusalExpire:
+			r.trace.blockPast(r.deadline)
+			return deadlineExceededError()
+		case refusalFail:
+			return appError("fixture observation refused")
+		default:
+			panic("invalid observationRefusal")
+		}
+	}
+	return r.inner.observe(screen)
+}
+
+func (r *refusingObservation) parserFailure() error {
+	return r.inner.parserFailure()
+}
+
+func (r *refusingObservation) inputHealth() observationHealth {
+	return r.inner.inputHealth()
+}
+
+// twoStepChild is two observed steps, head then the carriage return, so the second callback is
+// the chunk's final step.
+var twoStepChild = []byte("head\r")
+
+func (h *drainHarness) refusedDrain(tr *transport, io *drainEndpoints, refuseAt opt[int], refusal observationRefusal, until time.Time) (inputDrain, error) {
+	return tr.quiesceForInput(io.human, io.pty, io.output, &refusingObservation{inner: h.measured(), refuseAt: refuseAt, refusal: refusal, deadline: until, trace: h.trace}, until)
+}
+
+func finalStepFaultCase(t *testing.T, refusal observationRefusal) {
+	t.Helper()
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(64, 64, 64)
+		h.seal(tr)
+		h.resetObservations()
+		io := newDrainEndpoints(h.trace, newDrainReader(siteHuman, h.trace))
+		io.pty.reader = drainReaderData(siteChild, h.trace, twoStepChild, len(twoStepChild))
+		until := h.time().now().Add(100 * time.Millisecond)
+		_, err := h.refusedDrain(tr, io, some(1), refusal, until)
+		switch refusal {
+		case refusalExpire:
+			assertDeadline(t, err, tr)
+		case refusalFail:
+			assertAppError(t, err, "fixture observation refused")
+			if tr.takeInputDrain() != nil {
+				t.Fatal("no proof")
+			}
+		}
+		if tr.snapshot().screenSeq != 5 {
+			t.Fatalf("the final step reached the screen: %d", tr.snapshot().screenSeq)
+		}
+		if !slices.Equal(h.observations.screens, []uint64{4}) {
+			t.Fatalf("no observer callback succeeded for the final snapshot: %v", h.observations.screens)
+		}
+		result, err := h.refusedDrain(tr, io, some(0), refusalFail, h.until)
+		if err == nil && result == inputDrainQuiescent {
+			t.Fatal("observation stays incomplete while the final snapshot is unobserved")
+		}
+		if tr.takeInputDrain() != nil || !slices.Equal(h.observations.screens, []uint64{4}) {
+			t.Fatalf("screens %v", h.observations.screens)
+		}
+		assertHealthy(t, h)
+		result, err = h.refusedDrain(tr, io, none[int](), refusal, h.until)
+		assertQuiescent(t, result, err)
+		if !slices.Equal(h.observations.screens, []uint64{4, 5}) {
+			t.Fatalf("the drain observes the final snapshot before it seals: %v", h.observations.screens)
+		}
+		if tr.takeInputDrain() == nil {
+			t.Fatal("the drain seals")
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainIncompleteFinalStepDeadlineGuardExpiryReobservesTheSnapshotBeforeSealing(t *testing.T) {
+	t.Parallel()
+	finalStepFaultCase(t, refusalExpire)
+}
+
+func TestRuntimeTransport_DrainIncompleteFinalStepObserverErrorReobservesTheSnapshotBeforeSealing(t *testing.T) {
+	t.Parallel()
+	finalStepFaultCase(t, refusalFail)
+}
+
+func TestRuntimeTransport_DrainIncompleteCompleteObservationThenDisplayErrorPreservesEligibility(t *testing.T) {
+	t.Parallel()
+	for _, quiesce := range []bool{false, true} {
+		for _, discard := range []bool{false, true} {
+			withHarness(t, func(h *drainHarness) {
+				tr := h.transport(64, 64, 64)
+				io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("typed"), 5))
+				io.pty.reader = drainReaderData(siteChild, h.trace, controlSeparatedChild, 17)
+				io.output.writeError = some(syscall.EPIPE)
+				var err error
+				if quiesce {
+					_, err = h.drainWith(tr, io)
+				} else {
+					_, err = tr.tick(io.human, io.pty, io.output, h.measured())
+				}
+				if err == nil || !strings.Contains(cafleetErrorOf(err).message(), "fixture display write failure") {
+					t.Fatalf("error %v", err)
+				}
+				if tr.humanGeneration != 5 || tr.snapshot().screenSeq != 17 || tr.snapshot().screen.Contents() != "TAIL\nsuffix" || !slices.Equal(h.observations.screens, []uint64{4, 5, 9, 10, 11, 17}) || tr.pendingDisplayBytes() != 17 || len(io.output.bytes) != 0 || tr.takeInputDrain() != nil {
+					t.Fatalf("quiesce=%v discard=%v: screens %v pending %d", quiesce, discard, h.observations.screens, tr.pendingDisplayBytes())
+				}
+				io.output.writeError = none[syscall.Errno]()
+				if discard && tr.discardDisplayTail() != 17 {
+					t.Fatal("the tail holds the 17 queued bytes")
+				}
+				assertHealthy(t, h)
+				result, err := h.drainWith(tr, io)
+				assertQuiescent(t, result, err)
+				if got := drainedOf(tr); got != some([2]uint64{5, 17}) || tr.pendingDisplayBytes() != 0 {
+					t.Fatalf("drained %v", got)
+				}
+				want := controlSeparatedChild
+				if discard {
+					want = nil
+				}
+				assertBytes(t, io.output.bytes, want, "displayed")
+				if tr.takeInputDrain() == nil {
+					t.Fatal("the drain seals")
+				}
+			})
+		}
+	}
+}
+
+func TestRuntimeTransport_DrainIncompletePrefetchConsumptionControlObservesOnceAndCanSeal(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("typed"), 5))
+		io.pty.reader = drainReaderData(siteChild, h.trace, controlSeparatedChild, 17)
+		if count, err := tr.prefetchChildBytes(io.pty); err != nil || count != 17 {
+			t.Fatalf("prefetch %d %v", count, err)
+		}
+		if tr.snapshot().screenSeq != 0 || len(h.observations.screens) != 0 {
+			t.Fatal("a prefetch observes nothing")
+		}
+		result, err := h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if got := drainedOf(tr); got != some([2]uint64{5, 17}) || !slices.Equal(h.observations.screens, []uint64{4, 5, 9, 10, 11, 17}) || tr.pendingDisplayBytes() != 0 {
+			t.Fatalf("drained %v screens %v", got, h.observations.screens)
+		}
+		assertBytes(t, io.output.bytes, controlSeparatedChild, "displayed")
+		if tr.takeInputDrain() == nil {
+			t.Fatal("the drain seals")
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainIncompleteDiscardingUnobservedPrefetchKeepsLifetimeFence(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		h.control()
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("typed"), 5))
+		progress, err := h.tickWith(tr, io)
+		if err != nil || progress.humanBytes != 5 || tr.pendingDisplayBytes() != 0 {
+			t.Fatalf("tick %+v %v", progress, err)
+		}
+		h.resetObservations()
+		io.pty.reader.steps = append(io.pty.reader.steps, readData{bytes: slices.Clone(controlSeparatedChild)})
+		if count, err := tr.prefetchChildBytes(io.pty); err != nil || count != 17 {
+			t.Fatalf("prefetch %d %v", count, err)
+		}
+		if last := io.pty.reader.calls[len(io.pty.reader.calls)-1]; last.count != some(17) {
+			t.Fatalf("last read %+v", last)
+		}
+		assertBytes(t, io.pty.reader.bytes, controlSeparatedChild, "child bytes")
+		if tr.discardDisplayTail() != 17 || tr.pendingDisplayBytes() != 0 || tr.snapshot().screenSeq != 0 || len(h.observations.screens) != 0 || len(io.output.bytes) != 0 {
+			t.Fatal("the discarded prefetch reached nothing")
+		}
+		assertIncompleteObservationStaysFenced(t, h, tr, io, nil, 0)
+	})
+}
+
+func TestRuntimeTransport_DrainCompleteTerminalReplySealsAProofWithoutManualGeneration(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		reply := []byte("\x1b[I\x1b]11;rgb:0000/0000/0000\x07\x1b[24;80R")
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, reply, 64))
+		result, err := h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if got := drainedOf(tr); got != some([2]uint64{0, tr.snapshot().screenSeq}) {
+			t.Fatalf("drained %v", got)
+		}
+		assertBytes(t, io.pty.bytes, reply, "the reply is forwarded unchanged")
+		if tr.takeInputDrain() == nil {
+			t.Fatal("the drain seals")
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainCompletedReplyPrefixSealsAProofWithUnchangedGeneration(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("\x1b[24;"), 64))
+		result, err := h.drainWith(tr, io)
+		assertPending(t, result, err, tr)
+		if tr.drainBlocker != some("terminal reply pending") || tr.pendingInputBytes() != 0 || tr.humanGeneration != 0 {
+			t.Fatalf("blocker %v", tr.drainBlocker)
+		}
+		assertBytes(t, io.pty.bytes, []byte("\x1b[24;"), "the prefix is forwarded, not held")
+		io.human.steps = append(io.human.steps, readData{bytes: []byte("80R")})
+		result, err = h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if got := drainedOf(tr); got != some([2]uint64{0, tr.snapshot().screenSeq}) || tr.drainBlocker != none[string]() {
+			t.Fatalf("drained %v blocker %v", got, tr.drainBlocker)
+		}
+		assertBytes(t, io.pty.bytes, []byte("\x1b[24;80R"), "forwarded")
+		proof := tr.takeInputDrain()
+		if proof == nil || proof.humanGeneration != 0 {
+			t.Fatalf("quiet drain seals a proof: %+v", proof)
+		}
+		if err := tr.validateObservationDrain(proof, h.until); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainProofTakenBeforeAReplyPrefixFailsValidationWhileItIsPending(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		h.seal(tr)
+		proof := tr.takeInputDrain()
+		if proof == nil {
+			t.Fatal("quiet drain seals a proof")
+		}
+		if err := tr.validateObservationDrain(proof, h.until); err != nil {
+			t.Fatal(err)
+		}
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("\x1b"), 64))
+		if _, err := h.tickWith(tr, io); err != nil {
+			t.Fatal(err)
+		}
+		if tr.humanGeneration != 0 || tr.validateObservationDrain(proof, h.until) == nil {
+			t.Fatal("a pending prefix invalidates the old proof")
+		}
+		result, err := h.drainWith(tr, io)
+		assertPending(t, result, err, tr)
+		if tr.drainBlocker != some("terminal reply pending") || tr.validateObservationDrain(proof, h.until) == nil {
+			t.Fatalf("blocker %v", tr.drainBlocker)
+		}
+	})
+}
+
+func TestRuntimeTransport_DrainBackdatedLoneEscapeResolvesAsManualOnTheNextDrain(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("\x1b"), 64))
+		result, err := h.drainWith(tr, io)
+		assertPending(t, result, err, tr)
+		if tr.drainBlocker != some("terminal reply pending") || tr.humanGeneration != 0 {
+			t.Fatalf("blocker %v", tr.drainBlocker)
+		}
+		tr.backdateReplyPrefix(replyPrefixBound)
+		result, err = h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if got := drainedOf(tr); got != some([2]uint64{1, tr.snapshot().screenSeq}) {
+			t.Fatalf("drained %v", got)
+		}
+		assertBytes(t, io.pty.bytes, []byte("\x1b"), "forwarded")
+		if proof := tr.takeInputDrain(); proof == nil || proof.humanGeneration != 1 {
+			t.Fatalf("proof %+v", proof)
+		}
+	})
+}
+
+func TestRuntimeTransport_Pointer_PointerDrainForwardsReportsAndSealsBothGenerations(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		for _, report := range pointerReports {
+			tr := h.transport(64, 64, 64)
+			io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte(report), 64))
+			result, err := h.drainWith(tr, io)
+			assertQuiescent(t, result, err)
+			assertBytes(t, io.pty.bytes, []byte(report), "forwarded")
+			assertBytes(t, io.human.bytes, []byte(report), "read")
+			if tr.humanGeneration != 0 || tr.pointerGeneration != uint64(len(report)) {
+				t.Fatalf("%q: generations %d/%d", report, tr.humanGeneration, tr.pointerGeneration)
+			}
+			proof := tr.takeInputDrain()
+			if proof == nil || proof.humanGeneration != 0 || proof.pointerGeneration != uint64(len(report)) {
+				t.Fatalf("a complete pointer report drains: %+v", proof)
+			}
+			if err := tr.validateOrdinary(proof, h.until); err != nil {
+				t.Fatal(err)
+			}
+			if err := tr.validatePermission(proof, h.until); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+}
+
+func TestRuntimeTransport_Pointer_PointerDrainSplitX10WaitsForTheCompleteReportBeforeCounting(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		report := []byte("\x1b[M\xff\x80\x7f")
+		for split := 1; split < len(report); split++ {
+			tr := h.transport(64, 64, 64)
+			io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, report[:split], 64))
+			result, err := h.drainWith(tr, io)
+			assertPending(t, result, err, tr)
+			if tr.humanGeneration != 0 || tr.pointerGeneration != 0 {
+				t.Fatalf("split %d: generations %d/%d", split, tr.humanGeneration, tr.pointerGeneration)
+			}
+			assertBytes(t, io.pty.bytes, report[:split], "the prefix")
+			io.human.steps = append(io.human.steps, readData{bytes: slices.Clone(report[split:])})
+			result, err = h.drainWith(tr, io)
+			assertQuiescent(t, result, err)
+			if tr.humanGeneration != 0 || tr.pointerGeneration != uint64(len(report)) {
+				t.Fatalf("split %d: generations %d/%d", split, tr.humanGeneration, tr.pointerGeneration)
+			}
+			assertBytes(t, io.pty.bytes, report, "the report")
+		}
+	})
+}
+
+func TestRuntimeTransport_Pointer_PointerDrainExpiredX10PrefixCountsManualBytesOnce(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		prefix := []byte("\x1b[M !")
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, prefix, 64))
+		result, err := h.drainWith(tr, io)
+		assertPending(t, result, err, tr)
+		if tr.humanGeneration != 0 || tr.pointerGeneration != 0 {
+			t.Fatalf("generations %d/%d", tr.humanGeneration, tr.pointerGeneration)
+		}
+		tr.backdateReplyPrefix(replyPrefixBound)
+		result, err = h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if tr.humanGeneration != uint64(len(prefix)) || tr.pointerGeneration != 0 {
+			t.Fatalf("generations %d/%d", tr.humanGeneration, tr.pointerGeneration)
+		}
+		io.human.steps = append(io.human.steps, readData{bytes: []byte("!")})
+		result, err = h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if tr.humanGeneration != uint64(len(prefix)+1) || tr.pointerGeneration != 0 {
+			t.Fatalf("generations %d/%d", tr.humanGeneration, tr.pointerGeneration)
+		}
+		assertBytes(t, io.pty.bytes, []byte("\x1b[M !!"), "forwarded")
+	})
+}
+
+func TestRuntimeTransport_Pointer_PointerDrainOrdinaryProofIgnoresOnlyAStalePointerGeneration(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		report := []byte("\x1b[<0;10;20M")
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, report, 64))
+		result, err := h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		proof := tr.takeInputDrain()
+		if proof == nil || proof.pointerGeneration != uint64(len(report)) {
+			t.Fatalf("the actual drain sealed a proof: %+v", proof)
+		}
+		proof.pointerGeneration = 0
+		if err := tr.validateOrdinary(proof, h.until); err != nil {
+			t.Fatal(err)
+		}
+		if tr.validatePermission(proof, h.until) == nil {
+			t.Fatal("a permission proof rejects a stale pointer generation")
+		}
+	})
+}
+
+func TestRuntimeTransport_Pointer_PointerDrainBothProofsRejectAStaleKeyboardGeneration(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("x"), 64))
+		result, err := h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		proof := tr.takeInputDrain()
+		if proof == nil || proof.humanGeneration != 1 {
+			t.Fatalf("the actual drain sealed a proof: %+v", proof)
+		}
+		if tr.validateOrdinary(proof, h.until) != nil || tr.validatePermission(proof, h.until) != nil {
+			t.Fatal("the fresh proof validates")
+		}
+		proof.humanGeneration = 0
+		if tr.validateOrdinary(proof, h.until) == nil || tr.validatePermission(proof, h.until) == nil {
+			t.Fatal("both proofs reject a stale keyboard generation")
+		}
+	})
+}
+
+func TestRuntimeTransport_Pointer_PointerDrainBothProofsRetainTheTurnBinding(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		h.seal(tr)
+		old := tr.takeInputDrain()
+		if old == nil || tr.validateOrdinary(old, h.until) != nil || tr.validatePermission(old, h.until) != nil {
+			t.Fatal("the initial drain sealed a valid proof")
+		}
+		io := newDrainEndpoints(h.trace, drainReaderData(siteHuman, h.trace, []byte("\x1b[M !!"), 64))
+		result, err := h.drainWith(tr, io)
+		assertQuiescent(t, result, err)
+		if tr.humanGeneration != old.humanGeneration || tr.validateOrdinary(old, h.until) == nil || tr.validatePermission(old, h.until) == nil {
+			t.Fatal("a new turn invalidates the old proof")
+		}
+		fresh := tr.takeInputDrain()
+		if fresh == nil || tr.validateOrdinary(fresh, h.until) != nil || tr.validatePermission(fresh, h.until) != nil {
+			t.Fatal("the new turn sealed a valid proof")
+		}
+	})
+}
+
+func TestRuntimeTransport_Pointer_PointerDrainBothProofsRetainTheDeadlineCheck(t *testing.T) {
+	t.Parallel()
+	withHarness(t, func(h *drainHarness) {
+		tr := h.transport(64, 64, 64)
+		h.seal(tr)
+		proof := tr.takeInputDrain()
+		if proof == nil {
+			t.Fatal("the actual drain sealed a proof")
+		}
+		expired := h.time().now()
+		if tr.validateOrdinary(proof, expired) == nil || tr.validatePermission(proof, expired) == nil {
+			t.Fatal("both proofs check the deadline")
+		}
+	})
+}
