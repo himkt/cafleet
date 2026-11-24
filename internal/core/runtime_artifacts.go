@@ -524,7 +524,7 @@ func (l *runLock) transferToReconcilerChecked(ctx context.Context, conn *dbConn,
 					return runRecord{}, err
 				}
 			}
-			if err := checkDeadline(c.now(), deadline); err != nil {
+			if err := runtimeCheckDeadline(c.now(), deadline); err != nil {
 				return runRecord{}, err
 			}
 			return next, nil
@@ -657,14 +657,14 @@ func validatedPaths(ctx context.Context, conn *dbConn, run runRecord, lock *runL
 	if err := ensure(run.ownerPID == process.pid && run.ownerStartIdentity == process.startIdentity, "descriptor access requires the current runtime owner"); err != nil {
 		return runtimePaths{}, err
 	}
-	if err := checkDeadline(c.now(), until); err != nil {
+	if err := runtimeCheckDeadline(c.now(), until); err != nil {
 		return runtimePaths{}, err
 	}
 	return paths, nil
 }
 
 func readBounded(file *os.File, until time.Time, c clock) ([]byte, error) {
-	if err := checkDeadline(c.now(), until); err != nil {
+	if err := runtimeCheckDeadline(c.now(), until); err != nil {
 		return nil, err
 	}
 	info, err := file.Stat()
@@ -684,7 +684,7 @@ func readBounded(file *os.File, until time.Time, c clock) ([]byte, error) {
 	if err := ensure(len(data) <= descriptorLimit, "launch descriptor exceeds private size limit"); err != nil {
 		return nil, err
 	}
-	if err := checkDeadline(c.now(), until); err != nil {
+	if err := runtimeCheckDeadline(c.now(), until); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -726,7 +726,7 @@ func recoveryDescriptorPin(ctx context.Context, conn *dbConn, run runRecord, loc
 	if err := validateNamed(path, pinned); err != nil {
 		return nil, mergeCleanup(err, file.Close())
 	}
-	if err := checkDeadline(c.now(), until); err != nil {
+	if err := runtimeCheckDeadline(c.now(), until); err != nil {
 		return nil, mergeCleanup(err, file.Close())
 	}
 	return &recoveryDescriptor{path: path, pinned: pinned}, nil
@@ -788,7 +788,7 @@ func (r *recoveryDescriptor) remove(ctx context.Context, conn *dbConn, run runRe
 	if err := validateNamed(r.path, pinned); err != nil {
 		return err
 	}
-	if err := checkDeadline(c.now(), until); err != nil {
+	if err := runtimeCheckDeadline(c.now(), until); err != nil {
 		return err
 	}
 	if err := unlink(r.path, until); err != nil {
@@ -801,7 +801,7 @@ func (r *recoveryDescriptor) remove(ctx context.Context, conn *dbConn, run runRe
 	if err := ensure(!remains, "descriptor remains after unlink"); err != nil {
 		return err
 	}
-	if err := checkDeadline(c.now(), until); err != nil {
+	if err := runtimeCheckDeadline(c.now(), until); err != nil {
 		return err
 	}
 	return r.unpin()

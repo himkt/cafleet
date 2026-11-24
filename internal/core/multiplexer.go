@@ -191,7 +191,7 @@ func mapRunError(name string, argv []string, err *runError) *multiplexerError {
 	}
 }
 
-func checkDeadline(d deadline) *multiplexerError {
+func multiplexerCheckDeadline(d deadline) *multiplexerError {
 	if _, err := d.remaining(); err != nil {
 		return newMultiplexerError(cafleetErrorOf(err).message())
 	}
@@ -411,7 +411,7 @@ type multiplexer interface {
 }
 
 func validateKeyTarget(m multiplexer, p placement, d deadline) *multiplexerError {
-	if err := checkDeadline(d); err != nil {
+	if err := multiplexerCheckDeadline(d); err != nil {
 		return err
 	}
 	pane, concrete := p.muxPaneID.get()

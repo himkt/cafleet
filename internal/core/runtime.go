@@ -60,7 +60,7 @@ func (s spawnSpec) validate() error {
 	return s.size.validate()
 }
 
-func checkDeadline(now, deadline time.Time) error {
+func runtimeCheckDeadline(now, deadline time.Time) error {
 	if !now.Before(deadline) {
 		return deadlineExceededError()
 	}
