@@ -786,6 +786,66 @@ func scopedDatabaseBudget[T any](ctx context.Context, conn *dbConn, d deadline, 
 	return value, nil
 }
 
+type transactionBehavior uint8
+
+const (
+	transactionDeferred transactionBehavior = iota + 1
+	transactionImmediate
+)
+
+func (c *dbConn) begin(behavior transactionBehavior) error {
+	var sql string
+	switch behavior {
+	case transactionDeferred:
+		sql = "BEGIN DEFERRED"
+	case transactionImmediate:
+		sql = "BEGIN IMMEDIATE"
+	default:
+		panic("invalid transactionBehavior")
+	}
+	return c.executeBatch(sql)
+}
+
+// isAutocommit reports whether no transaction is open, including after SQLite ended one itself.
+func (c *dbConn) isAutocommit() bool {
+	return c.raw.GetAutocommit()
+}
+
+// rollbackIfOpen rolls back the open transaction, if SQLite has not already ended it.
+func (c *dbConn) rollbackIfOpen() error {
+	if c.isAutocommit() {
+		return nil
+	}
+	return c.executeBatch("ROLLBACK")
+}
+
+// inTransaction runs operation inside one transaction that commits when operation succeeds and
+// rolls back when operation or the commit fails, or operation panics.
+func inTransaction[T any](conn *dbConn, behavior transactionBehavior, operation func() (T, error)) (T, error) {
+	var zero T
+	if err := conn.begin(behavior); err != nil {
+		return zero, err
+	}
+	value, err := func() (value T, err error) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				if rollbackErr := conn.rollbackIfOpen(); rollbackErr != nil {
+					panic(fmt.Sprintf("%v; rolling back the transaction also failed: %v", recovered, rollbackErr))
+				}
+				panic(recovered)
+			}
+		}()
+		return operation()
+	}()
+	if err == nil {
+		err = conn.executeBatch("COMMIT")
+	}
+	if err != nil {
+		return zero, mergeCleanup(err, conn.rollbackIfOpen())
+	}
+	return value, nil
+}
+
 // pathExists reports whether path names an existing file, following symbolic links as Rust's
 // Path::try_exists does: a missing target is false, every other failure an error.
 func pathExists(path string) (bool, error) {
