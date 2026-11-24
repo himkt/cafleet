@@ -122,6 +122,14 @@ func decodeStrictValue(decoder *jsontext.Decoder, destination reflect.Value) err
 	if _, ok := destination.Addr().Interface().(json.UnmarshalerFrom); ok {
 		return decodeLeaf(decoder, destination)
 	}
+	if destination.Type() == reflect.TypeFor[jsontext.Value]() {
+		value, err := decoder.ReadValue()
+		if err != nil {
+			return appError(err.Error())
+		}
+		destination.Set(reflect.ValueOf(slices.Clone(value)))
+		return nil
+	}
 	if kind := destination.Kind(); kind == reflect.Struct {
 		return decodeStrictStruct(decoder, destination)
 	} else if kind == reflect.Slice {
@@ -173,6 +181,12 @@ func strictFields(structType reflect.Type) []strictField {
 	return fields
 }
 
+// unknownFieldsIgnored marks a struct whose Rust type lacks deny_unknown_fields: decodeStrict
+// skips its unknown members as serde does, and still applies every other rule to it.
+type unknownFieldsIgnored interface {
+	ignoresUnknownFields()
+}
+
 func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) error {
 	if kind := decoder.PeekKind(); kind != '{' {
 		return appErrorf("invalid type: expected a JSON object for %s, found %v", destination.Type(), kind)
@@ -180,6 +194,7 @@ func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) er
 	if _, err := decoder.ReadToken(); err != nil {
 		return appError(err.Error())
 	}
+	_, tolerant := destination.Addr().Interface().(unknownFieldsIgnored)
 	fields := strictFields(destination.Type())
 	byName := make(map[string]strictField, len(fields))
 	for _, field := range fields {
@@ -193,6 +208,12 @@ func decodeStrictStruct(decoder *jsontext.Decoder, destination reflect.Value) er
 		}
 		name := token.String()
 		field, known := byName[name]
+		if !known && tolerant {
+			if err := decoder.SkipValue(); err != nil {
+				return appError(err.Error())
+			}
+			continue
+		}
 		if !known {
 			return appError("unknown field `" + name + "`")
 		}

@@ -283,6 +283,10 @@ scenario("relative-url", {}, setup(),
          ["--database-url", "sqlite:///{W}/./cafleet.db", "message", "poll", "1"],
          do(lambda w: os.symlink(w.db, f"{w.root}/link.db"), "symlink the database"),
          ["--database-url", "sqlite:///{W}/link.db", "fleet", "list", "--json"])
+scenario("database-url-no-path", {},
+         ["--database-url", "sqlite:///", "setup"],
+         ["--database-url", "sqlite:///", "fleet", "list"],
+         ["--database-url", "sqlite:///", "doctor"])
 scenario("database-url-repeats", {}, setup(),
          ["--database-url", "{URL}", "--database-url", "{URL}", "fleet", "list"],
          ["fleet", "list", "--database-url", "{URL}", "--database-url", "{URL}"],

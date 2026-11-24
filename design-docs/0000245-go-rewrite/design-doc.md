@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 33/70 tasks complete
+**Progress**: 36/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -398,6 +398,7 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 | ncruces is pre-1.0, generated (wasm2go) and effectively single-maintainer | Pin the version and keep every driver call in `internal/core/db.go`. If ncruces becomes unusable, switching to `modernc.org/sqlite` is a re-planning event, not a drop-in change. It needs a re-armed timer in place of the busy handler for F20, and a `Done()` channel for the 1,000-step cancellation. Its database/sql `Commit` rolls back silently, so `GetAutocommit` detection and its diagnostic change (a SPEC-visible change), and it adds about 10 non-stdlib packages, relaxing the module success criterion. That switch gets its own design doc |
 | Runner port effort (largest unit) | Track Step 11 against the 16–25 person-week band at each sub-machine boundary. Above 26 person-weeks, re-plan before continuing |
 | Type-safety loss in the `InputCoordinator` and other state machines | Transliteration rules, linters, the per-sub-machine mutation check in Step 11, and `-race` |
+| vt100 0.18.1 panics at screen.rs:985 when a screen holding wide cells is resized to two or three columns; the A10 floor does not prevent it, so the Rust runner can panic on such panes (found by the seeded fuzz stream fuzz:grammar:00010) | The Go port keeps bug-for-bug parity for the rewrite and the seeded-screen golden records the panic. A follow-up change after cutover fixes it in the Go emulator with its own SPEC text |
 | Load-sensitive real-time tests (3/1,468 flaked under load in Rust) | Real time only in OS-level tests, with tolerant deadlines; the `t.Parallel()` policy keeps clock-driven tests deterministic |
 
 ---
@@ -440,13 +441,13 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 
 ### Step 5: SPEC amendments
 
-- [ ] A1: the error strings from Step 4, at their owning sections <!-- completed: -->
+- [x] A1: the error strings from Step 4, at their owning sections <!-- completed: 2026-11-24T13:38 -->
 - [x] A2: library-defined cause texts <!-- completed: 2026-11-24T11:38 -->
 - [x] A3: the `--database-url` repeat rule <!-- completed: 2026-11-24T11:38 -->
 - [x] A4: body validation after the schema guard <!-- completed: 2026-11-24T11:38 -->
 - [x] A6: inherited signal dispositions and blocked signals are not part of the contract <!-- completed: 2026-11-24T11:38 -->
 - [x] A7: observable subprocess-runner guarantees <!-- completed: 2026-11-24T11:38 -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md` for the facts it carries from A1, A3 and A4 <!-- completed: -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` for the facts it carries from A1, A3 and A4 <!-- completed: 2026-11-24T13:38 -->
 
 ### Step 6: Documentation and rules
 
@@ -488,6 +489,8 @@ COMMENT(tester): Pair A (Step 8 tasks 5–6) and the broker runtime unit hold th
 - [ ] G4 passes in CI and locally with `--corpus`; add `TestCodingAgentDetector_FixtureGolden` to `coding_agent_detector_test.go` and write its generated block with the update mode <!-- completed: -->
 - [ ] `multiplexer*.go`: tmux, herdr (F13), caller verification and layout <!-- completed: -->
 - [ ] `pane_lock.go` <!-- completed: -->
+
+COMMENT(director): Step 9 arbitration (Tester-C, U3): (b). Pure per-fixture classification/extraction tests of src/coding_agent/catalog.rs and detector.rs that hard-code embedded fixture ids or rule ids become G5 omissions whose replacement is TestCodingAgentDetector_FixtureGolden; the behavioral ones (answer-plan matching, fingerprint equality/inequality, primary-vs-alternate replay, edited-fixture guards) are ported by selecting fixtures and plans through the catalog's own provenance (a plan's fixture_ids, a rule's kind) and asserting relations, not embedded values, as § Testing and .claude/rules/code-quality.md require.
 
 ### Step 10: Stage 3 — OS layer and lifecycle commands
 
