@@ -7,9 +7,11 @@ import (
 	"math"
 	"math/rand/v2"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/himkt/cafleet/internal/vt"
@@ -91,6 +93,10 @@ func (o *transportTestObserver) observe(screen *screenSnapshot) error {
 
 func (o *transportTestObserver) parserFailure() error {
 	return nil
+}
+
+func (o *transportTestObserver) inputHealth() observationHealth {
+	panic("the transport fixture observer is never asked to quiesce input")
 }
 
 // feedObserved is the Rust test-only TerminalState::feed_observed: it reports either failure
@@ -896,6 +902,10 @@ func (o *seededScreenObserver) observe(screen *screenSnapshot) error {
 
 func (o *seededScreenObserver) parserFailure() error {
 	return nil
+}
+
+func (o *seededScreenObserver) inputHealth() observationHealth {
+	panic("the seeded screen observer is never asked to quiesce input")
 }
 
 // replaySeededStream feeds the stream through TerminalState with its per-step split, counting a
@@ -1971,3 +1981,158 @@ var seededScreenGolden = []seededScreenRecord{
 	{name: "fuzz:random:00330", steps: 909, final: 0xa60e65fdb1c826a9, chain: 0x2b54718fd80a8f61},
 	// END GENERATED
 }
+
+// fixtureIOError is a fixture I/O failure of errno kind with its own message, the Go form of
+// Rust's io::Error::new(kind, message): errors.Is matches the kind, and Error is the message.
+type fixtureIOError struct {
+	kind    syscall.Errno
+	message string
+}
+
+func (e fixtureIOError) Error() string { return e.message }
+
+func (e fixtureIOError) Is(target error) bool { return target == e.kind }
+
+// fakeInput is terminal input that first fails interruptions reads with EINTR, then yields its
+// queued chunks one per read, then EAGAIN, or end of file once eof is set.
+type fakeInput struct {
+	chunks        [][]byte
+	eof           bool
+	consumed      []byte
+	interruptions int
+}
+
+func newFakeInput(data []byte, width int) *fakeInput {
+	if width <= 0 {
+		panic("a fake input chunk width is positive")
+	}
+	input := &fakeInput{}
+	for len(data) > 0 {
+		count := min(width, len(data))
+		input.chunks = append(input.chunks, slices.Clone(data[:count]))
+		data = data[count:]
+	}
+	return input
+}
+
+func (f *fakeInput) push(chunk []byte) {
+	f.chunks = append(f.chunks, slices.Clone(chunk))
+}
+
+func (f *fakeInput) tryRead(target []byte) (int, error) {
+	if f.interruptions > 0 {
+		f.interruptions--
+		return 0, syscall.EINTR
+	}
+	if len(f.chunks) == 0 {
+		if f.eof {
+			return 0, nil
+		}
+		return 0, syscall.EAGAIN
+	}
+	chunk := f.chunks[0]
+	count := copy(target, chunk)
+	if count < len(chunk) {
+		f.chunks[0] = chunk[count:]
+	} else {
+		f.chunks = f.chunks[1:]
+	}
+	f.consumed = append(f.consumed, target[:count]...)
+	return count, nil
+}
+
+// fakePty is a PTY whose child side reads from output and whose master side records every
+// offer. failure refuses every write, fault only the next one.
+type fakePty struct {
+	output   *fakeInput
+	reads    int
+	written  []byte
+	offers   [][]byte
+	blocked  bool
+	failure  opt[syscall.Errno]
+	fault    opt[syscall.Errno]
+	maxWrite int
+	sizes    []terminalSize
+	closed   bool
+}
+
+func newFakePty(output []byte, width int) *fakePty {
+	return &fakePty{output: newFakeInput(output, width), maxWrite: math.MaxInt}
+}
+
+func (f *fakePty) tryRead(target []byte) (int, error) {
+	f.reads++
+	return f.output.tryRead(target)
+}
+
+func (f *fakePty) tryWrite(data []byte) (int, error) {
+	if len(data) == 0 {
+		panic("a PTY write offers bytes")
+	}
+	if f.blocked {
+		return 0, syscall.EAGAIN
+	}
+	f.offers = append(f.offers, slices.Clone(data))
+	kind, faulted := f.fault.get()
+	if faulted {
+		f.fault = none[syscall.Errno]()
+	} else {
+		kind, faulted = f.failure.get()
+	}
+	if faulted {
+		return 0, fixtureIOError{kind: kind, message: "fixture PTY write failure"}
+	}
+	count := min(len(data), f.maxWrite)
+	f.written = append(f.written, data[:count]...)
+	return count, nil
+}
+
+func (f *fakePty) resize(size terminalSize) error {
+	f.sizes = append(f.sizes, size)
+	return nil
+}
+
+func (f *fakePty) close() error {
+	f.closed = true
+	return nil
+}
+
+// fakeDisplay is a display that records accepted bytes; ordering logs each write as "display".
+type fakeDisplay struct {
+	bytes    []byte
+	blocked  bool
+	broken   bool
+	maxWrite opt[int]
+	ordering *[]string
+}
+
+func (f *fakeDisplay) tryWrite(data []byte) (int, error) {
+	if f.broken {
+		return 0, syscall.EPIPE
+	}
+	if f.blocked {
+		return 0, syscall.EAGAIN
+	}
+	if f.ordering != nil {
+		*f.ordering = append(*f.ordering, "display")
+	}
+	count := len(data)
+	if limit, set := f.maxWrite.get(); set {
+		count = min(count, limit)
+	}
+	f.bytes = append(f.bytes, data[:count]...)
+	return count, nil
+}
+
+func (f *fakeDisplay) tryFlush() error {
+	if f.blocked {
+		return syscall.EAGAIN
+	}
+	return nil
+}
+
+var (
+	_ byteInput = (*fakeInput)(nil)
+	_ ptyIo     = (*fakePty)(nil)
+	_ display   = (*fakeDisplay)(nil)
+)
