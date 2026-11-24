@@ -74,7 +74,7 @@ func sqlRows(conn *dbConn, sql string, args ...any) ([][]any, error) {
 	})
 }
 
-func classified(err error) error {
+func classifiedFailure(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -341,7 +341,7 @@ func TestDb_ExistingFileOpener_AnExistingReadOnlyConnectionKeepsPragmasAndRefuse
 	if !errors.Is(failure, sqlite3.READONLY) {
 		t.Fatalf("a valid write is refused as read-only: %v", failure)
 	}
-	mapped := classified(failure)
+	mapped := classifiedFailure(failure)
 	if kind, _ := cafleetKind(mapped); kind != errorDatabaseIO || mapped.Error() != "database error: attempt to write a readonly database" {
 		t.Fatalf("sqliteError = %v %q", kind, mapped)
 	}
@@ -1246,12 +1246,12 @@ func TestDb_SqliteErrorKeepsSqlitesOwnMessage(t *testing.T) {
 	reader := fileConn(t, databaseURLFor(path))
 	mustExecBatch(t, reader, "PRAGMA busy_timeout=0")
 	_, raw := sqlRows(reader, "SELECT * FROM probe")
-	mapped := classified(raw)
+	mapped := classifiedFailure(raw)
 	if kind, _ := cafleetKind(mapped); kind != errorDatabaseBusy || mapped.Error() != "database error: database is locked" {
 		t.Fatalf("classified(%v) = %v %q", raw, kind, mapped)
 	}
-	if classified(nil) != nil {
-		t.Fatal("classified(nil) is nil")
+	if classifiedFailure(nil) != nil {
+		t.Fatal("classifiedFailure(nil) is nil")
 	}
 }
 
@@ -1266,7 +1266,7 @@ func TestDb_DatabaseScopeTests_ExpiredCompletionCommitsUncontendedWork(t *testin
 		t.Fatalf("an expired budget: %v", err)
 	}
 	_, err = completeDatabaseBudget(ctx, conn, expired, noValue(func(ctx context.Context, conn *dbConn) error {
-		return classified(conn.raw.Exec("BEGIN IMMEDIATE; INSERT INTO probe VALUES(42); COMMIT;"))
+		return classifiedFailure(conn.raw.Exec("BEGIN IMMEDIATE; INSERT INTO probe VALUES(42); COMMIT;"))
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -1296,10 +1296,10 @@ func TestDb_DatabaseScopeTests_CompletionWaitsForAReaderToReleaseCommitAfterInpu
 		time.Sleep(30 * time.Millisecond)
 		_, err := completeDatabaseBudget(ctx, conn, at, noValue(func(ctx context.Context, conn *dbConn) error {
 			if err := conn.raw.Exec("BEGIN IMMEDIATE; UPDATE probe SET value=42"); err != nil {
-				return classified(err)
+				return classifiedFailure(err)
 			}
 			close(release)
-			return classified(conn.raw.Exec("COMMIT"))
+			return classifiedFailure(conn.raw.Exec("COMMIT"))
 		}))
 		if err != nil {
 			return err
@@ -1331,7 +1331,7 @@ func TestDb_DatabaseScopeTests_ExpiredCompletionReportsContentionAfterBoundedGra
 	expired := deadlineUntil(started.Add(-time.Millisecond))
 	_, err := completeDatabaseBudget(ctx, conn, expired, noValue(func(ctx context.Context, conn *dbConn) error {
 		_, err := sqlExecute(conn, "INSERT INTO probe VALUES(42)")
-		return classified(err)
+		return classifiedFailure(err)
 	}))
 	elapsed := time.Since(started)
 	if err == nil || !strings.Contains(err.Error(), "database is locked") {
@@ -1460,7 +1460,7 @@ func TestDb_DatabaseScopeTests_NestedExitRestoresTheEarliestOuterDeadlineOnEvery
 				return withDatabaseBudget(ctx, conn, newDeadline(), func(ctx context.Context, conn *dbConn) (int64, error) {
 					rows, err := sqlRows(conn, "SELECT value FROM probe")
 					if err != nil {
-						return 0, classified(err)
+						return 0, classifiedFailure(err)
 					}
 					return rows[0][0].(int64), nil
 				})
@@ -1494,7 +1494,7 @@ func TestDb_DatabaseScopeTests_ConsecutiveSqlWaitsShareOneAbsoluteDeadline(t *te
 	read := func(conn *dbConn) (int64, error) {
 		rows, err := sqlRows(conn, "SELECT value FROM probe")
 		if err != nil {
-			return 0, classified(err)
+			return 0, classifiedFailure(err)
 		}
 		return rows[0][0].(int64), nil
 	}
@@ -1553,10 +1553,10 @@ func TestDb_DatabaseScopeTests_SharedDeadlineLoweredMidScopeAbortsTheRunningWait
 			_, err := withSharedDatabaseDeadline(ctx, conn, started.Add(30*time.Second), shared, noValue(func(ctx context.Context, conn *dbConn) error {
 				if tc.busy {
 					_, err := sqlExecute(conn, "INSERT INTO probe VALUES(1)")
-					return classified(err)
+					return classifiedFailure(err)
 				}
 				_, err := sqlRows(conn, slowSum)
-				return classified(err)
+				return classifiedFailure(err)
 			}))
 			elapsed := time.Since(started)
 			<-lowered
@@ -1650,7 +1650,7 @@ func TestDb_DatabaseScopeTests_SharedDeadlineLeftUnsetBoundsTheScopeByItsOwnDead
 	value, err := withSharedDatabaseDeadline(ctx, conn, time.Now().Add(5*time.Second), &sharedDeadline{}, func(ctx context.Context, conn *dbConn) (int64, error) {
 		rows, err := sqlRows(conn, "WITH RECURSIVE counter(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM counter WHERE x<10000) SELECT sum(x) FROM counter")
 		if err != nil {
-			return 0, classified(err)
+			return 0, classifiedFailure(err)
 		}
 		return rows[0][0].(int64), nil
 	})
@@ -1731,7 +1731,7 @@ func TestDb_TestSupport_ReadBudgetsRecordTheInheritedBudgetOfEachRead(t *testing
 	at := deadlineUntil(time.Now().Add(3 * time.Second))
 	_, err := withDatabaseBudget(ctx, conn, at, noValue(func(ctx context.Context, conn *dbConn) error {
 		_, err := sqlRows(conn, "SELECT * FROM fleets")
-		return classified(err)
+		return classifiedFailure(err)
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -1765,7 +1765,7 @@ func TestDb_TestSupport_FaultPlansFailMatchingStatementsUntilCleared(t *testing.
 			}
 			tc.plan.arm(t, conn)
 			err := insert(conn)
-			if err == nil || !strings.Contains(classified(err).Error(), tc.cause) {
+			if err == nil || !strings.Contains(classifiedFailure(err).Error(), tc.cause) {
 				t.Fatalf("%s: armed insert = %v", tc.name, err)
 			}
 			if !conn.raw.GetAutocommit() {

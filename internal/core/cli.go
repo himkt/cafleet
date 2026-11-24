@@ -1680,7 +1680,9 @@ func dispatch(s settings, command cliCommand) (err error) {
 	switch command := command.(type) {
 	case setupArgs:
 		return setupRun(s, command)
-	case doctorArgs, memberRunCommand:
+	case doctorArgs:
+		return doctor(s, command)
+	case memberRunCommand:
 		return commandNotYetPorted()
 	case permissionCommandInspect, permissionCommandRespond:
 		return permissionDispatch(ctx, s, command.(permissionCommand))

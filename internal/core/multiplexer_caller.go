@@ -259,6 +259,21 @@ func identificationGuidance(backend muxBackend) string {
 
 // sharedServerMessage is the shared-server refusal body, without the `cafleet fleet create `
 // prefix.
+// sharedServerOf is the Rust caller::shared_server, renamed because it collides with the
+// sharedServer type: the first ancestor whose argv matches a backend's shared-server signature.
+func sharedServerOf(a ancestry) opt[sharedServer] {
+	for _, entry := range a.entries {
+		for _, agent := range codingAgentAll() {
+			for _, signature := range agent.sharedServerSignatures() {
+				if signature.matches(entry.argv) {
+					return some(sharedServer{label: signature.label(agent), pid: entry.pid})
+				}
+			}
+		}
+	}
+	return none[sharedServer]()
+}
+
 func sharedServerMessage(shared sharedServer) string {
 	return fmt.Sprintf("cannot verify this session's pane: a shared %s server (pid %d) runs this command, so its multiplexer environment can belong to another pane; ask the user to read the Director pane ID and server with %s in tmux, or with %s in herdr, %s", shared.label, shared.pid, tmuxGuidance, herdrGuidance, rerun)
 }

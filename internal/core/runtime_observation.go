@@ -15,6 +15,29 @@ func observationMomentSample(c clock) observationMoment {
 	return observationMoment{monotonic: c.now(), observedAt: wallStamp(c)}
 }
 
+// observationPhase names the runner step a test hook interrupts; production has no hooks.
+type observationPhase uint8
+
+const (
+	observationPhaseChildOutput observationPhase = iota + 1
+	observationPhaseQuietTimer
+	observationPhaseResize
+	observationPhaseShutdownDrain
+)
+
+type observationOperation uint8
+
+const (
+	observationOperationParser observationOperation = iota + 1
+	observationOperationDetector
+)
+
+// observationHooks lets a test fail an observation step; production observers have none.
+type observationHooks interface {
+	before(site observationPhase, operation observationOperation) error
+	orderShutdownParsingAfterNativeExit(deadline time.Time) bool
+}
+
 type observationStatus struct {
 	visibility         visibility
 	eligibility        inputEligibility
