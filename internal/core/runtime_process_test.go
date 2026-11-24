@@ -12,6 +12,67 @@ import (
 	"time"
 )
 
+// fixtureProcessTable is a literal process table: absent pids read as absent and unreadable
+// pids fail with their message.
+type fixtureProcessTable struct {
+	own              int64
+	entries          map[int64]processEntry
+	unreadablePIDs   map[int64]string
+	nestedNamespace  bool
+	namespaceFailure opt[string]
+}
+
+var _ processTable = (*fixtureProcessTable)(nil)
+
+func newFixtureProcessTable(own int64) *fixtureProcessTable {
+	return &fixtureProcessTable{own: own, entries: map[int64]processEntry{}, unreadablePIDs: map[int64]string{}}
+}
+
+func (f *fixtureProcessTable) process(pid, parent int64, argv ...string) *fixtureProcessTable {
+	if _, declared := f.entries[pid]; declared {
+		panic(fmt.Sprintf("fixture pid %d is declared twice", pid))
+	}
+	f.entries[pid] = processEntry{parent: parent, argv: argv}
+	return f
+}
+
+func (f *fixtureProcessTable) unreadable(pid int64, message string) *fixtureProcessTable {
+	if _, declared := f.unreadablePIDs[pid]; declared {
+		panic(fmt.Sprintf("fixture pid %d is declared unreadable twice", pid))
+	}
+	f.unreadablePIDs[pid] = message
+	return f
+}
+
+func (f *fixtureProcessTable) nested() *fixtureProcessTable {
+	f.nestedNamespace = true
+	return f
+}
+
+func (f *fixtureProcessTable) namespaceError(message string) *fixtureProcessTable {
+	f.namespaceFailure = some(message)
+	return f
+}
+
+func (f *fixtureProcessTable) ownPID() int64 {
+	return f.own
+}
+
+func (f *fixtureProcessTable) entry(pid int64) (processEntry, bool, error) {
+	if message, unreadable := f.unreadablePIDs[pid]; unreadable {
+		return processEntry{}, false, appError(message)
+	}
+	entry, present := f.entries[pid]
+	return entry, present, nil
+}
+
+func (f *fixtureProcessTable) nestedPIDNamespace() (bool, error) {
+	if message, failed := f.namespaceFailure.get(); failed {
+		return false, appError(message)
+	}
+	return f.nestedNamespace, nil
+}
+
 // zombieInGroup starts `sleep 30` in process group group (0 makes it lead its own group), kills
 // it and waits until it is an unreaped zombie that still matches its recorded identity.
 func zombieInGroup(t *testing.T, group int) (*exec.Cmd, processIdentity) {
