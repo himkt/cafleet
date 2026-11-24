@@ -1689,8 +1689,10 @@ func invocationConnection(ctx context.Context, databaseURL string, d deadline) (
 // commandNotYetPorted.
 func dispatch(s settings, command cliCommand) (err error) {
 	ctx := context.Background()
-	switch command.(type) {
-	case setupArgs, doctorArgs, memberRunCommand, permissionCommandInspect:
+	switch command := command.(type) {
+	case setupArgs:
+		return setupRun(s, command)
+	case doctorArgs, memberRunCommand, permissionCommandInspect:
 		return commandNotYetPorted()
 	case fleetCommandCreate, fleetCommandList, fleetCommandShow, fleetCommandDelete,
 		memberCommandCreate, memberCommandDelete, memberCommandShow, memberCommandList,
