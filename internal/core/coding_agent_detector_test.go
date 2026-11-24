@@ -1287,6 +1287,883 @@ func TestCodingAgentDetector_OpencodeShellMode_AShellModeComposerWithTheNormalGl
 	}
 }
 
+const (
+	panelCols      = 120
+	panelSeparator = 80
+	panelStyle     = "\x1b[2;48;5;235m"
+)
+
+var panelForm = []string{
+	"Synthetic permission request",
+	"Operation: write disposable.txt",
+	"> Allow once",
+	"  Deny once",
+	"Request form: synthetic-only",
+	"Selection: ",
+}
+
+type panelRow struct {
+	line         int
+	left         string
+	hasSeparator bool
+	separatorCol int
+	style        string
+	panel        string
+}
+
+func newPanelRow(line int, left string, separator opt[int]) panelRow {
+	col, has := separator.get()
+	return panelRow{line: line, left: left, hasSeparator: has, separatorCol: col, style: panelStyle, panel: " src/lib.rs +after"}
+}
+
+// panelScreen writes each row at its 1-based screen row; a separator row draws the glyph at its
+// 0-based column in its style, then one panel cell run in the same background.
+func panelScreen(t testing.TB, rows []panelRow, cursor [2]int) screenSnapshot {
+	t.Helper()
+	bytes := []byte("\x1b[0m\x1b[2J")
+	for _, row := range rows {
+		bytes = fmt.Appendf(bytes, "\x1b[%d;1H%s", row.line, row.left)
+		if row.hasSeparator {
+			bytes = fmt.Appendf(bytes, "\x1b[%d;%dH%s│\x1b[22m%s\x1b[0m", row.line, row.separatorCol+1, row.style, row.panel)
+		}
+	}
+	bytes = fmt.Appendf(bytes, "\x1b[%d;%dH", cursor[0]+1, cursor[1]+1)
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: panelCols})
+	mustFeed(t, terminal, bytes)
+	return terminal.snapshot()
+}
+
+// panelFormScreen is the synthetic permission form at rows 19-24 with a separator at columns[i]
+// on form row i (none past the slice) and, when above is set, on every row above the form.
+func panelFormScreen(t testing.TB, columns []opt[int], above opt[int]) screenSnapshot {
+	t.Helper()
+	var rows []panelRow
+	if _, set := above.get(); set {
+		for line := 1; line < 19; line++ {
+			rows = append(rows, newPanelRow(line, "", above))
+		}
+	}
+	for index, left := range panelForm {
+		separator := none[int]()
+		if index < len(columns) {
+			separator = columns[index]
+		}
+		rows = append(rows, newPanelRow(19+index, left, separator))
+	}
+	return panelScreen(t, rows, [2]int{23, 11})
+}
+
+func separatorAt(columns ...int) []opt[int] {
+	out := make([]opt[int], len(columns))
+	for index, col := range columns {
+		out[index] = some(col)
+	}
+	return out
+}
+
+func declaringPanelDefinition() any {
+	value := syntheticDefinitions()
+	jset(value, "│", "codex", "profile", "rules", 0, "region", "panel_separator")
+	return value
+}
+
+func assertSameRequest(t testing.TB, name string, clipped, full *screenObservation) {
+	t.Helper()
+	if clipped.kind != observationKindPermissionRequest || clipped.ruleID != syntheticRule || clipped.matchEvidence != matchEvidenceComplete {
+		t.Fatalf("%s: %s %s %s", name, clipped.kind.debugString(), clipped.ruleID, clipped.matchEvidence.debugString())
+	}
+	if clipped.rawEvidence.operation != full.rawEvidence.operation || clipped.rawEvidence.operationRows != full.rawEvidence.operationRows ||
+		clipped.rawEvidence.excerpt != full.rawEvidence.excerpt || clipped.rawEvidence.choices.set != full.rawEvidence.choices.set ||
+		!slices.Equal(clipped.rawEvidence.choices.values, full.rawEvidence.choices.values) {
+		t.Fatalf("%s: evidence differs from the full-width form", name)
+	}
+	if !fingerprintsEqual(clipped.fingerprint, full.fingerprint) {
+		t.Fatalf("%s: the fingerprints differ", name)
+	}
+}
+
+func TestCodingAgentDetector_PanelClipping_ASharedSeparatorColumnClipsEveryPanelRowForADeclaringRule(t *testing.T) {
+	t.Parallel()
+	fullScreen := panelFormScreen(t, nil, none[int]())
+	full := syntheticObservation(t, declaringPanelDefinition(), &fullScreen)
+	if full.ruleID != syntheticRule {
+		t.Fatalf("full-width rule %s", full.ruleID)
+	}
+	every := separatorAt(panelSeparator, panelSeparator, panelSeparator, panelSeparator, panelSeparator, panelSeparator)
+	for _, tc := range []struct {
+		name   string
+		screen screenSnapshot
+	}{
+		{"every form row", panelFormScreen(t, every, none[int]())},
+		{"every row above and on the form", panelFormScreen(t, every, some(panelSeparator))},
+		{"a full-width last row", panelFormScreen(t, every[:5], some(panelSeparator))},
+		{"one panel row", panelFormScreen(t, []opt[int]{none[int](), some(panelSeparator)}, none[int]())},
+	} {
+		clipped := syntheticObservation(t, declaringPanelDefinition(), &tc.screen)
+		assertSameRequest(t, tc.name, &clipped, &full)
+	}
+}
+
+func TestCodingAgentDetector_PanelClipping_AClippedRequestAnswersThroughTheSamePlan(t *testing.T) {
+	t.Parallel()
+	value := inspectionFixtureDefinition()
+	jset(value, "│", "codex", "profile", "rules", 0, "region", "panel_separator")
+	catalog := mustLoadCatalog(t, value)
+	d := newDetector(catalog, codingAgentCodex, some(syntheticVersion))
+	plan, ok := catalog.answerPlan(codingAgentCodex, syntheticRule, answerKeyDecision{decision: permissionDecisionAllow})
+	if !ok {
+		t.Fatal("the allow plan")
+	}
+	every := separatorAt(panelSeparator, panelSeparator, panelSeparator, panelSeparator, panelSeparator, panelSeparator)
+	clipped := mustMatchAnswer(t, d, panelFormScreen(t, every, some(panelSeparator)), &plan, "the clipped form")
+	full := mustMatchAnswer(t, d, panelFormScreen(t, nil, none[int]()), &plan, "the full-width form")
+	if !slices.Equal(clipped.choices, full.choices) || !clipped.semantic.equal(&full.semantic) || clipped.focus != full.focus {
+		t.Fatal("the clipped form answers as the full-width form")
+	}
+}
+
+func TestCodingAgentDetector_PanelClipping_DifferingSeparatorColumnsClipNoRow(t *testing.T) {
+	t.Parallel()
+	for _, columns := range [][]opt[int]{separatorAt(80, 81, 80, 80, 80, 80), separatorAt(80, 80, 80, 80, 80, 60)} {
+		screen := panelFormScreen(t, columns, none[int]())
+		if observation := syntheticObservation(t, declaringPanelDefinition(), &screen); observation.ruleID == syntheticRule {
+			t.Fatalf("%v: the rule matches", columns)
+		}
+	}
+	screen := panelFormScreen(t, separatorAt(80, 80, 80, 80, 80, 80), some(81))
+	if observation := syntheticObservation(t, declaringPanelDefinition(), &screen); observation.ruleID == syntheticRule {
+		t.Fatal("rows above use another column")
+	}
+}
+
+func TestCodingAgentDetector_PanelClipping_ASeparatorGlyphOnItsRowsBackgroundIsNeverASeparator(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ style, rowBackground string }{{"", ""}, {"\x1b[2m", ""}, {"\x1b[2;48;5;235m", "\x1b[48;5;235m\x1b[2K"}} {
+		var rows []panelRow
+		for index, left := range panelForm {
+			row := newPanelRow(19+index, tc.rowBackground+left, some(panelSeparator))
+			row.style = tc.style
+			rows = append(rows, row)
+		}
+		screen := panelScreen(t, rows, [2]int{23, 11})
+		if observation := syntheticObservation(t, declaringPanelDefinition(), &screen); observation.ruleID == syntheticRule {
+			t.Fatalf("%q: the rule matches", tc.style)
+		}
+	}
+	var boxed []panelRow
+	for index, left := range panelForm {
+		boxed = append(boxed, newPanelRow(19+index, left, none[int]()))
+	}
+	boxed = append(boxed, panelRow{line: 10, left: fmt.Sprintf("%-50s│ touch /tmp/cafleet-f-out/p4.txt", "")})
+	fullScreen := panelFormScreen(t, nil, none[int]())
+	full := syntheticObservation(t, declaringPanelDefinition(), &fullScreen)
+	boxedScreen := panelScreen(t, boxed, [2]int{23, 11})
+	gutter := syntheticObservation(t, declaringPanelDefinition(), &boxedScreen)
+	assertSameRequest(t, "a boxed gutter", &gutter, &full)
+}
+
+func singleCellPanel(t testing.TB, col int, panel string) screenSnapshot {
+	t.Helper()
+	var rows []panelRow
+	for index, left := range panelForm {
+		row := newPanelRow(19+index, left, some(col))
+		row.panel = panel
+		rows = append(rows, row)
+	}
+	return panelScreen(t, rows, [2]int{23, 11})
+}
+
+func TestCodingAgentDetector_PanelClipping_TheSeparatorColumnLiesFromColumn40BeforeTheLastColumn(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		col   int
+		panel string
+	}{{39, " "}, {panelCols - 1, ""}} {
+		screen := singleCellPanel(t, tc.col, tc.panel)
+		if observation := syntheticObservation(t, declaringPanelDefinition(), &screen); observation.ruleID == syntheticRule {
+			t.Fatalf("column %d separates", tc.col)
+		}
+	}
+	fullScreen := panelFormScreen(t, nil, none[int]())
+	full := syntheticObservation(t, declaringPanelDefinition(), &fullScreen)
+	for _, col := range []int{40, panelCols - 2} {
+		screen := singleCellPanel(t, col, " ")
+		clipped := syntheticObservation(t, declaringPanelDefinition(), &screen)
+		assertSameRequest(t, fmt.Sprintf("column %d", col), &clipped, &full)
+	}
+}
+
+func TestCodingAgentDetector_PanelClipping_AClippedRowIsNeverSoftJoinedToTheNextRow(t *testing.T) {
+	t.Parallel()
+	var rows []panelRow
+	for index, left := range panelForm {
+		row := newPanelRow(19+index, left, some(panelSeparator))
+		if index == 1 {
+			row.panel = " " + strings.Repeat("x", 45)
+		}
+		rows = append(rows, row)
+	}
+	screen := panelScreen(t, rows, [2]int{23, 11})
+	if !screen.screen.RowWrapped(19) {
+		t.Fatal("the overflowing panel text wraps the operation row")
+	}
+	if unclipped := syntheticObservation(t, syntheticDefinitions(), &screen); unclipped.ruleID == syntheticRule {
+		t.Fatal("unclipped, the wrapped operation row joins the next row")
+	}
+	fullScreen := panelFormScreen(t, nil, none[int]())
+	full := syntheticObservation(t, declaringPanelDefinition(), &fullScreen)
+	clipped := syntheticObservation(t, declaringPanelDefinition(), &screen)
+	assertSameRequest(t, "a wrapped panel row", &clipped, &full)
+}
+
+func panelStateDefinition(separator bool) any {
+	value := declaringPanelDefinition()
+	r := parseTestJSON(`{
+		"id":"synthetic-panel-state","priority":100,"observation":"question",
+		"region":{"screen":"either","start_pattern":"^Status idle +│ ready$","end_pattern":"^Status idle +│ ready$","max_rows":1,"cursor":"any"},
+		"matchers":[{"id":"status","scope":"line","pattern":"^Status idle +│ ready$"}],
+		"extract":{"operation":null,"choices":[]},
+		"verified_noninteraction":false
+	}`)
+	if separator {
+		jset(r, "│", "region", "panel_separator")
+	}
+	jarray(jget(value, "codex", "profile", "rules")).push(r)
+	jset(value, ja(syntheticRule, "synthetic-panel-state"), "codex", "profile", "capabilities", "detection", "rule_ids")
+	return value
+}
+
+func TestCodingAgentDetector_PanelClipping_RulesWithoutAPanelSeparatorSeeUnclippedRows(t *testing.T) {
+	t.Parallel()
+	status := newPanelRow(5, "Status idle", some(panelSeparator))
+	status.panel = " ready"
+	screen := panelScreen(t, []panelRow{status}, [2]int{0, 0})
+	unclipped := syntheticObservation(t, panelStateDefinition(false), &screen)
+	if unclipped.ruleID != "synthetic-panel-state" || unclipped.kind != observationKindQuestion {
+		t.Fatalf("unclipped: %s %s", unclipped.ruleID, unclipped.kind.debugString())
+	}
+	if clipped := syntheticObservation(t, panelStateDefinition(true), &screen); clipped.ruleID == "synthetic-panel-state" {
+		t.Fatal("a declaring rule sees the clipped row")
+	}
+}
+
+func questionDetector(t testing.TB) (*profileCatalog, *detector) {
+	t.Helper()
+	catalog := mustLoadCatalog(t, questionFixtureDefinition())
+	return catalog, newDetector(catalog, codingAgentCodex, some(syntheticVersion))
+}
+
+func questionPlan(t testing.TB, catalog *profileCatalog, request string, key answerKey) answerPlan {
+	t.Helper()
+	plan, ok := catalog.answerPlan(codingAgentCodex, request, key)
+	if !ok {
+		t.Fatal("synthetic question profile plan")
+	}
+	return plan
+}
+
+func questionMatched(t testing.TB, focused []string, id string) (answerMatch, bool) {
+	t.Helper()
+	catalog, d := questionDetector(t)
+	plan := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: id})
+	screen := screenOf(t, questionFixtureForm(focused))
+	matched, ok, err := d.matchAnswer(&screen, &plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return matched, ok
+}
+
+func TestCodingAgentDetector_QuestionAnswers_AQuestionFormIsACompleteQuestionWithItsChoiceLabels(t *testing.T) {
+	t.Parallel()
+	_, d := questionDetector(t)
+	screen := screenOf(t, questionFixtureForm([]string{"accept"}))
+	observation, err := d.observe(&screen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.kind != observationKindQuestion || observation.ruleID != questionRule || observation.matchEvidence != matchEvidenceComplete || observation.fingerprint == nil {
+		t.Fatalf("question: %s %s %s", observation.kind.debugString(), observation.ruleID, observation.matchEvidence.debugString())
+	}
+	if !slices.Equal(observation.rawEvidence.choices.values, []string{"Accept the change", "Keep current", "Ask later"}) {
+		t.Fatalf("choices %q", observation.rawEvidence.choices.values)
+	}
+}
+
+func TestCodingAgentDetector_QuestionAnswers_MatchAnswerMatchesAQuestionForEachOfItsChoicePlans(t *testing.T) {
+	t.Parallel()
+	catalog, _ := questionDetector(t)
+	for _, id := range []string{"decline", "later"} {
+		matched, ok := questionMatched(t, []string{"accept"}, id)
+		if !ok {
+			t.Fatalf("%s: a choice plan matches its question", id)
+		}
+		want := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: id})
+		if !matched.plan.equal(&want) || !slices.Equal(matched.choices, []string{"Accept the change", "Keep current", "Ask later"}) {
+			t.Fatalf("%s: match plan or choices differ", id)
+		}
+	}
+}
+
+func TestCodingAgentDetector_QuestionAnswers_MatchAnswerRefusesAChoicePlanOnAPermissionFormAndADecisionPlanOnAQuestion(t *testing.T) {
+	t.Parallel()
+	catalog, d := questionDetector(t)
+	permission := screenOf(t, inspectionFixtureForm("write disposable.txt", "synthetic-only"))
+	observed, err := d.observe(&permission)
+	if err != nil || observed.kind != observationKindPermissionRequest {
+		t.Fatalf("permission form: %s %v", observed.kind.debugString(), err)
+	}
+	allow := questionPlan(t, catalog, syntheticRule, answerKeyDecision{decision: permissionDecisionAllow})
+	mustMatchAnswer(t, d, permission, &allow, "the decision plan answers its permission form")
+	for _, id := range []string{"decline", "later"} {
+		plan := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: id})
+		assertNoAnswerMatch(t, d, permission, &plan, id+" on a permission form")
+	}
+	assertNoAnswerMatch(t, d, screenOf(t, questionFixtureForm([]string{"accept"})), &allow, "a decision plan on a question")
+	decline := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: "decline"})
+	assertNoAnswerMatch(t, d, screenOf(t, questionNoticeForm()), &decline, "a choice plan on another question rule")
+}
+
+func TestCodingAgentDetector_QuestionAnswers_MatchAnswerBindsAChoicePlanToItsBackendWhateverTheRunVersion(t *testing.T) {
+	t.Parallel()
+	catalog, _ := questionDetector(t)
+	screen := screenOf(t, questionFixtureForm([]string{"accept"}))
+	decline := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: "decline"})
+	for _, version := range []opt[string]{some("0.0.2-synthetic"), some("99.0.0"), none[string]()} {
+		mustMatchAnswer(t, newDetector(catalog, codingAgentCodex, version), screen, &decline, fmt.Sprint(version))
+	}
+	assertNoAnswerMatch(t, newDetector(catalog, codingAgentClaude, some(syntheticVersion)), screen, &decline, "claude")
+}
+
+func TestCodingAgentDetector_QuestionAnswers_MarkerFocusResolvesTheOneChoiceOnTheMarkerRow(t *testing.T) {
+	t.Parallel()
+	for _, focused := range []string{"accept", "decline", "later"} {
+		for _, id := range []string{"decline", "later"} {
+			matched, ok := questionMatched(t, []string{focused}, id)
+			if !ok || matched.focusedChoice != some(focused) {
+				t.Fatalf("%s %s: focused %v", focused, id, matched.focusedChoice)
+			}
+		}
+	}
+}
+
+func TestCodingAgentDetector_QuestionAnswers_MarkerFocusResolvesNoChoiceWhenTheMarkerRowHoldsNoChoiceLabel(t *testing.T) {
+	t.Parallel()
+	catalog, d := questionDetector(t)
+	unlisted := screenOf(t, []byte("\x1b[0m\x1b[2J\x1b[18;1HSynthetic question?\r\n  Accept the change\r\n  Keep current\r\n> Other option\r\n  Ask later\r\nQuestion end"))
+	decline := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: "decline"})
+	if matched := mustMatchAnswer(t, d, unlisted, &decline, "an unlisted focused option"); matched.focusedChoice != none[string]() {
+		t.Fatalf("focused %v", matched.focusedChoice)
+	}
+}
+
+func TestCodingAgentDetector_QuestionAnswers_MarkerFocusResolvesNoChoiceWhenTheMarkerRowHoldsSeveralChoiceLabels(t *testing.T) {
+	t.Parallel()
+	value := questionFixtureDefinition()
+	jset(value, " / (?P<label>Ask later)$", "codex", "profile", "rules", 1, "matchers", 4, "pattern")
+	catalog := mustLoadCatalog(t, value)
+	plan := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: "decline"})
+	d := newDetector(catalog, codingAgentCodex, some(syntheticVersion))
+	shared := screenOf(t, []byte("\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n  Accept the change\r\n> Keep current / Ask later\r\nQuestion end"))
+	if matched := mustMatchAnswer(t, d, shared, &plan, "two labels on the marker row"); matched.focusedChoice != none[string]() {
+		t.Fatalf("focused %v", matched.focusedChoice)
+	}
+	separate := screenOf(t, []byte("\x1b[0m\x1b[2J\x1b[19;1HSynthetic question?\r\n> Accept the change\r\n  Keep current / Ask later\r\nQuestion end"))
+	if matched := mustMatchAnswer(t, d, separate, &plan, "one label on the marker row"); matched.focusedChoice != some("accept") {
+		t.Fatalf("focused %v", matched.focusedChoice)
+	}
+}
+
+func TestCodingAgentDetector_QuestionAnswers_MarkerFocusIdentityIsTheCaptureAndFocusedChoiceLikeBackgroundFocus(t *testing.T) {
+	t.Parallel()
+	accept, _ := questionMatched(t, []string{"accept"}, "decline")
+	decline, _ := questionMatched(t, []string{"decline"}, "decline")
+	for _, value := range []answerMatch{accept, decline} {
+		encoded, err := encodeJSON([2]any{value.focusCapture, value.focusedChoice})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.focus != string(encoded) {
+			t.Fatalf("focus %q, want %s", value.focus, encoded)
+		}
+	}
+	again, _ := questionMatched(t, []string{"accept"}, "decline")
+	if accept.focus == decline.focus || !accept.semantic.equal(&decline.semantic) || accept.sameRequest(&decline) || !accept.sameRequest(&again) {
+		t.Fatal("a focus move keeps the semantics and changes the request focus")
+	}
+	_, d := questionDetector(t)
+	acceptScreen := screenOf(t, questionFixtureForm([]string{"accept"}))
+	declineScreen := screenOf(t, questionFixtureForm([]string{"decline"}))
+	a, errA := d.observe(&acceptScreen)
+	b, errB := d.observe(&declineScreen)
+	if errA != nil || errB != nil || !fingerprintsEqual(a.fingerprint, b.fingerprint) {
+		t.Fatal("a focus move keeps the episode identity")
+	}
+}
+
+func TestCodingAgentDetector_QuestionAnswers_AnInteractionFrameRejectPatternSuppressesTheRuleAnywhereOnTheScreen(t *testing.T) {
+	t.Parallel()
+	value := questionFixtureDefinition()
+	jset(value, parseTestJSON(`{"require_patterns":[],"reject_patterns":["^Live composer$"]}`), "codex", "profile", "rules", 1, "frame")
+	catalog := mustLoadCatalog(t, value)
+	d := newDetector(catalog, codingAgentCodex, some(syntheticVersion))
+	aloneScreen := screenOf(t, questionFixtureForm([]string{"accept"}))
+	alone, err := d.observe(&aloneScreen)
+	if err != nil || alone.kind != observationKindQuestion || alone.ruleID != questionRule {
+		t.Fatalf("alone: %s %s %v", alone.kind.debugString(), alone.ruleID, err)
+	}
+	quotedScreen := screenOf(t, append(questionFixtureForm([]string{"accept"}), "\x1b[2;1HLive composer"...))
+	quoted, err := d.observe(&quotedScreen)
+	if err != nil || quoted.ruleID == questionRule || quoted.kind == observationKindQuestion {
+		t.Fatalf("quoted: %s %s %v", quoted.kind.debugString(), quoted.ruleID, err)
+	}
+	plan := questionPlan(t, catalog, questionRule, answerKeyChoice{choice: "decline"})
+	assertNoAnswerMatch(t, d, screenOf(t, append(questionFixtureForm([]string{"accept"}), "\x1b[24;1HLive composer"...)), &plan, "a live composer row on the screen")
+}
+
+func TestCodingAgentDetector_QuestionAnswers_AnInteractionFrameRequirePatternMustAppearOnTheScreen(t *testing.T) {
+	t.Parallel()
+	value := questionFixtureDefinition()
+	jset(value, parseTestJSON(`{"require_patterns":["^Footer: question$"],"reject_patterns":["^Live composer$"]}`), "codex", "profile", "rules", 1, "frame")
+	d := newDetector(mustLoadCatalog(t, value), codingAgentCodex, some(syntheticVersion))
+	withoutScreen := screenOf(t, questionFixtureForm([]string{"accept"}))
+	if without, err := d.observe(&withoutScreen); err != nil || without.ruleID == questionRule {
+		t.Fatalf("without the footer: %s %v", without.ruleID, err)
+	}
+	withScreen := screenOf(t, append(questionFixtureForm([]string{"accept"}), "\x1b[2;1HFooter: question"...))
+	if with, err := d.observe(&withScreen); err != nil || with.ruleID != questionRule {
+		t.Fatalf("with the footer: %s %v", with.ruleID, err)
+	}
+}
+
+func gatedDetector(t testing.TB) (*profileCatalog, *detector) {
+	t.Helper()
+	catalog := mustLoadCatalog(t, gatedFixtureDefinition())
+	return catalog, newDetector(catalog, codingAgentCodex, some(syntheticVersion))
+}
+
+func gatedMatched(t testing.TB, screen screenSnapshot, decision permissionDecision) answerMatch {
+	t.Helper()
+	_, d := gatedDetector(t)
+	plan := gatedPlan(t, decision)
+	return mustMatchAnswer(t, d, screen, &plan, "the gated form matches regardless of its focus")
+}
+
+func gatedFocused(t testing.TB, screen screenSnapshot) opt[string] {
+	t.Helper()
+	allow := gatedMatched(t, screen, permissionDecisionAllow)
+	deny := gatedMatched(t, screen, permissionDecisionDeny)
+	if allow.focusedChoice != deny.focusedChoice {
+		t.Fatal("both plans read the same focus matcher")
+	}
+	return allow.focusedChoice
+}
+
+func TestCodingAgentDetector_FocusResolution_FocusStyleBackgroundResolvesTheOneFocusedChoice(t *testing.T) {
+	t.Parallel()
+	_, d := gatedDetector(t)
+	for _, tc := range []struct{ focus, expected string }{{"allow", "allow-once"}, {"deny", "deny-once"}} {
+		screen := screenOf(t, gatedFixtureForm("write disposable.txt", tc.focus))
+		if got := gatedFocused(t, screen); got != some(tc.expected) {
+			t.Fatalf("%s: focused %v", tc.focus, got)
+		}
+		observation, err := d.observe(&screen)
+		if err != nil || observation.kind != observationKindPermissionRequest || observation.ruleID != gatedRule || observation.matchEvidence != matchEvidenceComplete {
+			t.Fatalf("%s: %s %s %v", tc.focus, observation.kind.debugString(), observation.ruleID, err)
+		}
+		if !slices.Equal(observation.rawEvidence.choices.values, []string{"Allow once", "Deny once"}) {
+			t.Fatalf("%s: choices %q", tc.focus, observation.rawEvidence.choices.values)
+		}
+	}
+}
+
+func TestCodingAgentDetector_FocusResolution_FocusStyleBackgroundResolvesNoChoiceForNoneSeveralOrAnUnlistedOption(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		bytes []byte
+	}{
+		{"no styled label", gatedFixtureForm("write disposable.txt", "none")},
+		{"an option without a choice entry", gatedFixtureForm("write disposable.txt", "always")},
+		{"several styled choices", gatedFixtureFormStyled("write disposable.txt", true, []string{"Allow once", "Deny once"}, "", focusSGR)},
+		{"a label only partly styled", []byte("\x1b[0m\x1b[2J\x1b[19;1HSynthetic gated request\r\nOperation: write disposable.txt\r\n  " + focusSGR + "Allow\x1b[0m once   Always allow   Deny once\r\nSelection: ")},
+	} {
+		if got := gatedFocused(t, screenOf(t, tc.bytes)); got != none[string]() {
+			t.Fatalf("%s: focused %v", tc.name, got)
+		}
+	}
+}
+
+func TestCodingAgentDetector_FocusResolution_FocusStyleBackgroundComparesBackgroundsNotThemeColours(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		always     bool
+		row, focus string
+	}{
+		{"indexed theme", true, "\x1b[48;5;236m", "\x1b[48;5;214m"},
+		{"rgb theme", true, "\x1b[48;2;30;30;30m", "\x1b[48;2;10;200;10m"},
+		{"two-option layout", false, "\x1b[48;2;30;30;30m", focusSGR},
+		{"default row background", false, "", "\x1b[48;5;4m"},
+	} {
+		for _, label := range []struct{ label, expected string }{{"Allow once", "allow-once"}, {"Deny once", "deny-once"}} {
+			screen := screenOf(t, gatedFixtureFormStyled("write disposable.txt", tc.always, []string{label.label}, tc.row, tc.focus))
+			if got := gatedFocused(t, screen); got != some(label.expected) {
+				t.Fatalf("%s %s: focused %v", tc.name, label.label, got)
+			}
+		}
+		unfocused := screenOf(t, gatedFixtureFormStyled("write disposable.txt", tc.always, nil, tc.row, tc.focus))
+		if got := gatedFocused(t, unfocused); got != none[string]() {
+			t.Fatalf("%s on the row background: focused %v", tc.name, got)
+		}
+	}
+}
+
+func TestCodingAgentDetector_FocusResolution_StylingOnlyFocusChangeChangesTheRequestFocusButNotItsSemantics(t *testing.T) {
+	t.Parallel()
+	allow := screenOf(t, gatedFixtureForm("write disposable.txt", "allow"))
+	deny := screenOf(t, gatedFixtureForm("write disposable.txt", "deny"))
+	always := screenOf(t, gatedFixtureForm("write disposable.txt", "always"))
+	for _, decision := range []permissionDecision{permissionDecisionAllow, permissionDecisionDeny} {
+		first := gatedMatched(t, allow, decision)
+		moved := gatedMatched(t, deny, decision)
+		unlisted := gatedMatched(t, always, decision)
+		again := gatedMatched(t, allow, decision)
+		if !first.semantic.equal(&moved.semantic) || !slices.Equal(first.choices, moved.choices) ||
+			first.focus == moved.focus || first.focus == unlisted.focus || first.sameRequest(&moved) || !first.sameRequest(&again) {
+			t.Fatalf("%v: a styling-only focus change", decision)
+		}
+	}
+	_, d := gatedDetector(t)
+	a, errA := d.observe(&allow)
+	b, errB := d.observe(&deny)
+	if errA != nil || errB != nil || !fingerprintsEqual(a.fingerprint, b.fingerprint) {
+		t.Fatal("a focus move keeps the episode identity")
+	}
+}
+
+func TestCodingAgentDetector_FocusResolution_ContinuationRuleObservesOnlyTheEmptyReasonDialog(t *testing.T) {
+	t.Parallel()
+	_, d := gatedDetector(t)
+	dialog := screenOf(t, gatedReasonDialog(none[string]()))
+	empty, err := d.observe(&dialog)
+	if err != nil || empty.kind != observationKindPermissionContinuation || empty.ruleID != gatedReasonRule ||
+		empty.matchEvidence != matchEvidenceComplete || empty.verifiedNoninteraction {
+		t.Fatalf("empty reason: %s %s %v", empty.kind.debugString(), empty.ruleID, err)
+	}
+	for _, decision := range []permissionDecision{permissionDecisionAllow, permissionDecisionDeny} {
+		plan := gatedPlan(t, decision)
+		assertNoAnswerMatch(t, d, dialog, &plan, "a continuation is not an answerable request form")
+	}
+	for _, reason := range []string{"typed reason", "(empty) and more"} {
+		screen := screenOf(t, gatedReasonDialog(some(reason)))
+		typed, err := d.observe(&screen)
+		if err != nil || typed.kind == observationKindPermissionContinuation || typed.ruleID == gatedReasonRule {
+			t.Fatalf("%s: %s %s %v", reason, typed.kind.debugString(), typed.ruleID, err)
+		}
+	}
+}
+
+const focusRowSGR = "\x1b[48;2;30;30;30m"
+
+// sizedGatedForm is the gated form on a cols-wide screen whose choice row is row, written from
+// column 0 after the screen is cleared to the default background.
+func sizedGatedForm(t testing.TB, cols uint16, row string) screenSnapshot {
+	t.Helper()
+	terminal := mustTerminalState(t, terminalSize{rows: 24, cols: cols})
+	mustFeed(t, terminal, []byte("\x1b[0m\x1b[2J\x1b[19;1HSynthetic gated request\r\nOperation: write disposable.txt\r\n"+row+"\x1b[0m\r\nSelection: "))
+	return terminal.snapshot()
+}
+
+func gatedFocusedOn(t testing.TB, screen screenSnapshot) opt[string] {
+	t.Helper()
+	return gatedMatched(t, screen, permissionDecisionAllow).focusedChoice
+}
+
+func TestCodingAgentDetector_FocusResolution_FocusRowBackgroundIsTheMajorityBackgroundNotTheLeftEdge(t *testing.T) {
+	t.Parallel()
+	edge := sizedGatedForm(t, 80, focusRowSGR+"\x1b[K"+focusSGR+"  Allow once "+focusRowSGR+"  Always allow   Deny once")
+	if got := gatedFocusedOn(t, edge); got != some("allow-once") {
+		t.Fatalf("a highlight over column 0 leaves the row background to the majority: %v", got)
+	}
+	lastColumn := sizedGatedForm(t, 39, focusRowSGR+"\x1b[K  Allow once   Always allow   "+focusSGR+"Deny once")
+	if got := gatedFocusedOn(t, lastColumn); got != some("deny-once") {
+		t.Fatalf("a focused label may reach the last column: %v", got)
+	}
+}
+
+func TestCodingAgentDetector_FocusResolution_FocusResolvesNoChoiceWithoutABackgroundCoveringMoreThanHalfTheRow(t *testing.T) {
+	t.Parallel()
+	const half = "\x1b[48;5;236m"
+	splitRow := func(painted int) screenSnapshot {
+		return sizedGatedForm(t, 80, fmt.Sprintf(half+"\x1b[K  "+focusSGR+"Allow once"+half+"   Always allow   Deny once\x1b[%dG\x1b[0m\x1b[K", painted+1))
+	}
+	if got := gatedFocusedOn(t, splitRow(40)); got != none[string]() {
+		t.Fatalf("40 painted cells of 80 are not a majority: %v", got)
+	}
+	if got := gatedFocusedOn(t, splitRow(51)); got != some("allow-once") {
+		t.Fatalf("41 cells of the painted background are a majority: %v", got)
+	}
+}
+
+const syntheticEmptyRule = "synthetic-composer_empty"
+
+func withoutScreenFields(screen screenSnapshot, cursor, alternate bool) screenSnapshot {
+	if !cursor {
+		screen.cursor = none[[2]uint16]()
+	}
+	if !alternate {
+		screen.alternateScreen = none[bool]()
+	}
+	return screen
+}
+
+func emptyComposerDefinition(cursor, screen string) any {
+	value := simpleDefinition("composer_empty", true)
+	jset(value, cursor, "codex", "profile", "rules", 0, "region", "cursor")
+	jset(value, screen, "codex", "profile", "rules", 0, "region", "screen")
+	return value
+}
+
+func observeOn(t testing.TB, d *detector, screen screenSnapshot) screenObservation {
+	t.Helper()
+	observed, err := d.observe(&screen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return observed
+}
+
+func TestCodingAgentDetector_CursorFree_ACaptureWithoutACursorTreatsEveryCursorConditionAsAny(t *testing.T) {
+	t.Parallel()
+	for _, cursor := range []string{"at_end", "after_prompt", "inside"} {
+		d := codexDetector(t, emptyComposerDefinition(cursor, "either"))
+		screen := screenOf(t, []byte("\x1b[2J\x1b[10;1HSynthetic state\r\nState end\x1b[1;1H"))
+		if observed := observeOn(t, d, screen); observed.ruleID == syntheticEmptyRule {
+			t.Fatalf("%s: a cursor outside the condition keeps the region unqualified", cursor)
+		}
+		for _, tc := range []struct {
+			name   string
+			screen screenSnapshot
+		}{{"no cursor or screen mode", cursorFreeScreen(screen)}, {"no cursor", withoutScreenFields(screen, false, true)}} {
+			if observed := observeOn(t, d, tc.screen); observed.kind != observationKindComposerEmpty || observed.ruleID != syntheticEmptyRule {
+				t.Fatalf("%s: %s: %s %s", cursor, tc.name, observed.kind.debugString(), observed.ruleID)
+			}
+		}
+	}
+}
+
+func TestCodingAgentDetector_CursorFree_ACaptureWithoutACursorOrScreenModeIgnoresTheScreenSelector(t *testing.T) {
+	t.Parallel()
+	primary := screenOf(t, []byte("\x1b[2J\x1b[10;1HSynthetic state\r\nState end"))
+	alternate := screenOf(t, []byte("\x1b[?1049h\x1b[2J\x1b[10;1HSynthetic state\r\nState end"))
+	for _, tc := range []struct {
+		selector string
+		screen   screenSnapshot
+	}{{"primary", alternate}, {"alternate", primary}} {
+		d := codexDetector(t, emptyComposerDefinition("any", tc.selector))
+		if observed := observeOn(t, d, tc.screen); observed.ruleID == syntheticEmptyRule {
+			t.Fatalf("%s: a known screen mode keeps the selector", tc.selector)
+		}
+		for _, variant := range []struct {
+			name   string
+			screen screenSnapshot
+		}{
+			{"no cursor or screen mode", cursorFreeScreen(tc.screen)},
+			{"no screen mode", withoutScreenFields(tc.screen, true, false)},
+			{"no cursor", withoutScreenFields(tc.screen, false, true)},
+		} {
+			if observed := observeOn(t, d, variant.screen); observed.ruleID != syntheticEmptyRule {
+				t.Fatalf("%s: %s: rule %s", tc.selector, variant.name, observed.ruleID)
+			}
+		}
+	}
+}
+
+func promptRowDefinition(cursor string) any {
+	value := emptyComposerDefinition(cursor, "either")
+	r := jget(value, "codex", "profile", "rules", 0)
+	jset(r, "^> ", "region", "start_pattern")
+	jset(r, "^> ", "region", "end_pattern")
+	jset(r, 1, "region", "max_rows")
+	jset(r, parseTestJSON(`[{"id":"idle","scope":"line","pattern":"^> Idle placeholder$"}]`), "matchers")
+	return value
+}
+
+func promptRows(t testing.TB, history string) screenSnapshot {
+	t.Helper()
+	return screenOf(t, []byte("\x1b[2J\x1b[4;1H> "+history+"\x1b[21;1H> Idle placeholder\x1b[1;1H"))
+}
+
+func TestCodingAgentDetector_CursorFree_WithoutACursorAComposerRuleTakesItsBottomMostCandidateSatisfyingItsMatchers(t *testing.T) {
+	t.Parallel()
+	d := codexDetector(t, promptRowDefinition("at_end"))
+	for _, history := range []string{"history entry", "Idle placeholder"} {
+		observed := observeOn(t, d, cursorFreeScreen(promptRows(t, history)))
+		if observed.kind != observationKindComposerEmpty || observed.ruleID != syntheticEmptyRule {
+			t.Fatalf("%s: %s %s", history, observed.kind.debugString(), observed.ruleID)
+		}
+		if region, ok := observed.matchedRegion.get(); !ok || region.top != 20 {
+			t.Fatalf("%s: the bottom-most satisfying candidate is the region: %v", history, observed.matchedRegion)
+		}
+	}
+}
+
+func TestCodingAgentDetector_CursorFree_WithoutACursorAnInteractionRuleKeepsItsUniquenessCheck(t *testing.T) {
+	t.Parallel()
+	d := codexDetector(t, syntheticDefinitions())
+	if one := observeOn(t, d, cursorFreeScreen(screenOf(t, inspectionFixtureForm("rm -rf build", "synthetic-only")))); one.ruleID != syntheticRule {
+		t.Fatalf("one cursor-free form is detected: %s", one.ruleID)
+	}
+	form := "Synthetic permission request\r\nOperation: rm -rf build\r\n> Allow once\r\n  Deny once\r\nRequest form: synthetic-only\r\nSelection: "
+	two := screenOf(t, []byte("\x1b[2J\x1b[3;1H"+form+"\x1b[15;1H"+form))
+	if observed := observeOn(t, d, cursorFreeScreen(two)); observed.ruleID == syntheticRule {
+		t.Fatal("two satisfying forms stay ambiguous")
+	}
+}
+
+func TestCodingAgentDetector_CursorFree_WithoutACursorOnlyTheLowestEndingComposerMatchCompetes(t *testing.T) {
+	t.Parallel()
+	d := codexDetector(t, emptyComposerDefinition("at_end", "either"))
+	screen := cursorFreeScreen(screenOf(t, []byte("\x1b[2J\x1b[5;1HSynthetic state\r\nState end\x1b[20;1HSynthetic input: draft\r\nState end")))
+	observed := observeOn(t, d, screen)
+	if observed.kind == observationKindComposerEmpty || observed.ruleID != syntheticTextRuleID {
+		t.Fatalf("an empty-shaped box above a drafted composer: %s %s", observed.kind.debugString(), observed.ruleID)
+	}
+}
+
+func directorDetector(t testing.TB, backend codingAgent) (*detector, []string) {
+	t.Helper()
+	delivery, ok := profileCatalogBundled().directorDelivery(backend)
+	if !ok {
+		t.Fatal("a Director backend declares Director delivery")
+	}
+	return newDetector(profileCatalogBundled(), backend, none[string]()), slices.Clone(delivery.ruleIDs)
+}
+
+// herdrDirectorScreens is the ids of backend's bundled cursor-free herdr screens: those with no
+// composer record, and those holding a typed prompt literal.
+func herdrDirectorScreens(t testing.TB, backend codingAgent) (idle, drafted []string) {
+	t.Helper()
+	for _, member := range jobject(jget(parsedBundledFiles(), backend.name(), "screens")).members {
+		if jget(member.value, "multiplexer") != "herdr" {
+			continue
+		}
+		records, err := preSubmitRecords(member.value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, present := jobject(member.value).get("composer_evidence"); !present {
+			idle = append(idle, member.key)
+		} else if slices.ContainsFunc(records, func(record preSubmitRecord) bool { return record.operation == composerOperationPrompt }) {
+			drafted = append(drafted, member.key)
+		}
+	}
+	return idle, drafted
+}
+
+func observeDirectorOn(t testing.TB, d *detector, rules []string, screen screenSnapshot) screenObservation {
+	t.Helper()
+	observed, err := d.observeDirector(&screen, rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return observed
+}
+
+func TestCodingAgentDetector_CursorFree_EveryDirectorScreenAnEmptyComposerRuleCitesClassifiesEmptyThroughDirectorRules(t *testing.T) {
+	t.Parallel()
+	var misclassified []string
+	for _, backend := range codingAgentAll() {
+		if _, ok := profileCatalogBundled().directorDelivery(backend); !ok {
+			continue
+		}
+		d, rules := directorDetector(t, backend)
+		for _, r := range jarray(jget(parsedBundledFiles(), backend.name(), "profile", "rules")).items {
+			id, _ := jstring(jget(r, "id"))
+			if !composerEmptyRule(r) || !slices.Contains(rules, id) {
+				continue
+			}
+			cited, _ := jget(r, "fixture_ids").(*jsonArr)
+			if cited == nil {
+				continue
+			}
+			for _, fixture := range cited.items {
+				name, _ := jstring(fixture)
+				observed := observeDirectorOn(t, d, rules, replayAsCaptured(name, nil, none[[2]uint16]()))
+				if observed.kind != observationKindComposerEmpty {
+					misclassified = append(misclassified, fmt.Sprintf("%s (cited by %s): %s %s %v", name, id, observed.kind.debugString(), observed.ruleID, observed.matchedRegion))
+				}
+			}
+		}
+	}
+	if len(misclassified) > 0 {
+		t.Fatalf("an empty Director composer classifies empty: %q", misclassified)
+	}
+}
+
+func TestCodingAgentDetector_CursorFree_ADraftedDirectorComposerBelowAnEmptyShapedBoxClassifiesNotEmpty(t *testing.T) {
+	t.Parallel()
+	for _, backend := range codingAgentAll() {
+		if _, ok := profileCatalogBundled().directorDelivery(backend); !ok {
+			continue
+		}
+		d, rules := directorDetector(t, backend)
+		idle, drafted := herdrDirectorScreens(t, backend)
+		var emptyBox []string
+		var observedIdle []string
+		for _, id := range idle {
+			observed := observeDirectorOn(t, d, rules, replayAsCaptured(id, nil, none[[2]uint16]()))
+			if region, ok := observed.matchedRegion.get(); ok && observed.kind == observationKindComposerEmpty {
+				emptyBox = fixtureLines(id)[region.top:region.bottom]
+				break
+			}
+			observedIdle = append(observedIdle, fmt.Sprintf("%s: %s %s", id, observed.kind.debugString(), observed.ruleID))
+		}
+		if emptyBox == nil {
+			t.Fatalf("%s: a cursor-free idle Director screen classifies empty: %q", backend.name(), observedIdle)
+		}
+		if len(drafted) == 0 {
+			t.Fatalf("%s: a drafted Director screen", backend.name())
+		}
+		for _, id := range drafted {
+			if alone := observeDirectorOn(t, d, rules, replayAsCaptured(id, nil, none[[2]uint16]())); alone.kind == observationKindComposerEmpty {
+				t.Fatalf("%s: the drafted composer is empty", id)
+			}
+			boxed := replayAsCaptured(id, func(lines *[]string) {
+				for row, line := range emptyBox {
+					(*lines)[row+1] = line
+				}
+			}, none[[2]uint16]())
+			if _, has := boxed.cursor.get(); has {
+				t.Fatalf("%s: a herdr screen replays cursor-free", id)
+			}
+			if observed := observeDirectorOn(t, d, rules, boxed); observed.kind == observationKindComposerEmpty {
+				t.Fatalf("%s: an empty-shaped box above the drafted composer classifies empty", id)
+			}
+		}
+	}
+}
+
+func TestCodingAgentDetector_CursorFree_ACaptureWithACursorKeepsUniquenessBeforeTheMatchers(t *testing.T) {
+	t.Parallel()
+	d := codexDetector(t, promptRowDefinition("any"))
+	if observed := observeOn(t, d, promptRows(t, "history entry")); observed.ruleID == syntheticEmptyRule {
+		t.Fatal("two qualifying candidates match nothing when the cursor is known")
+	}
+}
+
+func TestCodingAgentDetector_CursorFree_AnObservationWithoutANativeVersionRecordsANullVersion(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range bundledFixtureRecords() {
+		screen := cursorFreeScreen(replayAsCaptured(fixture.id, nil, none[[2]uint16]()))
+		observed := observeOn(t, newDetector(profileCatalogBundled(), fixture.backend, none[string]()), screen)
+		if observed.rawEvidence.nativeVersion != none[string]() {
+			t.Fatalf("%s: native version %v", fixture.id, observed.rawEvidence.nativeVersion)
+		}
+	}
+}
+
 var detectorFixtureGoldens = []detectorFixtureGolden{
 	// BEGIN GENERATED: mise //:test -- -run 'TestCodingAgentDetector_FixtureGolden' -update-golden
 	{fixture: "claude-2.1.302-default-permission-1", screen: 0xd63aa2196391346a, record: `{"size":[36,120],"cursor":[23,1],"alternate_screen":true,"kind":"Interaction(PermissionRequest)","rule_id":"claude-bash-permission","match_evidence":"Complete","verified_noninteraction":false,"matched_region":[14,29],"operation":"/private/tmp/cafleet-194/cells-002/permission-probe allow","choices":["Yes","No"],"composer_text":null}`},
