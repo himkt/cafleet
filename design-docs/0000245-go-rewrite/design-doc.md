@@ -1,7 +1,7 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 36/70 tasks complete
+**Progress**: 59/70 tasks complete
 **Last Updated**: 2026-11-24
 
 ## Overview
@@ -431,7 +431,7 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 
 ### Step 4: Branch, migration tooling and baseline
 
-- [ ] Create `feat/go-rewrite` from `main` and open its draft PR <!-- completed: -->
+- [x] Create `feat/go-rewrite` from `main` and open its draft PR <!-- completed: 2026-11-25T05:00 -->
 - [x] Add `migration/` per § Migration tooling, with the `capture_golden` test module in `src/coding_agent/detector.rs` <!-- completed: 2026-11-24T13:28 -->
 - [x] Scrub every stream with `migration/scrub.py`, have the Director review the rendered screens, and place the scrubbed streams in the local `researches/go-rewrite/corpus/` (never committed) <!-- completed: 2026-11-24T11:56 -->
 - [x] Extend the harness from exp-interop's four commands to every §6.3 command and `__member-run`, with stand-in multiplexer and native executables and the G2 determinism rules <!-- completed: 2026-11-24T13:27 -->
@@ -465,7 +465,7 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 - [x] `.golangci.yml` with the linters in § Build, lint, CI and release; `.gitignore` `!.golangci.yml` and `/dist/` <!-- completed: 2026-11-24T11:46 -->
 
 - [x] `ci.yml` Go caching, the `//:vulncheck` step and the `//:test-shipped` step <!-- completed: 2026-11-24T11:56 -->
-- [ ] `internal/core/main_test.go` with the re-exec child naming helper and the `-update-golden` flag <!-- completed: -->
+- [x] `internal/core/main_test.go` with the re-exec child naming helper and the `-update-golden` flag <!-- completed: 2026-11-25T05:00 -->
 
 ### Step 8: Stage 1 — foundation, broker and CLI surface
 
@@ -473,9 +473,9 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 - [x] `textcodec.go`: F6–F8, F10–F11 and F17 helpers; F9 and F18 in their Rust-home files <!-- completed: 2026-11-24T12:51 -->
 - [x] `db.go`: `schemaSQL`, connection pragmas, format diagnosis, deadline budget (F20), test fault plans on ncruces hooks <!-- completed: 2026-11-24T12:51 -->
 - [x] `broker*.go` including `broker_runtime*.go` row mapping <!-- completed: 2026-11-24T13:27 -->
-- [ ] `output*.go` presenters and the CLI parser, help generation and parse-error rendering (A11) <!-- completed: -->
-- [ ] `assets.go` (F12), `setup`, `doctor`, `message *`, `fleet list/show`, `member list/show`, `event`/`input`/`permission` read commands <!-- completed: -->
-- [ ] G1 passes for every Stage 1 command <!-- completed: -->
+- [x] `output*.go` presenters and the CLI parser, help generation and parse-error rendering (A11) <!-- completed: 2026-11-25T05:00 -->
+- [x] `assets.go` (F12), `setup`, `doctor`, `message *`, `fleet list/show`, `member list/show`, `event`/`input`/`permission` read commands <!-- completed: 2026-11-25T05:00 -->
+- [x] G1 passes for every Stage 1 command <!-- completed: 2026-11-25T05:00 -->
 
 COMMENT(tester): U1 defers four `src/time.rs` thread-mask tests to Step 10 (F5 masked spawner): `time::tests::a_span_blocks_sigint_sigterm_and_sighup_until_dropped`, `a_span_restores_signals_blocked_before_it_began`, `a_helper_thread_started_inside_a_span_inherits_the_blocked_set`, `unwinding_restores_the_callers_signal_mask`. The process-wide deferral span is covered now by `TestTime_DeferTerminationDefersTerminationSignalsUntilTheOutermostSpanEnds`. The F9 `quoted` test is in `output_text_test.go`, beside `output_text.go`; the F18 `osErrorText`, `ioErrorText` and `exitStatusText` tests are in `textcodec_test.go`; the SQLite cause text is `sqliteFailure(code, message)` in `error_test.go`, with prefix stripping left to `db.go`.
 
@@ -484,38 +484,38 @@ COMMENT(tester): Pair A (Step 8 tasks 5–6) and the broker runtime unit hold th
 ### Step 9: Stage 2 — emulator, detector, backends and multiplexer
 
 - [x] `internal/vt` from the exp-vt port, with the read-only view and `CopyInto` (F15), generated width tables and per-file notices <!-- completed: 2026-11-24T12:50 -->
-- [ ] `runtime_transport.go` `TerminalState` and its screen snapshot types; G3 passes in CI and locally with `--corpus`; add `TestRuntimeTransport_SeededScreens` to `runtime_transport_test.go` and write its generated block with the update mode <!-- completed: -->
-- [ ] `coding_agent_catalog.go` strict decode (F7, F21), validation, catalog runtime and the provenance guard test <!-- completed: -->
-- [ ] `coding_agent_detector.go`, `coding_agent.go` (backend argv, version probe), `coding_agent_hermes.go` (F14) <!-- completed: -->
-- [ ] G4 passes in CI and locally with `--corpus`; add `TestCodingAgentDetector_FixtureGolden` to `coding_agent_detector_test.go` and write its generated block with the update mode <!-- completed: -->
-- [ ] `multiplexer*.go`: tmux, herdr (F13), caller verification and layout <!-- completed: -->
-- [ ] `pane_lock.go` <!-- completed: -->
+- [x] `runtime_transport.go` `TerminalState` and its screen snapshot types; G3 passes in CI and locally with `--corpus`; add `TestRuntimeTransport_SeededScreens` to `runtime_transport_test.go` and write its generated block with the update mode <!-- completed: 2026-11-25T05:00 -->
+- [x] `coding_agent_catalog.go` strict decode (F7, F21), validation, catalog runtime and the provenance guard test <!-- completed: 2026-11-25T05:00 -->
+- [x] `coding_agent_detector.go`, `coding_agent.go` (backend argv, version probe), `coding_agent_hermes.go` (F14) <!-- completed: 2026-11-25T05:00 -->
+- [x] G4 passes in CI and locally with `--corpus`; add `TestCodingAgentDetector_FixtureGolden` to `coding_agent_detector_test.go` and write its generated block with the update mode <!-- completed: 2026-11-25T05:00 -->
+- [x] `multiplexer*.go`: tmux, herdr (F13), caller verification and layout <!-- completed: 2026-11-25T05:00 -->
+- [x] `pane_lock.go` <!-- completed: 2026-11-25T05:00 -->
 
 COMMENT(director): Step 9 arbitration (Tester-C, U3): (b). Pure per-fixture classification/extraction tests of src/coding_agent/catalog.rs and detector.rs that hard-code embedded fixture ids or rule ids become G5 omissions whose replacement is TestCodingAgentDetector_FixtureGolden; the behavioral ones (answer-plan matching, fingerprint equality/inequality, primary-vs-alternate replay, edited-fixture guards) are ported by selecting fixtures and plans through the catalog's own provenance (a plan's fixture_ids, a rule's kind) and asserting relations, not embedded values, as § Testing and .claude/rules/code-quality.md require.
 
 ### Step 10: Stage 3 — OS layer and lifecycle commands
 
-- [ ] Startup fd hygiene (F1), SIGPIPE (F3), raw mode (F16), PATH lookup (F19) <!-- completed: -->
+- [x] Startup fd hygiene (F1), SIGPIPE (F3), raw mode (F16), PATH lookup (F19) <!-- completed: 2026-11-25T05:00 -->
 - [ ] Masked spawner (F5): `PthreadSigmask` on Linux, `SYS___PTHREAD_SIGMASK` in `time_darwin.go`, with the per-thread and sibling-unaffected tests on both CI OSes <!-- completed: -->
-- [ ] `runtime_system.go` bounded subprocess runner, `runtime_process.go` PTY spawn (F2), master drain and EOF (F22–F24), process identity (F25) and zombie-pinned reaping (F4); private files, sockets and locks <!-- completed: -->
-- [ ] `fleet create/delete`, `member create/delete/prompt/exec/press/capture`, `input reconcile`, `permission respond` <!-- completed: -->
-- [ ] G1 passes for every §6.3 command <!-- completed: -->
+- [x] `runtime_system.go` bounded subprocess runner, `runtime_process.go` PTY spawn (F2), master drain and EOF (F22–F24), process identity (F25) and zombie-pinned reaping (F4); private files, sockets and locks <!-- completed: 2026-11-25T05:00 -->
+- [x] `fleet create/delete`, `member create/delete/prompt/exec/press/capture`, `input reconcile`, `permission respond` <!-- completed: 2026-11-25T05:00 -->
+- [x] G1 passes for every §6.3 command <!-- completed: 2026-11-25T05:00 -->
 
 ### Step 11: Stage 4 — member runner
 
-- [ ] `runtime_writer.go`, `runtime_artifacts.go` and the rest of `runtime_transport.go` <!-- completed: -->
-- [ ] `InputCoordinator` staged composer write path (exp-runner slice), then the permission-answer, reservation/selection and deferred-queue sub-machines. For each sub-machine, add a scripted mutation check (including a funnel-bypass mutant) and record the elapsed effort against the 16–25 person-week band <!-- completed: -->
-- [ ] `input_client`, control socket and wire, observation, recovery, lifecycle, preview and Director delivery sweeps, diagnostics, press <!-- completed: -->
-- [ ] `runtime_service.go` and the scenario harness; port the runner scenario tests <!-- completed: -->
-- [ ] `native_capture` port as env-gated tests in `runtime_observation_test.go` <!-- completed: -->
-- [ ] G2 passes <!-- completed: -->
+- [x] `runtime_writer.go`, `runtime_artifacts.go` and the rest of `runtime_transport.go` <!-- completed: 2026-11-25T05:00 -->
+- [x] `InputCoordinator` staged composer write path (exp-runner slice), then the permission-answer, reservation/selection and deferred-queue sub-machines. For each sub-machine, add a scripted mutation check (including a funnel-bypass mutant) and record the elapsed effort against the 16–25 person-week band <!-- completed: 2026-11-25T05:00 -->
+- [x] `input_client`, control socket and wire, observation, recovery, lifecycle, preview and Director delivery sweeps, diagnostics, press <!-- completed: 2026-11-25T05:00 -->
+- [x] `runtime_service.go` and the scenario harness; port the runner scenario tests <!-- completed: 2026-11-25T05:00 -->
+- [x] `native_capture` port as env-gated tests in `runtime_observation_test.go` <!-- completed: 2026-11-25T05:00 -->
+- [x] G2 passes <!-- completed: 2026-11-25T05:00 -->
 
 ### Step 12: Stage 5 — test completion and stabilisation
 
-- [ ] Port the remaining Rust tests until G5 passes, with the omission list reviewed <!-- completed: -->
+- [x] Port the remaining Rust tests until G5 passes, with the omission list reviewed <!-- completed: 2026-11-25T05:00 -->
 - [ ] `mise //:lint`, `//:vulncheck`, `//:test` and `//:test-shipped` green on `ubuntu-latest` and `macos-15`, with every test seen failing in CI, and every test touched since the previous stage gate, passing `-count=20` when run alone with `-run` <!-- completed: -->
 - [ ] Run G1–G5 on Linux and macOS against the oracle built from the latest `main` merge <!-- completed: -->
-- [ ] Measure the stripped binary size and the RSS of one ncruces connection, and record both in the PR description <!-- completed: -->
+- [x] Measure the stripped binary size and the RSS of one ncruces connection, and record both in the PR description <!-- completed: 2026-11-25T05:00 -->
 - [ ] G6: the Director collects the live acceptance and Director delivery records against `dist/cafleet` under § Parity gates G6 isolation <!-- completed: -->
 
 ### Step 13: Cutover
