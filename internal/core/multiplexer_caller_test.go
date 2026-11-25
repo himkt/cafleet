@@ -127,6 +127,56 @@ func TestMultiplexerCaller_WalkTermination_AParentCycleTerminatesAtTheCap(t *tes
 	}
 }
 
+// callerDecision is the outcome of row 1 (sharedServerOf) and, when row 1 passes, rows 2–7
+// (verifyPane).
+type callerDecision struct {
+	shared   opt[sharedServer]
+	verified verification
+}
+
+func callerDecide(t *testing.T, name string, table *fixtureProcessTable, m multiplexer, pane string) callerDecision {
+	t.Helper()
+	walked := walk(table)
+	if shared, ok := sharedServerOf(walked).get(); ok {
+		return callerDecision{shared: some(shared)}
+	}
+	decided, err := verifyPane(m, table, walked, pane)
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	return callerDecision{verified: decided}
+}
+
+func callerShared(label string, pid int64) callerDecision {
+	return callerDecision{shared: some(sharedServer{label: label, pid: pid})}
+}
+
+func TestMultiplexerCaller_DecisionTable_Row1RefusesAtTheNearestSharedServerAncestorAmongTheRecordedEntries(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		table *fixtureProcessTable
+		want  opt[sharedServer]
+	}{
+		{name: "nearest shared-server ancestor", table: fixtureChain(30,
+			chainEntry{30, 20, []string{"cafleet"}},
+			chainEntry{20, 15, []string{"python", "-m", "hermes_cli.main", "gateway", "run"}},
+			chainEntry{15, 10, []string{"/opt/bin/codex", "app-server", "--list"}},
+			chainEntry{10, 1, []string{"tmux"}},
+		), want: some(sharedServer{label: "hermes gateway run", pid: 20})},
+		{name: "no shared-server ancestor", table: plainChain(), want: none[sharedServer]()},
+		{name: "entries recorded before an unreadable end", table: fixtureChain(30,
+			chainEntry{30, 20, []string{"cafleet"}},
+			chainEntry{20, 412, []string{"codex", "app-server"}},
+		).unreadable(412, callerTestUnreadable), want: some(sharedServer{label: "codex app-server", pid: 20})},
+	}
+	for _, tc := range cases {
+		if got := sharedServerOf(walk(tc.table)); got != tc.want {
+			t.Fatalf("%s: shared server %#v, want %#v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestMultiplexerCaller_DecisionTable_Rows2To7DecideATmuxPaneInOrder(t *testing.T) {
 	t.Parallel()
 	unreadableAfterShell := func() *fixtureProcessTable {
@@ -215,22 +265,277 @@ func TestMultiplexerCaller_DecisionTable_ANamespaceReadFailurePropagatesAsAnErro
 	}
 }
 
+const (
+	callerEvidenceTmuxServerPID  = 399808
+	callerEvidenceHerdrServerPID = 3340413
+	callerEvidenceOpencode       = "/root/.local/share/mise/installs/aqua-anomalyco-opencode/v2.2.5/opencode"
+	callerEvidenceHermesPython   = "/home/linuxbrew/.linuxbrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/python"
+)
+
+var (
+	callerEvidenceCafleet       = []string{"cafleet", "…"}
+	callerEvidenceCodexDaemon   = []string{"/root/.codex/packages/app-server-daemon/releases/0.167.1-x86_64-unknown-linux-musl/bin/codex", "app-server", "--list"}
+	callerEvidenceCodexPaneA    = []string{"codex", "--enable", "daemon_auto_start", "--dangerously-bypass-approvals-and-sandbox", "<prompt>"}
+	callerEvidenceTmuxServer    = []string{"tmux", "-L", "cafleet-probe", "-f", "/dev/null", "new-session", "-d", "-s", "probe", "-x", "220", "-y", "50", "-c", "/tmp/cafleet-env-probe/work"}
+	callerEvidenceHerdrServer   = []string{"/root/.local/share/mise/installs/aqua-ogulcancelik-herdr/v0.9.5/herdr", "server"}
+	callerEvidenceHermesGateway = []string{callerEvidenceHermesPython, "-m", "hermes_cli.main", "--profile", "default", "gateway", "run", "--quiet", "--idle-exit"}
+	callerEvidenceHermesChat    = []string{callerEvidenceHermesPython, "/home/linuxbrew/.linuxbrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/hermes", "chat", "--cli", "--yolo", "-q", "<prompt>"}
+)
+
+type callerEvidenceOutcome uint8
+
+const (
+	callerEvidenceSharedServer callerEvidenceOutcome = iota
+	callerEvidenceVerified
+	callerEvidenceNotAncestor
+)
+
+// callerEvidenceCase is a tmux capture: the chain stops below the tmux server, whose pid is every
+// top parent.
+type callerEvidenceCase struct {
+	name    string
+	ownPID  int64
+	chain   []chainEntry
+	pane    string
+	panePID opt[int64]
+	outcome callerEvidenceOutcome
+	shared  sharedServer
+}
+
+func (c callerEvidenceCase) rowOne() bool {
+	return c.outcome == callerEvidenceSharedServer
+}
+
+func (c callerEvidenceCase) want(t *testing.T, panePID opt[int64]) callerDecision {
+	t.Helper()
+	switch c.outcome {
+	case callerEvidenceSharedServer:
+		return callerDecision{shared: some(c.shared)}
+	case callerEvidenceVerified:
+		return callerDecision{verified: verificationVerified{}}
+	case callerEvidenceNotAncestor:
+		pid, ok := panePID.get()
+		if !ok {
+			t.Fatalf("%s: a row-7 case names its pane pid", c.name)
+		}
+		return callerDecision{verified: verificationRefused{refusal: refusalPaneNotAncestor{panePID: pid}}}
+	default:
+		panic("invalid callerEvidenceOutcome")
+	}
+}
+
+func (c callerEvidenceCase) tmuxTable() *fixtureProcessTable {
+	return fixtureChain(c.ownPID, c.chain...).process(callerEvidenceTmuxServerPID, 1, callerEvidenceTmuxServer...)
+}
+
+// callerEvidenceHerdrShell is the pane's shell between each agent and the herdr server; the shell
+// is the pane pid.
+func callerEvidenceHerdrShell(pid int64) int64 {
+	return pid + 1
+}
+
+func (c callerEvidenceCase) herdrTable() *fixtureProcessTable {
+	table := newFixtureProcessTable(c.ownPID)
+	for _, entry := range c.chain {
+		if entry.parent != callerEvidenceTmuxServerPID {
+			table.process(entry.pid, entry.parent, entry.argv...)
+			continue
+		}
+		shell := callerEvidenceHerdrShell(entry.pid)
+		table.process(entry.pid, shell, entry.argv...).process(shell, callerEvidenceHerdrServerPID, "/bin/sh")
+	}
+	return table.process(callerEvidenceHerdrServerPID, 1, callerEvidenceHerdrServer...)
+}
+
+func (c callerEvidenceCase) herdrPanePID() opt[int64] {
+	pid, ok := c.panePID.get()
+	if !ok {
+		return c.panePID
+	}
+	for _, entry := range c.chain {
+		if entry.pid == pid && entry.parent == callerEvidenceTmuxServerPID {
+			return some(callerEvidenceHerdrShell(pid))
+		}
+	}
+	return c.panePID
+}
+
+func (c callerEvidenceCase) herdrPane() string {
+	return "w5:p" + c.pane[1:]
+}
+
+func callerEvidenceTmuxCases() []callerEvidenceCase {
+	return []callerEvidenceCase{
+		{name: "Codex daemon, pane A", ownPID: 401748, chain: []chainEntry{
+			{401748, 401380, callerEvidenceCafleet},
+			{401380, 400625, callerEvidenceCodexDaemon},
+			{400625, callerEvidenceTmuxServerPID, callerEvidenceCodexPaneA},
+		}, pane: "%3", panePID: some[int64](400625), outcome: callerEvidenceSharedServer, shared: sharedServer{label: "codex app-server", pid: 401380}},
+		{name: "Codex daemon, pane C (pane A's variables)", ownPID: 402502, chain: []chainEntry{
+			{402502, 401380, callerEvidenceCafleet},
+			{401380, 400625, callerEvidenceCodexDaemon},
+			{400625, callerEvidenceTmuxServerPID, callerEvidenceCodexPaneA},
+		}, pane: "%3", panePID: some[int64](400625), outcome: callerEvidenceSharedServer, shared: sharedServer{label: "codex app-server", pid: 401380}},
+		{name: "Codex pane C after pane A closed", ownPID: 402611, chain: []chainEntry{
+			{402611, 401380, callerEvidenceCafleet},
+			{401380, 1, callerEvidenceCodexDaemon},
+		}, pane: "%3", panePID: none[int64](), outcome: callerEvidenceSharedServer, shared: sharedServer{label: "codex app-server", pid: 401380}},
+		{name: "Codex --no-daemon", ownPID: 403233, chain: []chainEntry{
+			{403233, 402835, callerEvidenceCafleet},
+			{402835, callerEvidenceTmuxServerPID, []string{"codex", "--no-daemon", "--dangerously-bypass-approvals-and-sandbox", "<prompt>"}},
+		}, pane: "%6", panePID: some[int64](402835), outcome: callerEvidenceVerified},
+		{name: "Codex --approve-for-me", ownPID: 402101, chain: []chainEntry{
+			{402101, 401813, callerEvidenceCafleet},
+			{401813, callerEvidenceTmuxServerPID, []string{"codex", "--enable", "daemon_auto_start", "--approve-for-me", "<prompt>"}},
+		}, pane: "%4", panePID: some[int64](401813), outcome: callerEvidenceVerified},
+		{name: "Claude Code", ownPID: 403317, chain: []chainEntry{
+			{403317, 403316, callerEvidenceCafleet},
+			{403316, 403012, []string{"/bin/bash", "-c", "<script>"}},
+			{403012, callerEvidenceTmuxServerPID, []string{"claude", "--allowedTools", "Bash(sh /tmp/cafleet-env-probe/detect.sh *)", "--", "<prompt>"}},
+		}, pane: "%7", panePID: some[int64](403012), outcome: callerEvidenceVerified},
+		{name: "pi", ownPID: 403373, chain: []chainEntry{
+			{403373, 403148, callerEvidenceCafleet},
+			{403148, callerEvidenceTmuxServerPID, []string{"pi", "<prompt>"}},
+		}, pane: "%8", panePID: some[int64](403148), outcome: callerEvidenceVerified},
+		{name: "OpenCode --standalone", ownPID: 403403, chain: []chainEntry{
+			{403403, 403187, callerEvidenceCafleet},
+			{403187, 403176, []string{callerEvidenceOpencode, "serve", "--stdio", "--port", "0"}},
+			{403176, callerEvidenceTmuxServerPID, []string{"opencode", "--standalone", "--auto", "--prompt", "<prompt>"}},
+		}, pane: "%9", panePID: some[int64](403176), outcome: callerEvidenceVerified},
+		{name: "OpenCode service, first client", ownPID: 403443, chain: []chainEntry{
+			{403443, 403264, callerEvidenceCafleet},
+			{403264, 403252, []string{callerEvidenceOpencode, "serve", "--service"}},
+			{403252, callerEvidenceTmuxServerPID, []string{"opencode", "--auto", "--prompt", "<prompt>"}},
+		}, pane: "%10", panePID: some[int64](403252), outcome: callerEvidenceVerified},
+		{name: "OpenCode service, second client", ownPID: 405295, chain: []chainEntry{
+			{405295, 403264, callerEvidenceCafleet},
+			{403264, 403252, []string{callerEvidenceOpencode, "serve", "--service"}},
+			{403252, callerEvidenceTmuxServerPID, []string{"opencode", "--auto", "--prompt", "<prompt>"}},
+		}, pane: "%13", panePID: some[int64](405228), outcome: callerEvidenceNotAncestor},
+	}
+}
+
+func TestMultiplexerCaller_EvidenceFixtures_EveryTmuxCaseReachesItsExpectedRow(t *testing.T) {
+	t.Parallel()
+	for _, tc := range callerEvidenceTmuxCases() {
+		runner := fakeRunnerWithBinary(t, "tmux")
+		if !tc.rowOne() {
+			answerTmux(runner, tc.pane, tc.panePID)
+		}
+		if got, want := callerDecide(t, tc.name, tc.tmuxTable(), callerTmuxMux(runner), tc.pane), tc.want(t, tc.panePID); got != want {
+			t.Fatalf("%s: decision %#v, want %#v", tc.name, got, want)
+		}
+		if tc.rowOne() && len(runner.runArgvs()) != 0 {
+			t.Fatalf("%s: row 1 ran %q", tc.name, runner.runArgvs())
+		}
+	}
+}
+
+func TestMultiplexerCaller_EvidenceFixtures_EveryHerdrCaseWithThePaneShellReachesItsExpectedRow(t *testing.T) {
+	t.Parallel()
+	for _, tc := range callerEvidenceTmuxCases() {
+		runner := fakeRunnerWithBinary(t, "herdr")
+		if !tc.rowOne() {
+			answerHerdr(t, runner, tc.herdrPanePID())
+		}
+		if got, want := callerDecide(t, tc.name, tc.herdrTable(), callerHerdrMux(runner), tc.herdrPane()), tc.want(t, tc.herdrPanePID()); got != want {
+			t.Fatalf("%s: decision %#v, want %#v", tc.name, got, want)
+		}
+		if tc.rowOne() && len(runner.runArgvs()) != 0 {
+			t.Fatalf("%s: row 1 ran %q", tc.name, runner.runArgvs())
+		}
+	}
+}
+
 func TestMultiplexerCaller_EvidenceFixtures_PaneCWouldPassRow4AloneBecausePaneAIsItsAncestor(t *testing.T) {
 	t.Parallel()
-	const tmuxServerPID = 399808
-	codexDaemon := []string{"/root/.codex/packages/app-server-daemon/releases/0.167.1-x86_64-unknown-linux-musl/bin/codex", "app-server", "--list"}
-	codexPaneA := []string{"codex", "--enable", "daemon_auto_start", "--dangerously-bypass-approvals-and-sandbox", "<prompt>"}
-	tmuxServer := []string{"tmux", "-L", "cafleet-probe", "-f", "/dev/null", "new-session", "-d", "-s", "probe", "-x", "220", "-y", "50", "-c", "/tmp/cafleet-env-probe/work"}
-	table := fixtureChain(402502,
-		chainEntry{402502, 401380, []string{"cafleet", "…"}},
-		chainEntry{401380, 400625, codexDaemon},
-		chainEntry{400625, tmuxServerPID, codexPaneA},
-		chainEntry{tmuxServerPID, 1, tmuxServer},
+	index := slices.IndexFunc(callerEvidenceTmuxCases(), func(tc callerEvidenceCase) bool {
+		return tc.name == "Codex daemon, pane C (pane A's variables)"
+	})
+	if index < 0 {
+		t.Fatal("the pane C fixture exists")
+	}
+	tc := callerEvidenceTmuxCases()[index]
+	runner := fakeRunnerWithBinary(t, "tmux")
+	answerTmux(runner, tc.pane, tc.panePID)
+	if got := mustVerifyPane(t, tc.name, callerTmuxMux(runner), tc.tmuxTable(), tc.pane); got != verification(verificationVerified{}) {
+		t.Fatalf("verification %#v, want verified", got)
+	}
+}
+
+func TestMultiplexerCaller_EvidenceFixtures_TmuxHermesRefusesAtRow1AlthoughItsChatPaneIsAnAncestor(t *testing.T) {
+	t.Parallel()
+	table := fixtureChain(428897,
+		chainEntry{428897, 428895, []string{"sh", "/tmp/cafleet-env-probe/capture.sh", "hermes"}},
+		chainEntry{428895, 428596, []string{"/usr/bin/bash", "-c", "<script>"}},
+		chainEntry{428596, 428571, callerEvidenceHermesGateway},
+		chainEntry{428571, 428475, callerEvidenceHermesChat},
+		chainEntry{428475, 1, callerEvidenceTmuxServer},
 	)
 	runner := fakeRunnerWithBinary(t, "tmux")
-	answerTmux(runner, "%3", some[int64](400625))
-	if got := mustVerifyPane(t, "pane C", callerTmuxMux(runner), table, "%3"); got != verification(verificationVerified{}) {
-		t.Fatalf("verification %#v, want verified", got)
+	if got, want := callerDecide(t, "tmux hermes", table, callerTmuxMux(runner), "%1"), callerShared("hermes gateway run", 428596); got != want {
+		t.Fatalf("decision %#v, want %#v", got, want)
+	}
+	if len(runner.runArgvs()) != 0 {
+		t.Fatalf("row 1 ran %q", runner.runArgvs())
+	}
+	answerTmux(runner, "%1", some[int64](428571))
+	if got := mustVerifyPane(t, "row 4 alone", callerTmuxMux(runner), table, "%1"); got != verification(verificationVerified{}) {
+		t.Fatalf("row 4 alone would accept the chat client pane: verification %#v", got)
+	}
+}
+
+func TestMultiplexerCaller_EvidenceFixtures_HerdrHermesWithThePaneShellRefusesAtRow1(t *testing.T) {
+	t.Parallel()
+	table := fixtureChain(428897,
+		chainEntry{428897, 428895, []string{"sh", "/tmp/cafleet-env-probe/capture.sh", "hermes"}},
+		chainEntry{428895, 428596, []string{"/usr/bin/bash", "-c", "<script>"}},
+		chainEntry{428596, 428571, callerEvidenceHermesGateway},
+		chainEntry{428571, 428572, callerEvidenceHermesChat},
+		chainEntry{428572, callerEvidenceHerdrServerPID, []string{"/bin/sh"}},
+		chainEntry{callerEvidenceHerdrServerPID, 1, callerEvidenceHerdrServer},
+	)
+	runner := fakeRunnerWithBinary(t, "herdr")
+	if got, want := callerDecide(t, "herdr hermes", table, callerHerdrMux(runner), "w5:p2"), callerShared("hermes gateway run", 428596); got != want {
+		t.Fatalf("decision %#v, want %#v", got, want)
+	}
+	if len(runner.runArgvs()) != 0 {
+		t.Fatalf("row 1 ran %q", runner.runArgvs())
+	}
+}
+
+func TestMultiplexerCaller_EvidenceFixtures_HerdrCodexDaemonPaneARefusesAtRow1(t *testing.T) {
+	t.Parallel()
+	table := fixtureChain(408076,
+		chainEntry{408076, 407596, callerEvidenceCafleet},
+		chainEntry{407596, 407442, callerEvidenceCodexDaemon},
+		chainEntry{407442, 407363, callerEvidenceCodexPaneA},
+		chainEntry{407363, callerEvidenceHerdrServerPID, []string{"/bin/sh"}},
+		chainEntry{callerEvidenceHerdrServerPID, 1, callerEvidenceHerdrServer},
+	)
+	runner := fakeRunnerWithBinary(t, "herdr")
+	if got, want := callerDecide(t, "herdr codex daemon", table, callerHerdrMux(runner), "w5:p1"), callerShared("codex app-server", 407596); got != want {
+		t.Fatalf("decision %#v, want %#v", got, want)
+	}
+	if len(runner.runArgvs()) != 0 {
+		t.Fatalf("row 1 ran %q", runner.runArgvs())
+	}
+}
+
+func TestMultiplexerCaller_EvidenceFixtures_HerdrRealDirectorSessionVerifiesItsPaneShell(t *testing.T) {
+	t.Parallel()
+	table := fixtureChain(410391,
+		chainEntry{410391, 410390, callerEvidenceCafleet},
+		chainEntry{410390, 363045, []string{"/bin/bash", "-c", "<script>"}},
+		chainEntry{363045, 362690, []string{"claude"}},
+		chainEntry{362690, 362679, []string{"zsh"}},
+		chainEntry{362679, callerEvidenceHerdrServerPID, []string{"/bin/sh"}},
+		chainEntry{callerEvidenceHerdrServerPID, 1, callerEvidenceHerdrServer},
+	)
+	runner := fakeRunnerWithBinary(t, "herdr")
+	answerHerdr(t, runner, some[int64](362679))
+	if got, want := callerDecide(t, "herdr Director", table, callerHerdrMux(runner), "w4:p3N"), (callerDecision{verified: verificationVerified{}}); got != want {
+		t.Fatalf("decision %#v, want %#v", got, want)
 	}
 }
 
