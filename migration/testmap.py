@@ -62,6 +62,8 @@ coding_agent::catalog::tests::bundled_claude_ask_user_question::the_answered_for
 coding_agent::catalog::tests::bundled_opencode::bundled_opencode_detects_every_narrow_and_compact_form_fixture -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
 coding_agent::catalog::tests::bundled_opencode::bundled_opencode_narrow_idle_composer_is_a_verified_empty_composer -> internal/core/coding_agent_detector_test.go:TestCodingAgentDetector_FixtureGolden
 coding_agent::catalog::tests::director_screens::hermes_composer_text_reads_a_tui_composer_rule_and_members_keep_the_classic_rules -> internal/core/coding_agent_catalog_test.go:TestCodingAgentCatalog_DirectorScreens_HermesTuiComposerTextReadsAWordWrappedPreviewBelowTheTranscriptAndStatusLine
+runtime::system::tests::per_stream_budget_is_64_kib_even_with_short_reads -> internal/core/runtime_system_test.go:TestRuntimeSystem_TimedRunnerChecksDeadlineWhileBothStreamsKeepProducing
+runtime::system::tests::a_drained_stream_keeps_at_most_its_cap_while_still_reading_the_budget -> internal/core/runtime_system_test.go:TestRuntimeSystem_BoundedRun_EachStreamKeepsAtMostItsCapWhileTheChildRunsToExit
 """
 GO_TEST_RE = re.compile(r"^func (Test\w+)\(t \*testing\.T\)", re.MULTILINE)
 OS_SUFFIX = {"linux": "Linux", "darwin": "Darwin"}

@@ -6,10 +6,17 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 // fixtureProcessTable is a literal process table: absent pids read as absent and unreadable
@@ -176,6 +183,81 @@ func TestRuntimeProcess_ZombieLiveness_AnUnreapedZombieKeepsItsIdentityButIsNotA
 		t.Fatal("the killed child reports its signal")
 	}
 	checks("reaped", false)
+}
+
+func runWithChild(t *testing.T, child processIdentity) runRecord {
+	t.Helper()
+	run := newRunnerFixture(t).run
+	run.childPID = some(child.pid)
+	run.childStartIdentity = some(child.startIdentity)
+	return run
+}
+
+func recoveryDeadlines() shutdownDeadlines {
+	return shutdownDeadlinesStartingAt(time.Now(), 100*time.Millisecond)
+}
+
+// groupLeader starts `sleep 30` as the leader of its own process group.
+func groupLeader(t *testing.T) (*exec.Cmd, processIdentity) {
+	t.Helper()
+	child := exec.Command("sleep", "30")
+	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return child, requireIdentity(t, int64(child.Process.Pid))
+}
+
+func killAndReap(t *testing.T, child *exec.Cmd) {
+	t.Helper()
+	if err := child.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err == nil {
+		t.Fatal("the killed child reports its signal")
+	}
+}
+
+func assertRecovery(t *testing.T, name string, outcome shutdownOutcome, err error, diagnostics []string, state cleanupState) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	if !slices.Equal(outcome.diagnostics, diagnostics) || outcome.cleanupState != state {
+		t.Fatalf("%s: outcome %#v, want diagnostics %q and cleanup state %v", name, outcome, diagnostics, state)
+	}
+}
+
+func TestRuntimeProcess_ZombieLiveness_RecoveryCompletesForAZombieChildAloneInItsGroup(t *testing.T) {
+	t.Parallel()
+	child, identity := zombie(t)
+	outcome, err := recoverDescendants(runWithChild(t, identity), recoveryDeadlines(), systemClock{})
+	if waitErr := child.Wait(); waitErr == nil {
+		t.Fatal("the killed child reports its signal")
+	}
+	assertRecovery(t, "zombie child", outcome, err, nil, cleanupStateComplete)
+}
+
+func TestRuntimeProcess_ZombieLiveness_RecoveryCountsOnlyNonZombieMembersOfAReapedChildGroup(t *testing.T) {
+	t.Parallel()
+	leader, identity := groupLeader(t)
+	descendant, _ := zombieInGroup(t, int(identity.pid))
+	killAndReap(t, leader)
+	outcome, err := recoverDescendants(runWithChild(t, identity), recoveryDeadlines(), systemClock{})
+	if waitErr := descendant.Wait(); waitErr == nil {
+		t.Fatal("the killed descendant reports its signal")
+	}
+	assertRecovery(t, "reaped child group", outcome, err, nil, cleanupStateComplete)
+}
+
+func TestRuntimeProcess_ZombieLiveness_RecoveryStillRefusesALiveGroupMemberItCannotAnchor(t *testing.T) {
+	t.Parallel()
+	leader, identity := groupLeader(t)
+	stale := processIdentity{pid: identity.pid, startIdentity: identity.startIdentity + "-stale"}
+	outcome, err := recoverDescendants(runWithChild(t, stale), recoveryDeadlines(), systemClock{})
+	killAndReap(t, leader)
+	assertRecovery(t, "unanchored live member", outcome, err,
+		[]string{"descendant ownership cannot be anchored to the recorded child generation"}, cleanupStateIncomplete)
 }
 
 func TestRuntimeProcess_AReapedPidReadsAsAbsentRatherThanAnError(t *testing.T) {
@@ -634,9 +716,9 @@ func (s *scanBeforeReap) stopped(pid int64) (bool, error) {
 	return s.script.stopped(pid)
 }
 
-// exitedLeader starts script as the leader of its own process group, waits until it has
-// exited unreaped and returns a session that owns it as its native child.
-func exitedLeader(t *testing.T, script string) (*ptySession, processIdentity) {
+// liveLeader starts script as the leader of its own process group and returns a session that
+// owns it as its native child; cleanup kills and reaps a leader the test left unreaped.
+func liveLeader(t *testing.T, script string) (*ptySession, processIdentity) {
 	t.Helper()
 	child := exec.Command("/bin/sh", "-c", script)
 	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -646,15 +728,57 @@ func exitedLeader(t *testing.T, script string) (*ptySession, processIdentity) {
 	native := requireIdentity(t, int64(child.Process.Pid))
 	t.Cleanup(func() {
 		var status syscall.WaitStatus
-		_, _ = syscall.Wait4(int(native.pid), &status, syscall.WNOHANG, nil)
+		if reaped, err := syscall.Wait4(int(native.pid), &status, syscall.WNOHANG, nil); err == nil && reaped == 0 {
+			_ = syscall.Kill(int(native.pid), syscall.SIGKILL)
+			_, _ = syscall.Wait4(int(native.pid), &status, 0, nil)
+		}
 	})
-	waitUntilStopped(t, native.pid)
 	return &ptySession{
 		clock:  systemClock{},
 		child:  some(int(native.pid)),
 		native: some(native),
 		owned:  pinnedMap(native),
 	}, native
+}
+
+// exitedLeader is liveLeader once the leader has exited unreaped.
+func exitedLeader(t *testing.T, script string) (*ptySession, processIdentity) {
+	t.Helper()
+	session, native := liveLeader(t, script)
+	waitUntilStopped(t, native.pid)
+	return session, native
+}
+
+func TestRuntimeProcess_OwnershipRefreshTests_LeaderWaitTests_TryWaitWithALiveLeaderChecksOnlyTheLeaderAndScansNoGroup(t *testing.T) {
+	t.Parallel()
+	session, native := liveLeader(t, "exec /bin/sleep 30")
+	for round := range 3 {
+		script := newObservationScript(stoppedStep(native.pid, false))
+		if exit, present, err := session.tryWaitWith(script); err != nil || present {
+			t.Fatalf("round %d: tryWaitWith = %#v %v %v, want a running leader", round, exit, present, err)
+		}
+		script.finished(t, fmt.Sprintf("round %d", round))
+	}
+	if want := pinnedMap(native); !maps.Equal(session.owned, want) {
+		t.Fatalf("owned %#v, want %#v", session.owned, want)
+	}
+	if _, ok := session.exit.get(); ok {
+		t.Fatalf("a live leader recorded exit %#v", session.exit)
+	}
+	if _, ok := session.shutdownDeadlines.get(); ok {
+		t.Fatal("a live leader begins no shutdown clock")
+	}
+	if session.groupClosed {
+		t.Fatal("a live leader keeps the group open")
+	}
+	if _, present, err := processIdentityRead(native.pid); err != nil || !present {
+		t.Fatalf("a live leader is not reaped: present=%v err=%v", present, err)
+	}
+	outcome := session.shutdown(shutdownDeadlinesStartingAt(time.Now(), shutdownUnit))
+	if outcome.cleanupState != cleanupStateComplete {
+		t.Fatalf("shutdown outcome %#v, want complete", outcome)
+	}
+	assertReaped(t, "live leader", native.pid)
 }
 
 func requireGroup(t *testing.T, pid int64) int32 {
@@ -949,5 +1073,372 @@ func TestRuntimeProcess_ProcessTableTests_SystemTable_NestedPidNamespaceReadsWit
 	t.Parallel()
 	if _, err := (systemProcessTable{}).nestedPIDNamespace(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ownedPty is a real PTY session that the test's cleanup shuts down unless the test already
+// completed its cleanup.
+type ownedPty struct {
+	session   *ptySession
+	deadlines opt[shutdownDeadlines]
+	cleaned   bool
+}
+
+func prepareOwnedPty(t *testing.T, size terminalSize) *ownedPty {
+	t.Helper()
+	session, err := ptySessionPrepare(size, systemClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := &ownedPty{session: session}
+	t.Cleanup(func() {
+		if !owned.cleaned {
+			owned.stop()
+		}
+	})
+	return owned
+}
+
+func (o *ownedPty) stop() shutdownOutcome {
+	deadlines, set := o.deadlines.get()
+	if !set {
+		deadlines = shutdownDeadlinesStartingAt(time.Now(), shutdownUnit)
+		o.deadlines = some(deadlines)
+	}
+	outcome := o.session.shutdown(deadlines)
+	o.cleaned = outcome.cleanupState == cleanupStateComplete
+	return outcome
+}
+
+// ptyReadUntil reads the session's PTY until its output holds every needle.
+func ptyReadUntil(t *testing.T, session *ptySession, needles ...string) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var output []byte
+	for {
+		buffer := make([]byte, 1024)
+		count, err := session.tryRead(buffer)
+		if err != nil && !errors.Is(err, syscall.EAGAIN) {
+			t.Fatalf("fixture PTY read failed: %v", err)
+		}
+		output = append(output, buffer[:count]...)
+		text := string(output)
+		if !slices.ContainsFunc(needles, func(needle string) bool { return !strings.Contains(text, needle) }) {
+			return text
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("fixture output lacks %q: %q", needles, text)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// ptyCollect reads the session's PTY until the child has exited and its output is drained.
+func ptyCollect(t *testing.T, session *ptySession) ([]byte, childExit) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var output []byte
+	var status childExit
+	read := func(stage string) int {
+		buffer := make([]byte, 4096)
+		count, err := session.tryRead(buffer)
+		if errors.Is(err, syscall.EAGAIN) {
+			return -1
+		}
+		if err != nil {
+			t.Fatalf("fixture PTY %s failed: %v", stage, err)
+		}
+		output = append(output, buffer[:count]...)
+		return count
+	}
+	for {
+		if read("read") == 0 && status != nil {
+			return output, status
+		}
+		if status == nil {
+			exit, exited, err := session.tryWait()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if exited {
+				status = exit
+			}
+		}
+		if status != nil && read("tail") == 0 {
+			return output, status
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatal("fixture child did not exit/drain within its deadline")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// announcedPID is the PID the fixture printed on its `<prefix><pid>` line.
+func announcedPID(t *testing.T, output, prefix string) int64 {
+	t.Helper()
+	for line := range strings.Lines(output) {
+		if value, found := strings.CutPrefix(strings.TrimSpace(line), prefix); found {
+			pid, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return pid
+		}
+	}
+	t.Fatalf("fixture output %q announces no %s PID", output, prefix)
+	return 0
+}
+
+func assertCleanupComplete(t *testing.T, name string, outcome shutdownOutcome) {
+	t.Helper()
+	if outcome.cleanupState != cleanupStateComplete {
+		t.Fatalf("%s: shutdown outcome %#v, want complete", name, outcome)
+	}
+}
+
+func TestRuntimeProcess_MechanismsTests_RunnerRealPtyPreparesWithoutAChildAndSpawnsLiteralArgvCwdAndEnvironmentOnce(t *testing.T) {
+	t.Parallel()
+	const literal = "assignment '$x' `backticks` 世界"
+	path := os.Getenv("PATH")
+	if path == "" {
+		t.Fatal("the fixture inherits the host execution path")
+	}
+	spec := newRunnerFixture(t).spec()
+	spec.argv = []string{
+		"/bin/sh", "-c",
+		`printf '%s\n' "$1"; printf '%s\n' "$CAFLEET_FIXTURE_MARKER"; if [ "$PATH" = "$2" ]; then printf 'inherited-path\n'; else exit 11; fi; pwd; exit 7`,
+		"cafleet-fixture", literal, path,
+	}
+	spec.environment = append(spec.environment, [2]string{"CAFLEET_FIXTURE_MARKER", "literal-marker-$x"})
+	owned := prepareOwnedPty(t, spec.size)
+	if exit, present, err := owned.session.tryWait(); err != nil || present {
+		t.Fatalf("a prepared PTY without a child waits %#v %v %v", exit, present, err)
+	}
+	process, err := owned.session.spawn(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process.pid <= 0 || process.startIdentity == "" {
+		t.Fatalf("spawned process identity %#v", process)
+	}
+	if _, err := owned.session.spawn(spec); err == nil {
+		t.Fatal("a second spawn on the same session succeeds")
+	}
+	output, status := ptyCollect(t, owned.session)
+	assertCleanupComplete(t, "spawn once", owned.stop())
+	cwd, err := filepath.EvalSymlinks(spec.cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(output)
+	for _, want := range []string{literal, "literal-marker-$x", "inherited-path", cwd} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("child output %q lacks %q", text, want)
+		}
+	}
+	if status != childExit(childExitCode{code: 7}) {
+		t.Fatalf("native exit %#v, want code 7", status)
+	}
+}
+
+func TestRuntimeProcess_MechanismsTests_RunnerRealPtyChildReceivesTheForwardedConfigLocation(t *testing.T) {
+	t.Parallel()
+	spec := newRunnerFixture(t).spec()
+	forwarded, err := codingAgentOpencode.forwardedConfig(func(name string) (opt[string], error) {
+		if name == "OPENCODE_CONFIG_DIR" {
+			return some("/cfg/open code"), nil
+		}
+		return none[string](), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, set := forwarded.get()
+	if !set {
+		t.Fatal("the set configuration variable is forwarded")
+	}
+	spec.environment = [][2]string{entry}
+	spec.argv = []string{"/bin/sh", "-c", `printf 'config=%s\n' "$OPENCODE_CONFIG_DIR"`}
+	owned := prepareOwnedPty(t, spec.size)
+	if _, err := owned.session.spawn(spec); err != nil {
+		t.Fatal(err)
+	}
+	output, status := ptyCollect(t, owned.session)
+	assertCleanupComplete(t, "forwarded config", owned.stop())
+	if text := string(output); !strings.Contains(text, "config=/cfg/open code") {
+		t.Fatalf("child output %q lacks the forwarded config location", text)
+	}
+	if status != childExit(childExitCode{code: 0}) {
+		t.Fatalf("native exit %#v, want code 0", status)
+	}
+}
+
+func TestRuntimeProcess_MechanismsTests_RunnerRealPtyRetainsTheNumericNativeSignalExit(t *testing.T) {
+	t.Parallel()
+	spec := newRunnerFixture(t).spec()
+	spec.argv = []string{"/bin/sh", "-c", "kill -TERM $$"}
+	owned := prepareOwnedPty(t, spec.size)
+	if _, err := owned.session.spawn(spec); err != nil {
+		t.Fatal(err)
+	}
+	_, status := ptyCollect(t, owned.session)
+	assertCleanupComplete(t, "signal exit", owned.stop())
+	if status != childExit(childExitSignal{signal: 15}) {
+		t.Fatalf("native exit %#v, want signal 15", status)
+	}
+}
+
+func assertTerminalRestored(t *testing.T, name string, terminal *os.File, expected unix.Termios) {
+	t.Helper()
+	actual, err := getTermios(int(terminal.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "darwin" {
+		// macOS sets PENDIN when TCSANOW restores canonical input.
+		actual.Lflag &^= unix.PENDIN
+		expected.Lflag &^= unix.PENDIN
+	}
+	if *actual != expected {
+		t.Fatalf("%s: terminal attributes %#v, want %#v", name, *actual, expected)
+	}
+}
+
+func TestRuntimeProcess_MechanismsTests_RunnerRealRawTerminalGuardRestoresOnlyItsOwnedFixtureTerminal(t *testing.T) {
+	t.Parallel()
+	master, terminal, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		closeFile(terminal)
+		closeFile(master)
+	})
+	before, err := getTermios(int(terminal.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := rawTerminalGuardEnter(terminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer guard.close()
+	raw, err := getTermios(int(terminal.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Lflag&unix.ICANON != 0 || raw.Lflag&unix.ECHO != 0 {
+		t.Fatalf("raw mode keeps canonical input or echo: %#v", raw.Lflag)
+	}
+	for _, stage := range []string{"restore", "repeated restore"} {
+		if err := guard.restore(); err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		assertTerminalRestored(t, stage, terminal, *before)
+	}
+	enterAndClose := func() {
+		scoped, err := rawTerminalGuardEnter(terminal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer scoped.close()
+	}
+	enterAndClose()
+	assertTerminalRestored(t, "scoped guard", terminal, *before)
+	unwound := func() (recovered bool) {
+		defer func() { recovered = recover() != nil }()
+		unwinding, err := rawTerminalGuardEnter(terminal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unwinding.close()
+		panic("fixture unwind")
+	}()
+	if !unwound {
+		t.Fatal("the fixture panic unwinds")
+	}
+	assertTerminalRestored(t, "unwound guard", terminal, *before)
+}
+
+// lateShutdownDeadlines start 1.7 units before now, leaving 0.3 units until the child deadline.
+func lateShutdownDeadlines(start time.Time) shutdownDeadlines {
+	return shutdownDeadlinesStartingAt(start.Add(-1700*time.Millisecond), shutdownUnit)
+}
+
+func TestRuntimeProcess_MechanismsTests_RunnerRealShutdownKillsAndReapsATermIgnoringOwnedChildWithinTheSharedDeadline(t *testing.T) {
+	t.Parallel()
+	spec := newRunnerFixture(t).spec()
+	spec.argv = []string{"/bin/sh", "-c", "trap '' TERM; printf 'ready\\n'; while :; do sleep 1; done"}
+	owned := prepareOwnedPty(t, spec.size)
+	process, err := owned.session.spawn(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ptyReadUntil(t, owned.session, "ready")
+	start := time.Now()
+	owned.deadlines = some(lateShutdownDeadlines(start))
+	outcome := owned.stop()
+	if elapsed := time.Since(start); elapsed >= 4750*time.Millisecond {
+		t.Fatalf("cleanup took %v: %#v", elapsed, outcome)
+	}
+	assertCleanupComplete(t, "TERM-ignoring child", outcome)
+	if outcome.nativeExit != some[childExit](childExitSignal{signal: 9}) {
+		t.Fatalf("native exit %#v, want signal 9", outcome.nativeExit)
+	}
+	assertReaped(t, "TERM-ignoring child", process.pid)
+}
+
+func TestRuntimeProcess_MechanismsTests_RunnerRealShutdownClosesASlaveRetainingDescendantAndPreservesTheNativeZeroExit(t *testing.T) {
+	t.Parallel()
+	fixture := newRunnerFixture(t)
+	ready := filepath.Join(fixture.dir, "descendant-ready")
+	spec := fixture.spec()
+	// The descendant must not fork: a new group member appearing during KILL enumeration is unpinned.
+	spec.argv = []string{
+		"/bin/sh", "-c",
+		`/bin/sh -c 'trap "" TERM HUP; printf ready > "$1"; exec /bin/sleep 600' descendant "$1" & descendant=$!; while [ ! -f "$1" ]; do sleep 0.01; done; printf 'descendant=%s\n' "$descendant"; exit 0`,
+		"parent", ready,
+	}
+	owned := prepareOwnedPty(t, spec.size)
+	native, err := owned.session.spawn(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := announcedPID(t, ptyReadUntil(t, owned.session, "\n"), "descendant=")
+	waitDeadline := time.Now().Add(5 * time.Second)
+	for {
+		exit, exited, err := owned.session.tryWait()
+		if err != nil {
+			t.Fatalf("native %#v with descendant %d wait failed: %v", native, pid, err)
+		}
+		if exited {
+			if exit != childExit(childExitCode{code: 0}) {
+				t.Fatalf("native %#v exit %#v, want code 0", native, exit)
+			}
+			break
+		}
+		if !time.Now().Before(waitDeadline) {
+			t.Fatalf("native %#v with descendant %d did not exit", native, pid)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	start := time.Now()
+	owned.deadlines = some(lateShutdownDeadlines(start))
+	outcome := owned.stop()
+	if elapsed := time.Since(start); elapsed >= 4750*time.Millisecond {
+		t.Fatalf("cleanup took %v: %#v", elapsed, outcome)
+	}
+	if outcome.nativeExit != some[childExit](childExitCode{code: 0}) {
+		t.Fatalf("native exit %#v, want code 0", outcome.nativeExit)
+	}
+	assertCleanupComplete(t, "slave-retaining descendant", outcome)
+	observation, err := exec.Command("/bin/ps", "-o", "stat=", "-p", strconv.FormatInt(pid, 10)).Output()
+	var exitErr *exec.ExitError
+	if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
+		t.Fatal(err)
+	}
+	if state := strings.TrimSpace(string(observation)); state != "" && !strings.HasPrefix(state, "Z") {
+		t.Fatalf("owned descendant remains running: %s", state)
 	}
 }
