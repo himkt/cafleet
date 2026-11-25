@@ -116,6 +116,9 @@ class Recorder:
             pass
 
 
+TIMINGS = False
+
+
 def run_scenario(binary, scenario, root):
     """One confined scenario run; aborts the harness if any cafleet-owned entry of the user's
     real home changed while it ran."""
@@ -142,7 +145,11 @@ def run_confined(binary, scenario, root):
                                       "value": json.dumps(value, sort_keys=True, ensure_ascii=False)})
                 rec.note_panes()
                 continue
+            step_started = time.monotonic()
             result = world.run(step)
+            if TIMINGS:
+                print(f"  timing {os.path.basename(os.path.dirname(binary))} {' '.join(step['argv'][:3])}: exit={result['exit']} "
+                      f"{time.monotonic() - step_started:.2f}s", flush=True)
             rec.pids.update(p for p in (result["pid"], result["wrapper_pid"]) if p)
             rec.note_panes()
             quiet = None
@@ -357,7 +364,10 @@ def main(argv=None):
     parser.add_argument("--records", default=None, help="write every normalized reference run to this JSON file")
     parser.add_argument("--include-dropped", action="store_true", help="also run the G2 scenarios DROPPED lists")
     parser.add_argument("--list", action="store_true", help="print the selected scenario names and exit")
+    parser.add_argument("--timings", action="store_true", help="print the exit code and duration of every command step")
     args = parser.parse_args(argv)
+    global TIMINGS
+    TIMINGS = args.timings
     selected = [s for s in load_scenarios(args.gate, args.include_dropped) if not args.only or s["name"] in args.only]
     assert selected, f"no scenario matches {args.only}"
     if args.list:
