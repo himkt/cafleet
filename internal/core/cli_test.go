@@ -479,18 +479,21 @@ func TestCli_DirectorOnlyGuard_RunArgsReportsParseErrorsBeforeTheGuard(t *testin
 	}
 }
 
-func TestCli_ParseErrorsWriteAnErrorLineThenUsageToStderrAndExitTwo(t *testing.T) {
+func TestCli_ParseErrorsWriteAnErrorLineAndUsageOutsideValueErrorsToStderrAndExitTwo(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name  string
 		args  []string
 		names []string
+		usage bool
 	}{
-		{name: "unknown subcommand", args: []string{"nonexistent"}, names: []string{"nonexistent"}},
-		{name: "unknown option", args: []string{"fleet", "list", "--bogus"}, names: []string{"--bogus"}},
-		{name: "missing subject", args: []string{"member", "show"}, names: []string{"<MEMBER_ID>"}},
+		{name: "unknown subcommand", args: []string{"nonexistent"}, names: []string{"nonexistent"}, usage: true},
+		{name: "unknown option", args: []string{"fleet", "list", "--bogus"}, names: []string{"--bogus"}, usage: true},
+		{name: "missing subject", args: []string{"member", "show"}, names: []string{"<MEMBER_ID>"}, usage: true},
 		{name: "non-integer subject", args: []string{"fleet", "show", "abc"}, names: []string{"abc"}},
-		{name: "conflicting bodies", args: []string{"message", "send", "--from-member-id", "1", "--to-member-id", "2", "hi", "--file", "body.txt"}, names: []string{"TEXT", "--file"}},
+		{name: "value outside the choices", args: []string{"setup", "--coding-agent", "bogus"}, names: []string{"bogus", "claude"}},
+		{name: "missing option value", args: []string{"message", "poll", "1", "--database-url"}, names: []string{"--database-url <URL>"}},
+		{name: "conflicting bodies", args: []string{"message", "send", "--from-member-id", "1", "--to-member-id", "2", "hi", "--file", "body.txt"}, names: []string{"TEXT", "--file"}, usage: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -511,8 +514,8 @@ func TestCli_ParseErrorsWriteAnErrorLineThenUsageToStderrAndExitTwo(t *testing.T
 			for _, line := range lines[1:] {
 				usage = usage || strings.HasPrefix(line, "Usage: ")
 			}
-			if !usage {
-				t.Fatalf("%s: no Usage: line follows the error:\n%s", tc.name, outcome.stderr)
+			if usage != tc.usage {
+				t.Fatalf("%s: a Usage: line follows the error is %t, want %t:\n%s", tc.name, usage, tc.usage, outcome.stderr)
 			}
 			for _, input := range tc.names {
 				if !strings.Contains(outcome.stderr, input) {
@@ -523,6 +526,52 @@ func TestCli_ParseErrorsWriteAnErrorLineThenUsageToStderrAndExitTwo(t *testing.T
 				t.Fatalf("%s: a parse error touched the database: %v", tc.name, err)
 			}
 		})
+	}
+}
+
+func TestCli_ParseErrorsReportTheFirstLineClapReports(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		args  []string
+		first string
+	}{
+		{name: "root without arguments", args: nil, first: cliRootAbout},
+		{name: "root with only a URL", args: []string{"--database-url", "x"}, first: "error: 'cafleet' requires a subcommand but one was not provided"},
+		{name: "group with its own URL", args: []string{"member", "--database-url", "x"}, first: "error: 'cafleet member' requires a subcommand but one was not provided"},
+		{name: "group under a root URL", args: []string{"--database-url", "x", "member"}, first: "Member lifecycle and pane interaction"},
+		{name: "group with a trailing separator", args: []string{"member", "--"}, first: "Member lifecycle and pane interaction"},
+		{name: "unknown long flag in place of a value", args: []string{"--database-url", "--json", "message", "poll", "1"}, first: "error: unexpected argument '--json' found"},
+		{name: "unknown short flag in place of a value", args: []string{"--database-url", "-x", "fleet"}, first: "error: unexpected argument '-x' found"},
+		{name: "subgroup version flag in place of a value", args: []string{"member", "--database-url", "--version"}, first: "error: unexpected argument '--version' found"},
+		{name: "known flag in place of a value", args: []string{"--database-url", "--help"}, first: "error: a value is required for '--database-url <URL>' but none was supplied"},
+		{name: "known short cluster in place of a value", args: []string{"--database-url", "-hx"}, first: "error: a value is required for '--database-url <URL>' but none was supplied"},
+		{name: "separator in place of a value", args: []string{"--database-url", "--", "fleet"}, first: "error: unexpected argument 'fleet' found"},
+		{name: "invalid UTF-8 positional", args: []string{"message", "poll", "\xff"}, first: "error: invalid UTF-8 was detected in one or more arguments"},
+		{name: "invalid UTF-8 option value", args: []string{"message", "send", "--to-member-id", "\xff", "--from-member-id", "x", "hi"}, first: "error: invalid UTF-8 was detected in one or more arguments"},
+		{name: "invalid UTF-8 body before a missing option", args: []string{"message", "send", "\xff"}, first: "error: invalid UTF-8 was detected in one or more arguments"},
+		{name: "invalid UTF-8 root URL", args: []string{"--database-url", "\xff", "fleet", "list"}, first: "error: invalid UTF-8 was detected in one or more arguments"},
+		{name: "leaf error before an invalid root URL", args: []string{"--database-url", "\xff", "fleet", "list", "--bogus"}, first: "error: unexpected argument '--bogus' found"},
+		{name: "extra positional before invalid UTF-8", args: []string{"message", "poll", "\xff", "2"}, first: "error: unexpected argument '2' found"},
+		{name: "invalid UTF-8 rendered lossily", args: []string{"message", "send", "--from-member-id", "1", "--to-member-id", "2", "\xff", "\xfe"}, first: "error: unexpected argument '�' found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, exit := cliArgsParseFrom(append([]string{"cafleet"}, tc.args...))
+			if exit == nil {
+				t.Fatalf("%s: the arguments parse", tc.name)
+			}
+			if exit.exitCode() != 2 {
+				t.Fatalf("%s: exit %d, want 2", tc.name, exit.exitCode())
+			}
+			if first, _, _ := strings.Cut(exit.text, "\n"); first != tc.first {
+				t.Fatalf("%s: first line %q, want %q", tc.name, first, tc.first)
+			}
+		})
+	}
+	if _, exit := cliArgsParseFrom([]string{"cafleet", "--database-url", "-", "fleet", "list"}); exit != nil {
+		t.Fatalf("a lone dash is the URL value: %s", exit.text)
 	}
 }
 

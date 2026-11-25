@@ -611,8 +611,11 @@ scenario("parse-errors", {}, *SEEDED,
          *[{"argv": [*case, "--database-url", "{URL}"] if i % 2 else case, "compare": "parse"}
            for i, case in enumerate(PARSE_CASES)],
          ["fleet", "list", *U])
+# The full parse-error bytes, beyond the first line G1 compares: an informational report outside
+# the gate's pass condition.
 scenario("parse-errors-exact", {}, *SEEDED,
-         *[[*case, "--database-url", "{URL}"] if i % 2 else case for i, case in enumerate(PARSE_CASES)])
+         *[[*case, "--database-url", "{URL}"] if i % 2 else case for i, case in enumerate(PARSE_CASES)],
+         informational=True)
 
 # ---------------------------------------------------------------- setup
 
