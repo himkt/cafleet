@@ -9,9 +9,8 @@ Develop changes through reviewed designs and the bundled CAFleet workflows, runn
 | `go.mod` | The Go module `github.com/himkt/cafleet` and its dependencies; its `ignore ./docs` directive keeps the documentation site out of every `./...` pattern |
 | `cmd/cafleet/` | The `cafleet` binary's entry point, which calls the CLI with the embedded assets |
 | `internal/core/` | The CLI, the synchronous SQLite broker, multiplexer/process adapters, the member runner and the SQL schema, the `schemaSQL` constant in `internal/core/db.go`, as one package |
-| `internal/vt/` | The in-repo terminal emulator: the screen model, its escape-sequence parser and Unicode width tables |
+| `internal/vt/` | The in-repo terminal emulator: the screen model, its escape-sequence parser and Unicode width tables. Each package's `license.go` carries the upstream copyright and license text of the code it is transliterated from |
 | `assets.go` | Embeds the `assets/` tree into the binary |
-| `third_party/` | Upstream license texts of the code the terminal emulator is transliterated from |
 | `assets/` | Data files: `assets/skills/` installed agent-facing skills, roles and references; `assets/presets/` backend permission/configuration assets; `assets/extensions/` one directory per backend whose plugin or extension `cafleet setup` installs, for Director goals and, where the backend has no native per-tool approval, the Director question tool and the member gate; `assets/profiles/` one runner-profile file per backend with its native screen fixtures. The binary embeds every file |
 | `docs/` | Independent operator documentation and its Node/pnpm site tooling |
 | `design-docs/` | Numbered design documents and local evidence |
@@ -73,7 +72,7 @@ These herdr references, pinned to commit `5608de0608918aba2f9d501e7793b984a0ca9c
 
 Map herdr’s broad `blocked` state into CAFleet’s typed interaction classes, returned-result observations and input-eligibility states. Questions, trust and update screens retain their own classes; a permission request needs the live operation and choice/input region together. Conflicting strongest rules produce an unknown interaction and preserve the native surface. CAFleet owns its runner, profiles, classification, persistence and notification; herdr APIs remain diagnostic, not runtime detection dependencies.
 
-Use safe PTY/terminal APIs behind deterministic transport interfaces. cafleet builds without cgo and imports no `unsafe` package, with a single exception: the audited darwin `__pthread_sigmask` call in `internal/core/time_darwin.go`, which carries its safety invariants inline; add no other unsafe code. Every safe start-time interface applies a same-effective-user check that fails for setuid descendants in the owned process group. PTYs are allocated through `creack/pty`, and the terminal screen model is the in-repo emulator in `internal/vt`, transliterated from vt100 0.18.1 and vte 0.15.0, with their notices in `third_party/`. Separate terminal transport, classification and event storage, and preserve bounded shutdown independently of SQLite waits.
+Use safe PTY/terminal APIs behind deterministic transport interfaces. cafleet builds without cgo and imports no `unsafe` package, with a single exception: the audited darwin `__pthread_sigmask` call in `internal/core/time_darwin.go`, which carries its safety invariants inline; add no other unsafe code. Every safe start-time interface applies a same-effective-user check that fails for setuid descendants in the owned process group. PTYs are allocated through `creack/pty`, and the terminal screen model is the in-repo emulator in `internal/vt`, transliterated from vt100 0.18.1 and vte 0.15.0, with their notices in each package's `license.go`. Separate terminal transport, classification and event storage, and preserve bounded shutdown independently of SQLite waits.
 
 Evaluate a candidate backend against the role bar before it ships:
 

@@ -97,7 +97,7 @@ internal/core/version.go        const Version = "<release version>"
 internal/vt/vte/                vte 0.15.0 parser
 internal/vt/unicodewidth/       unicode-width 0.2.2 (non-CJK; generated tables)
 internal/vt/                    vt100 0.18.1 screen model
-third_party/                    upstream LICENSE texts for vt100, vte and unicode-width
+internal/vt/**/license.go       upstream copyright and MIT license text for vt100, vte and unicode-width
 .golangci.yml                   lint configuration
 ```
 
@@ -133,7 +133,7 @@ No other module is added: no cobra, no `x/term` (raw mode is hand-written, inclu
 The transliterated emulator keeps its upstream notices:
 
 - each Go file in `internal/vt` starts with a header naming its source file, crate version, MIT license and copyright holder;
-- `third_party/{vt100-0.18.1,vte-0.15.0,unicode-width-0.2.2}/LICENSE` hold the MIT texts (vte and unicode-width used under their MIT option);
+- `license.go` in `internal/vt`, `internal/vt/vte` and `internal/vt/unicodewidth` holds, as a file comment, that package's upstream copyright notice and full MIT permission notice (vte and unicode-width used under their MIT option);
 - each release archive includes a `THIRD_PARTY_LICENSES` file with those three notices and the licenses of the linked Go modules.
 
 ### Transliteration rules
@@ -381,7 +381,7 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 |---|---|
 | `SPEC.md` | Amendments A1–A11 |
 | `assets/skills/cafleet/reference/cli.md` | The error rows and database-selection facts it carries for A1, A3 and A4 (Step 5). A9 changes no `cli.md` fact (Step 3 confirms) |
-| `docs/docs/contributing.md` | Project-structure `src/` row → the Go module (`cmd/`, `internal/`, root `assets.go`, `go.mod`). "Rust boundaries" → "Go boundaries", with the test sentence restated for `_test.go`. Development paragraph: Go validation, no `CARGO_PROFILE_TEST_OPT_LEVEL`, and the C compiler that `//:test` needs on Linux. The install paragraph states that `mise //:install` installs to `$GOBIN` (default `~/go/bin`), which must be on `PATH`, and that `cafleet setup` re-run after an install makes the extensions' executable record name the installed binary. The one-time switch-over steps for existing checkouts (`cargo uninstall cafleet`, put `~/go/bin` first on `PATH`, `mise //:install`, re-run `cafleet setup`) go in the cutover PR description and the first Go release's notes, which are point-in-time records, not in `contributing.md`. The unsafe/PTY paragraph: cafleet uses no cgo and no `unsafe` except the single audited darwin `__pthread_sigmask` call in `internal/core/time_darwin.go`, `creack/pty` for PTY allocation, and the in-repo emulator transliterated from vt100 0.18.1 / vte 0.15.0 with its notices in `third_party/`. The bundled-catalog guard location → `internal/core/coding_agent_catalog_test.go` |
+| `docs/docs/contributing.md` | Project-structure `src/` row → the Go module (`cmd/`, `internal/`, root `assets.go`, `go.mod`). "Rust boundaries" → "Go boundaries", with the test sentence restated for `_test.go`. Development paragraph: Go validation, no `CARGO_PROFILE_TEST_OPT_LEVEL`, and the C compiler that `//:test` needs on Linux. The install paragraph states that `mise //:install` installs to `$GOBIN` (default `~/go/bin`), which must be on `PATH`, and that `cafleet setup` re-run after an install makes the extensions' executable record name the installed binary. The one-time switch-over steps for existing checkouts (`cargo uninstall cafleet`, put `~/go/bin` first on `PATH`, `mise //:install`, re-run `cafleet setup`) go in the cutover PR description and the first Go release's notes, which are point-in-time records, not in `contributing.md`. The unsafe/PTY paragraph: cafleet uses no cgo and no `unsafe` except the single audited darwin `__pthread_sigmask` call in `internal/core/time_darwin.go`, `creack/pty` for PTY allocation, and the in-repo emulator transliterated from vt100 0.18.1 / vte 0.15.0 with its notices in each package's `license.go`. The bundled-catalog guard location → `internal/core/coding_agent_catalog_test.go` |
 | `README.md` | No change: the pitch, install commands and archive names stay |
 | Other `assets/skills/` files | No change: the `#[cfg(test)]` mentions in the design-doc programmer and tester roles are examples for any project |
 | `CLAUDE.md` | Project: "The Go module at the repository root builds the unified CLI with the standard library, ncruces go-sqlite3 and an embedded SQL schema." Tests: "Write every Go test in the `_test.go` file beside the implementation file it exercises, in the same package; never add a test data file or directory." |
@@ -460,7 +460,7 @@ The `poc/` tooling roots point at `poc/`. exp-interop `mixed.py`, `runner_probe.
 
 ### Step 7: Go module skeleton and toolchain
 
-- [x] `go.mod` (with `ignore ./docs`), root `assets.go`, `cmd/cafleet/main.go`, `internal/core/main.go`, `internal/core/version.go` and the `third_party/` license texts <!-- completed: 2026-11-24T11:46 -->
+- [x] `go.mod` (with `ignore ./docs`), root `assets.go`, `cmd/cafleet/main.go`, `internal/core/main.go`, `internal/core/version.go` and the `internal/vt` license notices <!-- completed: 2026-11-24T11:46 -->
 - [x] `mise.toml` tools and tasks per § Build, lint, CI and release <!-- completed: 2026-11-24T11:46 -->
 - [x] `.golangci.yml` with the linters in § Build, lint, CI and release; `.gitignore` `!.golangci.yml` and `/dist/` <!-- completed: 2026-11-24T11:46 -->
 
@@ -539,3 +539,4 @@ COMMENT(director): Step 9 arbitration (Tester-C, U3): (b). Pure per-fixture clas
 | 2026-11-24 | Reviewer round 2: identifier derivation rules, explicit test timeout, run-time fuzz generation, capture tests in their owners' `_test.go`, G6 `PATH` isolation |
 | 2026-11-24 | Reviewer round 3 and exp-macos: darwin `SYS___PTHREAD_SIGMASK` route, macOS lock interop and raw-mode results, darwin PTY rules F22–F25 |
 | 2026-11-24 | Execution: pre-baseline fixes ship as one PR. User decision: captured streams are never committed; they form a local corpus for Director-run G3/G4 stream checks, and the permanent golden tests use seeded generated streams and the bundled fixtures |
+| 2026-11-25 | User decision: the upstream license notices move from `third_party/` into a `license.go` file comment in each `internal/vt` package, and `third_party/` is removed |
