@@ -7692,3 +7692,172 @@ func TestRuntimeObservation_NativeCapture_Verification_NativeCapturePrepareStart
 		t.Fatalf("actual native prepare/start/cleanup outcome: %s", cafleetErrorOf(err).message())
 	}
 }
+
+// showQuietForm shows the synthetic form and waits for the quiet timer to open its interaction.
+func showQuietForm(t *testing.T, f *serviceFixture, form string) {
+	t.Helper()
+	f.writeOuter(form + "\r")
+	f.readUntil("Operation: write " + form + ".txt")
+	waitUntilWithin(t, 30*time.Second, func() bool { return runtimeEventCount(t, f, "interaction_opened") == 1 })
+}
+
+func runtimeEventKindsOf(t *testing.T, f *serviceFixture) []string {
+	t.Helper()
+	var kinds []string
+	for _, row := range tableRows(t, f.fixture.conn, "SELECT kind FROM member_runtime_events WHERE run_id=?1 ORDER BY event_seq", f.fixture.run.runID) {
+		kinds = append(kinds, row[0].(string))
+	}
+	return kinds
+}
+
+func assertLiveAfterFault(t *testing.T, f *serviceFixture, diagnostic string) {
+	t.Helper()
+	if status, exited, err := f.child.tryWait(); err != nil || exited {
+		t.Fatalf("the runner outlives the observation fault: %v %v", status, err)
+	}
+	observation := jsonAt(t, f.health(), "observation")
+	if !jsonIsString(jsonAt(t, observation, "eligibility", "state"), "hold") {
+		t.Fatalf("input holds after the fault: %s", observation)
+	}
+	if gaps, _ := jsonUint64(jsonAt(t, observation, "gap_count")); gaps == 0 {
+		t.Fatalf("the fault records a gap: %s", observation)
+	}
+	if reported, present := jsonString(jsonIndex(observation, "diagnostic")); present && reported != diagnostic {
+		t.Fatalf("diagnostic %q, want %q", reported, diagnostic)
+	}
+	f.assertManualIO()
+	assertDurableGap(t, f)
+}
+
+func TestRuntimeObservation_ObservationContract_ServiceQuietTimerPersistsOneOpeningWithoutChangingOutputSequence(t *testing.T) {
+	t.Parallel()
+	f := configuredServiceFixture(t, false, syntheticObservationServices)
+	f.startRunning()
+	f.writeOuter("form-one\r")
+	f.readUntil("Operation: write form-one.txt")
+	sequence := outputSeqOf(t, f.health())
+	waitUntilWithin(t, 3*realTimeBound, func() bool { return runtimeEventCount(t, f, "interaction_opened") == 1 })
+	after := f.health()
+	if outputSeqOf(t, after) != sequence {
+		t.Fatalf("the quiet timer leaves output_seq at %d: %s", sequence, after)
+	}
+	if !jsonIsString(jsonAt(t, after, "observation", "visibility"), "visible") || !jsonIsString(jsonAt(t, after, "observation", "eligibility", "state"), "hold") {
+		t.Fatalf("the opened interaction is visible and holds input: %s", after)
+	}
+	if messages := queryInt64(t, f.fixture.conn, "SELECT COUNT(*) FROM member_runtime_events e JOIN messages m ON m.message_id=e.message_id WHERE e.run_id=?1 AND e.kind='interaction_opened'", f.fixture.run.runID); messages != 1 {
+		t.Fatalf("one interaction_opened message, got %d", messages)
+	}
+	f.assertManualIO()
+	f.finish()
+}
+
+func TestRuntimeObservation_ObservationContract_ServiceShutdownUsesTheActiveControllerToCloseBeforeTruthfulExit(t *testing.T) {
+	t.Parallel()
+	f := configuredServiceFixture(t, false, syntheticObservationServices)
+	f.startRunning()
+	showQuietForm(t, f, "form-shutdown")
+	f.finish()
+	if kinds := runtimeEventKindsOf(t, f); !slices.Equal(kinds, []string{"interaction_opened", "interaction_closed", "runner_exited"}) {
+		t.Fatalf("event kinds %q", kinds)
+	}
+	if reason := queryText(t, f.fixture.conn, "SELECT close_reason FROM member_interactions WHERE run_id=?1", f.fixture.run.runID); reason != "process_exited" {
+		t.Fatalf("close reason %q", reason)
+	}
+}
+
+func TestRuntimeObservation_ObservationContract_ServiceRunOfABackendWithAProfileEmitsNoCoverageUnknownWhateverItsVersion(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		native opt[string]
+	}{
+		{"a tested version", some("0.164.0")},
+		{"an untested version", some("0.0.1")},
+		{"no recorded version", none[string]()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := configuredServiceFixture(t, false, func(t *testing.T, fixture *runnerFixture, _ *spawnSpec) {
+				t.Helper()
+				var version any
+				if native, set := tc.native.get(); set {
+					version = native
+				}
+				if _, err := sqlExecute(fixture.conn, "UPDATE member_runs SET native_version=?1,coverage=?2 WHERE run_id=?3", version, coverageTested.asStr(), fixture.run.runID); err != nil {
+					t.Fatal(err)
+				}
+				fixture.refresh(t)
+			})
+			f.startRunning()
+			for range 3 {
+				f.health()
+				f.assertManualIO()
+			}
+			f.finish()
+			if count := runtimeEventCount(t, f, "coverage_unknown"); count != 0 {
+				t.Fatalf("%s: coverage_unknown events %d", tc.name, count)
+			}
+			run := mustRun(t, f.fixture.conn, f.fixture.run.runID)
+			if run.nativeVersion != tc.native || run.coverage != coverageTested {
+				t.Fatalf("%s: native %v coverage %s", tc.name, run.nativeVersion, run.coverage.asStr())
+			}
+			if _, set := tc.native.get(); !set && run.resolvedMode != "approve-for-me" {
+				t.Fatalf("%s: resolved mode %q", tc.name, run.resolvedMode)
+			}
+		})
+	}
+}
+
+func TestRuntimeObservation_InjectedFailures_RunnerResizeDetectorFailureKeepsActualResizedServiceAndNativeChild(t *testing.T) {
+	t.Parallel()
+	f := configuredServiceFixture(t, false, func(t *testing.T, fixture *runnerFixture, spec *spawnSpec) {
+		t.Helper()
+		configureObservationFault(t, fixture, spec, "resize", "detector")
+	})
+	started := startedChild(t, f.startRunning())
+	showQuietForm(t, f, "form-resize-failure")
+	sequence := outputSeqOf(t, f.health())
+	armObservationFault(t, f)
+	if process, _ := f.process.get(); !mustMatch(t, process) {
+		t.Fatal("the runner keeps its generation")
+	}
+	f.resize(25, 90)
+	assertObservationFaultFired(t, f, "Resize/Detector")
+	if child := startedChild(t, f.healthChild()); child != started {
+		t.Fatalf("the native child %+v survives the fault, health reports %+v", started, child)
+	}
+	if resized := outputSeqOf(t, f.health()); resized <= sequence {
+		t.Fatalf("the resize advances output_seq past %d, got %d", sequence, resized)
+	}
+	assertLiveAfterFault(t, f, "detector_unavailable")
+	f.finish()
+	assertPrivateCauseStaysLocal(t, f)
+}
+
+func TestRuntimeObservation_InjectedFailures_RunnerDetectorFailuresKeepTransportAndTypedMetadata(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		point, operation, form, fired, diagnostic string
+	}{
+		{"child_output", "detector", "form-output-failure", "ChildOutput/Detector", "detector_unavailable"},
+		{"quiet_timer", "detector", "form-quiet-failure", "QuietTimer/Detector", "detector_unavailable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.point, func(t *testing.T) {
+			t.Parallel()
+			f := configuredServiceFixture(t, false, func(t *testing.T, fixture *runnerFixture, spec *spawnSpec) {
+				t.Helper()
+				configureObservationFault(t, fixture, spec, tc.point, tc.operation)
+			})
+			f.startRunning()
+			armObservationFault(t, f)
+			f.writeOuter(tc.form + "\r")
+			f.readUntil("Operation: write " + tc.form + ".txt")
+			assertObservationFaultFired(t, f, tc.fired)
+			assertLiveAfterFault(t, f, tc.diagnostic)
+			f.finish()
+			assertPrivateCauseStaysLocal(t, f)
+		})
+	}
+}
