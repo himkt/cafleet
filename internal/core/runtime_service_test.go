@@ -2037,7 +2037,7 @@ func (f *serviceFixture) stopForDisconnect() {
 		case errors.Is(err, unix.EINTR):
 		case err != nil:
 			f.t.Fatal(err)
-		case pid != 0 && status.Stopped() && status.StopSignal() == unix.SIGSTOP:
+		case pid != 0 && stoppedBySigstop(status):
 			return
 		case pid != 0:
 			f.t.Fatalf("unexpected owned runner state: %v", status)
@@ -2047,6 +2047,12 @@ func (f *serviceFixture) stopForDisconnect() {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+}
+
+// stoppedBySigstop decodes the wait status bits directly: the BSD WaitStatus methods report a
+// SIGSTOP stop as Continued rather than Stopped.
+func stoppedBySigstop(status unix.WaitStatus) bool {
+	return status&0xff == 0x7f && unix.Signal(status>>8&0xff) == unix.SIGSTOP
 }
 
 func mustMatch(t *testing.T, process processIdentity) bool {
