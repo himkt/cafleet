@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"github.com/ncruces/go-sqlite3"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1074,4 +1079,485 @@ func TestCliMember_WindowLayout_ABusyLayoutLockFailsMemberDeleteAndLeavesRunPane
 		t.Fatal("the run is unchanged")
 	}
 	paneLockAcquireReleased(t, s.databaseURL, after.placement).close()
+}
+
+const externalMemberEnv = "CAFLEET_TEST_EXTERNAL_MEMBER"
+
+type externalMemberConfig struct {
+	DatabasePath     string `json:"database_path"`
+	MemberID         int64  `json:"member_id"`
+	DirectorMemberID int64  `json:"director_member_id"`
+	Literal          string `json:"literal"`
+	Action           string `json:"action"`
+	JSON             bool   `json:"json"`
+	InputID          int64  `json:"input_id"`
+	SetupExpiration  uint64 `json:"setup_expiration"`
+}
+
+type externalMemberRelease struct {
+	Expiration uint64 `json:"expiration"`
+}
+
+// writeExternalMemberJSON publishes value at path by a rename, so a reader never sees a partial
+// file.
+func writeExternalMemberJSON(t *testing.T, path string, value any) {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".partial", data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path+".partial", path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readExternalMemberJSON(t *testing.T, path string, value any) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, value); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func externalMemberDeadline(t *testing.T, expiration uint64) time.Time {
+	t.Helper()
+	until, err := receiveInputExpiration(expiration, time.Now(), systemClock{})
+	if err != nil {
+		t.Fatalf("the original parent expiration remains live: %v", err)
+	}
+	return until
+}
+
+func fileExists(t *testing.T, path string) bool {
+	t.Helper()
+	_, err := os.Stat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return err == nil
+}
+
+func externalMemberRun(ctx context.Context, conn *dbConn, s settings, config externalMemberConfig, d deadline) error {
+	switch config.Action {
+	case "prompt":
+		return memberRun(ctx, conn, s, memberCommandPrompt{
+			memberID: config.MemberID, directorMemberID: config.DirectorMemberID, text: config.Literal, json: config.JSON,
+		}, d)
+	case "exec":
+		return memberRun(ctx, conn, s, memberCommandExec{
+			memberID: config.MemberID, directorMemberID: config.DirectorMemberID,
+			body: execBodyArgs{command: some(config.Literal), file: none[string]()}, json: config.JSON,
+		}, d)
+	case "show":
+		return memberRun(ctx, conn, s, memberCommandShow{memberID: config.MemberID, json: config.JSON}, d)
+	case "input_show":
+		return inputRun(ctx, conn, s, inputCommandShow{inputID: config.InputID, json: config.JSON}, d)
+	default:
+		panic("unknown owned member subprocess action: " + config.Action)
+	}
+}
+
+// TestCliMember_ExternalInputMemberChild runs one member command against the parent's runner
+// once the parent releases it, then exits with the command's code.
+//
+//nolint:paralleltest // catches SIGPIPE process-wide inside its own child process, as the binary does
+func TestCliMember_ExternalInputMemberChild(t *testing.T) {
+	skipUnlessChildTest(t)
+	if err := processStartup(); err != nil {
+		t.Fatal(err)
+	}
+	path := os.Getenv(externalMemberEnv)
+	var config externalMemberConfig
+	readExternalMemberJSON(t, path, &config)
+	setupUntil := externalMemberDeadline(t, config.SetupExpiration)
+	s := settingsForDatabase(config.DatabasePath)
+	conn, err := connect(s.databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeExternalMemberJSON(t, path+".ready", map[string]bool{"ready": true})
+	for !fileExists(t, path+".continue") {
+		if !time.Now().Before(setupUntil) {
+			t.Fatal("the parent releases the command within its setup bound")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	var release externalMemberRelease
+	readExternalMemberJSON(t, path+".continue", &release)
+	if release.Expiration > config.SetupExpiration {
+		t.Fatal("command expiration retains the original outer bound")
+	}
+	d := deadlineUntil(externalMemberDeadline(t, release.Expiration))
+	if err := externalMemberRun(context.Background(), conn, s, config, d); err != nil {
+		failure := cafleetErrorOf(err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", failure.message())
+		os.Exit(failure.exitCode())
+	}
+	os.Exit(0)
+}
+
+type externalMemberOutcome struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+var externalMemberSequence atomic.Uint64
+
+const externalMemberOutputCap = 16384
+
+// externalMemberInvoke runs action as a member command in its own process against f's runner,
+// bounded by five seconds and outer, closing the command's stdout reader first when loseStdout.
+func externalMemberInvoke(t *testing.T, f *serviceFixture, action, literal string, jsonOutput, loseStdout bool, inputID int64, outer time.Time) externalMemberOutcome {
+	t.Helper()
+	path := filepath.Join(f.fixture.dir, fmt.Sprintf("external-member-%d.json", externalMemberSequence.Add(1)))
+	setupExpiration := serviceInputExpiration(t, outer)
+	run := f.fixture.run
+	writeExternalMemberJSON(t, path, externalMemberConfig{
+		DatabasePath: f.fixture.databaseFile(t), MemberID: run.memberID, DirectorMemberID: run.directorMemberID,
+		Literal: literal, Action: action, JSON: jsonOutput, InputID: inputID, SetupExpiration: setupExpiration,
+	})
+	command := childTestCommand(TestCliMember_ExternalInputMemberChild)
+	command.Env = append(command.Env, externalMemberEnv+"="+path, "PATH="+f.fixture.dir, "HOME="+t.TempDir())
+	stdoutReader, stdoutWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	command.Stdout, command.Stderr = stdoutWriter, &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdoutWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- command.Wait() }()
+	reaped := false
+	defer func() {
+		if !reaped {
+			if err := command.Process.Kill(); err != nil {
+				t.Error(err)
+			}
+			if err := <-exited; err == nil {
+				t.Error("the killed owned member reports its signal")
+			}
+		}
+		if !loseStdout {
+			if err := stdoutReader.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	type captured struct {
+		data []byte
+		err  error
+	}
+	stdout := make(chan captured, 1)
+	if !loseStdout {
+		go func() {
+			data, err := io.ReadAll(io.LimitReader(stdoutReader, externalMemberOutputCap+1))
+			stdout <- captured{data, err}
+		}()
+	}
+	for !fileExists(t, path+".ready") {
+		select {
+		case err := <-exited:
+			reaped = true
+			t.Fatalf("owned member reaches its command-ready gate: %v\n%s", err, stderr.String())
+		default:
+		}
+		serviceInputPause(t, outer)
+	}
+	if loseStdout {
+		if err := stdoutReader.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := time.Now()
+	commandUntil := earliestTime(started.Add(5*time.Second), outer)
+	writeExternalMemberJSON(t, path+".continue", externalMemberRelease{Expiration: min(serviceInputExpiration(t, commandUntil), setupExpiration)})
+	select {
+	case err := <-exited:
+		reaped = true
+		var exit *exec.ExitError
+		if err != nil && !errors.As(err, &exit) {
+			t.Fatalf("owned member wait: %v", err)
+		}
+	case <-time.After(time.Until(commandUntil)):
+		t.Fatalf("owned member exceeded its original command deadline: elapsed=%v; budget=%v", time.Since(started), commandUntil.Sub(started))
+	}
+	outcome := externalMemberOutcome{code: command.ProcessState.ExitCode(), stderr: stderr.String()}
+	if !loseStdout {
+		output := <-stdout
+		if output.err != nil {
+			t.Fatal(output.err)
+		}
+		outcome.stdout = string(output.data)
+	}
+	if len(outcome.stdout) > externalMemberOutputCap || len(outcome.stderr) > externalMemberOutputCap {
+		t.Fatalf("owned member output exceeds %d bytes", externalMemberOutputCap)
+	}
+	return outcome
+}
+
+func externalMemberInputIDs(t *testing.T, conn *dbConn, runID int64) []int64 {
+	t.Helper()
+	ids, err := queryRows(conn, "SELECT input_id FROM member_input_operations WHERE run_id=?1 ORDER BY input_id",
+		[]any{runID}, func(row sqlRow) (int64, error) { return row.int64(0) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ids
+}
+
+func externalMemberJSON(t *testing.T, stdout string) jsontext.Value {
+	t.Helper()
+	for _, line := range lines(stdout) {
+		if strings.HasPrefix(line, "{") {
+			return jsontext.Value(line)
+		}
+	}
+	t.Fatalf("actual member JSON output: %q", stdout)
+	return nil
+}
+
+func isLowerHex(text string) bool {
+	return strings.Trim(text, "0123456789abcdef") == ""
+}
+
+func assertInvocationKey(t *testing.T, key, prefix string) {
+	t.Helper()
+	random, found := strings.CutPrefix(key, prefix)
+	if !found || len(random) != 64 || !isLowerHex(random) {
+		t.Fatalf("operation key %q is %s followed by 64 lowercase hex digits", key, prefix)
+	}
+}
+
+func countRecordLines(t *testing.T, f *serviceFixture, line string) int {
+	t.Helper()
+	count := 0
+	for _, recorded := range recordLines(t, f) {
+		if recorded == line {
+			count++
+		}
+	}
+	return count
+}
+
+func TestCliMember_OverLimitDispatchNamesTheCommandCountsItsPrefixAndStatesTheLimitCause(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		action  string
+		framing string
+	}{
+		{"prompt", "plain"},
+		{"exec", "plain"},
+		{"prompt", "bracketed_paste"},
+		{"exec", "bracketed_paste"},
+	}
+	for _, tc := range cases {
+		name := tc.action + " " + tc.framing
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			unit, displayUnit, literal, promptSize := "scalars", "characters", "ああああ", 4
+			reason := "the native CLI has not enabled bracketed paste"
+			if tc.framing == "plain" {
+				unit, displayUnit, literal, promptSize = "bytes", "bytes", "ああ", 6
+				reason = "the codex profile has no bracketed-paste delivery"
+			}
+			label, size := "prompt", promptSize
+			if tc.action == "exec" {
+				label, size = "native command", promptSize+2
+			}
+			withInputServiceCatalog(t, func(catalog any) {
+				for _, operation := range []string{"prompt", "exec"} {
+					plan := jget(catalog, "codex", "profile", "capabilities", "composer", "submission", operation)
+					jset(plan, tc.framing, "literal_framing")
+					jset(plan, jo("unit", unit, "max", 3), "plain_literal_limit")
+				}
+			}, func(f *serviceFixture, outer time.Time) {
+				run := f.fixture.run
+				before := externalMemberInputIDs(t, f.fixture.conn, run.runID)
+				outcome := externalMemberInvoke(t, f, tc.action, literal, true, false, 0, outer)
+				if outcome.code != 1 || outcome.stdout != "" {
+					t.Fatalf("%s: exit %d, stdout %q, stderr %q; want exit 1 and no stdout", name, outcome.code, outcome.stdout, outcome.stderr)
+				}
+				if after := externalMemberInputIDs(t, f.fixture.conn, run.runID); !slices.Equal(after, before) {
+					t.Fatalf("%s: an immediate limit refusal reserves no input: %v, want %v", name, after, before)
+				}
+				inputServiceBarrier(t, f, outer)
+				if lines := recordLines(t, f); !slices.Equal(lines, []string{"barrier"}) {
+					t.Fatalf("%s: the native journal holds %q", name, lines)
+				}
+				stderr := lines(strings.TrimSuffix(outcome.stderr, "\n"))
+				want := fmt.Sprintf("Error: %s was not dispatched to member %d: the input is %d %s, above the codex plain-input limit of 3 %s, and %s",
+					label, run.memberID, size, displayUnit, displayUnit, reason)
+				if len(stderr) != 2 || stderr[0] != want {
+					t.Fatalf("%s: stderr %q, want %q and its input context", name, stderr, want)
+				}
+				key, found := strings.CutPrefix(stderr[1], fmt.Sprintf("run_id=%d operation_key=", run.runID))
+				unquoted, err := strconv.Unquote(key)
+				if !found || err != nil {
+					t.Fatalf("%s: a dispatch refusal retains run and JSON-quoted operation context: %q", name, stderr[1])
+				}
+				assertInvocationKey(t, unquoted, fmt.Sprintf("%s:%d:", tc.action, run.runID))
+			})
+		})
+	}
+}
+
+func TestCliMember_ExternalInputMemberPromptExecRouteRawCommandsAndPrintActualDurableIds(t *testing.T) {
+	t.Parallel()
+	withInputService(t, func(f *serviceFixture, outer time.Time) {
+		_, run, p := serviceTarget(t, f)
+		member := requireMember(t, f.fixture.conn, run.memberID, run.fleetID)
+		pane, concrete := p.muxPaneID.get()
+		if !concrete {
+			t.Fatal("the runner's member has a concrete pane")
+		}
+		cases := []struct {
+			action string
+			kind   inputKind
+			json   bool
+		}{
+			{"prompt", inputKindPrompt, true},
+			{"exec", inputKindExec, false},
+		}
+		for _, tc := range cases {
+			inputServiceComposer(t, f, outer)
+			before := externalMemberInputIDs(t, f.fixture.conn, run.runID)
+			literal := fmt.Sprintf("member %s λ json=%t", tc.action, tc.json)
+			outcome := externalMemberInvoke(t, f, tc.action, literal, tc.json, false, 0, outer)
+			if outcome.code != 0 || outcome.stderr != "" {
+				t.Fatalf("actual %s failed: exit %d; stdout=%q; stderr=%q", tc.action, outcome.code, outcome.stdout, outcome.stderr)
+			}
+			after := externalMemberInputIDs(t, f.fixture.conn, run.runID)
+			if len(after) != len(before)+1 || !slices.Equal(after[:len(before)], before) {
+				t.Fatalf("%s: input ids %v after %v", tc.action, after, before)
+			}
+			row := storedInput(t, f.fixture.conn, after[len(after)-1])
+			if row.kind != tc.kind || row.state != inputStateAccepted {
+				t.Fatalf("%s: receipt %+v", tc.action, row)
+			}
+			assertInvocationKey(t, row.operationKey, fmt.Sprintf("%s:%d:", tc.kind.asStr(), run.runID))
+			payload := mustEncodeJSON(t, jsonObject{{"kind", tc.kind.asStr()}, {"literal", literal}, {"run_id", run.runID}})
+			if digest := sha256Hex([]byte(payload)); row.payloadDigest != digest {
+				t.Fatalf("%s: Exec binds the raw command before the native prefix: digest %s, want %s", tc.action, row.payloadDigest, digest)
+			}
+			delivery := `{"status":"submitted","method":"profile","reason":null}`
+			switch {
+			case tc.json && tc.action == "prompt":
+				want := fmt.Sprintf(`{"member_id":%d,"pane_id":%s,"text":%s,"input_id":%d,"delivery":%s}`,
+					run.memberID, jsonQuoted(t, pane), jsonQuoted(t, literal), row.inputID, delivery)
+				if got := string(externalMemberJSON(t, outcome.stdout)); got != want {
+					t.Fatalf("%s: stdout %s, want %s", tc.action, got, want)
+				}
+			case tc.json:
+				want := fmt.Sprintf(`{"member_id":%d,"pane_id":%s,"coding_agent":%s,"command":%s,"dispatched":true,"input_id":%d,"delivery":%s}`,
+					run.memberID, jsonQuoted(t, pane), jsonQuoted(t, p.codingAgent), jsonQuoted(t, literal), row.inputID, delivery)
+				if got := string(externalMemberJSON(t, outcome.stdout)); got != want {
+					t.Fatalf("%s: stdout %s, want %s", tc.action, got, want)
+				}
+			default:
+				original := fmt.Sprintf("Sent prompt %s to member %s (%s).", quoted(literal), member.name, pane)
+				if tc.action == "exec" {
+					original = fmt.Sprintf("Dispatched native command to member %d (%s). Inspect the pane for its result.", run.memberID, pane)
+				}
+				if want := fmt.Sprintf("%s\nDelivery: status=submitted method=profile reason=-\nInput: %d\n", original, row.inputID); !strings.Contains(outcome.stdout, want) {
+					t.Fatalf("%s: stdout %q lacks %q", tc.action, outcome.stdout, want)
+				}
+			}
+			line := literal
+			if tc.action == "exec" {
+				line = "! " + literal
+			}
+			waitInputServiceRecord(t, f, line, outer)
+			inputServiceBarrier(t, f, outer)
+			if count := countRecordLines(t, f, line); count != 1 {
+				t.Fatalf("%s: the native journal holds %d copies of %q", tc.action, count, line)
+			}
+			if got := storedInput(t, f.fixture.conn, row.inputID); got != row {
+				t.Fatalf("%s: receipt %+v, want %+v", tc.action, got, row)
+			}
+		}
+	})
+}
+
+func TestCliMember_ExternalInputMemberLostStdoutKeepsDiscoverableReceiptAndSameKeyNeverRetypes(t *testing.T) {
+	t.Parallel()
+	withInputService(t, func(f *serviceFixture, outer time.Time) {
+		s, run, p := serviceTarget(t, f)
+		before := externalMemberInputIDs(t, f.fixture.conn, run.runID)
+		const literal = "member output loss λ"
+		lost := externalMemberInvoke(t, f, "prompt", literal, true, true, 0, outer)
+		if lost.code != 0 || lost.stderr != "" {
+			t.Fatalf("a closed reader ends the output, not the command: exit %d, stderr %q", lost.code, lost.stderr)
+		}
+		ids := externalMemberInputIDs(t, f.fixture.conn, run.runID)
+		if len(ids) != len(before)+1 {
+			t.Fatalf("input ids %v after %v", ids, before)
+		}
+		row := storedInput(t, f.fixture.conn, ids[len(ids)-1])
+		if row.state != inputStateAccepted {
+			t.Fatalf("receipt %+v", row)
+		}
+		shown := externalMemberInvoke(t, f, "show", "", true, false, 0, outer)
+		if shown.code != 0 {
+			t.Fatalf("member show: exit %d, stderr %q", shown.code, shown.stderr)
+		}
+		runtime := jsonAt(t, externalMemberJSON(t, shown.stdout), "runtime")
+		unresolved, ok := jsonArray(jsonIndex(runtime, "unresolved_input_ids"))
+		if !ok || !slices.ContainsFunc(unresolved, func(id jsontext.Value) bool { return jsonEqual(id, mustJSON(t, row.inputID)) }) {
+			t.Fatalf("the accepted receipt is unresolved: %s", runtime)
+		}
+		assertJSONEqual(t, jsonIndex(runtime, "observation_probe"), jsontext.Value(`"answered"`), "observation_probe")
+		assertJSONKeyOrder(t, jsonIndex(runtime, "observation"), []string{
+			"visibility", "eligibility", "degraded", "diagnostic", "writer_diagnostic", "pending_count", "gap_count", "gap_open_since",
+		}, "a live runner answers its observation")
+		assertJSONEqual(t, jsonIndex(runtime, "observation_error"), jsontext.Value("null"), "observation_error")
+		text := externalMemberInvoke(t, f, "show", "", false, false, 0, outer)
+		if text.code != 0 {
+			t.Fatalf("member show text: exit %d, stderr %q", text.code, text.stderr)
+		}
+		index := slices.IndexFunc(lines(text.stdout), func(line string) bool { return strings.Contains(line, " observation=") })
+		if index < 0 {
+			t.Fatalf("the text runtime line carries the probe: %q", text.stdout)
+		}
+		runtimeLine := lines(text.stdout)[index]
+		observed := runtimeLine[strings.LastIndex(runtimeLine, " observation=")+len(" observation="):]
+		if slices.Contains([]string{"-", "unavailable", "pending"}, observed) {
+			t.Fatalf("an answered probe renders its eligibility: %s", runtimeLine)
+		}
+		discovered := externalMemberInvoke(t, f, "input_show", "", true, false, row.inputID, outer)
+		if discovered.code != 0 {
+			t.Fatalf("input show: exit %d, stderr %q", discovered.code, discovered.stderr)
+		}
+		input := jsonAt(t, externalMemberJSON(t, discovered.stdout), "input")
+		assertJSONEqual(t, jsonIndex(input, "input_id"), mustJSON(t, row.inputID), "input_id")
+		assertJSONEqual(t, jsonIndex(input, "operation_key"), mustJSON(t, row.operationKey), "operation_key")
+		assertJSONEqual(t, jsonIndex(input, "state"), jsontext.Value(`"accepted"`), "state")
+		request := submitInput{OperationKey: row.operationKey, InputKind: row.kind, Literal: literal}
+		result, failure := submitWrappedInput(context.Background(), f.fixture.conn, s, run, p, request, deadlineUntil(outer))
+		if failure != nil {
+			t.Fatalf("the same key resubmits: %+v", failure)
+		}
+		if result.Status != submissionStatusAccepted || result.InputID != some(row.inputID) {
+			t.Fatalf("the same key returns the retained receipt: %+v", result)
+		}
+		if got := storedInput(t, f.fixture.conn, row.inputID); got != row {
+			t.Fatalf("receipt %+v, want %+v", got, row)
+		}
+		waitInputServiceRecord(t, f, literal, outer)
+		inputServiceBarrier(t, f, outer)
+		if count := countRecordLines(t, f, literal); count != 1 {
+			t.Fatalf("the same key never retypes: %d copies of %q", count, literal)
+		}
+	})
 }

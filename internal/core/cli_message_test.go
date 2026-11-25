@@ -1,8 +1,44 @@
 package core
 
 import (
+	"strconv"
 	"testing"
+	"time"
 )
+
+func TestCliMessage_RunnerPull_MessageSendStoresTheMessageAndWritesNoByteToTheRecipientsChild(t *testing.T) {
+	t.Parallel()
+	withInputService(t, func(f *serviceFixture, _ time.Time) {
+		run := f.fixture.run
+		code := runArgs([]string{
+			"cafleet", "--database-url", f.fixture.url, "message", "send",
+			"--from-member-id", strconv.FormatInt(run.directorMemberID, 10),
+			"--to-member-id", strconv.FormatInt(run.memberID, 10), "stored for the runner",
+		})
+		if code != 0 {
+			t.Fatalf("message send exits %d", code)
+		}
+		if records := inputServiceRecords(t, f); len(records) != 0 {
+			t.Fatalf("the recipient's child received %q", records)
+		}
+		status, err := queryRow(f.fixture.conn,
+			"SELECT status_state,notified_at FROM messages WHERE to_member_id=?1 AND text='stored for the runner'",
+			[]any{run.memberID}, func(row sqlRow) ([2]opt[string], error) {
+				state, err := row.text(0)
+				if err != nil {
+					return [2]opt[string]{}, err
+				}
+				notified, err := row.optText(1)
+				return [2]opt[string]{some(state), notified}, err
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status != [2]opt[string]{some("input_required"), none[string]()} {
+			t.Fatalf("stored message status %v, want input_required and never notified", status)
+		}
+	})
+}
 
 func TestCliMessage_MessageSubcommandsOutsideTheRegistryAreUnrecognized(t *testing.T) {
 	t.Parallel()

@@ -196,6 +196,132 @@ func TestCli_MemberRunnerInternalCommandAcceptsAnAbsoluteDescriptorAndStaysHidde
 	}
 }
 
+func TestCli_FleetCreationRequiresNamedOptionsAndIntegerSubjects(t *testing.T) {
+	t.Parallel()
+	errorCases := []struct {
+		name  string
+		args  []string
+		kind  cliParseKind
+		input string
+	}{
+		{"missing name", []string{"fleet", "create", "--coding-agent", "claude"}, cliParseMissingRequired, "--name"},
+		{"missing coding agent", []string{"fleet", "create", "--name", "alpha"}, cliParseMissingRequired, "--coding-agent"},
+		{"unknown coding agent", []string{"fleet", "create", "--name", "alpha", "--coding-agent", "python"}, cliParseInvalidValue, "python"},
+		{"missing fleet id", []string{"fleet", "show"}, cliParseMissingRequired, "FLEET_ID"},
+		{"non-integer fleet id", []string{"fleet", "show", "abc"}, cliParseInvalidValue, "abc"},
+		{"server without pane", []string{"fleet", "create", "--name", "alpha", "--coding-agent", "codex", "--mux-server", "/tmp/tmux-0/default"}, cliParseMissingRequired, "--pane"},
+	}
+	for _, tc := range errorCases {
+		assertParseError(t, tc.name, tc.args, tc.input)
+		if kind := parseOutcome(t, tc.name, tc.args...).kind; kind != tc.kind {
+			t.Fatalf("%s: parse error kind %d, want %d", tc.name, kind, tc.kind)
+		}
+	}
+	parseCases := []struct {
+		name string
+		args []string
+		want fleetCommandCreate
+	}{
+		{
+			name: "named options with json",
+			args: []string{"fleet", "create", "--name", "alpha", "--coding-agent", "codex", "--json"},
+			want: fleetCommandCreate{name: "alpha", codingAgent: "codex", pane: none[string](), muxServer: none[string](), json: true},
+		},
+		{
+			name: "explicit pane and server",
+			args: []string{"fleet", "create", "--name", "alpha", "--coding-agent", "hermes", "--pane", "%3", "--mux-server", "/tmp/tmux-0/default"},
+			want: fleetCommandCreate{name: "alpha", codingAgent: "hermes", pane: some("%3"), muxServer: some("/tmp/tmux-0/default")},
+		},
+	}
+	for _, tc := range parseCases {
+		if got := mustParse(t, tc.name, tc.args...); got != cliCommand(tc.want) {
+			t.Fatalf("%s: parsed as %#v, want %#v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCli_HelpDescribesCommandGroupsAndDerivesChoicesFromTheirRegistries(t *testing.T) {
+	t.Parallel()
+	catalog := make([]string, 0, len(codingAgentAll()))
+	for _, agent := range codingAgentAll() {
+		selection, err := agent.resolvePolicy(none[string]())
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog = append(catalog, fmt.Sprintf("%s: %s (default %s)", agent.name(), strings.Join(agent.policyChoices(), ", "), selection.resolvedMode))
+	}
+	want := strings.Join(catalog, "; ")
+	if create := flattened(helpText(t, "member create", "member", "create")); !strings.Contains(create, want) {
+		t.Fatalf("member create help lacks %q:\n%s", want, create)
+	}
+	root := cliRoot()
+	for _, group := range []string{"event", "input", "permission"} {
+		spec := root.subcommand(group)
+		if spec == nil {
+			t.Fatalf("registered group %s", group)
+		}
+		if strings.TrimSpace(spec.about) == "" {
+			t.Fatalf("%s has a top-level description", group)
+		}
+	}
+	decision, ok := root.subcommand("permission").subcommand("respond").option("decision")
+	if !ok || !slices.Equal(decision.choices, permissionDecisionValues) {
+		t.Fatalf("permission respond --decision choices %q, want %q", decision.choices, permissionDecisionValues)
+	}
+	respond := flattened(helpText(t, "permission respond", "permission", "respond"))
+	if values := "[possible values: " + strings.Join(permissionDecisionValues, ", ") + "]"; !strings.Contains(respond, values) {
+		t.Fatalf("decision help lists %q:\n%s", values, respond)
+	}
+}
+
+func TestCli_MemberRunnerDispatchRejectsAnUnallocatedDescriptorBeforeRuntimeMutation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "registry.db")
+	descriptor := filepath.Join(dir, "unallocated.json")
+	if err := os.WriteFile(descriptor, []byte(`{"schema_version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := settingsForDatabase(path)
+	conn, err := connect(s.databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := initialize(conn, s.databaseURL); err != nil {
+		t.Fatal(err)
+	}
+	closeConnection(t, conn)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := mustParse(t, "member run", "__member-run", "--descriptor", descriptor)
+	if err := dispatch(s, command); err == nil {
+		t.Fatal("an unallocated descriptor is refused")
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("the refused runner left the database bytes unchanged: %v", err)
+	}
+}
+
+func TestCli_PressCliInvalidTailIsUsageBeforeMissingDatabaseValidation(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "absent.db")
+	command := mustParse(t, "raw key arguments reach typed validation",
+		"member", "press", "--from-member-id", "1", "42", "Enter", "Ctrl+1", "--json")
+	err := dispatch(settingsForDatabase(path), command)
+	if err == nil {
+		t.Fatal("the complete key vector is validated first")
+	}
+	failure := cafleetErrorOf(err)
+	if failure.kind != errorUsage || failure.message() != `invalid press key at position 2: "Ctrl+1"` || failure.exitCode() != 2 {
+		t.Fatalf("press failure kind %d exit %d: %q", failure.kind, failure.exitCode(), failure.message())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("validation touched the database: %v", err)
+	}
+}
+
 func TestCli_HelpDescribesEveryArgumentOfTheRuntimeReadInputAndPressCommands(t *testing.T) {
 	t.Parallel()
 	const json = "Output in JSON format"

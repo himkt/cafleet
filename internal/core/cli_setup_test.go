@@ -1252,6 +1252,20 @@ func TestCliSetup_DoctorSummary_DoctorAddsMemberRuntimeRowsAfterTheDatabaseRowAn
 	}
 }
 
+func TestCliSetup_DoctorSummary_DoctorPrintsAnOkMemberRowFromALiveRunnerProbe(t *testing.T) {
+	t.Parallel()
+	withInputService(t, func(f *serviceFixture, _ time.Time) {
+		s := newDoctorScenario(t)
+		healthyBackends(t, s)
+		s.database = f.fixture.databaseFile(t)
+		run := f.fixture.run
+		name := fmt.Sprintf("member.%d.runtime", run.memberID)
+		if got, want := namedRow(t, s.views(t).text, name), fmt.Sprintf("ok %s: run=%d observation=composer_empty", name, run.runID); got != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	})
+}
+
 func TestCliSetup_DoctorSummary_DoctorWithOnlyWarningsPrintsReadyBackendsAndExitsZero(t *testing.T) {
 	t.Parallel()
 	s := healthyScenario(t)

@@ -1,10 +1,12 @@
 package core
 
 import (
+	"context"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func permissionInspectArgs() []string {
@@ -257,4 +259,61 @@ func TestCliRuntime_EventAndInputShowReportAnUnknownRecord(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCliRuntime_LiveReceiptCliReconcilesRealExecHistoryAndPreservesRepeatEvidence(t *testing.T) {
+	t.Parallel()
+	withInputService(t, func(f *serviceFixture, outer time.Time) {
+		ctx := context.Background()
+		s, run, p := serviceTarget(t, f)
+		original, err := reserveInput(ctx, f.fixture.conn, run.owner(), newInput{
+			operationKey: "exec:cli-receipt-history", kind: inputKindExec, payloadDigest: strings.Repeat("d", 64),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := recordInputUncertain(ctx, f.fixture.conn, run.owner(), original.inputID, stopCauseWriteFailed); err != nil {
+			t.Fatal(err)
+		}
+		until := earliestTime(outer, time.Now().Add(2*time.Second))
+		reconcile := func(disposition disposition, evidence string) error {
+			return inputRun(ctx, f.fixture.conn, s, inputCommandReconcile{
+				inputID: original.inputID, directorMemberID: run.directorMemberID,
+				disposition: disposition, evidenceRef: evidence, json: true,
+			}, deadlineUntil(until))
+		}
+		if err := reconcile(dispositionAbandonedUncertain, "fixture:cli-owned-resolution"); err != nil {
+			t.Fatal(err)
+		}
+		settled := storedInput(t, f.fixture.conn, original.inputID)
+		if settled.state != inputStateSettled || settled.disposition != some(inputDispositionAbandonedUncertain) ||
+			settled.evidenceRef != some("fixture:cli-owned-resolution") {
+			t.Fatalf("settled receipt %+v", settled)
+		}
+		held, acquired, err := paneLockTryAcquire(s.databaseURL, p)
+		if err != nil || !acquired {
+			t.Fatalf("the pane lock is free after reconciliation: %v %v", acquired, err)
+		}
+		changes := queryInt64(t, f.fixture.conn, "SELECT total_changes()")
+		if err := reconcile(dispositionAbandonedUncertain, "fixture:replacement-evidence"); err != nil {
+			t.Fatalf("a repeated disposition is accepted: %v", err)
+		}
+		if err := reconcile(dispositionSubmitted, "fixture:conflicting-cli-disposition"); err == nil {
+			t.Fatal("a conflicting disposition is refused")
+		}
+		if after := queryInt64(t, f.fixture.conn, "SELECT total_changes()"); after != changes {
+			t.Fatalf("receipt-only repeats changed %d rows", after-changes)
+		}
+		if got := storedInput(t, f.fixture.conn, original.inputID); got != settled {
+			t.Fatalf("receipt %+v, want the first settlement %+v", got, settled)
+		}
+		if err := held.validateBinding(s.databaseURL, p); err != nil {
+			t.Fatal(err)
+		}
+		held.close()
+		inputServiceBarrier(t, f, outer)
+		if lines := recordLines(t, f); !slices.Equal(lines, []string{"barrier"}) {
+			t.Fatalf("receipt-only CLI work sends no native input: %q", lines)
+		}
+	})
 }

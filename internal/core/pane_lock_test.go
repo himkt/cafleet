@@ -1,9 +1,12 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -27,21 +30,31 @@ func paneLockAcquireReleased(t *testing.T, databaseURL string, p placement) *pan
 
 // lockFixture is a database with one fleet whose worker has the concrete pane %2.
 type lockFixture struct {
-	dir    string
-	url    string
-	member memberRecord
+	dir      string
+	url      string
+	conn     *dbConn
+	settings settings
+	director memberRecord
+	member   memberRecord
 }
 
 func newLockFixture(t *testing.T) lockFixture {
 	t.Helper()
 	conn, url := initializedFileConn(t)
-	fleet, _ := createFleetFixture(t, conn, "locks")
+	fleet, director := createFleetFixture(t, conn, "locks")
 	worker := register(t, conn, fleet, "worker", some("%2"))
 	path, err := databasePath(url)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return lockFixture{dir: filepath.Dir(path), url: url, member: requireMember(t, conn, worker, fleet)}
+	return lockFixture{
+		dir:      filepath.Dir(path),
+		url:      url,
+		conn:     conn,
+		settings: settingsForDatabase(path),
+		director: requireMember(t, conn, director, fleet),
+		member:   requireMember(t, conn, worker, fleet),
+	}
 }
 
 func (f lockFixture) hold(t *testing.T) *paneLock {
@@ -112,6 +125,139 @@ func TestPaneLock_PaneGuard_RunnerRecoveryPaneGuardValidatesTheActualDatabasePla
 	}
 	if content, err := os.ReadFile(path); err != nil || string(content) != "replacement lock identity" {
 		t.Fatalf("validation leaves the replacement untouched: %q %v", content, err)
+	}
+}
+
+func TestPaneLock_PaneGuard_RunnerRecoveryPaneGuardSelectionReusesADeduplicatedPhysicalGuard(t *testing.T) {
+	t.Parallel()
+	fixture := newRunnerFixture(t)
+	p := requireMember(t, fixture.conn, fixture.run.memberID, fixture.run.fleetID).placement
+	held, acquired, err := paneLockTryAcquire(fixture.url, p)
+	if err != nil || !acquired {
+		t.Fatalf("the member pane lock is free: %v %v", acquired, err)
+	}
+	defer held.close()
+	guards := []*paneLock{held}
+	shared := p
+	shared.muxWindowID = some("@shared")
+	for _, tc := range []struct {
+		name      string
+		placement placement
+	}{
+		{"the recorded placement", p},
+		{"a placement sharing the physical pane", shared},
+	} {
+		selected, err := paneLockFor(guards, fixture.url, tc.placement)
+		if err != nil || selected != guards[0] {
+			t.Fatalf("%s: selected %p, want the held guard %p: %v", tc.name, selected, guards[0], err)
+		}
+	}
+	assertPaneLockBusy(t, settingsForDatabase(filepath.Join(fixture.dir, "broker.db")), p)
+	if _, err := paneLockFor(nil, fixture.url, p); err == nil {
+		t.Fatal("selection without a held guard is refused")
+	}
+}
+
+// directorAndMemberInKeyOrder is the fixture's Director and member placements, in physical
+// lock-key order.
+func directorAndMemberInKeyOrder(t *testing.T, fixture lockFixture) []memberPlacement {
+	t.Helper()
+	targets := []memberPlacement{
+		{memberID: fixture.director.memberID, placement: fixture.director.placement},
+		{memberID: fixture.member.memberID, placement: fixture.member.placement},
+	}
+	key := func(target memberPlacement) string {
+		path, err := lockPath(fixture.settings.databaseURL, target.placement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	slices.SortFunc(targets, func(left, right memberPlacement) int { return strings.Compare(key(left), key(right)) })
+	return targets
+}
+
+func TestPaneLock_DeletionLocks_DeletionDeduplicatesPhysicalPanesAndRevalidatesAfterAllLocks(t *testing.T) {
+	t.Parallel()
+	fixture := newLockFixture(t)
+	p := fixture.member.placement
+	member := fixture.member.memberID
+	url := fixture.settings.databaseURL
+	locked, err := lockDeletion(context.Background(), fixture.conn, fixture.settings, newDeadline(),
+		func(context.Context, *dbConn) (struct{}, []memberPlacement, error) {
+			return struct{}{}, []memberPlacement{{memberID: member, placement: p}, {memberID: member + 1, placement: p}}, nil
+		},
+		func(context.Context, *dbConn, *struct{}, []*paneLock) (struct{}, bool, error) {
+			assertPaneLockBusy(t, fixture.settings, p)
+			return struct{}{}, true, nil
+		},
+		func(int64) error { return appError("duplicate pane remained locked") },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPaneLockBusy(t, fixture.settings, p)
+	locked.close()
+	paneLockAcquireReleased(t, url, p).close()
+}
+
+func TestPaneLock_DeletionLocks_DeletionAcquiresPhysicalKeysInSortedOrder(t *testing.T) {
+	t.Parallel()
+	fixture := newLockFixture(t)
+	targets := directorAndMemberInKeyOrder(t, fixture)
+	url := fixture.settings.databaseURL
+	highGuard, acquired, err := paneLockTryAcquire(url, targets[1].placement)
+	if err != nil || !acquired {
+		t.Fatalf("the higher key is free: %v %v", acquired, err)
+	}
+	conn, err := connect(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeConnection(t, conn) })
+	loaded := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		reversed := slices.Clone(targets)
+		slices.Reverse(reversed)
+		locked, err := lockDeletion(context.Background(), conn, fixture.settings, deadlineWithin(2*time.Second),
+			func(context.Context, *dbConn) (struct{}, []memberPlacement, error) {
+				close(loaded)
+				return struct{}{}, reversed, nil
+			},
+			func(context.Context, *dbConn, *struct{}, []*paneLock) (struct{}, bool, error) {
+				return struct{}{}, true, nil
+			},
+			func(int64) error { return appError("sorted lock wait expired") },
+		)
+		if err == nil {
+			locked.close()
+		}
+		done <- err
+	}()
+	select {
+	case <-loaded:
+	case <-time.After(time.Second):
+		t.Fatal("the deletion loads its targets")
+	}
+	limit := time.Now().Add(700 * time.Millisecond)
+	for {
+		held, acquired, err := paneLockTryAcquire(url, targets[0].placement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !acquired {
+			break
+		}
+		held.close()
+		if !time.Now().Before(limit) {
+			t.Fatal("the lower key is owned while the higher key waits")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	highGuard.close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

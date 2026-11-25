@@ -219,6 +219,54 @@ func TestOutputText_FleetDeletionReportsEveryOrdinaryMemberOutcomeInTextAndJson(
 	}
 }
 
+func TestOutputText_PermissionInspectionTextNamesTheTokenSequenceAnswersAndRuleOrDashes(t *testing.T) {
+	t.Parallel()
+	token := strings.Repeat("a", 64)
+	unsupported := testInspection(t)
+	unsupported.AnswerRuleID = none[string]()
+	unsupported.RequestToken = none[string]()
+	unsupported.SupportedDecisions = nil
+	unsupported.CapabilityReason = some("native profile unavailable")
+	unsupported.MissingEvidence = nil
+	cases := []struct {
+		name      string
+		inspected permissionInspection
+		want      string
+	}{
+		{
+			name:      "supported permission request",
+			inspected: testInspection(t),
+			want: "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=allow,deny\n" +
+				"Request: token=" + token + " output_seq=5 rule=opencode-shell-allow-enter\nMissing evidence: arguments,cwd",
+		},
+		{
+			name:      "unsupported request",
+			inspected: unsupported,
+			want: "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=-\n" +
+				"Request: token=- output_seq=5 rule=-\nCapability: native profile unavailable",
+		},
+		{
+			name:      "question with supported choice ids",
+			inspected: testQuestionInspection(t),
+			want: "Permission: interaction=12 event=11 member=3 run=7 epoch=2 visibility=visible answers=not-now,dont-show-again\n" +
+				"Request: token=" + token + " output_seq=5 rule=-",
+		},
+	}
+	for _, tc := range cases {
+		if got := formatPermissionInspection(tc.inspected); got != tc.want {
+			t.Fatalf("%s: formatPermissionInspection = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestOutputText_MemberPressTextAcknowledgesTheCanonicalKeysWithoutEffectCounts(t *testing.T) {
+	t.Parallel()
+	want := `Acknowledged keys ["Ctrl+a",";"] for member 42 (%5).`
+	if got := formatMemberPress(pressAcknowledgmentFixture(t)); got != want {
+		t.Fatalf("formatMemberPress = %q, want %q", got, want)
+	}
+}
+
 func TestOutputText_DeliveryText_DeliveryTextSubmittedPromptAndExecKeepTheirSuccessLinesThenDeliveryAndInput(t *testing.T) {
 	t.Parallel()
 	profile := deliveryFixture(deliveryStatusSubmitted, some(deliveryMethodProfile), none[string]())

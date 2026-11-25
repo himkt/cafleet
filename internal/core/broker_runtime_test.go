@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 const runtimeFixtureSecret = "fixture-secret-194-unique"
@@ -792,5 +793,44 @@ func TestBrokerRuntime_AStaleOwnerKindEpochOrDatabaseIdentityFencesEveryOwnerOpe
 	epoch.ownerEpoch++
 	if _, err := validateOwner(ctx, fixture.conn, epoch); err == nil || !strings.Contains(err.Error(), "stale ownership token") {
 		t.Fatalf("validateOwner = %v", err)
+	}
+}
+
+func runtimeRowCounts(t *testing.T, conn *dbConn) [3]int64 {
+	t.Helper()
+	return [3]int64{
+		queryInt64(t, conn, "SELECT COUNT(*) FROM member_interactions"),
+		queryInt64(t, conn, "SELECT COUNT(*) FROM member_runtime_events"),
+		queryInt64(t, conn, "SELECT COUNT(*) FROM messages"),
+	}
+}
+
+func TestBrokerRuntime_RunnerRegistry_MemberRuntimeReturnsHistoricalHealthWithoutContactingALiveEndpoint(t *testing.T) {
+	t.Parallel()
+	fixture := newRunnerFixture(t)
+	artifacts, _ := activate(t, fixture)
+	silentServer(t, artifacts.paths.controlSocket)
+	mustExecute(t, fixture.conn, "UPDATE member_runs SET last_health_at='2000-01-01T00:00:00Z' WHERE run_id=?1", fixture.run.runID)
+	before := runtimeRowCounts(t, fixture.conn)
+	start := time.Now()
+	recorded, err := memberRuntime(context.Background(), fixture.conn, fixture.run.memberID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed >= 750*time.Millisecond {
+		t.Fatalf("the snapshot waited %v on the silent endpoint", elapsed)
+	}
+	snapshot, found := recorded.get()
+	if !found {
+		t.Fatal("the member has a recorded run")
+	}
+	if health := snapshot.run.lastHealthAt; health != some("2000-01-01T00:00:00Z") {
+		t.Fatalf("last_health_at %v, want the recorded value", health)
+	}
+	if after := runtimeRowCounts(t, fixture.conn); after != before {
+		t.Fatalf("row counts %v, want %v", after, before)
+	}
+	if status := mustRun(t, fixture.conn, fixture.run.runID).status; status != runStatusRunning {
+		t.Fatalf("run status %s, want running", status.asStr())
 	}
 }

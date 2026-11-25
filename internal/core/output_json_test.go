@@ -39,6 +39,14 @@ func jsonPlacementFixture(concrete bool) placement {
 	return recorded
 }
 
+func TestOutputJson_MemberPressJsonIsTheCanonicalAcknowledgmentWithoutEffectCounts(t *testing.T) {
+	t.Parallel()
+	want := `{"member_id":42,"pane_id":"%5","keys":["Ctrl+a",";"],"status":"acknowledged"}`
+	if got := mustEncodeJSON(t, outputJSONMemberPress(pressAcknowledgmentFixture(t))); got != want {
+		t.Fatalf("member press JSON = %s, want %s", got, want)
+	}
+}
+
 func TestOutputJson_PlacementJson_APlacementOrdersItsWindowAndSlotKeysBeforeThePaneAndNullsPendingIds(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -254,4 +262,30 @@ func TestOutputJson_Runtime_InputPresentationReportsTheRecordedStopCauseAndKeeps
 	assertJSONEqual(t, stopCauseOf(settled), jsontext.Value(`"short_write"`), "reconciliation keeps the recorded cause")
 	plain := fixture.input(t, owner, "prompt:plain", inputKindPrompt)
 	assertJSONEqual(t, stopCauseOf(plain), jsontext.Value("null"), "a plain receipt")
+}
+
+func TestOutputJson_Runtime_PermissionInspectionRequestOrdersItsIdentityAndCapabilityKeys(t *testing.T) {
+	t.Parallel()
+	output := mustJSON(t, outputJSONPermissionInspection(testInspection(t)))
+	assertJSONKeyOrder(t, output, []string{"request"}, "inspection")
+	request := jsonAt(t, output, "request")
+	assertJSONKeyOrder(t, request, []string{
+		"event_id", "message_id", "member_id", "fleet_id", "director_member_id", "run_id", "owner_epoch",
+		"interaction_id", "episode_seq", "classification", "visibility", "backend", "native_version",
+		"answer_rule_id", "answer_capability", "capability_reason", "supported_decisions", "supported_choices",
+		"request_token", "output_seq", "evidence", "missing_evidence",
+	}, "request")
+	for _, tc := range []struct{ key, want string }{
+		{"backend", `"opencode"`},
+		{"native_version", `"2.1.4"`},
+		{"answer_rule_id", `"opencode-shell-allow-enter"`},
+		{"answer_capability", `"tested"`},
+	} {
+		assertJSONEqual(t, jsonAt(t, request, tc.key), jsontext.Value(tc.want), tc.key)
+	}
+	question := jsonAt(t, mustJSON(t, outputJSONPermissionInspection(testQuestionInspection(t))), "request")
+	assertJSONEqual(t, jsonAt(t, question, "supported_decisions"), jsontext.Value(`[]`), "question supported_decisions")
+	assertJSONEqual(t, jsonAt(t, question, "supported_choices"), jsontext.Value(
+		`[{"choice_id":"not-now","label":"Not now","scope":"persistent"},{"choice_id":"dont-show-again","label":"Don't show again","scope":"persistent"}]`),
+		"question supported_choices")
 }

@@ -256,6 +256,43 @@ func jsonQuoted(t *testing.T, text string) string {
 	return string(mustJSON(t, text))
 }
 
+func decodedInspection(t *testing.T, request string) permissionInspection {
+	t.Helper()
+	inspection, err := decodePermissionInspection(jsontext.Value(request))
+	if err != nil {
+		t.Fatalf("the fixture inspection matches the reply shape: %v", err)
+	}
+	return inspection
+}
+
+// testInspection is a tested, visible permission inspection with every identity field set.
+func testInspection(t *testing.T) permissionInspection {
+	t.Helper()
+	return decodedInspection(t, `{"event_id":11,"message_id":14,"member_id":3,"fleet_id":2,"director_member_id":1,`+
+		`"run_id":7,"owner_epoch":2,"interaction_id":12,"episode_seq":1,`+
+		`"classification":"permission_request","visibility":"visible",`+
+		`"backend":"opencode","native_version":"2.1.4","answer_rule_id":"opencode-shell-allow-enter",`+
+		`"answer_capability":"tested","capability_reason":null,"supported_decisions":["allow","deny"],`+
+		`"supported_choices":[],`+
+		`"request_token":"`+strings.Repeat("a", 64)+`","output_seq":5,"evidence":{"rule_id":"opencode-shell-permission"},`+
+		`"missing_evidence":["arguments","cwd"]}`)
+}
+
+// testQuestionInspection is a tested, visible question inspection offering two dismissal choices.
+func testQuestionInspection(t *testing.T) permissionInspection {
+	t.Helper()
+	return decodedInspection(t, `{"event_id":11,"message_id":14,"member_id":3,"fleet_id":2,"director_member_id":1,`+
+		`"run_id":7,"owner_epoch":2,"interaction_id":12,"episode_seq":1,`+
+		`"classification":"question","visibility":"visible",`+
+		`"backend":"claude","native_version":"2.1.312","answer_rule_id":null,`+
+		`"answer_capability":"tested","capability_reason":null,"supported_decisions":[],`+
+		`"supported_choices":[`+
+		`{"choice_id":"not-now","label":"Not now","scope":"persistent"},`+
+		`{"choice_id":"dont-show-again","label":"Don't show again","scope":"persistent"}],`+
+		`"request_token":"`+strings.Repeat("a", 64)+`","output_seq":5,"evidence":{"rule_id":"claude-auto-startup"},`+
+		`"missing_evidence":[]}`)
+}
+
 func TestRuntimeControl_CheckStatusesOrderBySeverityAndRenderTheirWireNames(t *testing.T) {
 	t.Parallel()
 	statuses := []checkStatus{checkStatusError, checkStatusOk, checkStatusWarn, checkStatusInfo}
