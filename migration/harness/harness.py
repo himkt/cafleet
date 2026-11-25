@@ -20,7 +20,12 @@ Comparison rules: an `exact` step compares exit code, stdout and stderr bytes an
 multiplexer argv; a `parse` step compares exit code, empty stdout, the first stderr line and the
 accepted-value list; a `help` step compares exit 0, empty stderr and the presence of the strings
 SPEC quotes. G2 scenarios additionally compare the runner's own multiplexer argv and the bytes each
-native child received.
+native child received. Every multiplexer argv comparison collapses each run of consecutive
+identical pane captures into one: how many polls a wait takes before the stand-in native redraws is
+timing, and two reference runs differ in it too.
+
+A scenario marked `informational` is compared and reported (status `info` when it differs) but
+stays outside the pass condition.
 """
 import argparse
 import hashlib
@@ -269,11 +274,13 @@ def compare(scenario, ref, got):
             if help_view(a, quoted) != help_view(b, quoted):
                 diffs.append((where + " help", help_view(a, quoted), help_view(b, quoted)))
             continue
-        for field in ("exit", "stdout", "stderr", "mux"):
+        for field in ("exit", "stdout", "stderr"):
             if a[field] != b[field]:
                 diffs.append((f"{where} {field}", a[field], b[field]))
-    if runner_gate and runner_mux(ref) != runner_mux(got):
-        diffs.append(("runner mux sequence", runner_mux(ref), runner_mux(got)))
+        if collapse_polls(a["mux"]) != collapse_polls(b["mux"]):
+            diffs.append((f"{where} mux", collapse_polls(a["mux"]), collapse_polls(b["mux"])))
+    if runner_gate and collapse_polls(runner_mux(ref)) != collapse_polls(runner_mux(got)):
+        diffs.append(("runner mux sequence", collapse_polls(runner_mux(ref)), collapse_polls(runner_mux(got))))
     if ref["db"] != got["db"]:
         diffs.append(("database", ref["db"], got["db"]))
     for name in sorted(set(ref["native"]) | set(got["native"])):
@@ -284,6 +291,22 @@ def compare(scenario, ref, got):
     if ref["files"] != got["files"]:
         diffs.append(("installed files", ref["files"], got["files"]))
     return diffs
+
+
+def is_capture(call):
+    """A pane capture: tmux `capture-pane` or herdr `pane read`."""
+    args = call[1]
+    return "capture-pane" in args or any(args[k:k + 2] == ["pane", "read"] for k in range(len(args) - 1))
+
+
+def collapse_polls(calls):
+    """calls with each run of consecutive identical pane captures reduced to one."""
+    collapsed = []
+    for call in calls:
+        if collapsed and is_capture(call) and call == collapsed[-1]:
+            continue
+        collapsed.append(call)
+    return collapsed
 
 
 def runner_mux(record):
@@ -368,8 +391,11 @@ def main(argv=None):
             got = run_scenario(candidate, scenario, root)
             diffs = compare(scenario, runs[0], got)
             entry["diffs"] = [{"where": w, "reference": short(a), "candidate": short(b)} for w, a, b in diffs]
-            status = "pass" if not diffs else "FAIL"
-            failures += bool(diffs)
+            if scenario.get("informational"):
+                status = "pass" if not diffs else "info"
+            else:
+                status = "pass" if not diffs else "FAIL"
+                failures += bool(diffs)
         failures += status in ("error", "unstable")
         entry["status"] = status
         report["scenarios"].append(entry)
