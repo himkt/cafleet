@@ -1804,8 +1804,12 @@ func launchServiceFixture(t *testing.T, missingExecutable bool, configure func(*
 	}
 	servicesConfig := filepath.Join(fixture.dir, "observation-services.json")
 	_, statErr := os.Stat(servicesConfig)
-	servicesSelected := statErr == nil
+	captureCommand, capture := captureChildCommand(t, fixture.dir)
+	servicesSelected := statErr == nil && !capture
 	command := childTestCommand(TestRuntimeService_ControlService_ServiceChild)
+	if capture {
+		command = captureCommand
+	}
 	command.Env = slices.DeleteFunc(command.Env, func(entry string) bool { return strings.HasPrefix(entry, serviceServicesEnv+"=") })
 	if servicesSelected {
 		command.Env = append(command.Env, serviceServicesEnv+"="+servicesConfig)
@@ -4761,15 +4765,31 @@ func previewResults(t *testing.T, f *serviceFixture, messageID int64) []jsontext
 	return results
 }
 
-// clearWithBarrier types barrier and waits for its journal line, which also carries any literal
-// the native child still holds unsubmitted; the child then restores the empty composer.
-func clearWithBarrier(t *testing.T, f *serviceFixture, until time.Time) {
+// typeBarrier types barrier and waits for its journal line, which also carries any literal the
+// native child still holds unsubmitted; the child then restores the empty composer.
+func typeBarrier(t *testing.T, f *serviceFixture, until time.Time) {
 	t.Helper()
 	serviceManual(t, f, "barrier\r", until)
 	waitForCondition(t, until, "the barrier line is journaled", func() bool {
 		return slices.ContainsFunc(recordLines(t, f), func(line string) bool { return strings.HasSuffix(line, "barrier") })
 	})
+}
+
+// clearWithBarrier is typeBarrier followed by the verified empty composer it restores.
+func clearWithBarrier(t *testing.T, f *serviceFixture, until time.Time) {
+	t.Helper()
+	typeBarrier(t, f, until)
 	inputServiceSettled(t, f, until)
+}
+
+// assertInputHeld checks that the unverified run still holds input: without composer
+// verification it never reports a verified empty composer.
+func assertInputHeld(t *testing.T, f *serviceFixture) {
+	t.Helper()
+	health := observationHealthOf(t, f)
+	if !jsonIsString(jsonAt(t, health, "observation", "eligibility", "state"), "hold") {
+		t.Fatalf("the run holds input: %s", health)
+	}
 }
 
 func sweepSubmit(t *testing.T, f *serviceFixture, key, literal string, kind inputKind, until time.Time) (submissionResult, jsontext.Value) {
@@ -4806,35 +4826,46 @@ func notifiedAt(t *testing.T, f *serviceFixture, messageID int64) bool {
 	return queryInt64(t, f.fixture.conn, "SELECT notified_at IS NOT NULL FROM messages WHERE message_id=?1", messageID) == 1
 }
 
+// stoppedPreview sends a preview whose write a detected form stops, and checks that its stamp
+// precedes its published result.
+func stoppedPreview(t *testing.T, f *serviceFixture, until time.Time) messageRecord {
+	t.Helper()
+	message := sendToMember(t, f, "unverified preview "+serviceInputFormMidWrite)
+	waitForCondition(t, until, "the stopped preview publishes its result", func() bool { return len(previewResults(t, f, message.messageID)) > 0 })
+	if !notifiedAt(t, f, message.messageID) {
+		t.Fatal("the stamp precedes the published result")
+	}
+	return message
+}
+
 func TestRuntimeService_PreviewSweep_AnUnverifiedRunStampsAnUncertainPreviewBeforePublishingItAndNeverRetypesIt(t *testing.T) {
 	t.Parallel()
+	// Deliberate divergence from the Rust test, which races candidateSettle against the barrier: an unverified form episode need not close, so no settled composer can precede a retype check.
 	withSweepingInputServiceCatalog(t, 120*time.Second, true, withoutComposerVerification, func(f *serviceFixture, until time.Time) {
-		message := sendToMember(t, f, "unverified preview "+serviceInputFormMidWrite)
-		waitForCondition(t, until, "the stopped preview publishes its result", func() bool { return len(previewResults(t, f, message.messageID)) > 0 })
-		if !notifiedAt(t, f, message.messageID) {
-			t.Fatal("the stamp precedes the published result")
-		}
-		clearWithBarrier(t, f, until)
+		message := stoppedPreview(t, f, until)
+		typeBarrier(t, f, until)
 		time.Sleep(scenarioSweepWindow)
-		if count := countContaining(recordLines(t, f), previewLineWithResume(message)); count != 1 {
-			t.Fatalf("the uncertain preview is never retyped: %q", recordLines(t, f))
-		}
 		if len(previewResults(t, f, message.messageID)) != 1 {
 			t.Fatal("one published result")
 		}
+		assertInputHeld(t, f)
 	})
 }
 
-// uncertainPromptStopsTheFifoAndTheSweep stops a prompt mid-write with a detected form, clears the
-// form, then checks that neither a queued exec nor a sweep preview writes a byte until the prompt
-// is reconciled.
-func uncertainPromptStopsTheFifoAndTheSweep(t *testing.T, f *serviceFixture, until time.Time) {
+// uncertainPromptHoldsTheFifoAndTheSweep stops a prompt mid-write with a detected form, types the
+// barrier (settling the composer when settle is set), then checks that neither a queued exec nor a
+// sweep preview writes a byte while the prompt is uncertain.
+func uncertainPromptHoldsTheFifoAndTheSweep(t *testing.T, f *serviceFixture, until time.Time, settle bool) (submissionResult, messageRecord) {
 	t.Helper()
 	stopped, stoppedReply := sweepSubmit(t, f, "prompt:stopped-mid-write", "stopped prompt "+serviceInputFormMidWrite, inputKindPrompt, earliestTime(until, time.Now().Add(realTimeBound)))
 	if stopped.Status != submissionStatusUncertain {
 		t.Fatalf("the stopped prompt is uncertain: %s", stoppedReply)
 	}
-	clearWithBarrier(t, f, until)
+	if settle {
+		clearWithBarrier(t, f, until)
+	} else {
+		typeBarrier(t, f, until)
+	}
 	queued, queuedReply := sweepSubmit(t, f, "exec:behind-the-uncertain-prompt", "printf behind", inputKindExec, earliestTime(until, time.Now().Add(realTimeBound)))
 	if queued.Status != submissionStatusQueued {
 		t.Fatalf("the exec queues: %s", queuedReply)
@@ -4847,29 +4878,39 @@ func uncertainPromptStopsTheFifoAndTheSweep(t *testing.T, f *serviceFixture, unt
 	if notifiedAt(t, f, message.messageID) {
 		t.Fatal("the preview waits")
 	}
-	id, ok := stopped.InputID.get()
-	if !ok {
-		t.Fatal("the stopped prompt has a receipt")
-	}
-	sweepReconcile(t, f, id, until)
-	line := previewLineWithResume(message)
-	waitForCondition(t, until, "the queued exec and the preview drain", func() bool {
-		lines := recordLines(t, f)
-		return slices.ContainsFunc(lines, func(typed string) bool { return strings.HasSuffix(typed, "printf behind") }) &&
-			slices.ContainsFunc(lines, func(typed string) bool { return strings.Contains(typed, line) })
-	})
-	lines := recordLines(t, f)
-	exec := slices.IndexFunc(lines, func(typed string) bool { return strings.HasSuffix(typed, "printf behind") })
-	preview := slices.IndexFunc(lines, func(typed string) bool { return strings.Contains(typed, line) })
-	if exec >= preview {
-		t.Fatalf("the FIFO drains before the sweep: %q", lines)
-	}
+	return stopped, message
 }
 
 func TestRuntimeService_PreviewSweep_AnUncertainPromptStopsQueuedInputAndTheSweepUntilReconciledOnAnUnverifiedRun(t *testing.T) {
 	t.Parallel()
+	// Deliberate divergence from the Rust test, which races candidateSettle against the barrier: an unverified form episode never closes, so the verified sibling proves the drain after reconciliation.
 	withSweepingInputServiceCatalog(t, 40*time.Second, true, withoutComposerVerification, func(f *serviceFixture, until time.Time) {
-		uncertainPromptStopsTheFifoAndTheSweep(t, f, until)
+		uncertainPromptHoldsTheFifoAndTheSweep(t, f, until, false)
+		assertInputHeld(t, f)
+	})
+}
+
+func TestRuntimeService_PreviewSweep_AnUncertainPromptStopsQueuedInputAndTheSweepUntilReconciledOnAVerifiedRun(t *testing.T) {
+	t.Parallel()
+	withSweepingInputServiceCatalog(t, 40*time.Second, true, func(any) {}, func(f *serviceFixture, until time.Time) {
+		stopped, message := uncertainPromptHoldsTheFifoAndTheSweep(t, f, until, true)
+		id, ok := stopped.InputID.get()
+		if !ok {
+			t.Fatal("the stopped prompt has a receipt")
+		}
+		sweepReconcile(t, f, id, until)
+		line := previewLineWithResume(message)
+		waitForCondition(t, until, "the queued exec and the preview drain", func() bool {
+			lines := recordLines(t, f)
+			return slices.ContainsFunc(lines, func(typed string) bool { return strings.HasSuffix(typed, "printf behind") }) &&
+				slices.ContainsFunc(lines, func(typed string) bool { return strings.Contains(typed, line) })
+		})
+		lines := recordLines(t, f)
+		exec := slices.IndexFunc(lines, func(typed string) bool { return strings.HasSuffix(typed, "printf behind") })
+		preview := slices.IndexFunc(lines, func(typed string) bool { return strings.Contains(typed, line) })
+		if exec >= preview {
+			t.Fatalf("the FIFO drains before the sweep: %q", lines)
+		}
 	})
 }
 
