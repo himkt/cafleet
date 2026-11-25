@@ -41,8 +41,8 @@ func kernelProcessRead(pid int64) (kernelProcess, bool, error) {
 	if err := ensure(int64(kinfoPID(record)) == pid, "kern.proc.pid returned another process"); err != nil {
 		return kernelProcess{}, false, err
 	}
-	seconds := int64(binary.NativeEndian.Uint64(record[0:8]))
-	micros := int32(binary.NativeEndian.Uint32(record[8:12]))
+	seconds := kinfoInt64(record, 0)
+	micros := kinfoInt32(record, 8)
 	return kernelProcess{
 		identity: processIdentity{pid: pid, startIdentity: strconv.FormatInt(seconds, 10) + ":" + strconv.FormatInt(int64(micros), 10)},
 		zombie:   record[36] == darwinSZOMB,
@@ -50,7 +50,15 @@ func kernelProcessRead(pid int64) (kernelProcess, bool, error) {
 }
 
 func kinfoPID(record []byte) int32 {
-	return int32(binary.NativeEndian.Uint32(record[40:44]))
+	return kinfoInt32(record, 40)
+}
+
+func kinfoInt64(record []byte, offset int) int64 {
+	return int64(binary.NativeEndian.Uint64(record[offset : offset+8])) //nolint:gosec // reinterprets the bits of a signed C field
+}
+
+func kinfoInt32(record []byte, offset int) int32 {
+	return int32(binary.NativeEndian.Uint32(record[offset : offset+4])) //nolint:gosec // reinterprets the bits of a signed C field
 }
 
 func processIdentityRead(pid int64) (processIdentity, bool, error) {

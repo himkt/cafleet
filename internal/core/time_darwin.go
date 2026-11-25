@@ -1,6 +1,7 @@
 package core
 
 import (
+	"math"
 	"syscall"
 	"unsafe"
 
@@ -24,10 +25,13 @@ func threadSigmask(how int, set *signalSet) (signalSet, error) {
 	var request, previous uint32
 	requested := uintptr(0)
 	if set != nil {
+		if *set > math.MaxUint32 {
+			panic("darwin signals are numbered 1 through 31, so every signalSet fits the 32-bit sigset_t")
+		}
 		request = uint32(*set)
 		requested = uintptr(unsafe.Pointer(&request))
 	}
-	_, _, errno := syscall.RawSyscall(unix.SYS___PTHREAD_SIGMASK, uintptr(how), requested, uintptr(unsafe.Pointer(&previous)))
+	_, _, errno := syscall.RawSyscall(unix.SYS___PTHREAD_SIGMASK, uintptr(how), requested, uintptr(unsafe.Pointer(&previous))) //nolint:staticcheck // x/sys/unix wraps no per-thread sigmask in libSystem, and calling one would add a second unsafe site
 	if errno != 0 {
 		return 0, errno
 	}
