@@ -11,7 +11,6 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -44,15 +43,38 @@ func TestMain_ProcessStartupChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	fmt.Print(string(output))
-	sleeper, err := startedSleeper(plainStart)
+	fmt.Printf("sigpipe=%s\n", childSigpipeDisposition(t))
+}
+
+// childSigpipeDisposition starts a sleeper and sends it SIGPIPE: "default" when SIGPIPE ends
+// it, which an inherited ignore would prevent. On Linux its SigIgn line must agree.
+func childSigpipeDisposition(t *testing.T) string {
+	t.Helper()
+	probe, err := startSignalProbe(plainStart, syscall.SIGPIPE)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ignored, readErr := processSignalSet(sleeper.Process.Pid, "SigIgn", "sigignore")
-	if err := errors.Join(readErr, endSleeper(sleeper)); err != nil {
+	defer func() {
+		if err := probe.end(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if runtime.GOOS == "linux" {
+		ignored, err := procSignalSet(probe.pid(), "SigIgn")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ignored.contains(syscall.SIGPIPE) {
+			return fmt.Sprintf("ignored per /proc SigIgn %#x", ignored)
+		}
+	}
+	if err := probe.send(); err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("ignored=%x\n", uint64(ignored))
+	if err := probe.endsBySignal(); err != nil {
+		return err.Error()
+	}
+	return "default"
 }
 
 func TestMain_ProcessStartupKeepsInheritedDescriptorsFromChildrenAndLeavesSigpipeAtDefault(t *testing.T) {
@@ -76,17 +98,8 @@ func TestMain_ProcessStartupKeepsInheritedDescriptorsFromChildrenAndLeavesSigpip
 	if !strings.Contains(text, "fd3=closed\n") {
 		t.Fatalf("an inherited descriptor above 2 reached a child (F1):\n%s", text)
 	}
-	_, after, found := strings.Cut(text, "ignored=")
-	if !found {
-		t.Fatalf("the probe printed no ignored set:\n%s", text)
-	}
-	line, _, _ := strings.Cut(after, "\n")
-	ignored, err := strconv.ParseUint(strings.TrimSpace(line), 16, 64)
-	if err != nil {
-		t.Fatalf("ignored set %q: %v", line, err)
-	}
-	if signalSet(ignored).contains(syscall.SIGPIPE) {
-		t.Fatalf("a child starts with SIGPIPE ignored (F3): %#x", ignored)
+	if !strings.Contains(text, "sigpipe=default\n") {
+		t.Fatalf("a child must start with SIGPIPE at its default action (F3):\n%s", text)
 	}
 }
 

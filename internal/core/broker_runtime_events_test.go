@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -933,7 +934,15 @@ func TestBrokerRuntimeEvents_ComposerReliability_ABlockedStalledRecordNamesItsBl
 			assertJSONEqual(t, jsonAt(t, event.payloadJSON, "message_id"), jsontext.Value("null"), "message_id")
 			assertJSONEqual(t, jsonAt(t, event.payloadJSON, "blocked_by_input_id"), mustJSON(t, blocker), "blocked_by_input_id")
 			assertJSONEqual(t, jsonAt(t, event.payloadJSON, "waiting_since"), mustJSON(t, runtimeFixtureNow), "waiting_since")
-			argv := []any{"cafleet", "input", "show", strconv.FormatInt(blocker, 10), "--json", "--database-url", fixture.url}
+			path, err := databasePath(fixture.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonical, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			argv := []any{"cafleet", "input", "show", strconv.FormatInt(blocker, 10), "--json", "--database-url", databaseURLFor(canonical)}
 			want := mustJSON(t, jsonObject{{"kind", "reconcile_uncertain_input"}, {"instruction", testReconcileInstruction}, {"inspect_argv", argv}})
 			assertJSONEqual(t, jsonAt(t, event.payloadJSON, "director_action"), want, blockerState+": the reconcile action")
 			assertOriginal(t, readEvent(t, fixture.reopen(t), event.eventID), transition, blockerState+": original rebuilds the 5-key record")

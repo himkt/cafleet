@@ -619,60 +619,163 @@ func TestTime_ASpanRestoresSignalsBlockedBeforeItBegan(t *testing.T) {
 	})
 }
 
-// processSignalSet reads one signal set of process pid as the kernel reports it: the named
-// /proc status line (SigBlk, SigIgn, ShdPnd) on Linux, the named ps column (sigmask, sigignore)
-// elsewhere. The probe is a process that never changes its own signal state, such as sleep;
-// shells clear and re-block their masks and cannot serve.
-func processSignalSet(pid int, statusField, psColumn string) (signalSet, error) {
-	if runtime.GOOS == "linux" {
-		status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
-		if err != nil {
-			return 0, err
-		}
-		for _, line := range strings.Split(string(status), "\n") {
-			if value, found := strings.CutPrefix(line, statusField+":"); found {
-				mask, err := strconv.ParseUint(strings.TrimSpace(value), 16, 64)
-				return signalSet(mask), err
-			}
-		}
-		return 0, fmt.Errorf("/proc/%d/status has no %s line", pid, statusField)
-	}
-	output, err := exec.Command("ps", "-o", psColumn+"=", "-p", strconv.Itoa(pid)).Output()
+const (
+	// deferralWindow is how long a sleeper must outlive a signal it defers.
+	deferralWindow = 300 * time.Millisecond
+	// signalDeathLimit bounds the wait for a sleeper to end on a signal it does not defer.
+	signalDeathLimit = 5 * time.Second
+)
+
+// procSignalSet reads the named signal set line (SigBlk, SigIgn, ShdPnd) of /proc/<pid>/status.
+// Only Linux publishes one; on darwin a Go program cannot read another process's per-thread mask.
+func procSignalSet(pid int, field string) (signalSet, error) {
+	status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {
-		return 0, fmt.Errorf("ps -o %s: %w", psColumn, err)
+		return 0, err
 	}
-	mask, err := strconv.ParseUint(strings.TrimSpace(string(output)), 16, 64)
-	return signalSet(mask), err
+	for _, line := range strings.Split(string(status), "\n") {
+		if value, found := strings.CutPrefix(line, field+":"); found {
+			mask, err := strconv.ParseUint(strings.TrimSpace(value), 16, 64)
+			return signalSet(mask), err
+		}
+	}
+	return 0, fmt.Errorf("/proc/%d/status has no %s line", pid, field)
 }
 
-// startedSleeper starts `sleep 30` with start; its signal state is the state it inherited.
-func startedSleeper(start func(*exec.Cmd) error) (*exec.Cmd, error) {
+// signalProbe is a `sleep 30` child whose reaction to sig shows the signal state it inherited.
+// The probe must not be a Go program, whose runtime unblocks SIGHUP, SIGINT and SIGTERM on every
+// thread and installs its own SIGPIPE handler at startup, nor a shell, which re-blocks its mask.
+type signalProbe struct {
+	sig     syscall.Signal
+	sleeper *exec.Cmd
+	exited  chan error
+	reaped  bool
+}
+
+func startSignalProbe(start func(*exec.Cmd) error, sig syscall.Signal) (*signalProbe, error) {
 	sleeper := exec.Command("sleep", "30")
 	if err := start(sleeper); err != nil {
 		return nil, err
 	}
-	return sleeper, nil
+	probe := &signalProbe{sig: sig, sleeper: sleeper, exited: make(chan error, 1)}
+	go func() { probe.exited <- sleeper.Wait() }()
+	return probe, nil
 }
 
-func endSleeper(sleeper *exec.Cmd) error {
-	if err := sleeper.Process.Kill(); err != nil {
+func (p *signalProbe) pid() int {
+	return p.sleeper.Process.Pid
+}
+
+func (p *signalProbe) send() error {
+	return p.sleeper.Process.Signal(p.sig)
+}
+
+// endsBySignal waits up to signalDeathLimit for the sleeper to end and requires that sig ended it.
+func (p *signalProbe) endsBySignal() error {
+	select {
+	case err := <-p.exited:
+		p.reaped = true
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			return fmt.Errorf("a sleeper sent %v ended with %v, want termination by it", p.sig, err)
+		}
+		status, ok := exit.Sys().(syscall.WaitStatus)
+		if !ok || !status.Signaled() || status.Signal() != p.sig {
+			return fmt.Errorf("a sleeper sent %v ended with %v, want termination by it", p.sig, exit)
+		}
+		return nil
+	case <-time.After(signalDeathLimit):
+		return fmt.Errorf("a sleeper sent %v still runs after %v: it blocks or ignores the signal (the test process ignores it: %v)", p.sig, signalDeathLimit, signal.Ignored(p.sig))
+	}
+}
+
+// survivesUntil requires the sleeper to keep running until deadline.
+func (p *signalProbe) survivesUntil(deadline time.Time) error {
+	select {
+	case err := <-p.exited:
+		p.reaped = true
+		return fmt.Errorf("a sleeper ended on %v instead of deferring it: %v", p.sig, err)
+	case <-time.After(time.Until(deadline)):
+		return nil
+	}
+}
+
+// end kills a sleeper that is still running and reaps it, so neither the sleeper nor a pending
+// signal it defers outlives the test.
+func (p *signalProbe) end() error {
+	if p.reaped {
+		return nil
+	}
+	p.reaped = true
+	if err := p.sleeper.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
-	var exit *exec.ExitError
-	if err := sleeper.Wait(); !errors.As(err, &exit) {
-		return fmt.Errorf("the killed sleeper ended with %v", err)
+	select {
+	case err := <-p.exited:
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			return fmt.Errorf("the killed sleeper %d ended with %v", p.pid(), err)
+		}
+		return nil
+	case <-time.After(signalDeathLimit):
+		return fmt.Errorf("the killed sleeper %d was not reaped within %v", p.pid(), signalDeathLimit)
 	}
-	return nil
 }
 
-// childBlockedSet starts a sleeper with start and returns the blocked set it inherited.
-func childBlockedSet(start func(*exec.Cmd) error) (signalSet, error) {
-	sleeper, err := startedSleeper(start)
-	if err != nil {
-		return 0, err
+// childDeferral starts one sleeper with start per deferred termination signal and sends each
+// sleeper its signal. A signal in want must stay pending in a sleeper that outlives
+// deferralWindow, and any other signal must end its sleeper. On Linux the sleepers' SigBlk and
+// ShdPnd lines must agree. Every sleeper is killed and reaped before childDeferral returns.
+func childDeferral(start func(*exec.Cmd) error, want signalSet) (err error) {
+	if want&^deferredTerminationSet != 0 {
+		panic("childDeferral probes only the deferred termination signals")
 	}
-	mask, readErr := processSignalSet(sleeper.Process.Pid, "SigBlk", "sigmask")
-	return mask, errors.Join(readErr, endSleeper(sleeper))
+	var probes []*signalProbe
+	defer func() {
+		for _, probe := range probes {
+			err = errors.Join(err, probe.end())
+		}
+	}()
+	for _, sig := range []syscall.Signal{syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM} {
+		probe, startErr := startSignalProbe(start, sig)
+		if startErr != nil {
+			return startErr
+		}
+		probes = append(probes, probe)
+	}
+	linux := runtime.GOOS == "linux"
+	if linux {
+		for _, probe := range probes {
+			blocked, readErr := procSignalSet(probe.pid(), "SigBlk")
+			if readErr != nil {
+				return readErr
+			}
+			if blocked&deferredTerminationSet != want {
+				return fmt.Errorf("/proc reports a sleeper blocking %#x of the deferred set, want %#x", blocked&deferredTerminationSet, want)
+			}
+		}
+	}
+	for _, probe := range probes {
+		if sendErr := probe.send(); sendErr != nil {
+			return sendErr
+		}
+	}
+	deadline := time.Now().Add(deferralWindow)
+	var failures []error
+	for _, probe := range probes {
+		if !want.contains(probe.sig) {
+			failures = append(failures, probe.endsBySignal())
+			continue
+		}
+		failures = append(failures, probe.survivesUntil(deadline))
+		if linux && !probe.reaped {
+			pending, readErr := procSignalSet(probe.pid(), "ShdPnd")
+			if readErr != nil || !pending.contains(probe.sig) {
+				failures = append(failures, fmt.Errorf("/proc reports the deferred %v pending as %#x (%v)", probe.sig, pending, readErr))
+			}
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func plainStart(cmd *exec.Cmd) error {
@@ -685,12 +788,8 @@ func TestTime_AHelperThreadStartedInsideASpanInheritsTheBlockedSet(t *testing.T)
 		if _, err := threadBlockSignals(deferredTerminationSet); err != nil {
 			return err
 		}
-		inherited, err := childBlockedSet(plainStart)
-		if err != nil {
-			return err
-		}
-		if !defersAll(inherited) {
-			return fmt.Errorf("a child started on the masked thread blocks %#x, want all of %#x", inherited, deferredTerminationSet)
+		if err := childDeferral(plainStart, deferredTerminationSet); err != nil {
+			return fmt.Errorf("a child started on the masked thread defers the set: %w", err)
 		}
 		return nil
 	})
@@ -770,36 +869,8 @@ func TestTime_MaskedSpawnerChildInheritsTheSetAndDefersItsOwnSigterm(t *testing.
 		t.Fatal(err)
 	}
 	defer spawner.stop()
-	inherited, err := childBlockedSet(spawnerStart(spawner))
-	if err != nil || !defersAll(inherited) {
-		t.Fatalf("a spawner child blocks %#x (%v), want all of %#x", inherited, err, deferredTerminationSet)
-	}
-	sleeper, err := startedSleeper(spawnerStart(spawner))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sleeper.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- sleeper.Wait() }()
-	select {
-	case err := <-exited:
-		t.Fatalf("a spawner child ended on SIGTERM while it blocks it: %v", err)
-	case <-time.After(300 * time.Millisecond):
-	}
-	if runtime.GOOS == "linux" {
-		pending, err := processSignalSet(sleeper.Process.Pid, "ShdPnd", "")
-		if err != nil || !pending.contains(syscall.SIGTERM) {
-			t.Fatalf("the deferred SIGTERM stays pending: %#x %v", pending, err)
-		}
-	}
-	if err := sleeper.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	var exit *exec.ExitError
-	if err := <-exited; !errors.As(err, &exit) {
-		t.Fatalf("the killed spawner child ended with %v", err)
+	if err := childDeferral(spawnerStart(spawner), deferredTerminationSet); err != nil {
+		t.Fatalf("a spawner child defers the set: %v", err)
 	}
 }
 
@@ -816,30 +887,32 @@ func TestTime_MaskedSpawnerChildrenAloneInheritTheSetWhileOrdinaryGoroutinesSpaw
 	}
 	defer spawner.stop()
 	var mu sync.Mutex
-	var siblingFailures []string
+	var siblingFailures, maskedFailures []error
+	record := func(failures *[]error, err error) {
+		if err == nil {
+			return
+		}
+		mu.Lock()
+		*failures = append(*failures, err)
+		mu.Unlock()
+	}
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for range siblings {
 		wg.Go(func() {
 			<-start
 			for range perSibling {
-				mask, err := childBlockedSet(plainStart)
-				if err != nil || !defersNone(mask) {
-					mu.Lock()
-					siblingFailures = append(siblingFailures, fmt.Sprintf("%#x %v", mask, err))
-					mu.Unlock()
-				}
+				record(&siblingFailures, childDeferral(plainStart, 0))
 			}
 		})
 	}
-	close(start)
-	var maskedFailures []string
 	for range maskedChildren {
-		mask, err := childBlockedSet(spawnerStart(spawner))
-		if err != nil || !defersAll(mask) {
-			maskedFailures = append(maskedFailures, fmt.Sprintf("%#x %v", mask, err))
-		}
+		wg.Go(func() {
+			<-start
+			record(&maskedFailures, childDeferral(spawnerStart(spawner), deferredTerminationSet))
+		})
 	}
+	close(start)
 	wg.Wait()
 	if len(maskedFailures) != 0 || len(siblingFailures) != 0 {
 		t.Fatalf("spawner children missing the set: %v; ordinary children holding it: %v", maskedFailures, siblingFailures)
@@ -853,25 +926,19 @@ func TestTime_SpanChildStartsChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inSpan, err := childBlockedSet(span.start)
-	if err != nil || !defersAll(inSpan) {
-		t.Fatalf("a span child blocks %#x (%v), want all of %#x", inSpan, err, deferredTerminationSet)
+	if err := childDeferral(span.start, deferredTerminationSet); err != nil {
+		t.Fatalf("a span child defers the set: %v", err)
 	}
 	routed := make(chan error)
 	go func() {
-		mask, err := childBlockedSet(startChild)
-		if err == nil && !defersAll(mask) {
-			err = fmt.Errorf("an in-span startChild child on another goroutine blocks %#x", mask)
-		}
-		routed <- err
+		routed <- childDeferral(startChild, deferredTerminationSet)
 	}()
 	if err := <-routed; err != nil {
-		t.Fatal(err)
+		t.Fatalf("an in-span startChild child on another goroutine defers the set: %v", err)
 	}
 	span.close()
-	after, err := childBlockedSet(startChild)
-	if err != nil || !defersNone(after) {
-		t.Fatalf("a child started after the span blocks %#x (%v), want none of %#x", after, err, deferredTerminationSet)
+	if err := childDeferral(startChild, 0); err != nil {
+		t.Fatalf("a child started after the span defers none of the set: %v", err)
 	}
 	fmt.Println("span child checks passed")
 }
