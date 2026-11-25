@@ -508,7 +508,7 @@ COMMENT(director): Step 9 arbitration (Tester-C, U3): (b). Pure per-fixture clas
 - [x] `input_client`, control socket and wire, observation, recovery, lifecycle, preview and Director delivery sweeps, diagnostics, press <!-- completed: 2026-11-25T05:00 -->
 - [x] `runtime_service.go` and the scenario harness; port the runner scenario tests <!-- completed: 2026-11-25T05:00 -->
 - [x] `native_capture` port as env-gated tests in `runtime_observation_test.go` <!-- completed: 2026-11-25T05:00 -->
-- [x] G2 passes <!-- completed: 2026-11-25T05:00 -->
+- [x] G2 passes (Linux; macOS fails, see the Step 12 handoff comment) <!-- completed: 2026-11-25T05:00 -->
 
 ### Step 12: Stage 5 — test completion and stabilisation
 
@@ -517,6 +517,13 @@ COMMENT(director): Step 9 arbitration (Tester-C, U3): (b). Pure per-fixture clas
 - [ ] Run G1–G5 on Linux and macOS against the oracle built from the latest `main` merge <!-- completed: -->
 - [x] Measure the stripped binary size and the RSS of one ncruces connection, and record both in the PR description <!-- completed: 2026-11-25T05:00 -->
 - [ ] G6: the Director collects the live acceptance and Director delivery records against `dist/cafleet` under § Parity gates G6 isolation <!-- completed: -->
+
+COMMENT(director): Handoff state at 2026-11-25T12:00 on `feat/go-rewrite`. `main` has no commit beyond the branch, so the oracle is built from the latest merge.
+- CI run 45603444843 (commit `acdf80fb`): `lint` and `test` green on `ubuntu-latest` and `macos-15`; `migration` green on `ubuntu-latest` and red on `macos-15`. This closes Step 10 F5 on both CI OSes. Step 12 task 2 is blocked by the macOS G1/G2 result below; task 1's `-count=20` re-run was done on Linux only, for `TestTime_*`, `TestMain_*`, `TestBrokerRuntimeEvents_ComposerReliability_*` and `TestRuntimeService_ControlService_ControlDisconnectedReplyPreservesHealthAndManualIo`.
+- G1/G2 were not in CI before `acdf80fb`; that commit adds them to the `migration` job, so Step 8, 10 and 11 G1/G2 checkboxes were established on Linux only. Linux: 71/71 scenarios pass, locally and in CI. macOS: 35/71 FAIL. Passing on macOS: the database-only G1 scenarios (`missing-database`, `format-*`, `broker-flow`, `send-errors`, `output-failures`, `seeded-reads`, `version-and-help`, `parse-errors`, `setup-*`, `doctor-*`, `fleet-create-*`, `member-create-errors`, `member-create-hermes-config-faults`, `member-input-pending-placement`). Failing: `database-locks` (179 s), every other `member-*` G1 scenario, `member-run-direct`, `input-reconcile`, `permission-tmux`, and every G2 scenario. The cause is undiagnosed: Go-side darwin divergence versus a harness/stand-in or timing defect on macOS is still open.
+- Next: push `8ae1a74a` (committed, not pushed), which makes the harness print the first three differences of each failing scenario, and read the macOS `migration` log; start from `member-run-direct` (7.8 s) and `database-locks`.
+- The Rust oracle test `runtime::service::tests::director_sweep::sweep_thread::stop_and_join_returns_by_the_shutdown_deadline_with_the_in_flight_attempt_clipped` failed once on `macos-15` (joined 327 ms after the deadline) in run 45583057892 with `src/` unchanged, and passed on re-run.
+- `go.mod` marks `github.com/creack/pty` `// indirect` although `internal/core/runtime_process.go` imports it directly; `go mod tidy` corrects it.
 
 ### Step 13: Cutover
 
