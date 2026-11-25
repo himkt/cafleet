@@ -93,3 +93,7 @@ jobs:
           cargo build --release --bin cafleet
           mise //:build
           $PY migration/harness/harness.py "$PWD/target/release/cafleet" "$PWD/dist/cafleet" --gate all
+      - name: database-locks reference stability (temporary)
+        if: always() && runner.os == 'macOS'
+        continue-on-error: true
+        run: $PY migration/harness/harness.py "$PWD/target/release/cafleet" "$PWD/dist/cafleet" --gate g1 --only database-locks --runs 3
