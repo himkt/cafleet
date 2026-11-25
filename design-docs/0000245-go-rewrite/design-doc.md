@@ -1,8 +1,8 @@
 # Rewrite the cafleet binary in Go
 
 **Status**: Approved
-**Progress**: 59/70 tasks complete
-**Last Updated**: 2026-11-24
+**Progress**: 60/70 tasks complete
+**Last Updated**: 2026-11-25
 
 ## Overview
 
@@ -496,7 +496,7 @@ COMMENT(director): Step 9 arbitration (Tester-C, U3): (b). Pure per-fixture clas
 ### Step 10: Stage 3 — OS layer and lifecycle commands
 
 - [x] Startup fd hygiene (F1), SIGPIPE (F3), raw mode (F16), PATH lookup (F19) <!-- completed: 2026-11-25T05:00 -->
-- [ ] Masked spawner (F5): `PthreadSigmask` on Linux, `SYS___PTHREAD_SIGMASK` in `time_darwin.go`, with the per-thread and sibling-unaffected tests on both CI OSes <!-- completed: -->
+- [x] Masked spawner (F5): `PthreadSigmask` on Linux, `SYS___PTHREAD_SIGMASK` in `time_darwin.go`, with the per-thread and sibling-unaffected tests on both CI OSes <!-- completed: 2026-11-25T09:42 -->
 - [x] `runtime_system.go` bounded subprocess runner, `runtime_process.go` PTY spawn (F2), master drain and EOF (F22–F24), process identity (F25) and zombie-pinned reaping (F4); private files, sockets and locks <!-- completed: 2026-11-25T05:00 -->
 - [x] `fleet create/delete`, `member create/delete/prompt/exec/press/capture`, `input reconcile`, `permission respond` <!-- completed: 2026-11-25T05:00 -->
 - [x] G1 passes for every §6.3 command <!-- completed: 2026-11-25T05:00 -->
