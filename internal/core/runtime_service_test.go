@@ -4852,6 +4852,25 @@ func TestRuntimeService_PreviewSweep_AnUnverifiedRunStampsAnUncertainPreviewBefo
 	})
 }
 
+func TestRuntimeService_PreviewSweep_AVerifiedRunLeavesAnUncertainPreviewUnnotifiedAndRetypesItOnceTheComposerIsVerifiedEmpty(t *testing.T) {
+	t.Parallel()
+	withSweepingInputServiceCatalog(t, 40*time.Second, true, func(any) {}, func(f *serviceFixture, until time.Time) {
+		message := sendToMember(t, f, "verified preview "+serviceInputFormMidWrite)
+		waitForCondition(t, until, "the stopped preview publishes its result", func() bool { return len(previewResults(t, f, message.messageID)) > 0 })
+		if notifiedAt(t, f, message.messageID) {
+			t.Fatal("the uncertain preview stays unnotified")
+		}
+		clearWithBarrier(t, f, until)
+		line := previewLineWithResume(message)
+		waitForCondition(t, until, "the sweep retypes the preview whole", func() bool {
+			return slices.ContainsFunc(recordLines(t, f), func(typed string) bool {
+				return strings.Contains(typed, line) && !strings.HasSuffix(typed, "barrier")
+			})
+		})
+		waitForCondition(t, until, "the retyped preview is stamped", func() bool { return notifiedAt(t, f, message.messageID) })
+	})
+}
+
 // uncertainPromptHoldsTheFifoAndTheSweep stops a prompt mid-write with a detected form, types the
 // barrier (settling the composer when settle is set), then checks that neither a queued exec nor a
 // sweep preview writes a byte while the prompt is uncertain.
