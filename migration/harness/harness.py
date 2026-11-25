@@ -181,6 +181,8 @@ def safe_query(world, statement):
 
 EXTRA = [
     ("START", re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:\d+")),
+    # darwin start identity: p_starttime as <epoch seconds>:<microseconds>
+    ("START", re.compile(rb"(?<![0-9:])[0-9]{10}:[0-9]{1,6}(?![0-9:])")),
     ("DEV", re.compile(rb'"device":\d+')),
     ("INO", re.compile(rb'"inode":\d+')),
     ("IDLE", re.compile(rb'"idle":\d+')),
@@ -408,6 +410,10 @@ def main(argv=None):
         if status == "FAIL":
             for diff in entry["diffs"][:3]:
                 print(f"  {diff['where']}\n    reference: {diff['reference']!r}\n    candidate: {diff['candidate']!r}",
+                      flush=True)
+        for run in entry["unstable_runs"]:
+            for diff in run["diffs"][:3]:
+                print(f"  run {run['run']} {diff['where']}\n    first: {diff['first']!r}\n    this: {diff['this']!r}",
                       flush=True)
     dropped = [s["name"] for s in report["scenarios"] if s["status"] == "dropped"]
     unstable = [s["name"] for s in report["scenarios"] if s["status"] == "unstable"]
