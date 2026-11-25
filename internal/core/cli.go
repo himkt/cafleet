@@ -942,7 +942,7 @@ type cliParseKind uint8
 const (
 	cliParseHelp cliParseKind = iota + 1
 	cliParseVersion
-	// A group invoked without a subcommand prints its help to stderr.
+	// A group invoked without a subcommand: its help, or the error once an argument matched.
 	cliParseMissingSubcommand
 	cliParseUnknownArgument
 	cliParseUnknownSubcommand
@@ -1007,15 +1007,18 @@ type cliParser struct {
 	databaseURL opt[string]
 }
 
+// group parses args below the group spec. A --database-url value at this level that is not
+// UTF-8 is reported only once the subcommand below parses, as clap validates a parent's values
+// after its subcommand.
 func (p *cliParser) group(spec *cliSpec, path []string, args []string) (cliCommand, *cliParseExit) {
 	usage := cliUsage(spec, path)
-	levelURL := false
+	levelURL, levelURLValid := false, true
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--":
 			if i+1 == len(args) {
-				return nil, &cliParseExit{kind: cliParseMissingSubcommand, text: cliHelp(spec, path)}
+				return nil, cliMissingSubcommand(spec, path, levelURL)
 			}
 			return nil, cliError(cliParseUnknownArgument, usage, "unexpected argument '%s' found", args[i+1])
 		case strings.HasPrefix(arg, "--"):
@@ -1030,13 +1033,16 @@ func (p *cliParser) group(spec *cliSpec, path []string, args []string) (cliComma
 					return nil, cliError(cliParseRepeatedArgument, usage, "the argument '%s' cannot be used multiple times", cliOptionLabel(cliDatabaseURLOption))
 				}
 				if !attached {
-					if i+1 == len(args) || strings.HasPrefix(args[i+1], "-") {
-						return nil, cliMissingValue(cliDatabaseURLOption, usage)
+					if i+1 == len(args) {
+						return nil, cliMissingValue(cliDatabaseURLOption)
+					}
+					if next := args[i+1]; next != "-" && strings.HasPrefix(next, "-") {
+						return nil, cliGroupValueMissing(spec, path, args[i+1:])
 					}
 					i++
 					value = args[i]
 				}
-				levelURL = true
+				levelURL, levelURLValid = true, utf8.ValidString(value)
 				p.databaseURL = some(value)
 			default:
 				return nil, cliError(cliParseUnknownArgument, usage, "unexpected argument '--%s' found", name)
@@ -1053,13 +1059,65 @@ func (p *cliParser) group(spec *cliSpec, path []string, args []string) (cliComma
 				return nil, cliError(cliParseUnknownSubcommand, usage, "unrecognized subcommand '%s'", arg)
 			}
 			childPath := append(slices.Clone(path), child.name)
+			var command cliCommand
+			var exit *cliParseExit
 			if len(child.subcommands) > 0 {
-				return p.group(child, childPath, args[i+1:])
+				command, exit = p.group(child, childPath, args[i+1:])
+			} else {
+				command, exit = p.leaf(child, childPath, args[i+1:])
 			}
-			return p.leaf(child, childPath, args[i+1:])
+			if exit == nil && !levelURLValid {
+				return nil, cliInvalidUTF8(usage)
+			}
+			return command, exit
 		}
 	}
-	return nil, &cliParseExit{kind: cliParseMissingSubcommand, text: cliHelp(spec, path)}
+	return nil, cliMissingSubcommand(spec, path, levelURL)
+}
+
+// cliMissingSubcommand is a group's exit without a subcommand: its help when no argument matched
+// at its level, as clap's arg_required_else_help, and otherwise the missing-subcommand error.
+func cliMissingSubcommand(spec *cliSpec, path []string, matched bool) *cliParseExit {
+	if !matched {
+		return &cliParseExit{kind: cliParseMissingSubcommand, text: cliHelp(spec, path)}
+	}
+	names := make([]string, 0, len(spec.subcommands)+1)
+	for _, child := range spec.subcommands {
+		names = append(names, child.name)
+	}
+	names = append(names, "help")
+	return cliError(cliParseMissingSubcommand, cliUsage(spec, path), "'%s' requires a subcommand but one was not provided\n  [subcommands: %s]",
+		strings.Join(path, " "), strings.Join(names, ", "))
+}
+
+// cliGroupValueMissing is the exit for a group's --database-url followed by the flag-like token
+// rest[0] instead of its value: clap parses that token as the group's next argument first, so an
+// argument the group does not know is reported in place of the missing value.
+func cliGroupValueMissing(spec *cliSpec, path []string, rest []string) *cliParseExit {
+	usage := cliUsage(spec, path)
+	next := rest[0]
+	switch {
+	case next == "--":
+		if len(rest) > 1 {
+			return cliError(cliParseUnknownArgument, usage, "unexpected argument '%s' found", rest[1])
+		}
+	case strings.HasPrefix(next, "--"):
+		name, _, _ := strings.Cut(next[2:], "=")
+		known := name == "help" || name == cliDatabaseURLOption.long || (name == "version" && len(path) == 1)
+		if !known {
+			return cliError(cliParseUnknownArgument, usage, "unexpected argument '--%s' found", name)
+		}
+	default:
+		flag, _ := utf8.DecodeRuneInString(next[1:])
+		if flag != 'h' && (flag != 'V' || len(path) != 1) {
+			return cliError(cliParseUnknownArgument, usage, "unexpected argument '-%c' found", flag)
+		}
+	}
+	return cliMissingValue(cliDatabaseURLOption)
+}
+
+func cliInvalidUTF8(usage string) *cliParseExit {
+	return cliError(cliParseInvalidValue, usage, "invalid UTF-8 was detected in one or more arguments")
 }
 
 func (s *cliSpec) subcommand(name string) *cliSpec {
@@ -1218,7 +1276,7 @@ func (p *cliParser) leaf(spec *cliSpec, path []string, args []string) (cliComman
 			if !attached {
 				next := i + 1
 				if next == len(args) || strings.HasPrefix(args[next], "--") {
-					return nil, cliMissingValue(option, usage)
+					return nil, cliMissingValue(option)
 				}
 				if args[next] != "-" && strings.HasPrefix(args[next], "-") {
 					// A short-flag token is never a value; the next iteration rejects it.
@@ -1272,24 +1330,27 @@ func (p *cliParser) leaf(spec *cliSpec, path []string, args []string) (cliComman
 }
 
 func cliCheckValue(check cliValueCheck, choices []string, value, label, usage string) *cliParseExit {
+	if !utf8.ValidString(value) {
+		return cliInvalidUTF8(usage)
+	}
 	if len(choices) > 0 && !slices.Contains(choices, value) {
-		return cliError(cliParseInvalidValue, usage, "invalid value '%s' for '%s'\n  [possible values: %s]", value, label, strings.Join(choices, ", "))
+		return cliValueError(cliParseInvalidValue, "invalid value '%s' for '%s'\n  [possible values: %s]", value, label, strings.Join(choices, ", "))
 	}
 	if check == nil {
 		return nil
 	}
 	if err := check(value); err != nil {
-		return cliError(cliParseInvalidValue, usage, "invalid value '%s' for '%s': %s", value, label, cafleetErrorOf(err).message())
+		return cliValueError(cliParseInvalidValue, "invalid value '%s' for '%s': %s", value, label, cafleetErrorOf(err).message())
 	}
 	return nil
 }
 
-func cliMissingValue(option cliOption, usage string) *cliParseExit {
+func cliMissingValue(option cliOption) *cliParseExit {
 	message := fmt.Sprintf("a value is required for '%s' but none was supplied", cliOptionLabel(option))
 	if len(option.choices) > 0 {
 		message += "\n  [possible values: " + strings.Join(option.choices, ", ") + "]"
 	}
-	return cliError(cliParseMissingValue, usage, "%s", message)
+	return cliValueError(cliParseMissingValue, "%s", message)
 }
 
 func (s *cliSpec) checkConflicts(matches cliMatches, usage string) *cliParseExit {
@@ -1341,7 +1402,16 @@ func (s *cliSpec) missingRequired(matches cliMatches) []string {
 func cliError(kind cliParseKind, usage, format string, args ...any) *cliParseExit {
 	return &cliParseExit{
 		kind: kind,
-		text: "error: " + fmt.Sprintf(format, args...) + "\n\nUsage: " + usage + "\n\nFor more information, try '--help'.",
+		text: lossyUTF8([]byte("error: " + fmt.Sprintf(format, args...) + "\n\nUsage: " + usage + "\n\nFor more information, try '--help'.")),
+	}
+}
+
+// cliValueError is a parse error about one argument's value, which clap renders without a usage
+// line.
+func cliValueError(kind cliParseKind, format string, args ...any) *cliParseExit {
+	return &cliParseExit{
+		kind: kind,
+		text: lossyUTF8([]byte("error: " + fmt.Sprintf(format, args...) + "\n\nFor more information, try '--help'.")),
 	}
 }
 
