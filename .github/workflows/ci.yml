@@ -88,3 +88,8 @@ jobs:
           $PY migration/golden.py compare "$RUNNER_TEMP/g4-reference.jsonl"
       - name: G5 test map
         run: $PY migration/testmap.py list "$RUNNER_TEMP/testmap.tsv"
+      - name: G1 and G2 command and runner parity
+        run: |
+          cargo build --release --bin cafleet
+          mise //:build
+          $PY migration/harness/harness.py "$PWD/target/release/cafleet" "$PWD/dist/cafleet" --gate all
