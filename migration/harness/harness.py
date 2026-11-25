@@ -405,6 +405,10 @@ def main(argv=None):
               f"unquiet={unquiet} {time.monotonic() - started:6.1f}s", flush=True)
         if runs[0]["error"]:
             print(runs[0]["error"], flush=True)
+        if status == "FAIL":
+            for diff in entry["diffs"][:3]:
+                print(f"  {diff['where']}\n    reference: {diff['reference']!r}\n    candidate: {diff['candidate']!r}",
+                      flush=True)
     dropped = [s["name"] for s in report["scenarios"] if s["status"] == "dropped"]
     unstable = [s["name"] for s in report["scenarios"] if s["status"] == "unstable"]
     report["dropped"], report["unstable"] = dropped, unstable
