@@ -1112,11 +1112,21 @@ pub(crate) enum TerminalObservationError {
     },
 }
 
+/// vt100 panics when a wide or combining scalar lands on a one-column grid, so the
+/// screen model never drops below two columns; the PTY keeps the pane's own size.
+const MIN_SCREEN_COLS: std::num::NonZeroU16 = std::num::NonZeroU16::new(2).unwrap();
+
+fn screen_cols(size: TerminalSize) -> std::num::NonZeroU16 {
+    std::num::NonZeroU16::new(size.cols)
+        .expect("validated cols")
+        .max(MIN_SCREEN_COLS)
+}
+
 impl TerminalState {
     pub(crate) fn new(size: TerminalSize) -> Result<Self> {
         size.validate()?;
         let rows = size.rows.try_into().expect("validated rows");
-        let cols = size.cols.try_into().expect("validated cols");
+        let cols = screen_cols(size);
         #[cfg(test)]
         let parser = vt100::Parser::new_with_callbacks(rows, cols, 0, Callbacks::default());
         #[cfg(not(test))]
@@ -1189,7 +1199,7 @@ impl TerminalState {
         self.advance_sequence(1)?;
         self.parser.set_size(
             size.rows.try_into().expect("validated rows"),
-            size.cols.try_into().expect("validated cols"),
+            screen_cols(size),
         );
         Ok(())
     }
@@ -1386,6 +1396,115 @@ mod tests {
             let snapshot = terminal.snapshot();
             assert_eq!((snapshot.rows, snapshot.cols), (24, 80));
         }
+    }
+
+    const EMOJI_WITH_TWO_PRESENTATION_SELECTORS: &[u8] = b"\xe2\x98\xba\xef\xb8\x8f\xef\xb8\x8f";
+
+    #[test]
+    fn runner_terminal_models_a_one_column_terminal_as_two_columns_at_creation_and_every_resize() {
+        struct Case {
+            name: &'static str,
+            created: TerminalSize,
+            resizes: &'static [TerminalSize],
+        }
+        let cases = [
+            Case {
+                name: "created one column wide",
+                created: TerminalSize { rows: 1, cols: 1 },
+                resizes: &[
+                    TerminalSize { rows: 1, cols: 2 },
+                    TerminalSize { rows: 1, cols: 1 },
+                ],
+            },
+            Case {
+                name: "resized down to one column",
+                created: TerminalSize { rows: 24, cols: 80 },
+                resizes: &[
+                    TerminalSize { rows: 24, cols: 1 },
+                    TerminalSize { rows: 24, cols: 2 },
+                    TerminalSize { rows: 24, cols: 1 },
+                ],
+            },
+        ];
+        for case in cases {
+            let name = case.name;
+            let modelled = |size: TerminalSize| (size.rows, size.cols.max(2));
+            let mut terminal = TerminalState::new(case.created).unwrap();
+            let created = terminal.snapshot();
+            assert_eq!(
+                (created.rows, created.cols),
+                modelled(case.created),
+                "{name}: creation"
+            );
+            terminal
+                .feed(EMOJI_WITH_TWO_PRESENTATION_SELECTORS)
+                .unwrap();
+            for &size in case.resizes {
+                let before = terminal.snapshot().screen_seq;
+                terminal.resize(size).unwrap();
+                terminal
+                    .feed(EMOJI_WITH_TWO_PRESENTATION_SELECTORS)
+                    .unwrap();
+                terminal.feed(b"\r\nlive").unwrap();
+                let resized = terminal.snapshot();
+                assert_eq!(
+                    (resized.rows, resized.cols),
+                    modelled(size),
+                    "{name}: resize to {size:?}"
+                );
+                assert!(
+                    resized.screen_seq > before,
+                    "{name}: the terminal keeps consuming output after resize to {size:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runner_transport_resizes_the_pty_to_the_pane_size_while_the_screen_stays_two_columns_wide() {
+        let mut transport = Transport::new(
+            TerminalSize { rows: 1, cols: 1 },
+            TransportLimits {
+                input_bytes: 65536,
+                display_bytes: 65536,
+                bytes_per_tick: 16384,
+            },
+            Arc::new(TestClock::starting_at(Instant::now())),
+        )
+        .unwrap();
+        let created = transport.snapshot();
+        assert_eq!((created.rows, created.cols), (1, 2));
+        let mut pty = FakePty::new(
+            EMOJI_WITH_TWO_PRESENTATION_SELECTORS,
+            EMOJI_WITH_TWO_PRESENTATION_SELECTORS.len(),
+        );
+        one_tick(&mut transport, &mut FakeInput::default(), &mut pty);
+        let panes = [
+            TerminalSize { rows: 1, cols: 2 },
+            TerminalSize { rows: 1, cols: 1 },
+        ];
+        for pane in panes {
+            let before = transport.snapshot().screen_seq;
+            transport.resize(&mut pty, pane).unwrap();
+            pty.output
+                .chunks
+                .push_back(EMOJI_WITH_TWO_PRESENTATION_SELECTORS.to_vec());
+            one_tick(&mut transport, &mut FakeInput::default(), &mut pty);
+            let resized = transport.snapshot();
+            assert_eq!(
+                (resized.rows, resized.cols),
+                (1, 2),
+                "the screen model after the pane resize to {pane:?}"
+            );
+            assert!(
+                resized.screen_seq > before,
+                "the runner keeps consuming child output after the pane resize to {pane:?}"
+            );
+        }
+        assert_eq!(
+            pty.sizes, panes,
+            "the PTY receives every pane size unchanged"
+        );
     }
 
     mod capture_replay {

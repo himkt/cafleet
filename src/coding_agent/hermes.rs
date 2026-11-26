@@ -309,7 +309,7 @@ fn busy(screen: &str) -> bool {
 
 fn stop_reports(screen: &str) -> usize {
     static REPORT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"Stopped \d+ process\(es\)\.|No running background processes\.")
+        regex::Regex::new(r"Stopped [0-9]+ process\(es\)\.|No running background processes\.")
             .expect("the /stop report pattern is valid")
     });
     REPORT.find_iter(&crate::output::strip_ansi(screen)).count()
@@ -317,7 +317,7 @@ fn stop_reports(screen: &str) -> usize {
 
 fn exit_summary_session(screen: &str) -> Option<String> {
     static SUMMARY: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?m)^Session:\s+(local-[0-9a-f]+)\s*$")
+        regex::Regex::new(r"(?m)^Session:[\t\n\v\f\r ]+(local-[0-9a-f]+)[\t\n\v\f\r ]*$")
             .expect("the exit summary pattern is valid")
     });
     SUMMARY
@@ -1373,6 +1373,74 @@ mod tests {
                 "{}",
                 failure.message()
             );
+        }
+
+        #[test]
+        fn settlement_screen_patterns_accept_only_ascii_digits_and_ascii_whitespace() {
+            struct Case {
+                name: &'static str,
+                screen: &'static str,
+                stop_reports: usize,
+                session: Option<&'static str>,
+            }
+            let cases = [
+                Case {
+                    name: "ascii stop count",
+                    screen: "Stopped 12 process(es).",
+                    stop_reports: 1,
+                    session: None,
+                },
+                Case {
+                    name: "arabic-indic stop count",
+                    screen: "Stopped \u{661}\u{662} process(es).",
+                    stop_reports: 0,
+                    session: None,
+                },
+                Case {
+                    name: "empty registry report",
+                    screen: "No running background processes.",
+                    stop_reports: 1,
+                    session: None,
+                },
+                Case {
+                    name: "ascii space and tab around the session",
+                    screen: "Session: \tlocal-ab12 \t\r\n",
+                    stop_reports: 0,
+                    session: Some("local-ab12"),
+                },
+                Case {
+                    name: "no-break space before the session",
+                    screen: "Session:\u{a0}local-ab12\n",
+                    stop_reports: 0,
+                    session: None,
+                },
+                Case {
+                    name: "ideographic space before the session",
+                    screen: "Session:\u{3000}local-ab12\n",
+                    stop_reports: 0,
+                    session: None,
+                },
+                Case {
+                    name: "ideographic space after the session",
+                    screen: "Session: local-ab12\u{3000}\n",
+                    stop_reports: 0,
+                    session: None,
+                },
+            ];
+            for case in cases {
+                assert_eq!(
+                    stop_reports(case.screen),
+                    case.stop_reports,
+                    "{}",
+                    case.name
+                );
+                assert_eq!(
+                    exit_summary_session(case.screen).as_deref(),
+                    case.session,
+                    "{}",
+                    case.name
+                );
+            }
         }
     }
 }

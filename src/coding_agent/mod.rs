@@ -674,7 +674,7 @@ impl CodingAgent {
 
 fn hermes_version(line: &str) -> Result<&str, &'static str> {
     static RULE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"^Hermes Agent v\S+ \((?P<version>[^)]+)\)$")
+        regex::Regex::new(r"^Hermes Agent v[^\t\n\v\f\r ]+ \((?P<version>[^)]+)\)$")
             .expect("the Hermes version rule is a valid pattern")
     });
     let version = RULE
@@ -1742,6 +1742,39 @@ mod tests {
                     CodingAgent::Hermes.version_from_line(line),
                     expected,
                     "{line:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn hermes_version_rule_ends_the_package_token_only_at_ascii_whitespace() {
+            let no_line = Err("printed no Hermes version line");
+            for (name, line, expected) in [
+                (
+                    "no-break space inside the package token",
+                    "Hermes Agent v1.0\u{a0}beta (2026.9.24)",
+                    Ok("2026.9.24"),
+                ),
+                (
+                    "ideographic space inside the package token",
+                    "Hermes Agent v1.0\u{3000}beta (2026.9.24)",
+                    Ok("2026.9.24"),
+                ),
+                (
+                    "tab inside the package token",
+                    "Hermes Agent v1.0\tbeta (2026.9.24)",
+                    no_line,
+                ),
+                (
+                    "no-break space before the release date",
+                    "Hermes Agent vunknown\u{a0}(2026.9.24)",
+                    no_line,
+                ),
+            ] {
+                assert_eq!(
+                    CodingAgent::Hermes.version_from_line(line),
+                    expected,
+                    "{name}"
                 );
             }
         }
