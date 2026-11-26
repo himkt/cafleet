@@ -45,9 +45,21 @@ jobs:
       - name: sleep implementation (temporary)
         if: matrix.task == 'test' && runner.os == 'Linux'
         run: |
-          sleep --version
-          readlink -f "$(command -v sleep)"
-          sleep 30 & pid=$!; for i in 1 2 3 4 5 6 7 8 9 10; do grep SigIgn "/proc/$pid/status"; done; kill "$pid"
+          grep SigIgn /proc/self/status
+          python3 -I -c 'import signal, subprocess, collections
+          signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+          seen = collections.Counter()
+          for _ in range(200):
+              p = subprocess.Popen(["sleep", "30"])
+              reads = [int(open(f"/proc/{p.pid}/status").read().split("SigIgn:")[1].split()[0], 16) & 0x1000 != 0 for _ in range(20)]
+              p.send_signal(signal.SIGPIPE)
+              try:
+                  code = p.wait(timeout=2)
+              except subprocess.TimeoutExpired:
+                  p.kill()
+                  code = f"survived ({p.wait()})"
+              seen[(reads[0], any(reads), code)] += 1
+          print("(first read ignored, any read ignored, exit) -> count:", dict(seen))'
       - if: matrix.task == 'test'
         run: mise //:test
       - if: matrix.task == 'test' && matrix.runner == 'ubuntu-latest'
