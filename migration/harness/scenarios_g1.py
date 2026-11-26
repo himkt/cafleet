@@ -396,9 +396,14 @@ scenario("output-failures", {}, *SEEDED,
 LOCKED_COMMANDS = [send(1, 2, "under a lock", *U)["argv"], ["message", "poll", "2", *U], ["fleet", "list", *U],
                    ["member", "list", "1", "--json", *U], ["message", "show", "1", *U], ["fleet", "delete", "2", *U],
                    ["member", "delete", "5", *U], ["setup", *U], ["doctor", *U]]
+# Well past the five-second busy timeout: on macOS CI runners the reference binary was observed to
+# keep waiting for more than seven wall-clock seconds before reporting the lock.
+OUTLASTING_LOCK_SECONDS = 12
 scenario("database-locks", {}, *SEEDED, send(1, 2, "before the locks", *U),
-         *[step for argv in LOCKED_COMMANDS for step in (hold_lock("EXCLUSIVE", 7), {"argv": argv}, do(release_lock))],
-         *[step for argv in LOCKED_COMMANDS[:3] for step in (hold_lock("IMMEDIATE", 7), {"argv": argv}, do(release_lock))],
+         *[step for argv in LOCKED_COMMANDS
+           for step in (hold_lock("EXCLUSIVE", OUTLASTING_LOCK_SECONDS), {"argv": argv}, do(release_lock))],
+         *[step for argv in LOCKED_COMMANDS[:3]
+           for step in (hold_lock("IMMEDIATE", OUTLASTING_LOCK_SECONDS), {"argv": argv}, do(release_lock))],
          *[step for argv in LOCKED_COMMANDS[:2] for step in (hold_lock("EXCLUSIVE", 1.5), {"argv": argv}, do(release_lock))],
          ["message", "poll", "2", "--json", *U])
 scenario("seeded-reads", {}, *SEEDED,
