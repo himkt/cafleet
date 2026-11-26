@@ -1,8 +1,8 @@
 # Rewrite the cafleet binary in Go
 
-**Status**: Approved
+**Status**: Aborted
 **Progress**: 8/69 tasks complete
-**Last Updated**: 2026-11-24
+**Last Updated**: 2026-11-26
 
 ## Overview
 
@@ -524,3 +524,4 @@ All six gates must pass on the final merge of `main` before the cutover change. 
 | 2026-11-24 | Reviewer round 1: one-package layout, darwin outcomes pending exp-macos, loosened A6, full R4/A8 scope, migration tooling, stream privacy, golden maintenance, G2 determinism, G6 isolation, cgo-free test configuration, version sync |
 | 2026-11-24 | Reviewer round 2: identifier derivation rules, explicit test timeout, run-time fuzz generation, capture tests in their owners' `_test.go`, G6 `PATH` isolation |
 | 2026-11-24 | Reviewer round 3 and exp-macos: darwin `SYS___PTHREAD_SIGMASK` route, macOS lock interop and raw-mode results, darwin PTY rules F22–F25 |
+| 2026-11-26 | User decision: the Go rewrite is aborted; only the pre-baseline Rust fixes (Step 3) land on `main` |
