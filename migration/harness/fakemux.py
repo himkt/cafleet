@@ -206,7 +206,9 @@ class Pane:
         if self.proc_pid is not None:
             try:
                 os.killpg(self.proc_pid, signal.SIGHUP)
-            except ProcessLookupError:
+            # darwin reports EPERM instead of ESRCH for a group whose members have all exited
+            # but are not yet reaped; tmux closes such a pane successfully.
+            except (ProcessLookupError, PermissionError):
                 pass
         if self.master is not None:
             self.daemon.close_master(self)
