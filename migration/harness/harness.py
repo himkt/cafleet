@@ -347,9 +347,18 @@ def load_scenarios(gate, include_dropped=False):
     return chosen
 
 
-def short(value, limit=1500):
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    return text if len(text) <= limit else text[:limit] + f"... <{len(text)} chars>"
+def short_pair(a, b, limit=1500, context=300):
+    """Clip two differing values to a window that starts shortly before their first difference."""
+    a, b = (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False) for v in (a, b))
+    first = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+    start = max(0, first - context)
+
+    def clip(text):
+        window = text[start:start + limit]
+        head = f"<{start} chars>..." if start else ""
+        tail = f"... <{len(text)} chars>" if start + limit < len(text) else ""
+        return head + window + tail
+    return clip(a), clip(b)
 
 
 def main(argv=None):
@@ -395,14 +404,16 @@ def main(argv=None):
         unstable = [(k, d) for k, d in unstable if d]
         entry = {"name": scenario["name"], "gate": scenario["gate"], "steps": len(runs[0]["steps"]),
                  "error": runs[0]["error"], "unstable_runs": [
-                     {"run": k, "diffs": [{"where": w, "first": short(a), "this": short(b)} for w, a, b in d]}
+                     {"run": k, "diffs": [dict(zip(("where", "first", "this"), (w, *short_pair(a, b))))
+                                          for w, a, b in d]}
                      for k, d in unstable]}
         unstable_status = "dropped" if scenario["gate"] == "g2" else "unstable"
         status = "error" if runs[0]["error"] else unstable_status if unstable else "stable"
         if candidate and not unstable and not runs[0]["error"]:
             got = run_scenario(candidate, scenario, root)
             diffs = compare(scenario, runs[0], got)
-            entry["diffs"] = [{"where": w, "reference": short(a), "candidate": short(b)} for w, a, b in diffs]
+            entry["diffs"] = [dict(zip(("where", "reference", "candidate"), (w, *short_pair(a, b))))
+                              for w, a, b in diffs]
             if scenario.get("informational"):
                 status = "pass" if not diffs else "info"
             else:
