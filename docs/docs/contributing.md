@@ -128,14 +128,19 @@ The bundled-catalog guard tests in `src/coding_agent/catalog.rs` check every pro
 | An object in a profile file's text repeats a key, a screen id written twice included | `duplicate object key <KEY>` |
 | A `fixture_ids` value names no screen of its own profile file | `<BACKEND> cites unknown fixture <ID>` |
 | A `fixture_ids` value is empty | `capability provenance required` |
-| A bundled screen's fields differ from the screen field set | `exact required object fields expected` |
+| A bundled screen's fields differ from the screen field set, which includes `expected_observation` | `exact required object fields expected` |
+| A screen's recorded `expected_observation` differs from what the detector yields for the replayed screen | `fixture <ID> expected observation differs: <key path>` |
 | A pattern-bearing field (a rule matcher, frame guard, region matcher, `prompt_pattern` or any other pattern the catalog decoder compiles) contains a Perl class or boundary (`\s \S \d \D \w \W \b \B`) or an escape outside the [pattern syntax](https://github.com/himkt/cafleet/blob/main/SPEC.md#pattern-syntax) | The backend, rule ID and construct, for example `` claude rule claude-bash-command: `\s` `` |
 
 Test catalogs exercise rule and capability validation with stub screens, and the test loader derives missing composer evidence from each composer plan. The guard requires complete captured screens in the bundled catalog.
 
 ### Native screen fixture capture
 
-The capture-to-fixture conversion inserts the converted screen under its fixture id in `screens` of `assets/profiles/<backend>.json`, recording the capture's `native_version` and any `composer_evidence` in the screen. It derives `cell_backgrounds` from the capture grid's per-cell `bg` and `cell_styles` from its per-cell faint and foreground attributes, and fixture replay applies each run's background and style before writing its row text. The terminal-screen parser gives a continuation cell default attributes whenever its leading cell receives a wide character, both on the runtime screen and in replay, so replay writes a run's attributes onto the leading cell and leaves the continuation cell to the parser. [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the profile file format.
+The capture-to-fixture conversion inserts the converted screen under its fixture id in `screens` of `assets/profiles/<backend>.json`, recording the capture's `native_version` and any `composer_evidence` in the screen. It derives `cell_backgrounds` from the capture grid's per-cell `bg` and `cell_styles` from its per-cell faint and foreground attributes, and fixture replay writes each row's text first, then applies the background and style runs over the written cells ([SPEC Fixture replay and expected observation](https://github.com/himkt/cafleet/blob/main/SPEC.md#fixture-replay-and-expected-observation)). The conversion records `expected_observation` with the values the capturer verified on the live screen, and any change that alters detector output updates the affected screens' `expected_observation` in the same change. The terminal-screen parser gives a continuation cell default attributes whenever its leading cell receives a wide character, both on the runtime screen and in replay, so replay writes a run's attributes onto the leading cell and leaves the continuation cell to the parser. [SPEC Bundled profiles and native screen fixtures](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the profile file format.
+
+### Terminal conformance vectors
+
+A test in `src/runtime/transport.rs` reads `SPEC.md` with `include_str!`, extracts every `vt-vector` block of [SPEC §9.2](https://github.com/himkt/cafleet/blob/main/SPEC.md#92-terminal-conformance-vectors) and drives the screen model through each, naming the vector ID in every assertion. Editing a vector, or changing the screen model, fails `mise //:test` until the two agree again.
 
 ### Storage deadline mechanisms
 
