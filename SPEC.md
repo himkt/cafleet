@@ -58,7 +58,7 @@ The broker persists/queries typed data. It performs no pane I/O. Multiplexer uti
 
 ### 5.1 Timestamps
 
-Serialize timestamps as fixed-width UTC `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` text with six fractional digits. Compare canonical timestamps lexicographically for SQL ordering/maxima. Parse only for age/idle arithmetic. Stored-timestamp parsing accepts at least the canonical form and every RFC 3339 `date-time`, including a missing fractional part and any UTC offset spelling; whether it accepts any other text is implementation-defined. Durations/deadlines use monotonic time.
+Serialize timestamps as fixed-width UTC `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` text with six fractional digits. Compare canonical timestamps lexicographically for SQL ordering/maxima. One write takes one clock reading for every timestamp it stores: `message send` stores one value as `created_at`, `status_timestamp` and a self-send's `notified_at`, `fleet create` one for the fleet, the Director's `registered_at` and its placement, and member registration one for `registered_at` and the placement. Parse only for age/idle arithmetic. Stored-timestamp parsing accepts at least the canonical form and every RFC 3339 `date-time`, including a missing fractional part and any UTC offset spelling; whether it accepts any other text is implementation-defined. Durations/deadlines use monotonic time.
 
 ### 5.2 Core entities
 
@@ -154,7 +154,7 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. The option may appear once on each level of the command path: after `cafleet`, after a command group such as `fleet`, and after the leaf subcommand. A repeat on one level is a parse error (exit 2); when several levels carry it, the deepest level's value wins, so `cafleet --database-url A fleet list --database-url B` selects `B`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
 
-The default expands HOME once, before any command runs, `setup` and `doctor` included. An unset `HOME` fails with `HOME is not set; cannot derive the default database path` and a `HOME` that is not valid UTF-8 with `HOME is not valid UTF-8; cannot derive the default database path`, both exit 1; an explicit `--database-url` reads no `HOME` for selection.
+The default expands HOME once, before any command runs, `setup` and `doctor` included. An unset `HOME` fails with `HOME is not set; cannot derive the default database path` and a `HOME` that is not valid UTF-8 with `HOME is not valid UTF-8; cannot derive the default database path`, both exit 1; an explicit `--database-url` reads no `HOME` for selection. `member create` still reads `HOME` to decide whether `{database_url}` renders `default` (§ Spawn-prompt substitution), after its Hermes preflight and before the placeholder check, failing with the unset-`HOME` error above.
 
 An explicit URL has the form `sqlite:///<path>`: the path is the text after the literal prefix `sqlite:///`, so `sqlite:///etc/x` names the relative path `etc/x` and an absolute path needs four slashes (`sqlite:////var/x.db`). Any other prefix fails with `database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'`, exit 1. The path is a plain filesystem filename: it is never interpreted as an SQLite `file:` URI, so `sqlite:///file:x?mode=memory` names the relative file `file:x?mode=memory`. An empty path (`sqlite:///`) and the path `:memory:` fail with `database URL has no file path`, exit 1. Resolve a relative file path against the invoking working directory (§6.5 Pane spawn working directory) before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
 
@@ -169,10 +169,10 @@ CAFleet reads no `CAFLEET_*` environment variable. Member creation renders the s
 Argument parsing completes before any other step (§ Validation order):
 
 - `-h` and `--help` print help on any command; `cafleet help [COMMAND…]` prints the same help as `cafleet COMMAND… --help`. Help, `--version` and `-V` write to stdout, exit 0 and open no database.
-- `--opt=value` and `--opt value` are equivalent.
+- `--opt=value` and `--opt value` are equivalent, except that a separate value starting with `-` is read as an option (a parse error such as `--from-member-id -1` or the positional `message show -5`), while the `--opt=value` form passes it to the command (`--lines=-5` reaches § Capture windowing).
 - An integer ID accepts an optional leading `+` and leading zeros (`+5` names 5 and `007` names 7); a value outside the 64-bit signed range is an invalid-value parse error.
 - An option or flag given twice on one command level (for example `--json --json`) is a parse error; `--database-url` follows § Database selection.
-- `cafleet` with no arguments, and a command group without its subcommand (for example `cafleet fleet`), writes that command's help to stderr and exits 2.
+- `cafleet` with no arguments, and a command group with nothing after its name (for example `cafleet fleet`), writes that command's help to stderr and exits 2; a group followed only by options, such as `cafleet fleet --database-url URL`, is a parse error.
 - `__member-run` is a hidden subcommand absent from help; it runs only as the runner a `member create` launches (§6.9 Runner boundary and creation transaction).
 - Every other parse error writes nothing to stdout and exits 2. Its first stderr line begins with `error: ` and names the offending argument (§6.3 Error Messages); the rest of its text is implementation-defined.
 
@@ -192,7 +192,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 
 | Command | Text | JSON |
 |---|---|---|
-| `fleet create` | `<fleet-id> director=<member-id>` | Ordered `fleet_id, name, created_at, director`, with Director identity/description/registration/placement |
+| `fleet create` | `<fleet-id> director=<member-id>` | Ordered `fleet_id, name, created_at, director`; `director` is ordered `member_id, name, description, status, registered_at, kind, placement, runtime` with `runtime` null |
 | `fleet list` | Header and one row per fleet (§ `fleet list`) | Array of fleet summaries (§ `fleet list`) |
 | `fleet show` | `fleet_id:`, `name:`, `created_at:` lines and an optional `deleted_at:` line (§ `fleet show`) | Fleet record (§ `fleet show`) |
 | `fleet delete` | `Deleted fleet ID. Deregistered N members.` plus one line per ordinary member | `{fleet_id, deregistered_count, members}` |
@@ -203,7 +203,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | `member delete` | `Member deleted.` with member/pane lines (§ `member delete`) | `{member_id, pane_status}` |
 | `member show` | `ID NAME STATUS window=WINDOW` plus wrapped runtime line | Detail including kind, placement and runtime |
 | `event show` | Event, runtime and optional interaction lines | Event and current state |
-| `input show` / `input reconcile` | Input receipt and optional decision lines | `{input}` |
+| `input show` / `input reconcile` | One `Input:` line (§ Runtime event and input commands) | `{input}` |
 | `permission inspect` | Request identity/capability lines | `{request}` |
 | `permission respond` | Answer submission status/stage line | `{response}` |
 | `member list` | Roster heading and rows, or `0 members.` (§ Member list output) | Roster array |
@@ -215,7 +215,7 @@ An invalid value for an option with possible values exits 2 with a usage error t
 
 ##### Member list output
 
-Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_consumed` and `idle`. `last_consumed` is the latest `status_timestamp` of the member's completed incoming messages, the time its poll consumed them. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending window or pane.
+Roster records are ordered `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_consumed`, `idle`. `last_sent` and `last_recv` are the latest `created_at` of the member's sent and received messages, a self-send counting as both. `last_consumed` is the latest `status_timestamp` of the member's completed incoming messages, the time its poll consumed them. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending window or pane.
 
 Every JSON `placement` object, in roster, `member create`, `member show` and `fleet create` output, has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id` and `mux_window_name` are null exactly when `mux_pane_id` is null.
 
@@ -250,7 +250,7 @@ The Director-only commands are exactly `member prompt`, `member exec` and `membe
 
 Each requires `--from-member-id <director-member-id>`, a positive integer: the caller's ID, or the pinned Director for `permission respond`. A missing or malformed value is a parse error, exit 2.
 
-After argument parsing and the invocation connection's schema-version guard (§ Schema-version guard), and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet — a member's own fleet, or the fleet of the run that owns an input or interaction — and requires that fleet to be live with `director_member_id` equal to `--from-member-id`. An unknown subject's not-found error precedes this check. Otherwise the command exits 1, prints nothing on stdout and writes this application error to stderr, `permission respond` included (no response attempt began, so the §6.3 Permission commands structured-response exception does not apply):
+After argument parsing and the invocation connection's schema-version guard (§ Schema-version guard), and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet — a member's own fleet, or the fleet of the run that owns an input or interaction — and requires that fleet to be live with `director_member_id` equal to `--from-member-id`. An unknown or inactive subject skips this check, and the command's later checks run in § Validation order, so its own text and body checks can fail before its not-found error. Otherwise the command exits 1, prints nothing on stdout and writes this application error to stderr, `permission respond` included (no response attempt began, so the §6.3 Permission commands structured-response exception does not apply):
 
 ```
 Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.
@@ -284,7 +284,7 @@ Each command applies its checks in the order below. The first failing check deci
 1. Argument parsing (§ CLI parse rules); a parse error exits 2.
 2. Without `--database-url`, the default database derivation (§ Database selection); a `HOME` error exits 1.
 3. `member press` only: key validation (§ `member press`), exit 2.
-4. The database URL form (§ Database selection), opening the database and the schema-version guard (§ Schema-version guard), exit 1. `setup` and `doctor` replace steps 4–7 with their own sections. A `member press` failure here appends the line `keys were not dispatched to member <id>.`, and a permission command's failure appends its known run/interaction context (§ Permission commands).
+4. The database URL form (§ Database selection), opening the database and the schema-version guard (§ Schema-version guard), exit 1. `setup` and `doctor` replace steps 4–7 with their own sections. A `member press` failure here appends the line `keys were not dispatched to member <id>.`, and a permission command's failure appends its context line (§ Error Messages).
 5. The Director-only command guard (§ Director-only command guard), exit 1.
 6. `member exec` only: the command line from its inline or `--file` source (§ `member exec`), exit 2 for an invalid line and exit 1 for a `--file` error.
 7. The command's own checks, in the order its list below gives; a command without a list performs its subject lookups in its own section's order.
@@ -331,7 +331,7 @@ Each command applies its checks in the order below. The first failing check deci
 
 `cafleet setup [--coding-agent AGENT...]` prepares the database first, then installs assets. It classifies the selected database before any write per §6.3 Schema-version guard, leaving a current file of this version unchanged. Compatible setup then installs embedded assets offline. Backend selection is multi-value/repeatable, deduplicated and defaults to the supported backend registry; selected backends install in registry order.
 
-Setup takes the path from the URL (§ Database selection) and creates its missing parent directories first; a failure exits 1 with `cannot create <dir>: <io error>`. After initializing, setup prints `Initialized database at <path>.`; a database that is already current prints `Database already initialized at <path>.`. `<path>` is the path as written in the URL, neither canonicalized nor made absolute. A failure while initializing the schema exits 1 with `database initialization failed: <cause>`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation, and setup exits 1 with that backend's cause.
+Setup takes the path from the URL (§ Database selection) and creates its missing parent directories first; a failure exits 1 with `cannot create <dir>: <io error>`, `<dir>` being the database path's whole parent directory as written, even when an ancestor is the failing component. After initializing, setup prints `Initialized database at <path>.`; a database that is already current prints `Database already initialized at <path>.`. `<path>` is the path as written in the URL, neither canonicalized nor made absolute. A failure while initializing the schema exits 1 with `database initialization failed: <cause>`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation, and setup exits 1 with that backend's cause.
 
 ##### Config-dir resolution
 
@@ -398,7 +398,7 @@ pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 
 #### Schema-version guard
 
-Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version and a file SQLite reports as not a database, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars: a path whose existence cannot be checked fails with `cannot inspect database at '<path>': <io error>`, an open failure with `failed to open database at '<path>': <cause>` and a connection-setting failure with `failed to apply connection PRAGMAs: <cause>`, all exit 1. Every other SQLite failure, here and in every later database operation, is `database error: <cause>`, exit 1, with `<cause>` implementation-defined. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
+Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables (§8 compatibility diagnosis, `Empty` row), with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version and a file SQLite reports as not a database, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` `PATH` and `<path>` in these errors, and in doctor's `cafleet <VERSION> at <path>`, are the URL's path as written, so a relative URL stays relative. Preserve database open/read causes, incompatible file bytes and existing sidecars: a path whose existence cannot be checked fails with `cannot inspect database at '<path>': <io error>`, an open failure with `failed to open database at '<path>': <cause>` and a connection-setting failure with `failed to apply connection PRAGMAs: <cause>`, all exit 1. Every other SQLite failure, here and in every later database operation, is `database error: <cause>`, exit 1, with `<cause>` implementation-defined. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
 
 `--help` renders at parse time and exits before any command body runs, so neither group-level help (`cafleet fleet --help`) nor subcommand help (`cafleet fleet create --help`) triggers the guard; both print help and exit 0 even under a missing database.
 
@@ -587,7 +587,7 @@ Error: cafleet fleet create cannot verify this session's pane: a shared codex ap
 2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure with the held layout lock: runner shutdown when its recorded owner is alive and recovery for a wrapped member, pane close in the placement's recorded window, that member's deregistration, then optional layout restoration of that window. The root Director's pane stays open.
 3. **Deregister the fleet.** One transaction revalidates the placement set, stamps deletion, deregisters the remaining active members (the root Director and members with a pending placement) and removes their placements.
 
-The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause (§ `member delete`) with every trailing `.` removed and `IDS` is the ended member IDs in lock-key order joined by `, `, or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
+The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause (§ `member delete`) with every trailing `.` of its last line removed, a multi-line cause keeping its lines and `IDS` is the ended member IDs in lock-key order joined by `, `, or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
 
 On success the text output is `Deleted fleet ID. Deregistered N members.` followed by one `  member MEMBER_ID: PANE_STATUS` line per ordinary member in ascending id. `N` counts every member the command deregistered, root Director included; `PANE_STATUS` takes the `member delete` values `PANE (killed)` and `(pending — no pane)`. JSON is ordered `fleet_id, deregistered_count, members`, with one `{member_id, pane_status}` entry per ordinary member in the same order.
 
@@ -595,7 +595,7 @@ On success the text output is `Deleted fleet ID. Deregistered N members.` follow
 
 A full-environment diagnosis that reports **every** check, with no early abort when the multiplexer is unavailable. `doctor` is exempt from the schema-version guard (§6.3 Schema-version guard), so a missing or incompatible database is reported, not fatal. Its optional flag is `--json` (§6.3 JSON output (`--json`)).
 
-Text output prints one `<status> <name>: <detail>` row per check in check order (§ Check rows), with each LF in the detail escaped as `\n` and each CR as `\r`. `--json` prints one JSON array of check objects in the same order, each ordered `name, status, detail`; each detail equals its text form without the `<status> <name>: ` prefix.
+Text output prints one `<status> <name>: <detail>` row per check in check order (§ Check rows), with each LF in the detail escaped as `\n` and each CR as `\r`. `--json` prints one JSON array of check objects in the same order, each ordered `name, status, detail`; each detail equals its text form without the `<status> <name>: ` prefix and with LF and CR raw.
 
 ```text
 ok multiplexer: herdr server=default
@@ -822,7 +822,7 @@ A root Director target exits 1 with `cannot prompt the Director's own pane`. The
 
 A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queued prompt prints `Queued prompt for member ID (PANE).` Both add the delivery and input lines (§6.3 Runtime presentation). `TEXT_REPR` follows §6.4 Quoted text.
 
-Pre-write error, including a held runner reply: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
+A runner refusal before any byte (`rejected` at stage `zero_bytes`) prints `prompt was not dispatched to member ID: CAUSE`. Every other refusal prints `prompt delivery to member ID is STATUS`, where STATUS is `held`, `rejected` or `uncertain`, followed by `: REASON` when the runner reported a reason and ` (method=METHOD)` when a delivery method was selected, as in `prompt delivery to member 7 is held: input requires live proven-zero revalidation`. These exit 1 without a success record, followed by their context line (§6.3 Error Messages).
 
 A prompt whose staged write stops or whose submission is not confirmed records `uncertain` and exits 1 with its recorded cause, method and input ID (§6.3 Runtime presentation). Prompt input requires a deliberate retry. Oversized input without safe framing is refused before reservation or bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` and publishes its result (§6.9 Measured submission plans and settle intervals). Insufficient immediate-attempt budget accepts a zero-byte queue entry with reason `delivery_budget_exhausted`.
 
@@ -845,8 +845,8 @@ Ordered JSON is:
 | Condition | Error body (exit 1) |
 |---|---|
 | Root Director | `cannot exec in the Director's own pane` |
-| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
-| Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Runner refusal before any byte (`rejected` at stage `zero_bytes`) | `native command was not dispatched to member ID: CAUSE` |
+| Every other refusal: held, rejected after typing began, or uncertain | `native command delivery to member ID is STATUS`, with `: REASON` and ` (method=METHOD)` as for `member prompt` |
 
 An exec whose staged write stops or whose submission is not confirmed records `uncertain`, exits 1 and requires a deliberate retry. An immediate oversized command with no safe framing is refused with zero bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` with a result event. Insufficient immediate budget queues with reason `delivery_budget_exhausted` (§6.9 Measured submission plans and settle intervals).
 
@@ -896,7 +896,7 @@ A missing member or placement, a pending pane (§6.3 Error Messages) and a nativ
 
 `cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]`
 
-- `--lines`: Number of trailing lines to capture (default: **20**). Parsing accepts any 64-bit signed integer; §6.5 Capture windowing rejects a value below 1. Every capture-operation failure, that rejection included, exits 1 as `capture failed: <cause>`.
+- `--lines`: Number of trailing lines to capture (default: **20**). Parsing accepts any 64-bit signed integer; §6.5 Capture windowing rejects a value below 1. Every failure of the capture call, that rejection included, exits 1 as `capture failed: <cause>`; an earlier failure to resolve the fleet's multiplexer, such as `tmux binary not found on PATH`, keeps its own text and precedes the `--lines` check.
 - `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws.
 
 Output shapes: §6.3 Output shapes; target resolution: §6.3 Member targeting and key delivery. A pending placement is a hard error (§6.3 Error Messages).
@@ -927,7 +927,7 @@ Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STA
 | `failed` | `unavailable` |
 | `skipped` | `-` |
 
-For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted` and adds, after its `Input:` line, the line `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted` and adds, after its `Input:` line, the line `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)` (with no recorded cause, `… is uncertain (method=profile)`), and its context line carries the known receipt identity; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
@@ -1010,7 +1010,7 @@ Render null values as `-` and append `Reason: REASON` when nonnull. Accepted mea
 
 Exit 0 means accepted submission. A structured held/rejected/uncertain reply prints the response in the selected text/JSON form and exits 1 (§6.3 Error Messages), with stderr `Error: permission response STATUS for interaction INTERACTION_ID: REASON`. Pre-reply operational failures retain their ordinary error category and include known run/interaction context; usage failures exit 2.
 
-An attempt against a blocked current request fails before any byte. It exits 1 with the primary stderr line `Error: runner control: permission request is blocked: REASON`, followed by the known run/interaction context. Respond checks the blocker at admission, after its admission drain, and again before each answer stage. `REASON` is the bounded explanation `permission inspect` returns as `capability_reason` for that state:
+An attempt against a blocked current request fails before any byte. It exits 1 with the primary stderr line `Error: runner control: permission request is blocked: REASON`, followed by its context line (§6.3 Error Messages). Respond checks the blocker at admission, after its admission drain, and again before each answer stage. `REASON` is the bounded explanation `permission inspect` returns as `capability_reason` for that state:
 
 | Reason | Blocking state |
 |---|---|
@@ -1053,6 +1053,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | (any command with a database) | The URL's path is empty or `:memory:` (§6.3 Database selection) | `Error: database URL has no file path` | 1 |
 | (any command with a database) | The database path's existence cannot be checked, the file cannot be opened, or its connection settings fail (§6.3 Schema-version guard) | `Error: cannot inspect database at '<path>': <io error>`, `Error: failed to open database at '<path>': <cause>`, `Error: failed to apply connection PRAGMAs: <cause>` | 1 |
 | (any command with a database) | Any other SQLite failure | `Error: database error: <cause>` | 1 |
+| (any command with an operation deadline) | A bounded database scope or step starts after its operation deadline passed, for example `fleet delete` before its final commit after slow member ends | `Error: operation exceeded its deadline` | 1 |
 | (any command with a database) | Restoring the connection's busy handler after a bounded wait fails | `Error: restoring database wait failed: <cause>` | 1 |
 | `setup` | A missing parent directory of the database path cannot be created (§6.3 `cafleet setup`) | `Error: cannot create <dir>: <io error>` | 1 |
 | `setup` | Initializing the schema fails (§6.3 `cafleet setup`) | `Error: database initialization failed: <cause>` | 1 |
@@ -1060,7 +1061,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | (any command with output) | Writing stdout fails with a broken pipe, e.g. `cafleet member list 1` piped into `head -1`; the command stops writing and nothing goes to stderr | — | The command's own result |
 | (any command with output) | Writing stdout fails with any other error | `Error: failed to write output: <cause>` | 1 |
 | `member prompt` / `member exec` / `member press` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
-| `input reconcile` | The pinned input has no recorded placement (deregistered member or deleted fleet), so no live runner can synchronize the receipt; the receipt stays uncertain (§6.9 Durable input receipts and settlement) | `Error: receipt reconciliation requires the member's live runner; the input stays uncertain` | 1 |
+| `input reconcile` | The pinned input has no recorded placement (a deregistered member; a deleted fleet's input fails the Director-only guard first), so no live runner can synchronize the receipt; the receipt stays uncertain (§6.9 Durable input receipts and settlement) | `Error: receipt reconciliation requires the member's live runner; the input stays uncertain` | 1 |
 | (runner queue housekeeping) | A queued receipt is no longer `ready`; the runner fences ordinary input (§6.9 Queue housekeeping) | `queued input INPUT_ID changed to STATE outside the runner queue` | — |
 | `member prompt` / `member exec` | Above the plain-input limit and profile framing is `plain`; CAUSE in the command's pre-write error | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the BACKEND profile has no bracketed-paste delivery` | 1 |
 | `member prompt` / `member exec` | Above the plain-input limit and profile framing is `bracketed_paste`, but mode 2004 is off; CAUSE in the pre-write error | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the native CLI has not enabled bracketed paste` | 1 |
@@ -1084,6 +1085,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID; for `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The live-fleet guard: the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
+| `member list` | An activity timestamp does not parse; the lexicographic maximum is chosen first | `Error: invalid stored value for messages.created_at: <value>` (`messages.status_timestamp` for consumption) | 1 |
 | `member list` / `member show` | The fleet is soft-deleted, or its root Director is not active (§6.3 `member list`) | `Error: fleet <fleet-id> is deleted`, `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
 | `setup` | `HOME` is unset when setup reads it after database preparation (§6.3 Config-dir resolution) | `Error: HOME is not set` | 1 |
 | `event show` / `input show` / `input reconcile` | An unknown event or input ID | `Error: Event <event-id> not found`, `Error: Input <input-id> not found` | 1 |
@@ -1098,7 +1100,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member delete` / `fleet delete` | A member deletion step fails (§6.3 `member delete`) | The member deletion cause of § `member delete`; `fleet delete` composes it per § `fleet delete` | 1 |
 | `member delete` / `fleet delete` | The member's run row is missing when recovery reads it | `Error: member <member-id> has no recorded run` | 1 |
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> | 1 |
-| `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 |
+| `member show` / `prompt` / `exec` / `capture` / `delete` / `press` | An unknown or inactive target member id; `member press` appends `keys were not dispatched to member <id>.` | `Error: Member <member-id> not found` | 1 |
 | `message send` / `member create` | A blank positional body (§ Text bodies) | `Error: text may not be empty.` | 2 |
 | `message send` / `member create` | `--file <path>` to a blank file, zero bytes included | `Error: --file <path>: file is empty.` | 1 |
 | `message send` / `member create` | `--file -` with blank stdin | `Error: --file -: stdin is empty.` | 1 |
@@ -1114,7 +1116,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `permission respond` | `--choice` on a non-question, `--decision` on a question, a choice without a tested plan, or a second answer for the episode; the structured `rejected` response prints on stdout first, with reasons per §6.3 Permission commands | `Error: permission response rejected for interaction <interaction-id>: <reason>` | 1 |
 | `permission inspect` | The inspected run records a database identity other than the selected database's; the known interaction context follows | `Error: invalid stored value for member_runs.database_identity_json: selected database identity mismatch` | 1 |
 
-Left-in-composer prompt/exec errors append known receipt identity as `input_id=INPUT_ID`. In the plain-limit errors, UNIT is `bytes` for a byte limit and `characters` for a scalar limit; N measures rendered prefix plus literal. Uncertain errors retain their command forms with the recorded cause, for example `write_failed`.
+A *context line* is one stderr line after the primary error, made of the known fields among `run_id=<run-id>`, `interaction_id=<interaction-id>`, `input_id=<input-id>` and `operation_key=<JSON string>`, in that order, joined by one space; with no known field there is no line. A permission command's failure, from the schema-version guard on, carries the run (`permission respond`'s `--expected-run-id`) and the interaction it names, and a prompt/exec refusal or uncertainty carries the receipt identity the runner reported. In the plain-limit errors, UNIT is `bytes` for a byte limit and `characters` for a scalar limit; N measures rendered prefix plus literal. Uncertain errors retain their command forms with the recorded cause, for example `write_failed`.
 
 ### 6.4 Output & Formatting
 
@@ -1171,7 +1173,7 @@ The CSI pattern (§6.9 Pattern syntax) is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC
 
 #### Formatter helper semantics
 
-Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eight characters after `T`; an absent value or one without a `T` renders `-`. Idle renders null as `-`, seconds below 60, floor minutes below 3600 and floor hours afterward. Required fields fail if absent; nullable activity and pending placement are documented valid cases.
+Idle renders null as `-`, seconds below 60, floor minutes below 3600 and floor hours afterward. Required fields fail if absent; nullable activity and pending placement are documented valid cases.
 
 ##### Quoted text
 
@@ -1295,6 +1297,7 @@ Process exit releases ownership. Read-only capture needs no input lock. Deletion
 | Locking fails other than by contention | `cannot lock pane input <path>: <io error>` (`pane layout <path>`) |
 | Releasing a held lock for the runner fails | `cannot release pane input <path>: <io error>` |
 | The member's placement changes while its pane input lock is acquired | `member <member-id> placement changed while acquiring pane input` |
+| A pane input lock error of a member-scoped writer | `member <member-id> pane input: <cause>`, wrapping the error above |
 
 #### Termination during pane input
 

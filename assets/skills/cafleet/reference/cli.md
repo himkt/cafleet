@@ -278,10 +278,10 @@ Text output is `Member deleted.`, `  member_id: <member-id>` and `  pane_id:   <
 
 | Condition | Error body (exit 1) |
 |---|---|
-| Pre-write error, including a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
-| Partial uncertainty | `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Rejected before any byte | `prompt was not dispatched to member ID: CAUSE` |
+| Held, rejected after typing began, or uncertain | `prompt delivery to member ID is STATUS[: REASON][ (method=METHOD)]`, e.g. `… is held: input requires live proven-zero revalidation` |
 
-Uncertain errors include `input_id=INPUT_ID`; inspect it and the pane before a deliberate retry. Over-limit input without safe framing gets the pre-write error with a CAUSE below (UNIT `bytes` or `characters`).
+Refusals add a context line such as `run_id=R input_id=N operation_key="…"` after the error; inspect the input and the pane before a deliberate retry. Over-limit input without safe framing gets the pre-write error with a CAUSE below (UNIT `bytes` or `characters`).
 
 | Missing delivery mechanism | CAUSE |
 |---|---|
@@ -297,10 +297,10 @@ The runner submits `! ` plus the command; the host owns cwd, environment, permis
 | Condition | Error body (exit 1) |
 |---|---|
 | Root Director, before I/O | `cannot exec in the Director's own pane` |
-| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
-| Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Rejected before any byte | `native command was not dispatched to member ID: CAUSE` |
+| Held, rejected after typing began, or uncertain | `native command delivery to member ID is STATUS[: REASON][ (method=METHOD)]` |
 
-Uncertain errors include `input_id=INPUT_ID`, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`; the command may have typed partially or executed, so inspect native output and reconcile receipts before a newly authorized retry. Over-limit CAUSE strings match [member prompt](#member-prompt). After completion, explicitly prompt continuation if the host has not resumed.
+Uncertain errors add a context line with `input_id=INPUT_ID`, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`; the command may have typed partially or executed, so inspect native output and reconcile receipts before a newly authorized retry. Over-limit CAUSE strings match [member prompt](#member-prompt). After completion, explicitly prompt continuation if the host has not resumed.
 
 ### `member press`
 
@@ -330,7 +330,7 @@ Answer request-bound decisions with `permission respond`.
 
 ### `member capture`
 
-`cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` reads trailing lines (default 20, at least 1) without the input lock; a failure, `--lines 0` included, exits 1 with `Error: capture failed: <cause>`; `--ansi` preserves escapes, otherwise redraws and escapes are cleaned. Pending placement fails. `captured_at` stamps the read; `content_sha256` hashes the emitted `content`.
+`cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` reads trailing lines (default 20, at least 1) without the input lock; a failure of the capture call, `--lines 0` included, exits 1 with `Error: capture failed: <cause>`, while a missing multiplexer (`tmux binary not found on PATH`) keeps its own error; `--ansi` preserves escapes, otherwise redraws and escapes are cleaned. Pending placement fails. `captured_at` stamps the read; `content_sha256` hashes the emitted `content`.
 
 ## Pane input and previews
 
