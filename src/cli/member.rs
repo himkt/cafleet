@@ -3177,12 +3177,14 @@ mod tests {
 
         enum Stderr {
             Exact(&'static str),
+            ForFleet(fn(i64) -> String),
             Prefix(&'static str),
             Excludes(&'static str),
         }
 
         struct ChildCase {
             name: &'static str,
+            director_placement: bool,
             backend: &'static str,
             prompt: &'static str,
             executables: &'static [(&'static str, &'static str)],
@@ -3192,9 +3194,25 @@ mod tests {
             pane_log_excludes: &'static [&'static str],
         }
 
-        const CHILD_CASES: [ChildCase; 5] = [
+        const CHILD_CASES: [ChildCase; 6] = [
+            ChildCase {
+                name: "the Director placement precedes backend availability",
+                director_placement: false,
+                backend: "claude",
+                prompt: "literal assignment on {database_url}",
+                executables: &[("tmux", LOGGING_FAILING_TMUX)],
+                stderr: Stderr::ForFleet(|fleet| {
+                    format!(
+                        "Error: fleet {fleet} has no recorded Director placement; re-create the fleet with 'cafleet fleet create'.\n"
+                    )
+                }),
+                exit_code: 1,
+                pane_log_contains: &[],
+                pane_log_excludes: &["#{window_height}"],
+            },
             ChildCase {
                 name: "backend availability precedes slot selection",
+                director_placement: true,
                 backend: "claude",
                 prompt: "literal assignment on {database_url}",
                 executables: &[("tmux", LOGGING_FAILING_TMUX)],
@@ -3205,6 +3223,7 @@ mod tests {
             },
             ChildCase {
                 name: "slot selection precedes the Hermes home preflight",
+                director_placement: true,
                 backend: "hermes",
                 prompt: "literal assignment on {database_url}",
                 executables: &[
@@ -3218,6 +3237,7 @@ mod tests {
             },
             ChildCase {
                 name: "the Hermes home preflight precedes placeholder validation",
+                director_placement: true,
                 backend: "hermes",
                 prompt: "assignment {nope on {database_url}",
                 executables: &[
@@ -3233,6 +3253,7 @@ mod tests {
             },
             ChildCase {
                 name: "an unknown placeholder precedes the database_url citation check",
+                director_placement: true,
                 backend: "claude",
                 prompt: "assignment {nope}",
                 executables: &[("tmux", LOGGING_WORKING_TMUX), ("claude", CLAUDE_VERSION)],
@@ -3243,6 +3264,7 @@ mod tests {
             },
             ChildCase {
                 name: "a malformed prompt precedes the database_url citation check",
+                director_placement: true,
                 backend: "claude",
                 prompt: "assignment }",
                 executables: &[("tmux", LOGGING_WORKING_TMUX), ("claude", CLAUDE_VERSION)],
@@ -3261,12 +3283,20 @@ mod tests {
                 let name = case.name;
                 let dir = crate::runtime::test_support::short_tempdir();
                 let mut conn = initialized_file_conn(&dir);
-                let (fleet, _) = create_fleet_fixture(&mut conn, "runtime-validation-order");
+                let (fleet_id, director) =
+                    create_fleet_fixture(&mut conn, "runtime-validation-order");
+                if !case.director_placement {
+                    conn.execute(
+                        "DELETE FROM member_placements WHERE member_id=?1",
+                        [director],
+                    )
+                    .unwrap();
+                }
                 let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
                 let config = dir.path().join("agent config");
                 std::fs::create_dir(&config).unwrap();
                 let before = table_snapshot(&conn, |_| true);
-                let fleet = fleet.to_string();
+                let fleet = fleet_id.to_string();
                 let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
                     &settings,
                     &[
@@ -3297,6 +3327,7 @@ mod tests {
                 );
                 match case.stderr {
                     Stderr::Exact(expected) => assert_eq!(stderr, expected, "{name}"),
+                    Stderr::ForFleet(expected) => assert_eq!(stderr, expected(fleet_id), "{name}"),
                     Stderr::Prefix(prefix) => {
                         assert!(stderr.starts_with(prefix), "{name}: {stderr}")
                     }

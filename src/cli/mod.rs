@@ -1558,6 +1558,7 @@ mod tests {
         struct Registry {
             dir: tempfile::TempDir,
             initialized: Settings,
+            fleet: i64,
             director: String,
             worker: String,
         }
@@ -1573,6 +1574,7 @@ mod tests {
                 Self {
                     dir,
                     initialized,
+                    fleet,
                     director: director.to_string(),
                     worker: worker.to_string(),
                 }
@@ -1586,6 +1588,13 @@ mod tests {
                 match database {
                     Database::Missing => Settings::for_database(&self.absent_path()),
                     Database::Initialized => self.initialized.clone(),
+                    Database::Altered(sql) => {
+                        crate::db::connect(&self.initialized.database_url)
+                            .unwrap()
+                            .execute_batch(sql)
+                            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+                        self.initialized.clone()
+                    }
                     Database::Url(url) => Settings::new(Some(url.into())).unwrap(),
                 }
             }
@@ -1595,6 +1604,8 @@ mod tests {
         enum Database {
             Missing,
             Initialized,
+            /// The initialized registry after this SQL runs on it.
+            Altered(&'static str),
             Url(&'static str),
         }
 
@@ -1717,6 +1728,52 @@ mod tests {
                         Expected::Prefix(format!(
                             "--file {}: file does not exist or is not a regular file. (",
                             path.display()
+                        ))
+                    },
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "a deleted sender fleet precedes the recipient lookup",
+                    database: Database::Altered(
+                        "UPDATE fleets SET deleted_at='2026-11-27T00:00:00.000000+00:00'",
+                    ),
+                    args: |registry| {
+                        owned(&[
+                            "message",
+                            "send",
+                            "--from-member-id",
+                            &registry.worker,
+                            "--to-member-id",
+                            "999998",
+                            "body",
+                        ])
+                    },
+                    expected: |registry| {
+                        Expected::Exact(format!("fleet {} is deleted", registry.fleet))
+                    },
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "an inactive root Director precedes the recipient lookup",
+                    database: Database::Altered(
+                        "UPDATE members SET status='deregistered'
+                         WHERE member_id=(SELECT director_member_id FROM fleets)",
+                    ),
+                    args: |registry| {
+                        owned(&[
+                            "message",
+                            "send",
+                            "--from-member-id",
+                            &registry.worker,
+                            "--to-member-id",
+                            "999998",
+                            "body",
+                        ])
+                    },
+                    expected: |registry| {
+                        Expected::Exact(format!(
+                            "fleet {}'s root Director (member {}) is not active.",
+                            registry.fleet, registry.director
                         ))
                     },
                     exit_code: 1,
@@ -1914,6 +1971,34 @@ mod tests {
                     exit_code: 1,
                 },
             ]);
+        }
+
+        #[test]
+        fn member_press_requires_the_fleet_multiplexer_before_the_director_refusal() {
+            let registry = Registry::new();
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                &registry.initialized,
+                &[
+                    "member",
+                    "press",
+                    &registry.director,
+                    "Enter",
+                    "--from-member-id",
+                    &registry.director,
+                ],
+                &[],
+                &[],
+            );
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(output.status.code(), Some(1), "{stderr}");
+            assert_eq!(
+                stderr,
+                format!(
+                    "Error: tmux binary not found on PATH\nkeys were not dispatched to member {}.\n",
+                    registry.director
+                )
+            );
+            assert_eq!(pane_calls, "");
         }
 
         #[test]
