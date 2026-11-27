@@ -495,6 +495,7 @@ Application errors print to stderr prefixed `Error: `, even with `--json`; struc
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member | `Error: Member <member-id> not found` |
 | `permission inspect` | An unknown `INTERACTION_ID` | `Error: Interaction <interaction-id> not found` |
+| `permission respond` | `--expected-run-id` names no run | `Error: Run <run-id> not found` |
 
 Text-body errors of `message send` and `member create`:
 
