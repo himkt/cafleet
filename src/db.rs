@@ -177,11 +177,25 @@ CREATE INDEX idx_member_runner_diagnostics_recent ON member_runner_diagnostics(r
 
 /// The file path a `sqlite:///<path>` database URL names.
 pub(crate) fn database_path(database_url: &str) -> Result<&str, CafleetError> {
-    database_url.strip_prefix("sqlite:///").ok_or_else(|| {
+    let path = database_url.strip_prefix("sqlite:///").ok_or_else(|| {
         CafleetError::App(format!(
             "database URL must use the sqlite scheme (sqlite:///<path>); got '{database_url}'"
         ))
-    })
+    })?;
+    if path.is_empty() || path == ":memory:" {
+        return Err(CafleetError::App("database URL has no file path".into()));
+    }
+    Ok(path)
+}
+
+/// The bundled SQLite is built with URI filenames enabled globally, so a relative path starting
+/// with `file:` would be parsed as a URI; prefixing `./` keeps every path a plain filename.
+fn plain_filename(path: &str) -> std::borrow::Cow<'_, str> {
+    if path.starts_with("file:") {
+        std::borrow::Cow::Owned(format!("./{path}"))
+    } else {
+        std::borrow::Cow::Borrowed(path)
+    }
 }
 
 pub(crate) fn connect(database_url: &str) -> Result<Connection, CafleetError> {
@@ -218,7 +232,7 @@ fn connect_with_flags(
     flags: rusqlite::OpenFlags,
 ) -> Result<Connection, CafleetError> {
     let path = database_path(database_url)?;
-    let conn = Connection::open_with_flags(path, flags)
+    let conn = Connection::open_with_flags(&*plain_filename(path), flags)
         .map_err(|e| CafleetError::App(format!("failed to open database at '{path}': {e}")))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
         .map_err(|e| CafleetError::App(format!("failed to apply connection PRAGMAs: {e}")))?;
@@ -228,9 +242,13 @@ fn connect_with_flags(
 pub(crate) fn initialize(conn: &mut Connection, database_url: &str) -> Result<(), CafleetError> {
     let failed =
         |e: rusqlite::Error| CafleetError::App(format!("database initialization failed: {e}"));
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(failed)?;
+    let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
+        Ok(tx) => tx,
+        Err(error) if is_not_a_database(&error) => {
+            return Err(incompatible_format(database_path(database_url)?));
+        }
+        Err(error) => return Err(failed(error)),
+    };
     match classify_schema(&tx)? {
         Classification::Current => return Ok(()),
         Classification::Incompatible => {
@@ -312,7 +330,16 @@ enum Classification {
     Incompatible,
 }
 
+fn is_not_a_database(error: &rusqlite::Error) -> bool {
+    error.sqlite_error_code() == Some(rusqlite::ErrorCode::NotADatabase)
+}
+
 fn classify_schema(conn: &Connection) -> Result<Classification, CafleetError> {
+    match conn.query_row("PRAGMA schema_version", [], |row| row.get::<_, i64>(0)) {
+        Ok(_) => {}
+        Err(error) if is_not_a_database(&error) => return Ok(Classification::Incompatible),
+        Err(error) => return Err(error.into()),
+    }
     if is_empty_file(conn)? {
         return Ok(Classification::Missing);
     }

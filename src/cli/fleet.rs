@@ -15,6 +15,7 @@ use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::multiplexer::CommandRunner;
 use crate::multiplexer::Multiplexer;
+use crate::multiplexer::MultiplexerContext;
 use crate::multiplexer::MuxBackend;
 use crate::multiplexer::caller;
 use crate::multiplexer::caller::CallerMux;
@@ -152,6 +153,16 @@ fn create(
     })
 }
 
+fn pane_context_text(context: Option<&MultiplexerContext>) -> String {
+    match context {
+        Some(context) => format!(
+            "session={:?} window_id={:?} pane_id={:?}",
+            context.session, context.window_id, context.pane_id
+        ),
+        None => "none".into(),
+    }
+}
+
 fn refusal(body: String) -> CafleetError {
     CafleetError::App(format!("cafleet fleet create {body}"))
 }
@@ -192,7 +203,9 @@ pub(crate) fn create_with(
         let actual_context = target.mux.pane_context(&pane)?;
         if actual_context.as_ref() != Some(&context) {
             return Err(CafleetError::App(format!(
-                "Director pane context changed during window naming: expected {context:?}, found {actual_context:?}"
+                "Director pane context changed during window naming: expected {}, found {}",
+                pane_context_text(Some(&context)),
+                pane_context_text(actual_context.as_ref())
             )));
         }
         Ok(NewPlacement::director(
@@ -565,7 +578,7 @@ pub(crate) fn end_member(
     deadline.remaining()?;
     host.close_pane(&placement, deadline).map_err(|error| {
         CafleetError::App(format!(
-            "kill_pane failed for pane {pane_id}: {}. Verify with 'cafleet doctor'.",
+            "pane {pane_id} could not be closed: {}. Verify with 'cafleet doctor'.",
             error.message()
         ))
     })?;

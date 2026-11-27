@@ -45,9 +45,6 @@ pub(crate) fn run(settings: &Settings, args: SetupArgs) -> Result<(), CafleetErr
 
 fn prepare_database(settings: &Settings) -> Result<(), CafleetError> {
     let path = crate::db::database_path(&settings.database_url)?;
-    if path.is_empty() {
-        return Err(CafleetError::App("database URL has no file path".into()));
-    }
     let db_file = Path::new(path);
     if let Some(parent) = db_file.parent().filter(|path| !path.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|error| {

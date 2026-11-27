@@ -273,10 +273,7 @@ pub(crate) fn resolve_body(
     file: Option<&str>,
 ) -> Result<String, CafleetError> {
     let body = read_body(inline, file)?;
-    if !body
-        .chars()
-        .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
-    {
+    if !body.chars().all(char::is_whitespace) {
         return Ok(body);
     }
     Err(match file {
