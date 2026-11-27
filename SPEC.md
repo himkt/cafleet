@@ -2905,7 +2905,119 @@ Every observation that carries both keeps the cursor and screen conditions and t
 
 ###### Pattern syntax
 
-Profile patterns, frame guards and region matchers of the bundled catalog and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; and flags `i m s U` in `(?flags)` and `(?flags:…)`. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
+Profile patterns, frame guards and region matchers of the bundled catalog and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; and flags `i m s U` in `(?flags)` and `(?flags:…)`. POSIX `[:name:]` classes match ASCII scalars only, and `(?i)` compares under Unicode simple case folding. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
+
+##### Profile rule object
+
+Each element of a profile's `rules` is one object. Every key not listed is refused, as is an explicit `null` for an optional key; an absent optional key takes the stated meaning.
+
+```text
+{
+  "id": NONBLANK,                     required, unique within the profile
+  "priority": INTEGER,                required
+  "observation": KIND,                required: permission_request | question | unknown_interaction |
+                                      permission_continuation | composer_empty | composer_text | unknown
+  "region": {                         required
+    "screen": "primary" | "alternate" | "either",
+    "start_pattern": PATTERN,
+    "end_pattern": PATTERN,
+    "max_rows": INTEGER 1..65535,
+    "cursor": "any" | "at_end" | "after_prompt" | "inside",
+    "panel_separator": GLYPH          optional; absent: no clipping (§ Diff sidebar clipping)
+  },
+  "matchers": [                       required
+    { "id": NONBLANK, "scope": "line" | "region", "pattern": PATTERN,
+      "focus_style": "marker" | "background" }      focus_style optional; absent: no focus
+  ],
+  "extract": {                        required
+    "operation": OPERATION | null,    required; null: no operation (§ Operation extraction)
+    "choices": [                      required, possibly empty
+      { "id": NONBLANK, "label": { "matcher_id": NONBLANK, "capture": NONBLANK },
+        "scope": "single_request" | "persistent" }
+    ]
+  },
+  "verified_noninteraction": BOOLEAN, required
+  "frame": FRAME,                     optional, interaction rules only (§ Interaction frame guard)
+  "suggestion": { "style": STYLE },   optional, composer_empty only (§6.7 Native suggestions)
+  "continues_rule_id": NONBLANK,      optional, permission_continuation only (§ Continuation screens)
+  "continues_choice_id": NONBLANK,    optional, with continues_rule_id
+  "text_prefixes": { "first_prefix": PATTERN, "continuation_prefix": PATTERN },
+                                      optional, composer_text only
+  "text_wrap": WRAP,                  optional, composer_text only
+  "text_framed": BOOLEAN,             optional, composer_text only
+  "fixture_ids": [NONBLANK, ...]      optional provenance, unread at run time
+}
+```
+
+`PATTERN` is a non-blank pattern of § Pattern syntax, `GLYPH` one non-whitespace scalar and `NONBLANK` a string with at least one scalar outside `White_Space`. `text_prefixes`, `text_wrap` and `text_framed` replace the profile's `composer.text` values for that rule's regions. The observations that accept each key and the cross-key requirements are the provenance rules of § Bundled profiles and native screen fixtures; a shipped catalog satisfies them, and how a binary reports a catalog that breaks one at run time is implementation-defined.
+
+##### Detection algorithm
+
+Detection runs one entry point over a snapshot with a set of selected rules:
+
+| Entry point | Selected rules |
+|---|---|
+| Runner observation | Every rule the profile's `detection` or `composer` capability lists, plus every `permission_continuation` rule |
+| Director observation | The profile's `director_delivery.rule_ids`, plus every interaction rule and every `permission_continuation` rule |
+
+The snapshot is *cursor-free* when it records no cursor or no screen mode. Each selected rule is matched in these steps:
+
+1. **Frame.** A rule with `frame` is skipped unless every require pattern matches some logical line and no reject pattern matches any logical line.
+2. **Lines.** The rule reads the clipped logical lines of its `panel_separator`, or the unclipped ones (§ Line text).
+3. **Screen.** A rule whose `screen` is `primary` while the alternate screen is active, or `alternate` while the primary screen is active, has no candidate; a cursor-free snapshot ignores `screen`.
+4. **Candidates.** A logical line whose text has exactly one `start_pattern` match starts candidates. Each logical line from the start line on whose text has exactly one `end_pattern` match closes a candidate region from the start line's first row through the end line's last row, while that span stays within `max_rows` rows; the first line that would exceed `max_rows` stops the search. A `composer_text` rule closes only at the first end line after the start line, and when none closes before the search stops, the screen's last row closes the region.
+5. **Cursor.** `any`, and every condition on a cursor-free snapshot, holds. `at_end` requires the cursor at the cell boundary right after the end match, `after_prompt` at the cell boundary right after the start match, and `inside` on a row of the region at a column up to `cols`. A bottom-closed `composer_text` region accepts only `any` and `inside`. A rule with `suggestion` also requires every cell from the after-prompt column through the row's last non-blank cell to carry the style.
+6. **Matchers.** On a candidate, a line-scoped matcher must match exactly once across the region's logical lines and a region-scoped matcher exactly once in the region text; otherwise the candidate fails. The operation and every declared choice label must then capture non-empty text.
+7. **Selection.** A `composer_text` rule, and a `composer_empty` rule on a cursor-free snapshot, takes its last candidate that passes step 6. On a cursor-free snapshot every other rule needs exactly one candidate that passes step 6. Otherwise a rule needs exactly one candidate after step 5, and that candidate must pass step 6.
+
+On a cursor-free snapshot, the matched `composer_empty` and `composer_text` rules are then reduced to those whose composer rows end lowest on the screen; a `composer_text` region's end-pattern row is not a composer row. Of the remaining matches only those at the highest `priority` count; they sort by rule id, and the first is the reported rule. The matches *conflict* when their `(observation, operation, choices)` triples differ:
+
+| Outcome | Observation |
+|---|---|
+| No match | `unknown`, rule `unmatched-screen`, evidence `absent` |
+| Matches that conflict | `unknown_interaction` when any match is an interaction rule, otherwise `unknown`; evidence `conflicting`; no operation or choices |
+| Matches that agree | The reported rule's observation, evidence `complete`, its operation and choices, and `verified_noninteraction` as the rule declares |
+
+The semantic fingerprint of an interaction or `permission_continuation` observation is the sorted, deduplicated list of the top-priority matches' `(observation, operation, choices)` triples, compared for exact equality; the backend is fixed per detector.
+
+**Composer-text extraction** matches the `composer.text` rules as above and needs exactly one of them to match; it then reads the region's rows through the profile's prefixes, dropping cells drawn in any of those rules' suggestion styles (§6.7 Native suggestions).
+
+**Answer matching** applies to a `complete` observation only. For each answer whose `request_rule_id` is the observed rule, focused-choice resolution reads the answer's focus matcher: `marker` selects the one choice whose label matched on the focus matcher's line, and `background` the one choice whose label cells share one background that differs from their row's majority background (the background of more than half the row's cells); any other count yields no focused choice.
+
+##### Fixture replay and expected observation
+
+A native screen fixture's screen is the state a fresh model of the fixture's `rows × cols` (§ Terminal emulation) reaches after these feeds:
+
+1. Text feed: `ESC [ ? 1049 h` when `alternate_screen` is true, then `ESC [ 2 J`, then for each row `r` whose `lines` entry is non-empty, `ESC [ <r+1> ; 1 H` followed by the entry's UTF-8 bytes. Masked rows are empty, so they stay without contents.
+2. Attribute feed, computed from the model after the text feed:
+   1. Give every cell `(row, col)` covered by a `cell_backgrounds` or `cell_styles` run an SGR parameter list holding, in order, the background parameters of its `cell_backgrounds` run (`48;5;<index>` for `indexed`, `48;2;<r>;<g>;<b>` for `rgb`), then `2` when its `cell_styles` run has `faint: true`, then the foreground parameters of that run when `foreground` is non-null (`38;5;<index>` or `38;2;<r>;<g>;<b>`), joined with `;` in decimal.
+   2. Visit the covered cells in ascending `(row, col)` order. A cell continues the open segment when it is on the segment's row, directly after the previous visited cell and has the same parameter list. Otherwise it starts a segment: emit `ESC [ 0 m` when a segment is open, then `ESC [ <row+1> ; <col+1> H` and `ESC [ <parameters> m`.
+   3. Emit each visited cell's text: nothing for a continuation, the cell's contents when it has contents, and one U+0020 otherwise.
+   4. After the last cell, emit `ESC [ 0 m` when any segment was opened.
+3. When both cursor coordinates are recorded, feed `ESC [ <cursor_row+1> ; <cursor_col+1> H`.
+
+The snapshot carries the recorded cursor and screen mode. A fixture whose `alternate_screen`, `cursor_row` and `cursor_col` are all `null` is cursor-free: its snapshot records no cursor and no screen mode.
+
+Every screen requires `expected_observation`, the detector's own output for each entry point, run with the screen's backend profile whatever the screen's `native_version`:
+
+| Key | Entry point | Value |
+|---|---|---|
+| `observe` | Runner observation | An observation object (below) |
+| `director` | Director observation | An observation object when the profile declares `director_delivery`, otherwise `null` |
+| `composer_text` | Composer-text extraction | `null` when the profile declares no `composer.text` or the extraction yields none; otherwise `{"mode_prefix", "segments"}` with `mode_prefix` a string or `null` and each segment `{"kind":"text","items":[…]}`, `{"kind":"scalars","count":N}` or `{"kind":"lines","count":N}`. A text segment's items are strings of consecutive characters, with `{"break":true}` for each word-wrap row break between them |
+| `answers` | Answer matching against the `observe` result | An object keyed by each matched answer's `answer_rule_id`, each value `{"focused_choice_id": <id or null>}`; `{}` when no answer matches |
+
+| Observation key | Value |
+|---|---|
+| `kind` | `permission_request`, `permission_continuation`, `question`, `unknown_interaction`, `composer_empty`, `composer_text` or `unknown` |
+| `rule_id` | The reported rule, or `unmatched-screen` |
+| `match_evidence` | `absent`, `conflicting` or `complete` |
+| `operation` | The extracted operation, rows joined with `\n`; `null` when unmatched, on a conflict, or for a rule without an operation |
+| `choices` | The captured labels of the rule's `extract.choices` in declaration order; `[]` for a matched rule without choices; `null` when unmatched or on a conflict |
+| `verified_noninteraction` | `true` only for an agreeing match of a rule declaring `verified_noninteraction: true` |
+| `continues_rule_id` | The continued rule's id for a `permission_continuation`, otherwise `null` |
+
+The bundled-catalog guard replays each screen, runs every entry point and fails with `invalid native profile: fixture <ID> expected observation differs: <key path>` at the first differing key, in the order `observe`, `director`, `composer_text`, `answers`; the key path is `observe.<key>` or `director.<key>` for the first differing observation key in the table order, and `composer_text` or `answers` otherwise. A change that alters any detector output updates the affected `expected_observation` values in the same change; a capture added through the capture-to-fixture conversion records the values verified on the live screen.
 
 ##### Interaction frame guard
 
@@ -3033,13 +3145,13 @@ Before the first byte and on each zero-byte reselection, render the selected del
 
 Fallback applies the same selection to its literal stage. A run whose backend has no bundled profile writes plainly with no limit. The 4000-scalar inline limit remains unchanged; framing and inline/pointer rendering are outside the digest preimage and become pinned at the first byte.
 
-A verified-composer run is one whose recorded backend's bundled profile supplies empty-composer observation and an executable plan for the operation: `prompt` for previews/prompts, `exec` for native commands. The runner and every client derive this predicate from the same recorded identity. Such an attempt begins only when its remaining budget covers `500 ms × settles + 2 s + 250 ms`: one settle for profile delivery, two for fallback. An immediate attempt below that bound queues with zero bytes and `defer_reason=delivery_budget_exhausted`; a deferred head waits with zero bytes under the same obstacle and retries with its own five-second attempt budget.
+A verified-composer run is one whose recorded backend's bundled profile supplies empty-composer observation and an executable plan for the operation: `prompt` for previews/prompts, `exec` for native commands. The runner and every client derive this predicate from the same recorded identity. Such an attempt begins only when its remaining budget covers `500 ms × settles + 2 s + 250 ms`: one settle for profile delivery, two for fallback. A run without composer verification requires `500 ms × settles + 250 ms`, the stage write margin without the verification window. An immediate attempt below that bound queues with zero bytes and `defer_reason=delivery_budget_exhausted`; a deferred head waits with zero bytes under the same obstacle and retries with its own five-second attempt budget.
 
 1. Revalidate run, placement, observer and interaction state, then durably reserve the input before any child byte.
 2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to the pre-write wait without settling; each further chunk needs a fresh write authorization after fresh ordinary draining and an interaction check.
 3. Start the 500 ms settle only after the last literal chunk, including any closing paste marker. Service child output, outer input and control traffic throughout it.
 4. Revalidate identity and interaction state; keyboard and pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget records `uncertain/deadline_expired`, stage `partial`.
-5. On a run whose profile declares `composer.text`, observe the composer, extract its text and match it against the written literal (§ Composer-text extraction). A complete match continues to the submit key. Without a match, the composer is observed again until it matches or a 1-second pre-submit window after the settle ends, whichever comes first; the attempt deadline ends the window earlier, and the stop signal ends the attempt with its own cause. A window that closes without a match, or a composer whose text cannot be extracted, writes no submit key, erases nothing and records `uncertain/literal_mismatch`, stage `partial`; a text extending beyond the literal, such as an appended human key, still mismatches at window close.
+5. On a run whose profile declares `composer.text`, observe the composer, extract its text and match it against the written literal (§ Composer-text extraction). A complete match continues to the submit key. Without a match, the composer is observed again, on every runner loop pass at an implementation-defined cadence, until it matches or a 1-second pre-submit window after the settle ends, whichever comes first; the attempt deadline ends the window earlier, and the stop signal ends the attempt with its own cause. A window that closes without a match, or a composer whose text cannot be extracted, writes no submit key, erases nothing and records `uncertain/literal_mismatch`, stage `partial`; a text extending beyond the literal, such as an appended human key, still mismatches at window close.
 6. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
 7. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `uncertain/submit_unconfirmed`, stage `submitted`.
 
@@ -3067,13 +3179,13 @@ tmux/herdr pane <--> CAFleet runner <--> child PTY <--> native agent CLI
 
 The runner owns the child PTY and reconstructs terminal state independently of the multiplexer.
 
-Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` beside the canonical selected database. The database identity is the canonical path, filesystem device/inode and the stored `runtime_database_identity` instance ID (§8); `database_namespace` is the first 26 characters of the unpadded RFC 4648 base32 encoding (alphabet `a`–`z`, `2`–`7`, most-significant bit first) of the SHA-256 digest of the canonical JSON (§6.4 JSON encoding) of the database identity object. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts.
+Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` in the directory of the canonical selected database: `identity.json` (the namespace manifest) in the namespace directory, and `launch.json` (the descriptor), `owner.lock` and `control.sock` in the run directory. The control socket's complete path is at most 107 bytes on Linux and 103 on macOS; a longer path fails creation with `complete runtime socket path exceeds platform limit`. The database identity is the JSON object `{"canonical_path": <canonical UTF-8 path>, "instance_id": <runtime_database_identity.instance_id>, "device": <st_dev>, "inode": <st_ino>}` (§8); `database_namespace` is the first 26 characters of the unpadded RFC 4648 base32 encoding (alphabet `a`–`z`, `2`–`7`, most-significant bit first) of the SHA-256 digest of the canonical JSON (§6.4 JSON encoding) of the database identity object. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts.
 
 Directories use `0700`, descriptor files `0600`, and a control socket is accessible only to its owner. Create each run directory exclusively and reconcile an existing directory before reuse. Reject symlinks, ownership mismatches, malformed descriptors and socket paths exceeding the platform limit against the complete resulting path before pane creation. The descriptor contains complete database identity, fleet/member/Director/run identities, ownership epoch, a random launch nonce, literal child argv, absolute cwd, required environment overrides and initial terminal dimensions. The child inherits the native configuration; CAFleet neither copies the entire environment nor creates per-member native profiles.
 
 Replacing a database file creates a different filesystem identity and namespace even when restored bytes retain the instance ID. Runners validate the selected path's file/instance identity before input and storage mutations; replacement fences the old run from the new database, holds input and initiates owned-child cleanup. Retain the old namespace for explicit reconciliation; a new creator never adopts its socket.
 
-The descriptor and control socket are local coordination mechanisms, not an authorization boundary against the same operating-system user; matching identities and the nonce reject stale endpoints. The creator's guarded cleanup deletes the descriptor on every outcome (success, handshake failure, timeout, rollback and uncertain post-`start` timeout) and reports a failed unlink explicitly. Failed run records retain only the non-secret `permission_argv_json`, never the assignment-bearing prompt element or raw environment. After a creator crash, deletion's recovery removes the descriptor only after identity/ownership validation. The runner removes its loaded descriptor after preparation when safe, independently of the creator's idempotent cleanup.
+The descriptor's file format and size bound are implementation-defined: only processes of one binary version exchange it. The descriptor and control socket are local coordination mechanisms, not an authorization boundary against the same operating-system user; matching identities and the nonce reject stale endpoints. The creator's guarded cleanup deletes the descriptor on every outcome (success, handshake failure, timeout, rollback and uncertain post-`start` timeout) and reports a failed unlink explicitly. Failed run records retain only the non-secret `permission_argv_json`, never the assignment-bearing prompt element or raw environment. After a creator crash, deletion's recovery removes the descriptor only after identity/ownership validation. The runner removes its loaded descriptor after preparation when safe, independently of the creator's idempotent cleanup.
 
 During verified ordinary recovery, retain the original ownership lock and pin a leftover launch descriptor by its opened file identity and bounded content, validating the recorded namespace/directory, private regular file, immutable database/fleet/member/Director/run identity and nonce. A positive historical descriptor epoch at or below the captured current epoch remains valid across takeover and retry; native launch loading still requires current creator ownership and the exact current epoch. Expected absence is idempotent while the pathname remains absent.
 
@@ -3105,7 +3217,7 @@ Forward outer-terminal input so a burst spanning several reads reaches the child
 | Pacing | A tick that moved input bytes, by reading outer bytes or writing a positive count to the PTY master, is followed immediately by the next tick; every other tick, including one whose queued input the master did not accept, keeps the loop's idle sleep |
 | Framing | None: forwarded bytes pass unchanged and in order, with no holding or timeout. Keyboard bytes advance `human_generation` and complete pointer reports advance `pointer_generation` (§ Terminal reply classification); replies advance neither |
 
-The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens, OSC title and a monotonic output sequence. Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and the screen model never answers a terminal query itself; every reply comes from the outer terminal.
+The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens and a monotonic output sequence (§ Screen model facts). Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and the screen model never answers a terminal query itself; every reply comes from the outer terminal.
 
 Terminal transport, classification and event storage are separate: database waits, a held Director delivery and event-commit retries never stop draining child output or accepting a human's native answer. Use bounded byte buffers and ordinary terminal backpressure for a slow outer display; a broken outer terminal triggers owned-child cleanup. Classification may coalesce intermediate working-screen snapshots, but it processes every potential interaction transition from the ordered parser stream before such coalescing. This is an observation contract for output actually rendered/read, not a guarantee to capture a dialog opened and closed between observable states.
 
@@ -3141,7 +3253,128 @@ Only the current lock/epoch owner allocates event sequences. Confirmed loss and 
 
 ##### Screen model facts
 
-The runner reconstructs the child's screen as a grid of rows × columns of cells and offers detection a snapshot of it after each step. The screen model is at least two columns wide: a one-column terminal is modelled as two columns, while the child PTY keeps the pane's size. A cell holds one base scalar plus any following zero-width scalars. A wide scalar (width 2; East Asian Ambiguous scalars are width 1) occupies a leading cell and a continuation cell, and writing it resets the continuation cell to the default background and style. Each row records whether its text continued onto the next row by automatic wrap. After a write into the last column the cursor reports column `cols` (pending wrap). A cell's colours are default, one of 256 indexed colours (SGR 30–37/40–47 and 90–97/100–107 denote indexed colours 0–15, equal to their `38;5;n`/`48;5;n` forms) or RGB, and its style includes faint. The model tracks the primary and alternate screens, the OSC window title and the bracketed-paste mode (DEC private mode 2004), resizes with the PTY, and never answers a terminal query itself.
+The runner reconstructs the child's screen as a grid of rows × columns of cells and offers detection a snapshot of it after each step. The screen model is at least two columns wide: a one-column terminal is modelled as two columns, while the child PTY keeps the pane's size. A cell holds one base scalar plus any following zero-width scalars. A wide scalar (width 2; East Asian Ambiguous scalars are width 1) occupies a leading cell and a continuation cell, and writing it resets the continuation cell to the default background and style. Each row records whether its text continued onto the next row by automatic wrap. After a write into the last column the cursor reports column `cols` (pending wrap). A cell's colours are default, one of 256 indexed colours (SGR 30–37/40–47 and 90–97/100–107 denote indexed colours 0–15, equal to their `38;5;n`/`48;5;n` forms) or RGB, and its style includes faint. The model tracks the primary and alternate screens and the bracketed-paste mode (DEC private mode 2004), resizes with the PTY, and never answers a terminal query itself. No rule reads a window title, so the model keeps none.
+
+Each PTY read is fed as steps: every ASCII control byte (0x00–0x1F and 0x7F) alone, and every maximal run of other bytes. Detection observes the snapshot after each step; a resize is not observed. `screen_seq` starts at 0, grows by the number of bytes of every step and by 1 for every resize, a resize to the current size included (vector `observe-granularity`).
+
+##### Terminal emulation
+
+The screen model is the snapshot-visible state below, changed only by the control functions this subsection lists; every other byte sequence, including every function the tables omit, leaves that state unchanged. The vectors cited in each row are in §9.2.
+
+| Snapshot-visible state | Contents |
+|---|---|
+| Cells | Each cell's contents (one base scalar plus appended zero-width scalars, or none), its wide-leading and continuation flags, its foreground and background colours (default, indexed 0–255 or RGB) and its faint attribute |
+| Rows | Each row's wrap flag |
+| Cursor | Row and column of each screen; the column equals `cols` while a wrap is pending |
+| Screen | Primary or alternate; each screen has its own cells, cursor, saved cursor, scroll region and origin mode |
+| Modes | Bracketed paste |
+
+Current attributes, one saved-attributes slot, the last printed scalar and the count of rows scrolled off the primary screen's top are shared by both screens and become visible only through later effects. The model keeps no scrollback rows.
+
+**Byte parsing.** Parser state persists across reads, so splitting input into reads never changes the result (`utf8-split-across-reads`). In the ground state a valid UTF-8 scalar below U+0020 other than ESC is a C0 control; U+0080–U+009F, U+007F and U+FFFD have no effect; every other scalar prints. Invalid UTF-8 consumes its maximal invalid subpart with no effect, and a valid scalar after it is never lost; a sequence cut by ESC is dropped before ESC is processed; a sequence cut at the end of a read waits for the next read, and when the next bytes do not complete it they are reparsed from their start (`utf8-invalid`, `utf8-partial-then-invalid`, `utf8-c1-del-fffd`). 8-bit C1 bytes never introduce a sequence (`utf8-raw-c1-not-introducer`). Inside an escape, control or string sequence:
+
+| State | C0 except CAN, SUB, ESC | CAN 0x18, SUB 0x1A | ESC |
+|---|---|---|---|
+| Escape | Executed; the state stays Escape, so the next byte is a final byte (`esc-c0-inside-escape`) | Abort to ground | Ignored |
+| Control sequence | Executed; the sequence continues | Abort to ground (`csi-c0-inside-and-can-abort`) | Restart the escape |
+| OSC string | Ignored, BEL terminates | Terminate | Terminate |
+| DCS, SOS, PM, APC string | Ignored | Terminate | Terminate |
+
+**Control-sequence parameters.** Digits accumulate decimal, saturating at 65535; `;` ends a parameter and `:` a sub-parameter; an empty parameter is 0, and 0 means the function's default. At most 32 values are kept and the final byte still dispatches; a function reading one value takes a parameter's first sub-parameter (`csi-params-saturate-and-overflow`, `csi-subparameter-first-value`). A private marker `<`, `=`, `>` or `?` is recognized only right after `CSI`; elsewhere it voids the sequence (`csi-late-private-ignored`).
+
+**C0 controls.**
+
+| Byte | Effect | Vector |
+|---|---|---|
+| BS 0x08 | Column − 1, saturating at 0; a pending wrap goes to `cols − 1` | `c0-bs`, `wrap-pending-then-bs-lf` |
+| HT 0x09 | Column ← next multiple of 8, clamped to `cols − 1` | `c0-ht` |
+| LF 0x0A, VT 0x0B, FF 0x0C | Row + 1; at the scroll-region bottom with the cursor inside the region, the region scrolls up one row; below the region the row clamps at `rows − 1`; the column is kept | `c0-lf-vt-ff`, `c0-lf-scrolls-at-bottom` |
+| CR 0x0D | Column ← 0 | `c0-cr`, `wrap-pending-then-cr` |
+| Every other C0 | No effect | `c0-ignored` |
+
+**Escape sequences.**
+
+| Sequence | Effect | Vector |
+|---|---|---|
+| `ESC 7` | Save the screen's cursor and origin mode, and the current attributes | `esc-decsc-decrc` |
+| `ESC 8` | Restore them; without a save: `(0, 0)`, origin mode off, default attributes | `esc-decsc-decrc`, `esc-decrc-without-save` |
+| `ESC M` | Row − 1; at the region top inside the region, or on row 0, the region scrolls down one row, also when row 0 is outside the region | `esc-ri`, `esc-ri-row0-outside-region` |
+| `ESC c` | A fresh screen of the same size: both screens blank, cursor `(0, 0)`, default attributes, bracketed paste off, primary screen, no last printed scalar | `esc-ris` |
+| Every other final byte and every sequence with an intermediate (`ESC D`, `ESC E`, `ESC ( 0`, `ESC # 8`) | No effect; no character-set designation | `esc-unhandled-and-charset` |
+
+**Control sequences.** `n` defaults to 1 unless stated; a sequence whose intermediate the row does not name has no effect.
+
+| Sequence | Effect | Vector |
+|---|---|---|
+| `CSI n A`, `CSI n B` | Row ∓ n, clamped to the scroll region when the cursor is inside it, else to the screen | `csi-cuu-cud-region` |
+| `CSI n C`, `CSI n D` | Column + n clamped to `cols − 1`; column − n saturating at 0 (from a pending wrap, `cols − n`) | `csi-cuf-cub` |
+| `CSI n E`, `CSI n F` | Column 0, then down or up n as `CSI n B` / `CSI n A` | `csi-cnl-cpl` |
+| `CSI n G`, ``CSI n ` ``, `CSI n d` | Column ← n − 1; row ← n − 1; clamped, ignoring origin mode and the region | `csi-cha-hpa-vpa` |
+| `CSI r ; c H`, `CSI r ; c f` | Row ← r − 1 (offset by the region top and clamped to the region under origin mode), column ← c − 1, both clamped | `csi-cup-clamps`, `dec-origin-mode` |
+| `CSI n J`, `CSI ? n J` (n defaults to 0) | 0: rows below cleared, then erase to the row end; 1: rows above cleared, then erase from the row start; 2: every row cleared, cursor kept; 3: the scrolled-off count ← 0 | `csi-ed0`, `csi-ed1`, `csi-ed2-keeps-cursor`, `csi-ed3-then-grow` |
+| `CSI n K`, `CSI ? n K` (n defaults to 0) | 0: erase from the cursor to the row end (nothing at a pending wrap); 1: erase from column 0 through the cursor; 2: clear the row | `csi-el` |
+| `CSI n X` | Erase `min(n, cols − col)` cells from the cursor | `csi-ech` |
+| `CSI n @`, `CSI n P` | Insert `min(n, cols − col)` blank cells at the cursor, discarding cells pushed off the row; delete that many, blank cells entering at the right; a wide pair cut by either is cleared, and the row's wrap flag is cleared | `csi-ich`, `csi-dch`, `wrap-cleared-by-ich-dch` |
+| `CSI n L`, `CSI n M` | Only with the cursor inside the region: insert or delete n rows at the cursor row within the region; the cursor is kept | `csi-il-dl`, `csi-il-outside-region-ignored` |
+| `CSI n S`, `CSI n T` | Scroll the region up or down n rows; rows scrolled off a region whose top is row 0 add to the scrolled-off count | `csi-su-sd` |
+| `CSI t ; b r` | Region ← rows `t − 1 … b − 1` when `t < min(b, rows)`, else the whole screen (t defaults to 1, b to `rows`); the cursor goes to `(region top, 0)` | `csi-decstbm` |
+| `CSI n b` | Print the last printed scalar n more times; the last printed scalar is the latest of width above 0; none: no effect | `csi-rep`, `csi-rep-without-last-scalar` |
+| `CSI … m` | Select graphic rendition (below) | — |
+| `CSI ? … h`, `CSI ? … l` | DEC private modes (below) | — |
+| Every other control sequence (`CSI s`, `CSI u`, `CSI 4 h`, `CSI 20 h`, `CSI > … m`, `CSI ! p`, `CSI … t`, `CSI n SP q`) | No effect | `csi-ignored` |
+
+**Select graphic rendition.** Parameters apply left to right, each colon group being one parameter:
+
+| Parameter | Effect | Vector |
+|---|---|---|
+| `0` or empty | Default attributes | `sgr-faint-bold-interplay` |
+| `1`, `2`, `22` | Bold on and faint off; faint on and bold off; both off | `sgr-faint-bold-interplay` |
+| `30`–`37`, `90`–`97`, `39` | Foreground indexed 0–7, indexed 8–15, default | `sgr-indexed-and-default` |
+| `40`–`47`, `100`–`107`, `49` | Background indexed 0–7, indexed 8–15, default | `sgr-indexed-and-default` |
+| `38;5;i`, `38;2;r;g;b`, `48;5;i`, `48;2;r;g;b` and their colon forms `38:5:i`, `38:2:r:g:b`, `48:5:i`, `48:2:r:g:b` | Indexed or RGB foreground or background | `sgr-extended-colours` |
+| Every other parameter | Skipped; processing continues | `sgr-unknown-skipped` |
+
+A colour component above 255, or a semicolon `38`/`48` with a selector other than `2` or `5` or with too few components, stops the remaining parameters of that sequence; earlier ones stay applied (`sgr-stops`). Attributes apply to scalars printed afterwards and to cells erased afterwards.
+
+**DEC private modes.** Each parameter of the list applies in order; one with sub-parameters, or an unlisted mode such as 1, 7, 25 or 1047, has no effect (`dec-ignored-modes`, `dec-multiple-parameters`).
+
+| Mode | Set | Reset | Vector |
+|---|---|---|---|
+| 6 | Origin mode on, cursor to the region's top-left | Origin mode off, cursor to `(0, 0)` | `dec-origin-mode` |
+| 47 | Switch to the alternate screen, keeping its contents and cursor | Switch to the primary screen | `dec-47-alternate` |
+| 1049 | Save the cursor and attributes as `ESC 7`, clear the alternate screen (cursor, saved cursor, region and origin mode reset), switch to it | Switch to the primary screen, then restore as `ESC 8` | `dec-1049-alternate`, `dec-1049-alternate-active` |
+| 2004 | Bracketed paste on | Bracketed paste off | `dec-2004-bracketed-paste`, `dec-2004-reset` |
+
+**Strings.** OSC (`ESC ]`) ends at BEL, ESC (so `ESC \`), CAN or SUB; DCS (`ESC P`), SOS (`ESC X`), PM (`ESC ^`) and APC (`ESC _`) end at ESC, CAN or SUB, and a raw 0x9C also ends DCS. No string changes the snapshot-visible state (`osc-bel-and-st`, `osc-raw-9c-is-data`, `dcs-pm-sos-apc`, `dcs-raw-9c-terminates`).
+
+**Scalar width.** A scalar's width is its Unicode 17.0.0 East_Asian_Width class outside an East Asian context: W and F are 2, ambiguous scalars are 1, Default_Ignorable, Grapheme_Extend, Hangul vowel and trailing jamo and prepended concatenation marks are 0, U+115F and U+17A4 are 2, U+17D8 is 2, and every other printable scalar is 1. Widths are per scalar: ZWJ sequences and emoji modifier sequences take one cell per scalar of width above 0 (`width-wide`, `width-ambiguous-is-one`, `width-emoji-zwj-not-clustered`).
+
+**Printing a scalar of width w > 0** at `(r, c)`:
+
+1. When `c + w > cols`, the cursor first moves to column 0 of the next row as an LF would. The row left behind gets its wrap flag set exactly when its last cell has contents or is a continuation, the cursor really moved to the row below and the screen has more than one row; otherwise the flag is cleared (`wrap-sets-flag`, `wrap-wide-at-last-column`, `wrap-one-row`).
+2. The cell takes the scalar and the current attributes, is wide-leading when `w = 2` and is not a continuation; the column advances by w, to `cols` when the scalar ends in the last column (`wrap-pending-then-cr`).
+3. Overwriting the continuation of a wide pair clears its leading cell; overwriting a wide-leading cell with a narrow scalar writes U+0020 with the current attributes into the next cell; a wide scalar makes the next cell a default continuation and, when that cell was wide-leading, clears the cell after it (`width-overwrite-continuation`, `width-overwrite-wide-with-narrow`, `width-overwrite-narrow-with-wide`).
+
+**Printing a scalar of width 0** appends it to the cell before the cursor (the wide pair's leading cell when that cell is a continuation, the last cell at a pending wrap), writing U+0020 into a cell without contents first; at column 0 it is dropped, and an append to a cell already holding 18 bytes or more of UTF-8 is dropped; the cursor stays. After U+FE0F the cell becomes wide-leading when its contents' string width exceeds 1; when the cell is in the last column, its contents move to column 0 of the next row (the row left behind not wrapped) and the cursor goes to column 2, otherwise the cursor advances by 1. Other zero-width scalars never change a cell's width (`width-combining`, `width-vs16-widens`, `width-vs16-at-last-column`, `width-vs15-keeps-width`).
+
+**Erasing.** An erase (`CSI J`, `CSI K`, `CSI X`) leaves cells without contents or flags in the current attributes, and the other half of a cut wide pair without contents in its own attributes (`csi-erase-takes-current-attributes`). Rows entering by scrolling, inserted or deleted rows and cells, rows and cells a resize adds, `ESC c` and the 1049 clear are default cells.
+
+**Wrap flags** are set only by printing step 1. A row's flag clears when the row is cleared, when an erase covers its last cell (`cols − 1`, or `cols − 2` when that cell is wide-leading), on `CSI @` and `CSI P`, on the region-bottom row of `CSI L` and `CSI T`, for rows entering by scroll and on any resize that changes the size; otherwise the flag moves with its row (`wrap-cleared-by-erase`, `wrap-kept-by-mid-row-erase`, `wrap-moves-with-scroll`). The last row's flag is never set.
+
+**Resize.** The model is at least two columns wide (`resize-floor-two-columns`), and a resize to the current size changes nothing (`resize-same-size`). Otherwise, on each screen, the region resets to the whole screen, then:
+
+1. Fewer rows: `k = max(0, removed − (old_rows − 1 − cursor_row))` rows scroll off the top (adding to the scrolled-off count), rows beyond the new height are dropped from the bottom, and the cursor and saved rows move up by k (`resize-shrink-rows`, `resize-shrink-rows-cursor-top`).
+2. More rows: the primary screen inserts `p = min(scrolled-off count, added)` blank rows at the top, moves the cursor and saved rows down by p and lowers the count by p; the remaining rows, and every added row of the alternate screen, join at the bottom (`resize-grow-rows-pulls-scrollback`, `resize-grow-alternate`, `csi-ed3-then-grow`).
+3. The last row's wrap flag clears; a row whose width changes is truncated (its new last cell cleared when wide-leading) or extended with default cells, and its wrap flag clears (`resize-cols`, `resize-wider-clears-wrap`).
+4. The cursor and saved columns clamp to `cols − 1`, ending a pending wrap.
+
+##### Line text
+
+Detection reads a snapshot as rows and logical lines:
+
+- A row's text is its cells, left to right, up to the last cell that has contents or is a continuation: a continuation contributes nothing, a cell with contents contributes its contents (a written U+0020 included), and a cell without contents before that last cell contributes one U+0020. An erased cell has no contents even when it carries attributes.
+- A logical line is a row joined with the following rows while each row's wrap flag is set; the last row, and a row clipped by § Diff sidebar clipping, ends its logical line.
+- Region text is the region's logical lines joined with `\n`.
 
 ##### Terminal reply classification
 
@@ -3223,7 +3456,7 @@ Human input whose bytes exactly equal an allowlisted reply and arrive within the
 
 #### Classification and episode identity
 
-Each detector consumes a reconstructed screen, title, cursor/input-region evidence, output sequence and backend, and returns a typed observation with its rule identifier, matched region, extracted visible operation/choices, a normalized semantic fingerprint and a confidence/evidence designation. Rules compile at startup, and an invalid rule definition fails. Profiles are bundled locally in CAFleet, never loaded from remote rules or herdr manifests.
+Each detector consumes a reconstructed screen, cursor and screen-mode evidence, output sequence and backend, and returns a typed observation with its rule identifier, matched region, extracted visible operation/choices, a semantic fingerprint and an evidence designation (§ Detection algorithm). Rules compile at startup, and an invalid rule definition fails. Profiles are bundled locally in CAFleet, never loaded from remote rules or herdr manifests.
 
 | Classification | Evidence needed | Meaning |
 |---|---|---|
@@ -3239,7 +3472,7 @@ A title such as `Action Required`, a quoted approval transcript, a transcript vi
 
 An episode is a CAFleet observation identity, `(run_id, episode_seq)`, not a native request ID. Allocate `episode_seq` monotonically within a run when a stable live interaction first appears. A candidate is *stable* after two compatible observations at least 100 ms apart, rechecked after 100 ms even if no bytes arrive; an episode opens only for a stable candidate. Gate programmatic input immediately on the first candidate, before this notification debounce.
 
-The fingerprint contains backend, interaction class, visible operation and stable choice labels. Exclude spinner/counter/cursor decoration. The visible operation includes its displayed row breaks, so a resize that rewraps the operation changes the fingerprint and replaces the episode. Redraws and resize matching the fingerprint keep the episode, its stored evidence and any issued request token without another opening notification. A different operation/choice/class candidate holds input immediately and replaces the active episode only once stable; the old episode stays open until then. An incompatible candidate restarts stability, while return to the original fingerprint cancels the pending replacement. After a verified native noninteraction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
+The fingerprint is the § Detection algorithm list of observation, operation and choice-label triples of the run's backend; spinner, counter and cursor decoration outside those captures never enters it. The visible operation includes its displayed row breaks, so a resize that rewraps the operation changes the fingerprint and replaces the episode. Redraws and resize matching the fingerprint keep the episode, its stored evidence and any issued request token without another opening notification. A different operation/choice/class candidate holds input immediately and replaces the active episode only once stable; the old episode stays open until then. An incompatible candidate restarts stability, while return to the original fingerprint cancels the pending replacement. After a verified native noninteraction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
 
 | Episode transition | Event and interpretation |
 |---|---|
@@ -3272,7 +3505,7 @@ The §8 DDL fixes the runtime tables' exact columns, types, enums, nullability, 
 
 | Record | Semantics beyond the DDL |
 |---|---|
-| `member_runs` | `owner_epoch` starts at 1. `runtime_path` is canonical, each start identity is a verified platform-specific process-start token, and `recovery_origin_status` preserves the original lifecycle status while recovering. |
+| `member_runs` | `owner_epoch` starts at 1. `runtime_path` is canonical, each start identity is a verified process-start token: on Linux `<boot_id>:<starttime>`, the trimmed `/proc/sys/kernel/random/boot_id` and field 22 of `/proc/<pid>/stat` (the 20th field after the last `)`); on macOS `<seconds>:<microseconds>`, the decimal `kp_proc.p_starttime` of the `kern.proc.pid` `kinfo_proc` record, and `recovery_origin_status` preserves the original lifecycle status while recovering. |
 | `member_interactions` | `evidence_json` and `evidence_digest` are the opening event's evidence. |
 | `member_runtime_events` | `payload_json` is the final event payload, and unique `(run_id, event_seq)` supports idempotent retries. |
 | `member_input_operations` | `ready` certifies a zero-byte attempt, and a ready row with deferred metadata is a runner-queued ordinary input; `stop_cause` is a value from § Stop cause. Settled rows are retained as replay-rejection records for the lifetime of the database file. |
@@ -3516,6 +3749,16 @@ Replies retain exactly `protocol_version` plus one of `result` or textual `error
 The original invocation captures one expiration and carries it through framing, transit, queues, SQL and every native stage. Convert using three samples taken in order: the process's internal monotonic clock, `CLOCK_MONOTONIC`, and the internal monotonic clock again, validating sample order and overflow-checked arithmetic. Sender expiration adds the remaining original deadline measured at the third sample to the `CLOCK_MONOTONIC` sample. Receiver deadline adds the remaining expiration measured at the `CLOCK_MONOTONIC` sample to the first sample. Scheduling delay can shorten this budget and grants no extension; use no wall clock. Clock failure, overflow or expiration fails before new reservation/native bytes while preserving prior committed or possibly transmitted state.
 
 The service also caps new-operation admission at five seconds from the first observed frame-header byte; delayed framing and queueing consume that cap. Client exchange, lock acquisition, supplied-connection SQL scopes and stage advancement retain their earlier original/inherited deadline. Validate the declared frame size (above) before allocation and the complete serialized size before sending.
+
+Lifecycle requests have exactly `protocol_version`, `kind`, `identity` and, for `prepare`, `remaining_ms` (a non-negative integer) or, for `start`, `pane_id` (a string); `health` and `shutdown` carry nothing more. Every control frame, lifecycle and input alike, refuses a repeated object key at any level with `malformed or duplicate control JSON fields`. A lifecycle `result` is:
+
+| Request | `result` keys |
+|---|---|
+| `prepare` | `identity` (the control identity with the runner's new `owner_epoch`), `runner` |
+| `start` | `identity`, `runner`, `child` |
+| `health` | `identity`, `runner`, `child` (null before the native child starts), `output_seq`, and `observation` (§6.3 Runtime presentation) only once the observer reports |
+
+`runner` and `child` are `{"pid": <pid>, "start_identity": <token>}` (§8 `member_runs` start identities).
 
 ##### Bounded input draining
 
@@ -3896,6 +4139,17 @@ A run whose backend has no bundled profile, and a capability its bundled profile
 
 With a live member runner and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while the Director composer is verified empty and no older Director message is held, another two seconds from commit to the start of a Director delivery attempt (§ Director delivery sweep); while delivery is held, the preview waits until the hold clears.
 
+#### Runtime failure texts
+
+Runner and runtime-client operations fail with the texts below, exit 1 when they reach a command; each surfaces as a command's cause, a runner diagnostic (§ Storage pressure and durability boundary) or an event's error, behind any prefix its owning section names. A validation failure of a stored value renders `invalid stored value for <field>: <description>` (§6.3 Error Messages).
+
+| Situation | Texts |
+|---|---|
+| A concurrent cafleet process changed a row, an identity, a placement or an ownership | `episode is closed or classification changed`, `deferred input state changed`, `input state changed`, `input CAS failed`, `settlement CAS failed`, `preview recipient changed`, `director preview recipient changed`, `stale ownership token`, `database identity changed`, `runtime artifact changed while opening`, `runtime database identity changed`, `runtime directory or owner lock identity changed; explicit recovery required`, `artifact ownership changed during allocation`, `descriptor identity changed before unlink`, `recovery ownership changed before CAS`, `stale runtime owner`, `creator ownership transfer lost CAS`, `descriptor runtime ownership changed`, `descriptor pathname changed`, `descriptor appeared after absence was pinned`, `descriptor content changed before unlink`, `descriptor remains after unlink`, `shutdown ownership changed`, `permission Director is inactive`, `permission fleet/Director changed`, `composer stage selection changed`, `permission stage selection changed`, `permission inspection durable episode changed`, `permission continuation binding changed`, `permission request token or current plan binding changed`, `selected permission plan changed`, `permission stage target changed`, `input or observation changed between answer stages`, `the permission episode changed between answer stages`, `the request changed other than to the next stage's focus`, `the request changed instead of opening its continuation`, `permission response current association changed`, `permission response token identity changed`, `manual accounting failure fenced input`, `input coordinator current run changed`, `input member placement changed`, `receipt current run identity changed`, `receipt cache identity changed`, `settled input disposition changed`, `input database identity changed`, `sweep preview state changed`, `input coordinator no longer owns a running run`, `input manual generation changed`, `input reservation changed before write`, `permission retained selection changed`, `permission stage rule or choice changed`, `zero-byte selection receipt changed`, `ordinary writer selection changed`, `paste cleanup receipt changed`, `input coordinator run identity changed`, `submission run identity changed`, `submission member placement changed`, `submission health ownership changed`, `receipt run identity changed`, `receipt member placement changed`, `receipt immutable input identity changed`, `receipt changed after retirement`, `permission owner epoch changed`, `permission response association changed`, `permission inspection association changed`, `input member is inactive`, `pending member became inactive`, `prepared publication lost run ownership`, `pending placement vanished or changed before start`, `published placement vanished`, `native exit identity changed`, `descendant ownership lost its recorded process generation`, `recovery descendant PID generation changed`, `owned process group lost its pinned generation`, `owned PID was replaced by another generation`, `process generation changed before termination`, `owned PID generation changed during cleanup`, `recorded runtime disappeared during recovery`, `runtime ownership or placement changed during recovery`, `recovery takeover lost CAS`, `launch creator process identity changed`, `prepared member became inactive`, `start placement changed`, `native spawn storage lost ownership`, `selected database was replaced; input fenced`, `input drain pointer binding changed`, `input drain binding changed` |
+| A lock, an input queue or a bound is busy or full | `unresolved input limit reached`, `launch descriptor exceeds private size limit`, `control frame exceeds size limit`, `native composer payload exceeds 65536 bytes`, `another programmatic input is pending`, `input receipt cache is at capacity`, `pane input remained busy before submission`, `pane input lock remained busy after the runner reported <value>; inspect the result with cafleet input show <input-id> --json`, `pane input lock remained busy after the runner reported <value>`, `receipt pane input remained busy`, `permission pane input lock is busy`, `too many control requests per tick`, `control reply buffer is full`, `runtime observation channel is full or unavailable` |
+| Process identity, spawn, termination or cleanup could not be confirmed | `native exit remains unconfirmed`, `absolute CAFleet executable required`, `CAFleet executable requires UTF-8 path`, `runner pane spawn failed: <cause>`, `owned runner termination remains unconfirmed`, `runner pane cleanup failed: <cause>`, `current process identity unavailable`, `missing process birth time`, `cannot establish process start identity: <cause>`, `kern.proc.pgrp kept growing during the read`, `descendant ownership cannot be anchored to the recorded child generation`, `verified descendants remain after the original cleanup deadline`, `native child spawn failed`, `native child start identity unavailable`, `owned descendants remain unconfirmed`, `native start identity unavailable; descendant cleanup remains unverified`, `native child reaping remains unconfirmed`, `PTY is closed`, `human input tail remains undelivered after native termination`, `runner loop unwound`, `creator disconnected before native start`, `native startup failed; owned compensation required: <cause>` |
+| The control endpoint, the event writer or the storage path failed | `new input requires an active running member`, `cannot identify runtime database: <io error>`, `cannot inspect runtime database: <io error>`, `member_runs.native_session_json of run <run-id> is invalid: <cause>`, `descriptor unlink failed: <cause>`, `control endpoint disconnected during write`, `control endpoint disconnected before reply`, `current inspection observation unavailable`, `current executable permission request unavailable`, `current permission token unavailable`, `current permission request unavailable`, `the next stage's gate did not hold before the response deadline`, `an unexpected continuation screen appeared between answer stages`, `a different continuation screen appeared`, `permission member placement unavailable`, `shutdown exceeded its original storage deadline`, `display truncated: <bytes> undelivered bytes`, `pending events=<count> unsaved observation gap=<count>`, `owned recovery cleanup remains incomplete`, `run ownership lock is held`, `cannot bind private runtime control socket: <cause>`, `creator control disconnected before start`, `event writer is fenced`, `event writer is stopped` |
+
 ## 7. Cross-cutting concerns
 
 ### 7.1 Configuration & environment
@@ -4154,4 +4408,1633 @@ The DDL above owns every runtime table column, type, enum, nullability constrain
 
 ## 9. Testing strategy
 
-A conforming implementation is verified at four levels. Command level: every §6.3 command's exit code, stdout/stderr text and JSON bytes, the multiplexer argv it issues, and the §8 rows it leaves, driven through the CLI with stand-in multiplexer and native executables. Function level: argv construction, multiplexer command choreography, terminal-reply and key parsing, ANSI stripping, catalog validation and screen classification of every catalogued native screen. Runtime level: the §6.9 runner fed scripted screens, commands and storage faults under a controlled clock, asserting events, rows, receipts and bytes written to the child. Operating-system level: real PTYs, process groups, signals, pane-lock exclusion and release on process death, and shutdown deadlines in real time.
+### 9.1 Conformance levels
+
+A conforming implementation is verified at four levels:
+
+| Level | Contract checked | Observable compared |
+|---|---|---|
+| Command | §6.3 commands, §6.4 output, §8 rows | Exit code, stdout and stderr bytes, JSON bytes, the multiplexer argv issued and the §8 rows left, driven through the CLI with stand-in multiplexer and native executables |
+| Function | §6.5 argv and reply parsing, §6.7 argv construction, §6.9 terminal emulation, reply and key parsing, ANSI stripping, catalog validation and detection | Return values of each contract function, the §9.2 terminal vectors and the §9.3 detection vectors |
+| Runtime | §6.9 runner, events, receipts and recovery | Events, rows, receipts and bytes written to the child, for scripted screens, commands and storage faults under a controlled clock |
+| Operating system | §6.5 locks and signal deferral, §6.9 PTY, process groups and shutdown | Real PTYs, process groups, signals, pane-lock exclusion and release on process death, and shutdown deadlines in real time |
+
+### 9.2 Terminal conformance vectors
+
+Each fenced block with the info string `vt-vector` is one JSON object, a normative test of the screen model (§6.9 Terminal emulation). A fresh model of `rows × cols` takes the steps in order; afterwards each `expect` key present must equal the model's state:
+
+| Key | Required | Value |
+|---|---|---|
+| `id` | yes | A string unique among the vectors |
+| `rows`, `cols` | yes | Positive integers: the initial terminal size |
+| `steps` | yes | A non-empty array, each element exactly one of `{"feed_hex": H}` (the bytes of the lowercase hex string `H`, delivered as one PTY read) or `{"resize": [ROWS, COLS]}` (rows first) |
+| `observations` | no | When present, the exact sequence of `screen_seq` values the observer sees across all steps (§6.9 Screen model facts); a resize step produces no observation |
+| `expect` | yes | The final state; each key below is asserted only when present |
+
+| `expect` key | Value |
+|---|---|
+| `lines` | One string per row, in the §6.9 Line text row rendering |
+| `wrapped` | The exact set of row indexes whose wrap flag is set, ascending |
+| `cursor` | `[row, col]`, zero-based; `col` equals the column count while a wrap is pending |
+| `alternate_screen`, `bracketed_paste` | Booleans |
+| `screen_seq` | An integer |
+| `cells` | Cell assertions, each with required `row` and `col`, plus any of `contents` (the base scalar and its zero-width scalars, `""` for a cell without contents), `wide` and `continuation` (booleans), `fg` and `bg` (`"default"`, `{"kind":"indexed","index":N}` or `{"kind":"rgb","r":R,"g":G,"b":B}`) and `faint` (a boolean) |
+
+```vt-vector
+{
+  "id": "c0-bs",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61626364656608580808080808080859"}],
+  "expect": {
+    "lines": ["YbcdeX", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-ht",
+  "rows": 2,
+  "cols": 20,
+  "steps": [{"feed_hex":"61096209630909097a"}],
+  "expect": {
+    "lines": ["a       b       c  z", ""],
+    "wrapped": [],
+    "cursor": [0, 20],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-lf-vt-ff",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"61620a63640b65660c67"}],
+  "expect": {
+    "lines": ["  cd", "", "ef", "  g"],
+    "wrapped": [],
+    "cursor": [3, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-lf-scrolls-at-bottom",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a63"}],
+  "expect": {
+    "lines": ["b", "c"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-cr",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d58"}],
+  "expect": {
+    "lines": ["Xbcd", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-ignored",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"61006207630e640f651c66"}],
+  "expect": {
+    "lines": ["abcdef", ""],
+    "wrapped": [],
+    "cursor": [0, 6],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-decsc-decrc",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b323b33481b5b33316d1b371b5b306d1b5b313b3148781b3879"}],
+  "expect": {
+    "lines": ["x", "  y", ""],
+    "wrapped": [],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 27,
+    "cells": [
+      {"row":1,"col":2,"contents":"y","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-decrc-without-save",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b333b34481b387a"}],
+  "expect": {
+    "lines": ["z", "", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-ri",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a631b5b313b31481b4d78"}],
+  "expect": {
+    "lines": ["x", "a", "b"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-ri-row0-outside-region",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b33721b5b313b31481b4d78"}],
+  "expect": {
+    "lines": ["x", "", "b", "d"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 25
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-ris",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f32303034681b5b3f313034396861621b5b33316d1b637a"}],
+  "expect": {
+    "lines": ["z", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 26,
+    "cells": [
+      {"row":0,"col":0,"contents":"z","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-unhandled-and-charset",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b44621b45631b2830711b233872"}],
+  "expect": {
+    "lines": ["abcqr", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-c0-inside-escape",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"611b0a7862"}],
+  "expect": {
+    "lines": ["a", " b", ""],
+    "wrapped": [],
+    "cursor": [1, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cuu-cud-region",
+  "rows": 5,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b323b34721b5b333b31481b5b3941611b5b3942621b5b313b31481b5b394263"}],
+  "expect": {
+    "lines": ["", "a", "", " b", "c"],
+    "wrapped": [],
+    "cursor": [4, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 33
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cuf-cub",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b43781b5b313b31481b5b3343791b5b39447a"}],
+  "expect": {
+    "lines": ["zbcyex", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 26
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cnl-cpl",
+  "rows": 4,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162631b5b3245641b5b4665"}],
+  "expect": {
+    "lines": ["abc", "e", "d", ""],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 12
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cha-hpa-vpa",
+  "rows": 4,
+  "cols": 8,
+  "steps": [{"feed_hex":"1b5b3547611b5b3260621b5b3364631b5b39394764"}],
+  "expect": {
+    "lines": [" b  a", "", "  c    d", ""],
+    "wrapped": [],
+    "cursor": [2, 8],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 21
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cup-clamps",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b393b3948611b5b303b3048621b5b323b4863"}],
+  "expect": {
+    "lines": ["b", "c", "   a"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 20
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed0",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d0a656667680d0a696a6b6c1b5b323b32481b5b4a"}],
+  "expect": {
+    "lines": ["abcd", "e", ""],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 25
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed1",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d0a656667680d0a696a6b6c1b5b323b32481b5b314a"}],
+  "expect": {
+    "lines": ["", "  gh", "ijkl"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 26
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed2-keeps-cursor",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d0a656667681b5b324a"}],
+  "expect": {
+    "lines": ["", "", ""],
+    "wrapped": [],
+    "cursor": [1, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 14
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed3-then-grow",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b334a"}, {"resize":[4,4]}],
+  "expect": {
+    "lines": ["b", "c", "d", ""],
+    "wrapped": [],
+    "cursor": [2, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-el",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465660d0a6768696a6b6c0d0a6d6e6f7071721b5b313b33481b5b4b1b5b323b33481b5b314b1b5b333b33481b5b324b"}],
+  "expect": {
+    "lines": ["ab", "   jkl", ""],
+    "wrapped": [],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 51
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ech",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b3358"}],
+  "expect": {
+    "lines": ["a   ef", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-erase-takes-current-attributes",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263641b5b313b32481b5b34343b326d1b5b4b"}],
+  "expect": {
+    "lines": ["a", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 20,
+    "cells": [
+      {"row":0,"col":1,"contents":"","wide":false,"continuation":false,"fg":"default","bg":{"kind":"indexed","index":4},"faint":true},
+      {"row":0,"col":3,"contents":"","wide":false,"continuation":false,"fg":"default","bg":{"kind":"indexed","index":4},"faint":true}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ich",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b3240"}],
+  "expect": {
+    "lines": ["a  bcd", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-dch",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b3250"}],
+  "expect": {
+    "lines": ["adef", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-il-dl",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b31481b5b4c1b5b343b31481b5b4d"}],
+  "expect": {
+    "lines": ["a", "", "b", ""],
+    "wrapped": [],
+    "cursor": [3, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 28
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-il-outside-region-ignored",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b33721b5b313b31481b5b4c"}],
+  "expect": {
+    "lines": ["a", "b", "c", "d"],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 25
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-su-sd",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b33721b5b531b5b313b31481b5b3254"}],
+  "expect": {
+    "lines": ["a", "", "", "d"],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 29
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-decstbm",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"611b5b323b3372621b5b333b3272631b5b303b39397264"}],
+  "expect": {
+    "lines": ["d", "b", "", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 23
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-rep",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"61621b5b336263cc811b5b3262"}],
+  "expect": {
+    "lines": ["abbbbćcc", ""],
+    "wrapped": [],
+    "cursor": [0, 8],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 13,
+    "cells": [
+      {"row":0,"col":5,"contents":"ć","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-rep-without-last-scalar",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b336278"}],
+  "expect": {
+    "lines": ["x", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ignored",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"61621b5b731b5b313b31481b5b751b5b3468631b5b323068641b5b3e316d651b5b217066"}],
+  "expect": {
+    "lines": ["cdef", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 36
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-params-saturate-and-overflow",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b39393939393b393939393948611b5b313b323b333b343b353b363b373b383b393b31303b31313b31323b31333b31343b31353b31363b31373b31383b31393b32303b32313b32323b32333b32343b32353b32363b32373b32383b32393b33303b33313b33323b33333b33343b3335481b5b313b314862"}],
+  "expect": {
+    "lines": ["b", "", "   a"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 120
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-late-private-ignored",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"611b5b313f324862"}],
+  "expect": {
+    "lines": ["ab", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 8
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-c0-inside-and-can-abort",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"611b5b320a48621b5b313b184863"}],
+  "expect": {
+    "lines": ["a", "bHc", ""],
+    "wrapped": [],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 14
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-subparameter-first-value",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b333a354861"}],
+  "expect": {
+    "lines": ["", "", "a", ""],
+    "wrapped": [],
+    "cursor": [2, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-indexed-and-default",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"1b5b33313b34326d611b5b39343b3130336d621b5b33396d631b5b34396d641b5b306d65"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 36,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":{"kind":"indexed","index":2},"faint":false},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":{"kind":"indexed","index":12},"bg":{"kind":"indexed","index":11},"faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":"default","bg":{"kind":"indexed","index":11},"faint":false},
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":4,"contents":"e","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-faint-bold-interplay",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b326d611b5b316d621b5b326d631b5b32326d641b5b326d1b5b6d65"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 29,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":"default","bg":"default","faint":true},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":"default","bg":"default","faint":true},
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":4,"contents":"e","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-extended-colours",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b33383b353b3230306d611b5b34383b323b313b323b336d621b5b303b33383a353a396d631b5b34383a323a343a353a366d64"}],
+  "expect": {
+    "lines": ["abcd", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 52,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":{"kind":"indexed","index":200},"bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":{"kind":"indexed","index":200},"bg":{"kind":"rgb","r":1,"g":2,"b":3},"faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":{"kind":"indexed","index":9},"bg":"default","faint":false},
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":{"kind":"indexed","index":9},"bg":{"kind":"rgb","r":4,"g":5,"b":6},"faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-unknown-skipped",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b353b33313b343a333b393b32316d7a"}],
+  "expect": {
+    "lines": ["z", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17,
+    "cells": [
+      {"row":0,"col":0,"contents":"z","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-stops",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b33313b33383b353b3330303b34326d611b5b306d1b5b33323b33383b373b34336d621b5b306d1b5b33333b33383b323b313b326d63"}],
+  "expect": {
+    "lines": ["abc", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 55,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":{"kind":"indexed","index":2},"bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":{"kind":"indexed","index":3},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-origin-mode",
+  "rows": 5,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b323b34721b5b3f36681b5b313b3148611b5b393b3148621b5b3f366c63"}],
+  "expect": {
+    "lines": ["c", "a", "", "b", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 31
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-47-alternate",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61621b5b3f34376863641b5b3f34376c651b5b3f34376866"}],
+  "expect": {
+    "lines": ["cdf", "", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": true,
+    "bracketed_paste": false,
+    "screen_seq": 24
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-1049-alternate",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61621b5b33316d1b5b3f313034396863641b5b306d1b5b3f313034396c78"}],
+  "expect": {
+    "lines": ["abx", "", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 30,
+    "cells": [
+      {"row":0,"col":2,"contents":"x","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-1049-alternate-active",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61621b5b3f31303439686364"}],
+  "expect": {
+    "lines": ["cd", "", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": true,
+    "bracketed_paste": false,
+    "screen_seq": 12
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-2004-bracketed-paste",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f323030346861"}],
+  "expect": {
+    "lines": ["a", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": true,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-2004-reset",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f32303034681b5b3f323030346c61"}],
+  "expect": {
+    "lines": ["a", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-ignored-modes",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f376c6162636465661b5b3f3130343768671b5b3f32356c1b5b3f31681b5b3f323030343a3168"}],
+  "expect": {
+    "lines": ["abcd", "efg"],
+    "wrapped": [0],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 41
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-multiple-parameters",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f323030343b31303439687a"}],
+  "expect": {
+    "lines": ["z", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": true,
+    "bracketed_paste": true,
+    "screen_seq": 14
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "osc-bel-and-st",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b5d303b7469746c6507621b5d323b740a781b5c63"}],
+  "expect": {
+    "lines": ["abc", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 22
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "osc-raw-9c-is-data",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b5d303b749c780762"}],
+  "expect": {
+    "lines": ["ab", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dcs-pm-sos-apc",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b50710a781b5c621b5e7007781b5c631b58731b5c641b5f7a07711b5c65"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 31
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dcs-raw-9c-terminates",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b5071789c62"}],
+  "expect": {
+    "lines": ["ab", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-invalid",
+  "rows": 2,
+  "cols": 10,
+  "steps": [{"feed_hex":"61ff62e4b863c0af64eda08065"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 13
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-split-across-reads",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61e4"}, {"feed_hex":"b8ad"}, {"feed_hex":"62"}],
+  "expect": {
+    "lines": ["a中b", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5,
+    "cells": [
+      {"row":0,"col":1,"contents":"中","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-partial-then-invalid",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61e4"}, {"feed_hex":"7862"}],
+  "expect": {
+    "lines": ["axb", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 4
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-c1-del-fffd",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61c285627f63efbfbd64"}],
+  "expect": {
+    "lines": ["abcd", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-raw-c1-not-introducer",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"619b33316d629d303b740763"}],
+  "expect": {
+    "lines": ["a31mb0;t", "c"],
+    "wrapped": [0],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 12,
+    "cells": [
+      {"row":0,"col":1,"contents":"3","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-wide",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61e4b8ad62"}],
+  "expect": {
+    "lines": ["a中b", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5,
+    "cells": [
+      {"row":0,"col":1,"contents":"中","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":3,"contents":"b","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-ambiguous-is-one",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"ceb1e291a062"}],
+  "expect": {
+    "lines": ["α①b", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-emoji-zwj-not-clustered",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"f09f91a8e2808df09f91a978"}],
+  "expect": {
+    "lines": ["👨‍👩x", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 12,
+    "cells": [
+      {"row":0,"col":0,"contents":"👨‍","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"👩","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-combining",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"65cc81e4b8adcc810d0acc81611b5b333b3348cc81"}],
+  "expect": {
+    "lines": ["é中́", "a", "  ́"],
+    "wrapped": [],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 21,
+    "cells": [
+      {"row":0,"col":0,"contents":"é","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"中́","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":2,"col":2,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-vs16-widens",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e29da4efb88f78"}],
+  "expect": {
+    "lines": ["❤️x", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7,
+    "cells": [
+      {"row":0,"col":0,"contents":"❤️","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"x","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-vs16-at-last-column",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263e29da4efb88f78"}],
+  "expect": {
+    "lines": ["abc", "❤️x", ""],
+    "wrapped": [],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10,
+    "cells": [
+      {"row":1,"col":0,"contents":"❤️","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":1,"col":1,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-vs15-keeps-width",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e29da4efb88e78"}],
+  "expect": {
+    "lines": ["❤︎x", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7,
+    "cells": [
+      {"row":0,"col":0,"contents":"❤︎","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-overwrite-continuation",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e4b8ad621b5b313b324878"}],
+  "expect": {
+    "lines": [" xb", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11,
+    "cells": [
+      {"row":0,"col":0,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"x","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-overwrite-wide-with-narrow",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e4b8ad621b5b313b314878"}],
+  "expect": {
+    "lines": ["x b", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11,
+    "cells": [
+      {"row":0,"col":0,"contents":"x","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":" ","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-overwrite-narrow-with-wide",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162e4b8ad1b5b313b3248e69687"}],
+  "expect": {
+    "lines": ["a文", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 14,
+    "cells": [
+      {"row":0,"col":1,"contents":"文","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":3,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":4,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-pending-then-cr",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"61626364"}, {"feed_hex":"0d"}, {"resize":[2,6]}],
+  "observations": [4, 5],
+  "expect": {
+    "lines": ["abcd", ""],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6,
+    "cells": [
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-sets-flag",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263646566"}],
+  "expect": {
+    "lines": ["abcd", "ef", ""],
+    "wrapped": [0],
+    "cursor": [1, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-pending-then-bs-lf",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636408581b5b313b3148616263640a79"}],
+  "expect": {
+    "lines": ["abcd", "", "y"],
+    "wrapped": [],
+    "cursor": [2, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 18
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-wide-at-last-column",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263e4b8ad"}, {"feed_hex":"0d0a61626364e4b8ad"}],
+  "expect": {
+    "lines": ["中", "abcd", "中"],
+    "wrapped": [1],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-cleared-by-erase",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465661b5b313b34481b5b4b"}],
+  "expect": {
+    "lines": ["abc", "ef", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-kept-by-mid-row-erase",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b4b"}],
+  "expect": {
+    "lines": ["a", "ef", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-cleared-by-ich-dch",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61626364656667681b5b313b31481b5b30401b5b323b31481b5b3050"}],
+  "expect": {
+    "lines": [" abc", "fgh", ""],
+    "wrapped": [],
+    "cursor": [1, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 28
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-moves-with-scroll",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465660d0a67"}],
+  "expect": {
+    "lines": ["ef", "g"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-one-row",
+  "rows": 1,
+  "cols": 3,
+  "steps": [{"feed_hex":"61626364"}],
+  "expect": {
+    "lines": ["d"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 4
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-floor-two-columns",
+  "rows": 2,
+  "cols": 1,
+  "steps": [{"feed_hex":"e4b8adcc8161"}],
+  "expect": {
+    "lines": ["中́", "a"],
+    "wrapped": [0],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6,
+    "cells": [
+      {"row":0,"col":0,"contents":"中́","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-same-size",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263646566"}, {"resize":[2,4]}],
+  "expect": {
+    "lines": ["abcd", "ef"],
+    "wrapped": [0],
+    "cursor": [1, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-shrink-rows",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a64"}, {"resize":[2,4]}],
+  "expect": {
+    "lines": ["c", "d"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-shrink-rows-cursor-top",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b313b3148"}, {"resize":[2,4]}],
+  "expect": {
+    "lines": ["a", "b"],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-grow-rows-pulls-scrollback",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a64"}, {"resize":[4,4]}],
+  "expect": {
+    "lines": ["", "", "c", "d"],
+    "wrapped": [],
+    "cursor": [3, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-grow-alternate",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f3130343968610d0a620d0a63"}, {"resize":[4,4]}],
+  "expect": {
+    "lines": ["b", "c", "", ""],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": true,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-cols",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61626364650d0a1b5b333b31486162e4b8ad"}, {"resize":[3,3]}],
+  "expect": {
+    "lines": ["abc", "e", "ab"],
+    "wrapped": [],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 19
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-wider-clears-wrap",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465666768"}, {"resize":[3,6]}],
+  "expect": {
+    "lines": ["abcd", "efgh", ""],
+    "wrapped": [],
+    "cursor": [1, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "observe-granularity",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"61620d0a63641b5b313b3148e4b8ad"}, {"resize":[3,8]}, {"feed_hex":"78"}],
+  "observations": [2, 3, 4, 6, 7, 15, 17],
+  "expect": {
+    "lines": ["中x", "cd", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17
+  }
+}
+```
+
+### 9.3 Detection conformance
+
+The bundled screens' `expected_observation` values are the detection vectors (§6.9 Fixture replay and expected observation): replaying each screen and running every entry point with its backend's profile must yield exactly the recorded values.
