@@ -10,7 +10,7 @@ config_roots = [
 "core:node" = "26.13.1"
 "core:rust" = { version = "1.100.0", components = ["clippy", "rustfmt", "llvm-tools-preview"] }
 "core:zig" = "0.15.2"
-"cargo:cargo-llvm-cov" = "0.9.1"
+"cargo:cargo-llvm-cov" = "0.9.2"
 
 [tasks.skill-install]
 run = [
