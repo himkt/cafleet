@@ -1,7 +1,7 @@
 # Make SPEC.md sufficient for an independent reimplementation
 
 **Status**: Approved
-**Progress**: 11/47 tasks complete
+**Progress**: 17/47 tasks complete
 **Last Updated**: 2026-11-27
 
 ## Overview
@@ -101,7 +101,7 @@ Row C9 rejects `:memory:` instead of documenting it. An in-memory database is pr
 
 | ID | Finding (audit 2 #) | Bucket | Resolution | Owning section |
 |---|---|---|---|---|
-| M1 | Child signal mask inside a deferral span (#1) | Document | The Linux experiment (`.experiments/sigmask.md`) showed in-span multiplexer clients inherit the blocked `SIGINT`, `SIGTERM` and `SIGHUP`, so the SPEC sentence stays and gains the per-thread scope. The Step 3 child-mask test pins it on both spawn paths; a failure on `macos-15` alone makes macOS the A6 case | §6.5 Termination during pane input |
+| M1 | Child signal mask inside a deferral span (#1) | Document | The Linux experiment (`.experiments/sigmask.md`) showed in-span multiplexer clients inherit the blocked `SIGINT`, `SIGTERM` and `SIGHUP`, so the SPEC sentence stays, gains the per-thread scope and states the guarantee as the blocked set the client process starts with (a shell the client runs may change its own mask). The Step 3 child-mask test pins it on both spawn paths; a failure on `macos-15` alone makes macOS the A6 case | §6.5 Termination during pane input |
 | M2 | Per-thread vs per-process deferral (#2) | Loosen | SPEC states the effect: within a span, no `SIGINT`, `SIGTERM` or `SIGHUP` delivered to the process takes its default action until the outermost span ends. The masking mechanism is implementation-defined | §6.5 Termination during pane input |
 | M3 | Lock kind, release/reacquire, file mode (#3) | Document | The pane-input lock is a whole-file advisory lock with BSD `flock(2)` semantics: held per open file description and conflicting with other `flock` holders of the same file; whether it interacts with `fcntl` record locks is platform-defined. The holder keeps one descriptor across release and reacquire, and after acquiring it verifies that the lock path still names the same device and inode, reopening otherwise. The file is created with mode `0600` minus the umask | §6.5 Pane input lock |
 | M4 | Working-directory source (#4) | Document | The invoking working directory is the physical path `getcwd(3)` reports, not `$PWD`; this governs `--cwd`, relative database paths, `-c` and Hermes `--in` | §6.5 Pane spawn working directory |
@@ -209,7 +209,7 @@ The experiment uses `cafleet member press`, whose span covers both of its multip
 4. Run the command again and send `SIGINT` to its process group during the `send-keys` sleep.
 5. Record the blocked set the stand-in saw, whether the stand-in survived the `SIGINT`, and whether `cafleet` took the default action only after the span ended.
 
-macOS evidence comes from CI, which runs `mise //:test` on `macos-15`. Step 3 adds an in-file test in `src/runtime/system.rs`, the file that spawns every multiplexer client and where a Fix code change lands. Inside a `DeferTermination` span, the test drives both production spawn paths, `SystemRunner`'s `CommandRunner::run` (through `spawn_piped`) and `run_until_exit`. Each runs a `/bin/sh -c` child that prints its own blocked set: the `SigBlk` line of `/proc/self/status` on Linux, `ps -o blocked= -p $$` on macOS. The test asserts that the decoded set contains `SIGINT`, `SIGTERM` and `SIGHUP`, as one table-driven test over the two spawn paths. When the Linux result selects Document, that test pins the behavior on both platforms. When the result selects Fix code, the test checks the fix, and a failure on `macos-15` alone makes that platform the A6 case below. A local macOS host, when one is available, runs steps 1–5 as well.
+macOS evidence comes from CI, which runs `mise //:test` on `macos-15`. Step 3 adds an in-file test in `src/runtime/system.rs`, the file that spawns every multiplexer client and where a Fix code change lands. Inside a `DeferTermination` span, the test drives both production spawn paths, `SystemRunner`'s `CommandRunner::run` (through `spawn_piped`) and `run_until_exit`. Each re-executes the test binary as a probe child that prints the blocked set it inherited. A `/bin/sh -c` child cannot serve as the probe, because dash and bash reset an inherited mask at startup (`.experiments/sigmask.md` § Follow-up). The test asserts that the decoded set contains `SIGINT`, `SIGTERM` and `SIGHUP`, as one table-driven test over the two spawn paths. When the Linux result selects Document, that test pins the behavior on both platforms. When the result selects Fix code, the test checks the fix, and a failure on `macos-15` alone makes that platform the A6 case below. A local macOS host, when one is available, runs steps 1–5 as well.
 
 Decision rule: when the stand-in's set contains `SIGINT`, `SIGTERM` and `SIGHUP`, the SPEC sentence stays and row M1 becomes Document. When it does not, row M1 becomes Fix code: multiplexer clients started inside a span start with the span's blocked set (for example by re-blocking the set in the child before `exec`), with an in-file test that inspects a child's mask. This is the recommendation because the deferral exists to keep a host interrupt from killing a client mid-input. A6 (inherited and blocked signals are not part of the contract) is adopted only for a platform where that fix proves infeasible, and the reason is recorded in row M1.
 
@@ -449,12 +449,12 @@ Within each step the commits follow the project's documentation-first order: `SP
 - [x] SPEC: rows C14–C18, C20, C21 and § CLI parse rules <!-- completed: 2026-11-27T09:00 -->
 - [x] SPEC: every Area 1 `listed` and `reworded` sweep literal at its owner <!-- completed: 2026-11-27T09:00 -->
 - [x] `cli.md`: carried facts for Area 1 <!-- completed: 2026-11-27T09:00 -->
-- [ ] Code: unify blank text in `resolve_body`, with a table-driven test over White_Space and U+001C–U+001F bodies <!-- completed: -->
-- [ ] Code: validation-order tests per command family <!-- completed: -->
-- [ ] Code: open database paths as plain filenames and reject `:memory:` (row C9), with a table-driven test that `sqlite:///file:x?mode=memory` creates a file of that name and `sqlite:///:memory:` fails with `database URL has no file path`; move the in-file tests that open `sqlite:///:memory:` to an in-memory constructor in `src/db.rs` `test_support` <!-- completed: -->
-- [ ] Code: route a not-a-database file to the incompatible-database refusal (row C11), with a test <!-- completed: -->
-- [ ] Code: reword the pane-close cause (row C15), the Director pane-context error (row C16's Director pane-context part) and every other Area 1 `reworded` literal, with tests <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` and commit the step <!-- completed: -->
+- [x] Code: unify blank text in `resolve_body`, with a table-driven test over White_Space and U+001C–U+001F bodies <!-- completed: 2026-11-27T09:13 -->
+- [x] Code: validation-order tests per command family <!-- completed: 2026-11-27T09:13 -->
+- [x] Code: open database paths as plain filenames and reject `:memory:` (row C9), with a table-driven test that `sqlite:///file:x?mode=memory` creates a file of that name and `sqlite:///:memory:` fails with `database URL has no file path`; move the in-file tests that open `sqlite:///:memory:` to an in-memory constructor in `src/db.rs` `test_support` <!-- completed: 2026-11-27T09:13 -->
+- [x] Code: route a not-a-database file to the incompatible-database refusal (row C11), with a test <!-- completed: 2026-11-27T09:13 -->
+- [x] Code: reword the pane-close cause (row C15), the Director pane-context error (row C16's Director pane-context part) and every other Area 1 `reworded` literal, with tests <!-- completed: 2026-11-27T09:13 -->
+- [x] Run `mise //:test` and `mise //:lint` and commit the step <!-- completed: 2026-11-27T09:16 -->
 
 ### Step 3: Multiplexer, pane input and backends
 
