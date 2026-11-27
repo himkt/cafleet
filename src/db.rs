@@ -669,6 +669,23 @@ pub(crate) mod test_support {
     use rusqlite::types::Value;
     use tempfile::TempDir;
 
+    /// The database URL in-memory test connections report in path-bearing messages.
+    pub(crate) const IN_MEMORY_LABEL: &str = "sqlite:///in-memory-test.db";
+
+    /// A private in-memory database carrying the PRAGMAs every `connect` applies.
+    pub(crate) fn memory_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
+            .unwrap();
+        conn
+    }
+
+    pub(crate) fn initialized_memory_conn() -> Connection {
+        let mut conn = memory_conn();
+        crate::db::initialize(&mut conn, IN_MEMORY_LABEL).unwrap();
+        conn
+    }
+
     pub(crate) fn initialized_file_conn(dir: &TempDir) -> Connection {
         let url = format!("sqlite:///{}", dir.path().join("broker.db").display());
         let mut conn = crate::db::connect(&url).unwrap();
@@ -818,6 +835,9 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use crate::db::test_support::IN_MEMORY_LABEL;
+    use crate::db::test_support::initialized_memory_conn;
+    use crate::db::test_support::memory_conn;
     use crate::db::test_support::table_rows as rows;
     use crate::db::*;
 
@@ -907,13 +927,11 @@ mod tests {
     }
 
     fn require_current(conn: &Connection) -> Result<(), CafleetError> {
-        classify_selected_schema(conn, "sqlite:///:memory:").require_current()
+        classify_selected_schema(conn, IN_MEMORY_LABEL).require_current()
     }
 
     fn initialized_conn() -> Connection {
-        let mut conn = connect("sqlite:///:memory:").unwrap();
-        initialize(&mut conn, "sqlite:///:memory:").unwrap();
-        conn
+        initialized_memory_conn()
     }
 
     fn application_rows(conn: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
@@ -948,7 +966,7 @@ mod tests {
         let before = application_rows(&conn);
         let version_row = rows(&conn, "SELECT * FROM cafleet_database");
         for _ in 0..2 {
-            initialize(&mut conn, "sqlite:///:memory:").unwrap();
+            initialize(&mut conn, IN_MEMORY_LABEL).unwrap();
             assert_eq!(application_rows(&conn), before);
             assert_eq!(rows(&conn, "SELECT * FROM cafleet_database"), version_row);
             require_current(&conn).unwrap();
@@ -1133,8 +1151,8 @@ mod tests {
 
     #[test]
     fn connection_pragmas_and_foreign_keys_protect_real_writes() {
-        let mut conn = connect("sqlite:///:memory:").unwrap();
-        initialize(&mut conn, "sqlite:///:memory:").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::db::test_support::initialized_file_conn(&dir);
         assert!(conn.execute("INSERT INTO members(fleet_id, name, description, status, registered_at) VALUES(404, 'orphan', '', 'active', '')", []).is_err());
         conn.execute_batch("INSERT INTO fleets(fleet_id, name, created_at) VALUES(1, 'valid', 'created'); INSERT INTO members(member_id, fleet_id, name, description, status, registered_at) VALUES(1, 1, 'valid', '', 'active', 'registered');").unwrap();
         for (from, to) in [(404, 1), (1, 404)] {
@@ -1270,7 +1288,7 @@ mod tests {
     fn failed_initialization_rolls_back_identity_and_tables() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA max_page_count=1").unwrap();
-        assert!(initialize(&mut conn, "sqlite:///:memory:").is_err());
+        assert!(initialize(&mut conn, IN_MEMORY_LABEL).is_err());
         assert!(conn.is_autocommit());
         assert_eq!(
             conn.query_row("PRAGMA application_id", [], |row| row.get::<_, i64>(0))
@@ -1826,17 +1844,17 @@ mod tests {
     }
 
     #[test]
-    fn classification_preserves_missing_current_identity_and_sql_causes() {
-        let mut conn = crate::db::connect("sqlite:///:memory:").unwrap();
+    fn classification_distinguishes_missing_current_and_foreign_identity() {
+        let mut conn = memory_conn();
         assert_eq!(classify_schema(&conn).unwrap(), Classification::Missing);
-        crate::db::initialize(&mut conn, "sqlite:///:memory:").unwrap();
+        crate::db::initialize(&mut conn, IN_MEMORY_LABEL).unwrap();
         assert_eq!(classify_schema(&conn).unwrap(), Classification::Current);
         conn.execute_batch("PRAGMA application_id=1").unwrap();
         assert_eq!(
             classify_schema(&conn).unwrap(),
             Classification::Incompatible
         );
-        let identified = crate::db::connect("sqlite:///:memory:").unwrap();
+        let identified = memory_conn();
         identified
             .pragma_update(None, "application_id", APPLICATION_ID)
             .unwrap();
@@ -1845,16 +1863,192 @@ mod tests {
             Classification::Incompatible,
             "CAFleet identity without a cafleet_database table"
         );
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("not-sqlite.db");
-        std::fs::write(&path, b"not a sqlite database file\n".repeat(64)).unwrap();
-        let conn = Connection::open(&path).unwrap();
-        let failure = classify_schema(&conn).expect_err("non-SQLite bytes fail classification");
-        assert!(
-            failure.message().contains("file is not a database"),
-            "the SQL cause is preserved: {}",
-            failure.message()
-        );
+    }
+
+    #[test]
+    fn a_file_sqlite_reports_as_not_a_database_gets_the_incompatible_refusal_untouched() {
+        struct Case {
+            name: &'static str,
+            bytes: Vec<u8>,
+        }
+        let cases = [
+            Case {
+                name: "text spanning several pages",
+                bytes: b"not a sqlite database file\n".repeat(64),
+            },
+            Case {
+                name: "a short text file",
+                bytes: b"cafleet\n".to_vec(),
+            },
+            Case {
+                name: "a binary page without the SQLite header",
+                bytes: (0..4096u32).map(|i| (i * 37 % 251) as u8).collect(),
+            },
+        ];
+        for case in cases {
+            let name = case.name;
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("foreign.db");
+            std::fs::write(&path, &case.bytes).unwrap();
+            let url = format!("sqlite:///{}", path.display());
+            let expected = format!(
+                "database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
+                path.display()
+            );
+            let reader = connect_read_only(&url).unwrap();
+            let state = classify_selected_schema(&reader, &url);
+            assert!(
+                matches!(&state, SchemaState::Incompatible { path: shown } if shown == path.to_str().unwrap()),
+                "{name}: {state:?}"
+            );
+            assert_eq!(
+                state.require_current().unwrap_err().message(),
+                expected,
+                "{name}"
+            );
+            drop(reader);
+            let mut writer = connect(&url).unwrap();
+            let failure = initialize(&mut writer, &url).expect_err(name);
+            assert_eq!(failure.message(), expected, "{name}");
+            assert_eq!(failure.exit_code(), 1, "{name}");
+            drop(writer);
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                case.bytes,
+                "{name}: bytes unchanged"
+            );
+        }
+    }
+
+    mod plain_filename_opening {
+        use crate::db::*;
+
+        const URLS_ENV: &str = "CAFLEET_TEST_DATABASE_URLS";
+        const OUTCOME_PREFIX: &str = "cafleet-database-open: ";
+
+        #[test]
+        #[ignore = "owned subprocess entry: opens each URL from the parent's temporary working directory"]
+        fn open_from_working_directory_child() {
+            let urls: Vec<String> =
+                serde_json::from_str(&std::env::var(URLS_ENV).expect("explicit database URLs"))
+                    .unwrap();
+            for url in urls {
+                let created = connect(&url).and_then(|mut conn| initialize(&mut conn, &url));
+                let reopened = open_existing(&url, true).map(|conn| conn.is_some());
+                println!(
+                    "{OUTCOME_PREFIX}{}",
+                    serde_json::json!({
+                        "url": url,
+                        "created": created.as_ref().err().map(|error| error.message().into_owned()),
+                        "reopened": match &reopened {
+                            Ok(found) => serde_json::json!(found),
+                            Err(error) => serde_json::json!(error.message()),
+                        },
+                    })
+                );
+            }
+        }
+
+        enum Outcome {
+            CreatesFile(&'static str),
+            Refused(&'static str),
+        }
+
+        struct Case {
+            name: &'static str,
+            url: &'static str,
+            outcome: Outcome,
+        }
+
+        const CASES: [Case; 4] = [
+            Case {
+                name: "a URI-shaped path asking for an in-memory database",
+                url: "sqlite:///file:x?mode=memory",
+                outcome: Outcome::CreatesFile("file:x?mode=memory"),
+            },
+            Case {
+                name: "a URI-shaped path asking for read-only mode",
+                url: "sqlite:///file:ro.db?mode=ro",
+                outcome: Outcome::CreatesFile("file:ro.db?mode=ro"),
+            },
+            Case {
+                name: "a URI-shaped path naming the memory database",
+                url: "sqlite:///file::memory:",
+                outcome: Outcome::CreatesFile("file::memory:"),
+            },
+            Case {
+                name: "the special memory name",
+                url: "sqlite:///:memory:",
+                outcome: Outcome::Refused("database URL has no file path"),
+            },
+        ];
+
+        #[test]
+        fn database_paths_open_as_plain_filenames_and_the_memory_name_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let urls = CASES.iter().map(|case| case.url).collect::<Vec<_>>();
+            let output = crate::cli::test_support::run_test_child(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .current_dir(dir.path())
+                    .env(URLS_ENV, serde_json::json!(urls).to_string()),
+                test_path!(open_from_working_directory_child),
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert!(
+                output.status.success(),
+                "{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let outcomes = stdout
+                .lines()
+                .filter_map(|line| line.strip_prefix(OUTCOME_PREFIX))
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(outcomes.len(), CASES.len(), "{stdout}");
+            for (case, outcome) in CASES.iter().zip(&outcomes) {
+                let name = case.name;
+                assert_eq!(outcome["url"], case.url, "{name}");
+                match case.outcome {
+                    Outcome::CreatesFile(file_name) => {
+                        assert_eq!(outcome["created"], serde_json::Value::Null, "{name}");
+                        assert_eq!(outcome["reopened"], true, "{name}");
+                        let path = dir.path().join(file_name);
+                        let conn = rusqlite::Connection::open_with_flags(
+                            &path,
+                            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                        )
+                        .unwrap_or_else(|error| panic!("{name}: {}: {error}", path.display()));
+                        classify_selected_schema(&conn, &format!("sqlite:///{}", path.display()))
+                            .require_current()
+                            .unwrap_or_else(|error| panic!("{name}: {error}"));
+                    }
+                    Outcome::Refused(message) => {
+                        assert_eq!(outcome["created"], message, "{name}");
+                        assert_eq!(outcome["reopened"], message, "{name}");
+                    }
+                }
+            }
+            let mut entries = std::fs::read_dir(dir.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .filter(|entry| {
+                    !entry.ends_with("-wal")
+                        && !entry.ends_with("-shm")
+                        && !entry.ends_with("-journal")
+                })
+                .collect::<Vec<_>>();
+            entries.sort();
+            let mut expected = CASES
+                .iter()
+                .filter_map(|case| match case.outcome {
+                    Outcome::CreatesFile(file_name) => Some(file_name.to_owned()),
+                    Outcome::Refused(_) => None,
+                })
+                .collect::<Vec<_>>();
+            expected.sort();
+            assert_eq!(entries, expected, "exactly the plain filenames exist");
+        }
     }
     mod database_scope_tests {
         use crate::db::*;

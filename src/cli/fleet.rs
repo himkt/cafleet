@@ -1686,7 +1686,7 @@ mod tests {
             assert_eq!(
                 error.message(),
                 format!(
-                    "fleet {fleet} was not deleted: member {failed}: kill_pane failed for pane {failed_pane}: pane vanished. Verify with 'cafleet doctor'. Members already deleted: {ended}."
+                    "fleet {fleet} was not deleted: member {failed}: pane {failed_pane} could not be closed: pane vanished. Verify with 'cafleet doctor'. Members already deleted: {ended}."
                 )
             );
             assert_eq!(host.panes.len(), failing + 1);
@@ -2874,6 +2874,58 @@ mod tests {
             );
             assert_eq!(fleet_rows(&conn), (1, 1));
             assert_stored_placement(&conn, &fleet);
+        }
+
+        #[test]
+        fn a_director_pane_context_change_during_window_naming_renders_both_contexts_as_fields() {
+            struct Case {
+                name: &'static str,
+                first_reply: &'static str,
+                second_reply: &'static str,
+                expected: &'static str,
+            }
+            let cases = [
+                Case {
+                    name: "the pane moved to another window",
+                    first_reply: "main|@1|%5\n",
+                    second_reply: "main|@2|%5\n",
+                    expected: r#"Director pane context changed during window naming: expected session="main" window_id="@1" pane_id="%5", found session="main" window_id="@2" pane_id="%5""#,
+                },
+                Case {
+                    name: "the pane left the server",
+                    first_reply: "main|@1|%5\n",
+                    second_reply: "main|@1|%9\n",
+                    expected: r#"Director pane context changed during window naming: expected session="main" window_id="@1" pane_id="%5", found none"#,
+                },
+                Case {
+                    name: "a session name that needs quoted-text escapes",
+                    first_reply: "a\"b\\c|@1|%5\n",
+                    second_reply: "a\"b\\c|@3|%5\n",
+                    expected: r#"Director pane context changed during window naming: expected session="a\"b\\c" window_id="@1" pane_id="%5", found session="a\"b\\c" window_id="@3" pane_id="%5""#,
+                },
+            ];
+            for case in cases {
+                let (_dir, mut conn) = database();
+                let runner = FakeRunner::with_binary("tmux");
+                runner.respond(Ok(case.first_reply.into()));
+                runner.succeed(1);
+                runner.respond(Ok("@1|cafleet-1-0\n".into()));
+                runner.respond(Ok(case.second_reply.into()));
+                let error = refused(
+                    &mut conn,
+                    request(Some("%5"), Some(RERUN_SOCKET)),
+                    &[],
+                    &runner,
+                    &UnreadTable,
+                );
+                let message = error.message();
+                assert_eq!(
+                    message.lines().next().unwrap(),
+                    case.expected,
+                    "{}",
+                    case.name
+                );
+            }
         }
 
         #[test]

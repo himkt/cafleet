@@ -1025,7 +1025,7 @@ mod tests {
         .unwrap_err();
         assert!(error.message().contains("CODEX_HOME"));
         let conn = crate::db::connect(&settings.database_url).unwrap();
-        crate::db::classify_selected_schema(&conn, "sqlite:///:memory:")
+        crate::db::classify_selected_schema(&conn, &settings.database_url)
             .require_current()
             .unwrap();
         assert!(!home.path().join(".hermes").exists());
@@ -1046,6 +1046,65 @@ mod tests {
                 !home.path().join(".hermes").exists(),
                 "an unselected hermes gets no assets"
             );
+        }
+    }
+
+    #[test]
+    fn setup_refuses_a_database_url_it_cannot_prepare_as_a_cafleet_file() {
+        enum Url {
+            Literal(&'static str),
+            ForeignFile(&'static [u8]),
+        }
+        struct Case {
+            name: &'static str,
+            url: Url,
+        }
+        let cases = [
+            Case {
+                name: "an empty path",
+                url: Url::Literal("sqlite:///"),
+            },
+            Case {
+                name: "the special memory name",
+                url: Url::Literal("sqlite:///:memory:"),
+            },
+            Case {
+                name: "a file SQLite reports as not a database",
+                url: Url::ForeignFile(b"not a sqlite database file\n"),
+            },
+        ];
+        for case in cases {
+            let name = case.name;
+            let home = tempfile::tempdir().unwrap();
+            let (settings, expected, foreign) = match case.url {
+                Url::Literal(url) => (
+                    Settings::new(Some(url.into())).unwrap(),
+                    "database URL has no file path".to_owned(),
+                    None,
+                ),
+                Url::ForeignFile(bytes) => {
+                    let path = home.path().join("foreign.db");
+                    std::fs::write(&path, bytes).unwrap();
+                    (
+                        Settings::for_database(&path),
+                        format!(
+                            "database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
+                            path.display()
+                        ),
+                        Some((path, bytes)),
+                    )
+                }
+            };
+            let error = prepare_database(&settings).expect_err(name);
+            assert_eq!(error.message(), expected, "{name}");
+            assert_eq!(error.exit_code(), 1, "{name}");
+            if let Some((path, bytes)) = foreign {
+                assert_eq!(
+                    std::fs::read(path).unwrap(),
+                    bytes,
+                    "{name}: bytes unchanged"
+                );
+            }
         }
     }
 
