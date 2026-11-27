@@ -229,7 +229,7 @@ Backend preflights exit 1 before registration:
 
 | Condition | Error |
 |---|---|
-| `hermes config path` fails or times out under the member's `HERMES_HOME` | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
+| `hermes config path` fails or times out, run with `HERMES_HOME` set to the resolved Hermes base (`~/.hermes` when unset) | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
 | `hermes config path` prints no absolute file path | `Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
 | The pi extension `<pi base>/extensions/cafleet.ts` is unreadable | `Error: cannot read the CAFleet pi extension at <path>: <cause>; run 'cafleet setup --coding-agent pi' first` |
 
