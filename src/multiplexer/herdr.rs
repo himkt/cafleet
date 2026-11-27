@@ -383,7 +383,8 @@ impl Multiplexer for HerdrMultiplexer {
     fn press_submit(&self, pane: &str, submit: &[u8]) -> Result<(), MultiplexerError> {
         let keys = crate::multiplexer::PressKeys::from_bytes(submit).ok_or_else(|| {
             MultiplexerError::new(format!(
-                "herdr has no key mapping for the submit bytes {submit:02x?}"
+                "herdr has no key mapping for the submit bytes {}",
+                crate::digest::hex(submit)
             ))
         })?;
         let mut argv = self.core.argv(&["herdr", "pane", "send-keys", pane]);
