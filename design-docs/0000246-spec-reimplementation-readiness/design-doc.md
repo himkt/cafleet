@@ -1,7 +1,7 @@
 # Make SPEC.md sufficient for an independent reimplementation
 
 **Status**: Approved
-**Progress**: 4/47 tasks complete
+**Progress**: 11/47 tasks complete
 **Last Updated**: 2026-11-27
 
 ## Overview
@@ -442,13 +442,13 @@ Within each step the commits follow the project's documentation-first order: `SP
 
 ### Step 2: CLI, output and persistence
 
-- [ ] SPEC: § Conformance policy in the opening paragraph and §1 <!-- completed: -->
-- [ ] SPEC: rows C1–C7 and C19 (fleet, member delete, queued line, poll and roster layouts) <!-- completed: -->
-- [ ] SPEC: rows C8–C11 and C22 (database selection, setup path, schema guard) <!-- completed: -->
-- [ ] SPEC: § Blank text and validation order (rows C12, C13, M15), with the order confirmed from code and the §6.5 Slot selection pointer <!-- completed: -->
-- [ ] SPEC: rows C14–C18, C20, C21 and § CLI parse rules <!-- completed: -->
-- [ ] SPEC: every Area 1 `listed` and `reworded` sweep literal at its owner <!-- completed: -->
-- [ ] `cli.md`: carried facts for Area 1 <!-- completed: -->
+- [x] SPEC: § Conformance policy in the opening paragraph and §1 <!-- completed: 2026-11-27T09:00 -->
+- [x] SPEC: rows C1–C7 and C19 (fleet, member delete, queued line, poll and roster layouts) <!-- completed: 2026-11-27T09:00 -->
+- [x] SPEC: rows C8–C11 and C22 (database selection, setup path, schema guard) <!-- completed: 2026-11-27T09:00 -->
+- [x] SPEC: § Blank text and validation order (rows C12, C13, M15), with the order confirmed from code and the §6.5 Slot selection pointer <!-- completed: 2026-11-27T09:00 -->
+- [x] SPEC: rows C14–C18, C20, C21 and § CLI parse rules <!-- completed: 2026-11-27T09:00 -->
+- [x] SPEC: every Area 1 `listed` and `reworded` sweep literal at its owner <!-- completed: 2026-11-27T09:00 -->
+- [x] `cli.md`: carried facts for Area 1 <!-- completed: 2026-11-27T09:00 -->
 - [ ] Code: unify blank text in `resolve_body`, with a table-driven test over White_Space and U+001C–U+001F bodies <!-- completed: -->
 - [ ] Code: validation-order tests per command family <!-- completed: -->
 - [ ] Code: open database paths as plain filenames and reject `:memory:` (row C9), with a table-driven test that `sqlite:///file:x?mode=memory` creates a file of that name and `sqlite:///:memory:` fails with `database URL has no file path`; move the in-file tests that open `sqlite:///:memory:` to an in-memory constructor in `src/db.rs` `test_support` <!-- completed: -->
@@ -508,3 +508,4 @@ Within each step the commits follow the project's documentation-first order: `SP
 | 2026-11-27 | Reviewer round 1: multi-bucket rows and code pointers, `:memory:` rejection, `flock`-only lock contract, sweep source set and completeness check, seeded signal-mask experiment with CI macOS evidence, byte-exact fixture replay, per-entry-point `expected_observation`, `vt-vector` key tables with observations, blind-slice version and difference classes, PR 4 and row-to-PR assignment |
 | 2026-11-27 | Reviewer round 2: child-mask test moved to `src/runtime/system.rs` over both production spawn paths |
 | 2026-11-27 | User decision: one branch and one pull request in place of four; the steps become stages of that branch |
+| 2026-11-27 | Step 2 code-over-text findings: `--database-url` may appear once per command level (root, group, leaf) and the deepest level wins, more general than A3's before/after wording (row C8); `fleet delete` strips every trailing `.` from `CAUSE`, not one (row C15); `cafleet` and a command group without its subcommand print help to stderr with exit 2 instead of an `error: ` line (§ CLI parse rules); `HOME` derivation precedes `member press` key parsing, and `member create` checks `--model`, `--effort` and `--permission-mode` before its body source and validates placeholders after the layout lock and preflight (§ Blank text and validation order). Spec choice: the `database URL has no file path` refusal of rows C9 and C10 applies to every command, so `sqlite:///` with an empty path no longer reports `no cafleet database` outside `setup` |

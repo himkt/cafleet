@@ -1,12 +1,28 @@
 # CAFleet — Reimplementation Specification
 
-This is the self-contained interface and observable-behavior specification for the `cafleet` CLI, broker, independent coding-agent sessions and embedded assets. Exact authored errors, JSON fields/order and command layouts govern. Text that an operating-system or library error contributes after an authored prefix (written `<io error>`, `<error>` or `<cause>`) is non-normative: an implementation preserves the error's meaning, not its wording, quoting or numeric suffix. An errno name shown in a diagnostic (such as `ECONNREFUSED`) is normative; the description after it is not. Complete module contracts appear in §6 Module specifications.
+This is the self-contained interface and observable-behavior specification for the `cafleet` CLI, broker, independent coding-agent sessions and embedded assets. Every observable this document states is normative and byte-exact, except the implementation-defined surfaces that §1.1 Conformance lists. Text that an operating-system or library error contributes after an authored prefix (written `<io error>`, `<error>` or `<cause>`) is implementation-defined: an implementation preserves the error's meaning, not its wording, quoting or numeric suffix. An errno name shown in a diagnostic (such as `ECONNREFUSED`) is normative; the description after it is not. Complete module contracts appear in §6 Module specifications.
 
 ## 1. Overview & goals
 
 CAFleet multiplexes coding-agent sessions in tmux or herdr and coordinates them with durable point-to-point SQLite messages. The host owns task continuation and native execution results; the Director owns delegation, wake handling, evidence inspection, authorization and cleanup. The shipped product consists of the CLI, embedded skills/presets and documentation site.
 
 Reproduce the documented command/option/exit surface, configuration defaults, current schema, enum values, output shapes, lifecycle, consuming poll, notification, locking, termination deferral and native dispatch semantics. The current format identity defines compatibility; required data corruption surfaces at its read boundary.
+
+### 1.1 Conformance
+
+An implementation conforms when every normative observable equals this specification's statement byte for byte. Everything not listed as implementation-defined below is normative:
+
+| Surface | Status |
+|---|---|
+| Authored stdout and stderr text, JSON bytes and key order, text layouts, exit codes | Normative |
+| Multiplexer and native argv, bytes written to a child PTY, §8 rows and their values | Normative |
+| Process, lock, signal and deadline behavior stated as observable outcomes | Normative |
+| Operating-system and library cause text after an authored prefix (`<io error>`, `<error>`, `<cause>`) | Implementation-defined |
+| `--help` layout, except the strings this specification quotes (§6.3 Help text) | Implementation-defined |
+| A parse error's stderr after the first line's `error: ` prefix and the named argument (§6.3 CLI parse rules) | Implementation-defined |
+| A diagnostic for a violated internal invariant that no conforming environment reaches; the process exits non-zero | Implementation-defined |
+| The `__member-run` descriptor file exchanged between processes of one binary version (§6.9 Runner boundary and creation transaction) | Implementation-defined |
+| Internal scheduling not stated as a constant, such as an idle tick or a pipe-drain loop | Implementation-defined |
 
 ## 2. Architecture stance
 
@@ -42,7 +58,7 @@ The broker persists/queries typed data. It performs no pane I/O. Multiplexer uti
 
 ### 5.1 Timestamps
 
-Serialize timestamps as fixed-width UTC `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` text with six fractional digits. Compare canonical timestamps lexicographically for SQL ordering/maxima. Parse only for age/idle arithmetic; externally supplied parsing accepts missing fractional parts and UTC offset spellings. Durations/deadlines use monotonic time.
+Serialize timestamps as fixed-width UTC `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` text with six fractional digits. Compare canonical timestamps lexicographically for SQL ordering/maxima. Parse only for age/idle arithmetic. Stored-timestamp parsing accepts at least the canonical form and every RFC 3339 `date-time`, including a missing fractional part and any UTC offset spelling; whether it accepts any other text is implementation-defined. Durations/deadlines use monotonic time.
 
 ### 5.2 Core entities
 
@@ -136,19 +152,33 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 #### Database selection
 
-The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
+The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. The option may appear once on each level of the command path: after `cafleet`, after a command group such as `fleet`, and after the leaf subcommand. A repeat on one level is a parse error (exit 2); when several levels carry it, the deepest level's value wins, so `cafleet --database-url A fleet list --database-url B` selects `B`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
 
-The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; resolve a relative file path against the invoking working directory before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
+The default expands HOME once, before any command runs, `setup` and `doctor` included. An unset `HOME` fails with `HOME is not set; cannot derive the default database path` and a `HOME` that is not valid UTF-8 with `HOME is not valid UTF-8; cannot derive the default database path`, both exit 1; an explicit `--database-url` reads no `HOME` for selection.
+
+An explicit URL has the form `sqlite:///<path>`: the path is the text after the literal prefix `sqlite:///`, so `sqlite:///etc/x` names the relative path `etc/x` and an absolute path needs four slashes (`sqlite:////var/x.db`). Any other prefix fails with `database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'`, exit 1. The path is a plain filesystem filename: it is never interpreted as an SQLite `file:` URI, so `sqlite:///file:x?mode=memory` names the relative file `file:x?mode=memory`. An empty path (`sqlite:///`) and the path `:memory:` fail with `database URL has no file path`, exit 1. Resolve a relative file path against the invoking working directory (§6.5 Pane spawn working directory) before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
 
 CAFleet reads no `CAFLEET_*` environment variable. Member creation renders the selected database into the spawn prompt (§ Spawn-prompt substitution), and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A member that omits the option on a custom-database fleet reaches the default database: when that file is absent the command fails with `no cafleet database; run 'cafleet setup'`, and when it exists its literal IDs may match another fleet. This is the same cooperative limit as the Director-only command guard (§ Director-only command guard).
 
 #### Global Options
 
-`cafleet --version` prints `cafleet <version>` and exits 0 before dispatch; `--database-url` follows § Database selection.
+`cafleet --version` and `cafleet -V` print `cafleet <version>` and exit 0 before dispatch; `--database-url` follows § Database selection.
+
+##### CLI parse rules
+
+Argument parsing completes before any other step (§ Validation order):
+
+- `-h` and `--help` print help on any command; `cafleet help [COMMAND…]` prints the same help as `cafleet COMMAND… --help`. Help, `--version` and `-V` write to stdout, exit 0 and open no database.
+- `--opt=value` and `--opt value` are equivalent.
+- An integer ID accepts an optional leading `+` and leading zeros (`+5` names 5 and `007` names 7); a value outside the 64-bit signed range is an invalid-value parse error.
+- An option or flag given twice on one command level (for example `--json --json`) is a parse error; `--database-url` follows § Database selection.
+- `cafleet` with no arguments, and a command group without its subcommand (for example `cafleet fleet`), writes that command's help to stderr and exits 2.
+- `__member-run` is a hidden subcommand absent from help; it runs only as the runner a `member create` launches (§6.9 Runner boundary and creation transaction).
+- Every other parse error writes nothing to stdout and exits 2. Its first stderr line begins with `error: ` and names the offending argument (§6.3 Error Messages); the rest of its text is implementation-defined.
 
 #### Help text
 
-`--help` on any command prints its usage line, its subcommands and its options, each with a one-line description, to stdout and exits 0 without opening the database. Its layout is non-normative except for the strings this specification quotes, such as the `--permission-mode` description. Command group descriptions state the purpose given in the subcommand summary. Help derives choice lists from the same registries that validate the values:
+`--help` on any command prints its usage line, its subcommands and its options, each with a one-line description, to stdout and exits 0 without opening the database. Its layout is implementation-defined except for the strings this specification quotes, such as the `--permission-mode` description. Command group descriptions state the purpose given in the subcommand summary. Help derives choice lists from the same registries that validate the values:
 
 | Option | Help shows | Source |
 |---|---|---|
@@ -163,20 +193,20 @@ An invalid value for an option with possible values exits 2 with a usage error t
 | Command | Text | JSON |
 |---|---|---|
 | `fleet create` | `<fleet-id> director=<member-id>` | Ordered `fleet_id, name, created_at, director`, with Director identity/description/registration/placement |
-| `fleet list` | `FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT` columns | Fleet records |
-| `fleet show` | Fleet row with `deleted_at:` | Fleet including nullable `deleted_at` |
+| `fleet list` | Header and one row per fleet (§ `fleet list`) | Array of fleet summaries (§ `fleet list`) |
+| `fleet show` | `fleet_id:`, `name:`, `created_at:` lines and an optional `deleted_at:` line (§ `fleet show`) | Fleet record (§ `fleet show`) |
 | `fleet delete` | `Deleted fleet ID. Deregistered N members.` plus one line per ordinary member | `{fleet_id, deregistered_count, members}` |
 | `message send` | `Message sent.` then envelope | `{message}` |
 | `message poll` | Envelopes, or `No messages found.` | Full record array |
 | `message show` | Envelope | `{message}` |
 | `member create` | `ID NAME backend=AGENT pane=PANE window=WINDOW` plus runtime line | Member with placement and runtime |
-| `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
+| `member delete` | `Member deleted.` with member/pane lines (§ `member delete`) | `{member_id, pane_status}` |
 | `member show` | `ID NAME STATUS window=WINDOW` plus wrapped runtime line | Detail including kind, placement and runtime |
 | `event show` | Event, runtime and optional interaction lines | Event and current state |
 | `input show` / `input reconcile` | Input receipt and optional decision lines | `{input}` |
 | `permission inspect` | Request identity/capability lines | `{request}` |
 | `permission respond` | Answer submission status/stage line | `{response}` |
-| `member list` | Roster rows or `0 members.` | Roster array |
+| `member list` | Roster heading and rows, or `0 members.` (§ Member list output) | Roster array |
 | `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` or the queued line, plus delivery and input lines | `{member_id, pane_id, text, input_id, delivery}` |
 | `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` or the queued line, plus delivery and input lines | `{member_id, pane_id, coding_agent, command, dispatched, input_id, delivery}` |
 | `member press` | `Acknowledged keys KEYS_JSON for member ID (PANE).` | Ordered `member_id, pane_id, keys, status` |
@@ -189,7 +219,7 @@ Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `l
 
 Every JSON `placement` object, in roster, `member create`, `member show` and `fleet create` output, has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id` and `mux_window_name` are null exactly when `mux_pane_id` is null.
 
-Text rows use the format `"  {:<9}  {:<13}  {:<8}  {backend:<8}  {window:<13}  {pane:<7}  {}"` for member ID, name, kind, backend, window name, pane ID and idle:
+Rows are in ascending `member_id`. Text starts with the heading `N members:` for N ≠ 1 or `1 member:` for one row, then the column header line `  member_id  name           kind      backend   window         pane_id  idle`; an empty roster prints only `0 members.`. Each row starts with two spaces and joins its columns with two spaces: member ID, name, kind, backend (the placement's `coding_agent`), window name, pane ID and idle. Each of the first six values is left-aligned and right-padded with U+0020 to widths 9, 13, 8, 8, 13 and 7, counted in Unicode scalars; a longer value is written whole, never truncated, and the idle column is unpadded. Idle follows §6.4 Formatter helper semantics; an activity timestamp later than now yields idle `0s`.
 
 ```text
 2 members:
@@ -206,7 +236,7 @@ Place `--json` among the subcommand options, before a `--` separator that introd
 
 #### Positional subject ids
 
-Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults; a Director-only command also takes its caller's literal ID as `--from-member-id` (§ Director-only command guard). A missing or malformed subject is a parse error (§6.3 Error Messages).
+Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers in the integer forms of § CLI parse rules, without prefix resolution or environment defaults; a Director-only command also takes its caller's literal ID as `--from-member-id` (§ Director-only command guard). A missing or malformed subject is a parse error (§6.3 Error Messages).
 
 Spawned members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:`, `CODING AGENT:` and `DATABASE URL:` lines, pass these literal IDs on each invocation and apply `DATABASE URL:` per § Database selection.
 
@@ -243,15 +273,65 @@ CLI text output truncates only message bodies, to a fixed 200 codepoints per §6
 
 #### Text bodies (positional `TEXT` / `--file`)
 
-Send and member creation require exactly one positional body or `--file PATH`; `--file -` reads UTF-8 stdin. Preserve exact nonblank body text. Missing/both sources or a blank positional body exit 2; blank file/stdin sources and file-read errors exit 1 with the authored diagnostics below. File read/UTF-8 failures retain the actual cause.
+Send and member creation require exactly one positional body or `--file PATH`; `--file -` reads UTF-8 stdin. Preserve exact nonblank body text. A text is **blank** when every scalar in it has the Unicode `White_Space` property, the empty text included; every command that refuses blank text uses this definition. Missing/both sources or a blank positional body exit 2; blank file/stdin sources and file-read errors exit 1 with the authored diagnostics below (§6.3 Error Messages). A `--file <path>` read error appends ` (<io error>)` to its message, and a stdin read failure is `--file -: <io error>`.
 
 `member prompt` takes one positional line. Native exec has the separate command contract (§6.3 `member exec`).
+
+#### Validation order
+
+Each command applies its checks in the order below. The first failing check decides the error and the exit code, and no later check runs.
+
+1. Argument parsing (§ CLI parse rules); a parse error exits 2.
+2. Without `--database-url`, the default database derivation (§ Database selection); a `HOME` error exits 1.
+3. `member press` only: key validation (§ `member press`), exit 2.
+4. The database URL form (§ Database selection), opening the database and the schema-version guard (§ Schema-version guard), exit 1. `setup` and `doctor` replace steps 4–7 with their own sections. A `member press` failure here appends the line `keys were not dispatched to member <id>.`, and a permission command's failure appends its known run/interaction context (§ Permission commands).
+5. The Director-only command guard (§ Director-only command guard), exit 1.
+6. `member exec` only: the command line from its inline or `--file` source (§ `member exec`), exit 2 for an invalid line and exit 1 for a `--file` error.
+7. The command's own checks, in the order its list below gives; a command without a list performs its subject lookups in its own section's order.
+
+`message send`:
+
+1. The body source (§ Text bodies).
+2. The sender is an active member (`Sender member not found or not active: <from-member-id>`).
+3. The sender's fleet is live (`fleet <fleet-id> is deleted`, then `fleet <fleet-id>'s root Director (member <id>) is not active.`).
+4. The recipient is an active member (`Destination member not found: <to-member-id>`).
+5. Both are in the same fleet.
+
+`member prompt` and `member exec`:
+
+1. `member prompt` only: the text line (§ `member prompt`), exit 2.
+2. The target is an active member (`Member <member-id> not found`).
+3. The root Director refusal (§ `member prompt`, § `member exec`).
+4. The pending-placement refusal (§6.3 Error Messages).
+5. The runner submission (§ Member targeting and key delivery).
+
+`member press`:
+
+1. The target is an active member, and the multiplexer recorded for its fleet's Director is supported and on `PATH` (§6.5 Backend selection).
+2. The root Director refusal, then the pending-placement refusal.
+3. Termination deferral (§6.5 Termination during pane input), the pane input lock, the key-target check and the placement revalidation (§ `member press`).
+
+`member create`:
+
+1. The fleet exists (`fleet '<fleet-id>' not found.`) and is not deleted (`fleet <fleet-id> is deleted`).
+2. Without `--coding-agent`, the live-fleet guard and the Director's recorded backend.
+3. `--model`, then `--effort` (§6.7 Model selection; §6.7 Reasoning effort), exit 2.
+4. `--permission-mode` (§ Help text), exit 2.
+5. The body source (§ Text bodies), then the pi leading-`@` refusal (§6.7 Per-backend spawn argv), exit 2.
+6. The fleet layout lock (§ `member create`), then termination deferral (§6.5 Termination during pane input).
+7. The Director placement (`fleet <fleet-id> has no recorded Director placement; re-create the fleet with 'cafleet fleet create'.`), then the recorded multiplexer backend and its binary on `PATH` (§6.5 Backend selection).
+8. Backend availability: the backend's config-dir resolution (§ Config-dir resolution), its binary on `PATH`, then the opencode agent preset or the pi extension (§ `member create`).
+9. Slot selection (§6.5 Slot selection); a slot-selection error therefore follows every availability error and precedes every Hermes preflight error.
+10. `hermes` only: the Hermes availability preflight (§6.7 Hermes availability preflight), which runs concurrently with the native version probe; the probe only warns.
+11. Spawn-prompt placeholders (§ Spawn-prompt substitution), exit 2, then the `{database_url}` requirement of a non-default database.
+12. The forwarded config-location variable (§ Member environment), the runtime artifact paths (§6.9 Runner boundary and creation transaction), the working directory and the launch nonce.
+13. Registration, whose live-fleet guard runs here when step 2 did not run it, then the steps of § Creation failure compensation.
 
 #### `cafleet setup` — Onboarding and Schema Management
 
 `cafleet setup [--coding-agent AGENT...]` prepares the database first, then installs assets. It classifies the selected database before any write per §6.3 Schema-version guard, leaving a current file of this version unchanged. Compatible setup then installs embedded assets offline. Backend selection is multi-value/repeatable, deduplicated and defaults to the supported backend registry; selected backends install in registry order.
 
-After initializing, setup prints `Initialized database at {path}.`; a database that is already current prints `Database already initialized at {path}.`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation, and setup exits 1 with that backend's cause.
+Setup takes the path from the URL (§ Database selection) and creates its missing parent directories first; a failure exits 1 with `cannot create <dir>: <io error>`. After initializing, setup prints `Initialized database at <path>.`; a database that is already current prints `Database already initialized at <path>.`. `<path>` is the path as written in the URL, neither canonicalized nor made absolute. A failure while initializing the schema exits 1 with `database initialization failed: <cause>`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation, and setup exits 1 with that backend's cause.
 
 ##### Config-dir resolution
 
@@ -318,7 +398,7 @@ pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 
 #### Schema-version guard
 
-Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
+Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version and a file SQLite reports as not a database, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars: a path whose existence cannot be checked fails with `cannot inspect database at '<path>': <io error>`, an open failure with `failed to open database at '<path>': <cause>` and a connection-setting failure with `failed to apply connection PRAGMAs: <cause>`, all exit 1. Every other SQLite failure, here and in every later database operation, is `database error: <cause>`, exit 1, with `<cause>` implementation-defined. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
 
 `--help` renders at parse time and exits before any command body runs, so neither group-level help (`cafleet fleet --help`) nor subcommand help (`cafleet fleet create --help`) triggers the guard; both print help and exit 0 even under a missing database.
 
@@ -358,6 +438,21 @@ Read the pane on the chosen server — `tmux -S <server> display-message -p -t <
 Registration follows the §6.2 Fleets bootstrap transaction. After allocating the fleet ID, overwrite the resolved Director window/tab name with `cafleet-<fleet_id>-0` through the Rename window operation, read it back and require exact equality (§6.5 Backend operations). Re-read the Director pane context and require the original session, window ID and pane ID. Record the canonical name as `mux_window_name`, construct the result before commit, and emit success only after confirmed commit. The Director has `name="Director"` and `description="Root Director for this fleet"`; its pane title/label retains its current value.
 
 Any naming, verification, insertion or result-construction failure exits 1 and rolls back active uncommitted registration, with no success payload even under `--json`. Keep the registration transaction open until the commit result is known: a failed commit rolls back an active transaction, or reports the registry outcome as unconfirmed if SQLite already ended it. Append a rollback failure to the original error. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, describe the terminal name as potentially changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. A rolled-back fleet ID can be reused.
+
+| Failure | Text |
+|---|---|
+| The read-back name differs | `Director window name verification failed: expected <quoted>, found <quoted>` |
+| The re-read pane context differs | `Director pane context changed during window naming: expected <context>, found <context>` |
+| A commit failure after which SQLite already ended the transaction | The cause, then the line `fleet registration outcome is unconfirmed: SQLite ended the transaction after a failed commit` |
+| The rollback fails | The original error, then the line `rolling back fleet registration failed: <cause>` |
+
+`<context>` renders a pane context as `session=<quoted> window_id=<quoted> pane_id=<quoted>` from its session, window ID and pane ID, or as `none` when the re-read finds no pane. Each failure after naming is attempted appends one more stderr line:
+
+```text
+fleet create naming attempt: fleet_id=<fleet-id> backend=<backend> server=<quoted> window_id=<quoted> pane_id=<quoted> requested_name=<quoted>; the terminal name may have changed. Inspect 'cafleet fleet list' and `<inspection>`. The attempted fleet ID can be reused after rollback.
+```
+
+`<inspection>` is `tmux -S <quoted server> display-message -p -t <quoted window_id> '#{window_id}|#{window_name}'` on tmux and `herdr --session <quoted server> tab get <quoted window_id>` on herdr, with `<quoted …>` per §6.4 Quoted text.
 
 Applied names remain after a failure, crash or fleet deletion, and the Director pane keeps running. The rename and database commit are separate operations: a crash can leave a changed name without registration, or committed registration without delivered output. An output error after confirmed commit preserves registration and the name. Existing fleets keep their recorded names, and subsequent user renames leave placement snapshots unchanged.
 
@@ -478,11 +573,11 @@ Error: cafleet fleet create cannot verify this session's pane: a shared codex ap
 
 ##### `fleet list`
 
-List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain the Director reference so its ID remains discoverable.
+`cafleet fleet list [--json]` lists non-deleted fleets by descending creation timestamp/fleet ID. Rows retain the Director reference so its ID remains discoverable. JSON is an array of objects ordered `fleet_id, name, created_at, director_member_id, member_count`, where `member_count` counts the fleet's `active` members, root Director included. Text prints the header `FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT`, then one line per fleet with its `fleet_id`, `director_member_id`, `name`, `member_count` and `created_at` joined by one U+0020 and no padding; no fleets prints `No fleets found.`.
 
 ##### `fleet show`
 
-`cafleet fleet show FLEET_ID [--json]` includes soft-deleted rows. Unknown ID: `fleet 'X' not found.`, exit 1.
+`cafleet fleet show FLEET_ID [--json]` includes soft-deleted rows. Unknown ID: `fleet 'X' not found.`, exit 1. JSON is one object ordered `fleet_id, name, created_at, deleted_at, director_member_id`, with a nullable `deleted_at`. Text prints the lines `fleet_id: <fleet-id>`, `name: <name>` and `created_at: <timestamp>`, then `deleted_at: <timestamp>` only when `deleted_at` is non-null.
 
 ##### `fleet delete`
 
@@ -492,7 +587,7 @@ List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain t
 2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure with the held layout lock: runner shutdown when its recorded owner is alive and recovery for a wrapped member, pane close in the placement's recorded window, that member's deregistration, then optional layout restoration of that window. The root Director's pane stays open.
 3. **Deregister the fleet.** One transaction revalidates the placement set, stamps deletion, deregisters the remaining active members (the root Director and members with a pending placement) and removes their placements.
 
-The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause and `IDS` is a comma-separated id list or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
+The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause (§ `member delete`) with every trailing `.` removed and `IDS` is the ended member IDs in lock-key order joined by `, `, or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
 
 On success the text output is `Deleted fleet ID. Deregistered N members.` followed by one `  member MEMBER_ID: PANE_STATUS` line per ordinary member in ascending id. `N` counts every member the command deregistered, root Director included; `PANE_STATUS` takes the `member delete` values `PANE (killed)` and `(pending — no pane)`. JSON is ordered `fleet_id, deregistered_count, members`, with one `{member_id, pane_status}` entry per ordinary member in the same order.
 
@@ -630,7 +725,7 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 
 A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight). The pi backend also requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a missing or unreadable extension exits 1 (§6.7 Contract error strings), and a pi prompt beginning with `@` exits 2 before registration (§6.7 Per-backend spawn argv).
 
-After prompt validation, `member create` acquires the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
+After its argument and body checks (§ Validation order), `member create` acquires the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
 
 The pane target — a column of an existing window or a new overflow window in the Director's session — and the multiplexer server come from the registry and the fleet Director's recorded placement (§6.5 Multiplexer context); each new member placement copies the Director's `mux_server`. Publication patches the pane ID, window ID and window name together (§6.9 Runner boundary and creation transaction).
 
@@ -650,7 +745,7 @@ The native child runs in the multiplexer pane's environment overridden by the sp
 | `{coding_agent}` | The resolved backend's registry token | `CODING AGENT: <coding_agent>` |
 | `{database_url}` | `default` when the canonical database path equals the default path (§6.3 Database selection), otherwise `sqlite:///<canonical database path>` | `DATABASE URL: <database_url>` |
 
-The spawned member learns its identity and database from the literals rendered into its prompt; commands take every ID as a literal argument, and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A prompt without `{database_url}` is accepted only for the default database; against a non-default database `member create` exits 1 before registration (§6.3 Error Messages). Besides the names above, the formatter accepts only doubled literal braces (`{{` / `}}`), not Python format specifications, conversions, or attribute/index access; an unknown placeholder or malformed brace expression exits 2 before registration (§6.3 Error Messages).
+The spawned member learns its identity and database from the literals rendered into its prompt; commands take every ID as a literal argument, and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A prompt without `{database_url}` is accepted only for the default database; against a non-default database `member create` exits 1 before registration (§6.3 Error Messages). Besides the names above, the formatter accepts only doubled literal braces (`{{` / `}}`), not Python format specifications, conversions, or attribute/index access; an unknown placeholder or malformed brace expression exits 2 before registration (§6.3 Error Messages). The formatter reads the body left to right: `{{` and `}}` write one brace, and a single `{` opens a placeholder whose name is the exact text up to the next `}`, so `{}` and `{ fleet_id }` are unknown placeholders. The malformed `<detail>` is `unexpected '{' in placeholder name` for a `{` inside an open placeholder, `expected '}' before end of string` for a placeholder the body never closes and `single '}' encountered outside a placeholder` for a lone `}`; the first error in body order wins.
 
 The spawn always creates the pane without stealing focus (tmux `split-window -d` / `new-window -d`, herdr `--no-focus`): the Director's pane and active window stay active (§6.5 Member pane creation). In the default output, `pane` and `window` render `(pending)` until the placement is published.
 
@@ -693,6 +788,21 @@ After the pane lock and before any cleanup step (Hermes settlement, runner shutd
 For a `hermes` run, after the pane lock is held and before runner shutdown, run the Hermes work settlement (§6.7 Hermes work settlement) under its own 20-second budget; the deletion deadline moves later by the settlement's duration, so lock acquisition stays bounded by the original five seconds and the remaining steps keep the time they had when settlement began. An unverified stop exits 1 (§6.3 Error Messages) and retains the runner's cleanup records and the member row; a retry re-runs the settlement.
 
 Revalidate pending placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins; actual database failures report that the pane was closed and preserve the database cause. The close passes the placement's recorded `mux_window_id`, and optional layout restoration of that window follows mandatory finalization within the original deadline (§6.5 Delete-time pane layout). A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
+
+Before each irreversible step the member's placement and run identity are revalidated. Each failure below exits 1 and is the member deletion cause that `fleet delete` composes (§ `fleet delete`):
+
+| Failure | Cause |
+|---|---|
+| The placement or run identity changed; `<stage>` is `before cleanup`, `before pane close` or `after pane close` | `member placement or runtime ownership changed <stage>` |
+| The owned runner shutdown reports incomplete cleanup | `member <member-id> child cleanup remains unconfirmed: <diagnostics>; inspect with cafleet doctor`, with the shutdown diagnostics joined by `; ` |
+| The run's identity changed before recovery | `member runtime ownership changed during cleanup` |
+| Recovery ends with an outcome other than recovered | `member recovery remains incomplete; inspect with cafleet doctor` |
+| The pane close fails | `pane <pane-id> could not be closed: <cause>. Verify with 'cafleet doctor'.` |
+| Registry finalization fails after the close | `pane <pane-id> was closed, but deregister failed: <cause>` |
+
+A failed optional layout restoration writes `Member <member-id> was deregistered; optional layout restoration failed: <cause>` to stderr and keeps exit 0.
+
+Text output is three lines: `Member deleted.`, `  member_id: <member-id>` and `  pane_id:   <pane-status>` (three spaces after `pane_id:`), where `<pane-status>` is `<pane-id> (killed)` or `(pending — no pane)`.
 
 ##### `member show`
 
@@ -786,7 +896,7 @@ A missing member or placement, a pending pane (§6.3 Error Messages) and a nativ
 
 `cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]`
 
-- `--lines`: Number of trailing lines to capture (default: **20**).
+- `--lines`: Number of trailing lines to capture (default: **20**). Parsing accepts any 64-bit signed integer; §6.5 Capture windowing rejects a value below 1. Every capture-operation failure, that rejection included, exits 1 as `capture failed: <cause>`.
 - `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws.
 
 Output shapes: §6.3 Output shapes; target resolution: §6.3 Member targeting and key delivery. A pending placement is a hard error (§6.3 Error Messages).
@@ -817,7 +927,7 @@ Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STA
 | `failed` | `unavailable` |
 | `skipped` | `-` |
 
-For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted` and adds, after its `Input:` line, the line `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
@@ -926,6 +1036,15 @@ Application errors print to stderr even with `--json`, which selects only succes
 | (any surface resolving a config dir) | A set config-path variable holds a non-absolute value (empty string and relative paths included); `doctor` reports it as the agent's configuration check instead | §6.3 Config-dir resolution validation | 1 |
 | (any surface resolving a config dir) | A set config-path variable or `HOME` holds a value that is not valid UTF-8 (§6.3 Config-dir resolution) | `Error: <VAR> is not valid UTF-8` | 1 |
 | (any command except `setup` and `doctor`) | A missing, empty or incompatible database | §6.3 Schema-version guard | 1 |
+| (any command without `--database-url`) | `HOME` is unset, or not valid UTF-8 (§6.3 Database selection) | `Error: HOME is not set; cannot derive the default database path`, `Error: HOME is not valid UTF-8; cannot derive the default database path` | 1 |
+| (any command with a database) | The URL lacks the `sqlite:///` prefix (§6.3 Database selection) | `Error: database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'` | 1 |
+| (any command with a database) | The URL's path is empty or `:memory:` (§6.3 Database selection) | `Error: database URL has no file path` | 1 |
+| (any command with a database) | The database path's existence cannot be checked, the file cannot be opened, or its connection settings fail (§6.3 Schema-version guard) | `Error: cannot inspect database at '<path>': <io error>`, `Error: failed to open database at '<path>': <cause>`, `Error: failed to apply connection PRAGMAs: <cause>` | 1 |
+| (any command with a database) | Any other SQLite failure | `Error: database error: <cause>` | 1 |
+| (any command with a database) | Restoring the connection's busy handler after a bounded wait fails | `Error: restoring database wait failed: <cause>` | 1 |
+| `setup` | A missing parent directory of the database path cannot be created (§6.3 `cafleet setup`) | `Error: cannot create <dir>: <io error>` | 1 |
+| `setup` | Initializing the schema fails (§6.3 `cafleet setup`) | `Error: database initialization failed: <cause>` | 1 |
+| `setup` | The operating system cannot report the running executable's path for an extension's executable record (§6.3 Asset installation) | `failed to install extension into <record>: cannot resolve the running cafleet: <io error>`, `<record>` being the executable record path | 1 |
 | (any command with output) | Writing stdout fails with a broken pipe, e.g. `cafleet member list 1` piped into `head -1`; the command stops writing and nothing goes to stderr | — | The command's own result |
 | (any command with output) | Writing stdout fails with any other error | `Error: failed to write output: <cause>` | 1 |
 | `member prompt` / `member exec` / `member press` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
@@ -949,7 +1068,7 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member create` | A herdr re-parenting move failed; a stderr diagnostic while the spawn continues (§6.5 herdr re-parenting) | `layout re-parenting incomplete: <cause>` | The command's own result |
 | `setup` | An extension file or its executable record cannot be installed (§6.3 Asset installation) | `failed to install extension into <target>: <error>` | 1 |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path, before registration or multiplexer effects. `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
-| (any command-line argument) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is non-normative. | 2 |
+| (any command-line argument) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is implementation-defined (§ CLI parse rules). | 2 |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID; for `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The live-fleet guard: the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
@@ -958,14 +1077,21 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `message send` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` | 1 |
 | `message send` | The recipient is unknown or inactive | `Error: Destination member not found: <to-member-id>` | 1 |
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` | 1 |
+| `member capture` | The capture operation fails, a `--lines` value below 1 included (§6.3 `member capture`) | `Error: capture failed: <cause>` | 1 |
+| `member create` | The operating system's random source fails while generating the launch nonce | `Error: launch nonce unavailable: <io error>` | 1 |
+| `member prompt` / `member exec` | The operating system's random source fails while generating the input operation key | `Error: cannot generate input operation key: <io error>` | 1 |
+| `member delete` / `fleet delete` | A member deletion step fails (§6.3 `member delete`) | The member deletion cause of § `member delete`; `fleet delete` composes it per § `fleet delete` | 1 |
+| `member delete` / `fleet delete` | The member's run row is missing when recovery reads it | `Error: member <member-id> has no recorded run` | 1 |
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> | 1 |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 |
-| `message send` / `member create` | Positional body empty or whitespace-only | `Error: text may not be empty.` | 2 |
-| `message send` / `member create` | `--file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --file <path>: file is empty.` | 1 |
-| `message send` / `member create` | `--file -` with empty or whitespace-only stdin | `Error: --file -: stdin is empty.` | 1 |
-| `message send` / `member create` | `--file <path>` to a non-existent path or non-regular file | `Error: --file <path>: file does not exist or is not a regular file.` | 1 |
-| `message send` / `member create` | `--file <path>` to an unreadable file | `Error: --file <path>: file is not readable.` | 1 |
-| `message send` / `member create` | `--file <path>` to a file containing invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` | 1 |
+| `message send` / `member create` | A blank positional body (§ Text bodies) | `Error: text may not be empty.` | 2 |
+| `message send` / `member create` | `--file <path>` to a blank file, zero bytes included | `Error: --file <path>: file is empty.` | 1 |
+| `message send` / `member create` | `--file -` with blank stdin | `Error: --file -: stdin is empty.` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` to a non-existent path or a directory | `Error: --file <path>: file does not exist or is not a regular file. (<io error>)` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` that cannot be read for any other reason | `Error: --file <path>: file is not readable. (<io error>)` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` to a file containing invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` | 1 |
+| `message send` / `member create` / `member exec` | Reading stdin for `--file -` fails | `Error: --file -: <io error>` | 1 |
+| `message send` / `member create` / `member exec` | `--file -` stdin is not valid UTF-8 | `Error: --file -: file is not valid UTF-8.` | 1 |
 | `member create` | A `--model` or `--effort` value the selected backend rejects, before any side effect | §6.7 *Model selection* and *Reasoning effort* | 2 |
 | `member create` | An unknown `{placeholder}` in the prompt, before registration | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` | 2 |
 | `member create` | A malformed brace expression in the prompt, before registration | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 |
@@ -1010,7 +1136,7 @@ The ordered public record is:
 | `message_id` | Bracketed ID on the first line |
 | `from_member_id` | `from:` segment |
 | `status_timestamp` | Timestamp on the first line |
-| `text` | Body on the next line when nonempty |
+| `text` | Body on the next line, always present (an empty body leaves an empty line) |
 | Recipient, creation and status fields | Available in full JSON |
 
 ```text
@@ -1018,7 +1144,7 @@ The ordered public record is:
 build OK
 ```
 
-Text bodies use a fixed 200 codepoints plus `…`; `--json` preserves the complete exact text. Pane preview lines, their folding, inline limit and long-body `message poll` pointer follow §6.5 Push notifications.
+Several envelopes are joined by one empty line. A body of at most 200 Unicode scalars renders unchanged; a longer body renders its first 200 scalars followed by `…`. `--json` preserves the complete exact text. Pane preview lines, their folding, inline limit and long-body `message poll` pointer follow §6.5 Push notifications.
 
 #### Runtime observation messages
 
@@ -1034,7 +1160,7 @@ Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eig
 
 ##### Quoted text
 
-`TEXT_REPR` and `<quoted>` denote the value wrapped in `"` with these escapes: `"` → `\"`, `\` → `\\`, U+0009 → `\t`, U+000A → `\n`, U+000D → `\r`, U+0000 → `\0`; any other scalar whose general category is Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs (except U+0020), or which has the Grapheme_Extend property, → `\u{H}` with lowercase hex and no leading zeros. Every other scalar, including `'`, is written as itself. Categories and properties follow the Unicode version the implementation ships; the rendering of a scalar whose classification differs between Unicode versions is non-normative.
+`TEXT_REPR` and `<quoted>` denote the value wrapped in `"` with these escapes: `"` → `\"`, `\` → `\\`, U+0009 → `\t`, U+000A → `\n`, U+000D → `\r`, U+0000 → `\0`; any other scalar whose general category is Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs (except U+0020), or which has the Grapheme_Extend property, → `\u{H}` with lowercase hex and no leading zeros. Every other scalar, including `'`, is written as itself. Categories and properties follow the Unicode version the implementation ships; the rendering of a scalar whose classification differs between Unicode versions is implementation-defined.
 
 #### JSON encoding
 
@@ -1311,7 +1437,7 @@ The constants are fixed; no flag or configuration changes them. A column in a wi
 
 Occupancy comes from the registry: the fleet's active members whose placement is concrete, grouped by `window_ordinal` and `column_side`, excluding the Director's own row (ordinal 0, `left`). A pending placement holds no slot: every creation holds the fleet layout lock until it completes or compensates, so a pending row seen under the lock belongs to a killed creation (§ Termination during pane input), which `member delete` removes. An overflow ordinal with no concrete member is a closed window and is not scanned.
 
-Each scanned window's height is read live before registration (§ Backend operations Window height). The anchors are the Director pane for ordinal 0 and every concrete member pane of the window, in registry order, for an overflow window, so one member whose pane died does not make a live herdr tab unreadable. A failed Director-window read propagates the multiplexer error unchanged. A failed or unparsable overflow-window read (the user closed the window, or every member pane in it died while the members stayed registered) fails `member create` with the unreadable-window error (§6.3 Error Messages), whose `<member-ids>` lists the window's active member IDs ascending, separated by `, `. Neither failure registers anything.
+Each scanned window's height is read live before registration (§ Backend operations Window height). The anchors are the Director pane for ordinal 0 and every concrete member pane of the window, in registry order, for an overflow window, so one member whose pane died does not make a live herdr tab unreadable. A failed Director-window read propagates the multiplexer error unchanged. A failed or unparsable overflow-window read (the user closed the window, or every member pane in it died while the members stayed registered) fails `member create` with the unreadable-window error (§6.3 Error Messages), whose `<member-ids>` lists the window's active member IDs ascending, separated by `, `. Neither failure registers anything. Slot selection runs after the backend availability check and before the Hermes preflight (§6.3 Validation order).
 
 ##### Placement policy
 
