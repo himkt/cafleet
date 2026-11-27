@@ -1,7 +1,7 @@
 # Make SPEC.md sufficient for an independent reimplementation
 
 **Status**: Approved
-**Progress**: 24/47 tasks complete
+**Progress**: 40/47 tasks complete
 **Last Updated**: 2026-11-27
 
 ## Overview
@@ -101,7 +101,7 @@ Row C9 rejects `:memory:` instead of documenting it. An in-memory database is pr
 
 | ID | Finding (audit 2 #) | Bucket | Resolution | Owning section |
 |---|---|---|---|---|
-| M1 | Child signal mask inside a deferral span (#1) | Document | The Linux experiment (`.experiments/sigmask.md`) showed in-span multiplexer clients inherit the blocked `SIGINT`, `SIGTERM` and `SIGHUP`, so the SPEC sentence stays, gains the per-thread scope and states the guarantee as the blocked set the client process starts with (a shell the client runs may change its own mask). The Step 3 child-mask test pins it on both spawn paths; a failure on `macos-15` alone makes macOS the A6 case | §6.5 Termination during pane input |
+| M1 | Child signal mask inside a deferral span (#1) | Document | The Linux experiment (`.experiments/sigmask.md`) showed in-span multiplexer clients inherit the blocked `SIGINT`, `SIGTERM` and `SIGHUP`, so the SPEC sentence stays, gains the per-thread scope and states the guarantee as the blocked set the client process starts with (a shell the client runs may change its own mask). The Step 3 child-mask test pins it on both spawn paths; the `macos-15` CI run of PR #661 passed it, so no platform is an A6 case | §6.5 Termination during pane input |
 | M2 | Per-thread vs per-process deferral (#2) | Loosen | SPEC states the effect: within a span, no `SIGINT`, `SIGTERM` or `SIGHUP` delivered to the process takes its default action until the outermost span ends. The masking mechanism is implementation-defined | §6.5 Termination during pane input |
 | M3 | Lock kind, release/reacquire, file mode (#3) | Document | The pane-input lock is a whole-file advisory lock with BSD `flock(2)` semantics: held per open file description and conflicting with other `flock` holders of the same file; whether it interacts with `fcntl` record locks is platform-defined. The holder keeps one descriptor across release and reacquire, and after acquiring it verifies that the lock path still names the same device and inode, reopening otherwise. The file is created with mode `0600` minus the umask | §6.5 Pane input lock |
 | M4 | Working-directory source (#4) | Document | The invoking working directory is the physical path `getcwd(3)` reports, not `$PWD`; this governs `--cwd`, relative database paths, `-c` and Hermes `--in` | §6.5 Pane spawn working directory |
@@ -465,25 +465,25 @@ Within each step the commits follow the project's documentation-first order: `SP
 - [x] `cli.md`: carried facts for Area 2 <!-- completed: 2026-11-27T09:22 -->
 - [x] Code: herdr submit-bytes hex rendering (row C16's herdr part) and every other Area 2 `reworded` literal, with tests <!-- completed: 2026-11-27T09:22 -->
 - [x] Code: the child-mask test in `src/runtime/system.rs` over both spawn paths inside a `DeferTermination` span (§ Signal-mask experiment), plus the row M1 fix in those spawn paths when the experiment selects Fix code <!-- completed: 2026-11-27T09:22 -->
-- [ ] Confirm the child-mask test's result on the `macos-15` CI run and, when it fails there alone, record the A6 case for macOS in row M1 and its SPEC text <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint`, commit the step, then push the branch and open the pull request <!-- completed: -->
+- [x] Confirm the child-mask test's result on the `macos-15` CI run and, when it fails there alone, record the A6 case for macOS in row M1 and its SPEC text <!-- completed: 2026-11-27T10:20 -->
+- [x] Run `mise //:test` and `mise //:lint`, commit the step, then push the branch and open the pull request <!-- completed: 2026-11-27T10:20 -->
 
 ### Step 4: Runtime, detection and testing strategy
 
-- [ ] SPEC: Terminal emulation subsection from `.inventory/vt-model.md`, and rows R5 and R6 in Screen model facts <!-- completed: -->
-- [ ] SPEC: Line text, Profile rule object and Detection algorithm subsections (rows R1–R3, R9, M16) <!-- completed: -->
-- [ ] SPEC: Fixture replay and the `expected_observation` field (row R7) <!-- completed: -->
-- [ ] SPEC: rows R10–R14 <!-- completed: -->
-- [ ] SPEC: every Area 3 `listed` and `reworded` sweep literal at its owner <!-- completed: -->
-- [ ] SPEC: §9 rewrite with §9.1, §9.3 and the §9.2 vectors, generated from `TerminalState` with expected values reviewed against the Terminal emulation table <!-- completed: -->
-- [ ] `docs/docs/contributing.md`: provenance row, capture conversion, the corrected fixture replay order sentence and conformance test <!-- completed: -->
-- [ ] `.claude/rules/code-quality.md`: the SPEC-vector test placement line <!-- completed: -->
-- [ ] Code: `expected_observation` in the screen field set and the guard comparison in `src/coding_agent/catalog.rs`, with tests for a matching and each differing field <!-- completed: -->
-- [ ] Code: populate `expected_observation` for every screen of `assets/profiles/*.json` from the current detector, with a temporary generator removed before commit <!-- completed: -->
-- [ ] Code: reject repeated keys in lifecycle frames (row R13), with a test <!-- completed: -->
-- [ ] Code: every Area 3 `reworded` literal, with tests <!-- completed: -->
-- [ ] Code: the `vt-vector` conformance test in `src/runtime/transport.rs` <!-- completed: -->
-- [ ] Run `mise //:test` and `mise //:lint` and commit the step <!-- completed: -->
+- [x] SPEC: Terminal emulation subsection from `.inventory/vt-model.md`, and rows R5 and R6 in Screen model facts <!-- completed: 2026-11-27T09:52 -->
+- [x] SPEC: Line text, Profile rule object and Detection algorithm subsections (rows R1–R3, R9, M16) <!-- completed: 2026-11-27T09:52 -->
+- [x] SPEC: Fixture replay and the `expected_observation` field (row R7) <!-- completed: 2026-11-27T09:52 -->
+- [x] SPEC: rows R10–R14 <!-- completed: 2026-11-27T09:52 -->
+- [x] SPEC: every Area 3 `listed` and `reworded` sweep literal at its owner <!-- completed: 2026-11-27T09:52 -->
+- [x] SPEC: §9 rewrite with §9.1, §9.3 and the §9.2 vectors, generated from `TerminalState` with expected values reviewed against the Terminal emulation table <!-- completed: 2026-11-27T09:52 -->
+- [x] `docs/docs/contributing.md`: provenance row, capture conversion, the corrected fixture replay order sentence and conformance test <!-- completed: 2026-11-27T09:52 -->
+- [x] `.claude/rules/code-quality.md`: the SPEC-vector test placement line <!-- completed: 2026-11-27T09:52 -->
+- [x] Code: `expected_observation` in the screen field set and the guard comparison in `src/coding_agent/catalog.rs`, with tests for a matching and each differing field <!-- completed: 2026-11-27T09:52 -->
+- [x] Code: populate `expected_observation` for every screen of `assets/profiles/*.json` from the current detector, with a temporary generator removed before commit <!-- completed: 2026-11-27T09:52 -->
+- [x] Code: reject repeated keys in lifecycle frames (row R13), with a test <!-- completed: 2026-11-27T09:52 -->
+- [x] Code: every Area 3 `reworded` literal, with tests <!-- completed: 2026-11-27T09:52 -->
+- [x] Code: the `vt-vector` conformance test in `src/runtime/transport.rs` <!-- completed: 2026-11-27T09:52 -->
+- [x] Run `mise //:test` and `mise //:lint` and commit the step <!-- completed: 2026-11-27T10:20 -->
 
 ### Step 5: Verification
 
@@ -510,3 +510,4 @@ Within each step the commits follow the project's documentation-first order: `SP
 | 2026-11-27 | User decision: one branch and one pull request in place of four; the steps become stages of that branch |
 | 2026-11-27 | Step 2 code-over-text findings: `--database-url` may appear once per command level (root, group, leaf) and the deepest level wins, more general than A3's before/after wording (row C8); `fleet delete` strips every trailing `.` from `CAUSE`, not one (row C15); `cafleet` and a command group without its subcommand print help to stderr with exit 2 instead of an `error: ` line (§ CLI parse rules); `HOME` derivation precedes `member press` key parsing, and `member create` checks `--model`, `--effort` and `--permission-mode` before its body source and validates placeholders after the layout lock and preflight (§ Blank text and validation order). Spec choice: the `database URL has no file path` refusal of rows C9 and C10 applies to every command, so `sqlite:///` with an empty path no longer reports `no cafleet database` outside `setup` |
 | 2026-11-27 | Step 3 code-over-text findings: the pane input lock holder does not reopen on a device/inode change; before each write it verifies the path still names the held file and fails with `held pane lock pathname identity mismatch` (row M3). tmux trims a whole reply, not each line, and keeps the window-name reply whole except its final LF (row M9). The undeadlined multiplexer calls are every multiplexer process of `fleet create` and of `doctor`'s multiplexer rows, and the `member capture` capture (row M5) |
+| 2026-11-27 | Step 4 code-over-text findings: DEC modes 7 and 1047 have no effect in the screen model, so Terminal emulation lists them with the unchanged-state rule (row R4); the semantic fingerprint is the sorted list of top-priority `(observation, operation, choices)` triples, without matcher captures (row R9); the native capture sample count is test-only exporter state, so row R12 documents only the pre-submit re-observation cadence and loosens it with the idle tick; `expected_observation` uses the backend's profile whatever the screen's `native_version`, text items merge consecutive characters, and key paths are `observe.<key>`, `director.<key>`, `composer_text` and `answers` (row R7) |
