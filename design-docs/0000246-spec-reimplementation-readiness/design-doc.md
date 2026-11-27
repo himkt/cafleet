@@ -1,7 +1,7 @@
 # Make SPEC.md sufficient for an independent reimplementation
 
-**Status**: In Progress
-**Progress**: 46/47 tasks complete
+**Status**: Complete
+**Progress**: 47/47 tasks complete
 **Last Updated**: 2026-11-27
 
 ## Overview
@@ -492,7 +492,7 @@ Within each step the commits follow the project's documentation-first order: `SP
 
 ### Step 6: Closeout
 
-- [ ] Cut one patch release through the release workflow, covering the fix-code changes <!-- completed: -->
+- [x] Cut one patch release through the release workflow, covering the fix-code changes: skipped by user decision; the release follows the normal release workflow outside this design <!-- completed: 2026-11-27T11:40 -->
 
 ---
 
@@ -505,6 +505,7 @@ Within each step the commits follow the project's documentation-first order: `SP
 | 2026-11-27 | Reviewer round 2: child-mask test moved to `src/runtime/system.rs` over both production spawn paths |
 | 2026-11-27 | User decision: one branch and one pull request in place of four; the steps become stages of that branch |
 | 2026-11-27 | Step 5: blind slice reached 0 differences over 322 scenarios after 11 SPEC gaps were documented; the re-audit and its re-checks closed every finding, so § Accepted minor findings is empty |
+| 2026-11-27 | User decision: the Step 6 patch release is skipped in this design and left to the normal release workflow; the D10 action-argv change and the scrolled-composer preview defect are tracked as issues #663 and #662 |
 | 2026-11-27 | Step 2 code-over-text findings: `--database-url` may appear once per command level (root, group, leaf) and the deepest level wins, more general than A3's before/after wording (row C8); `fleet delete` strips every trailing `.` from `CAUSE`, not one (row C15); `cafleet` and a command group without its subcommand print help to stderr with exit 2 instead of an `error: ` line (§ CLI parse rules); `HOME` derivation precedes `member press` key parsing, and `member create` checks `--model`, `--effort` and `--permission-mode` before its body source and validates placeholders after the layout lock and preflight (§ Blank text and validation order). Spec choice: the `database URL has no file path` refusal of rows C9 and C10 applies to every command, so `sqlite:///` with an empty path no longer reports `no cafleet database` outside `setup` |
 | 2026-11-27 | Step 3 code-over-text findings: the pane input lock holder does not reopen on a device/inode change; before each write it verifies the path still names the held file and fails with `held pane lock pathname identity mismatch` (row M3). tmux trims a whole reply, not each line, and keeps the window-name reply whole except its final LF (row M9). The undeadlined multiplexer calls are every multiplexer process of `fleet create` and of `doctor`'s multiplexer rows, and the `member capture` capture (row M5) |
 | 2026-11-27 | Step 4 code-over-text findings: DEC modes 7 and 1047 have no effect in the screen model, so Terminal emulation lists them with the unchanged-state rule (row R4); the semantic fingerprint is the sorted list of top-priority `(observation, operation, choices)` triples, without matcher captures (row R9); the native capture sample count is test-only exporter state, so row R12 documents only the pre-submit re-observation cadence and loosens it with the idle tick; `expected_observation` uses the backend's profile whatever the screen's `native_version`, text items merge consecutive characters, and key paths are `observe.<key>`, `director.<key>`, `composer_text` and `answers` (row R7) |
