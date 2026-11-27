@@ -63,7 +63,7 @@ fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub(super) fn decode_lifecycle_control_body(body: &[u8]) -> Result<Value> {
-    let frame = serde_json::from_slice(body).map_err(|_| error("malformed control JSON body"))?;
+    let frame = decode_strict_json(body)?;
     validate_version(&frame)?;
     Ok(frame)
 }

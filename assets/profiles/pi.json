@@ -583,7 +583,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-allow-continuation-tmux-120-1": {
       "native_version": "1.5.0",
@@ -716,7 +751,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-deny-pre-stage-1-tmux-120-1": {
       "native_version": "1.5.0",
@@ -849,7 +909,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-pre-stage-2-tmux-120-1": {
       "native_version": "1.5.0",
@@ -982,7 +1077,71 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                {
+                  "break": true
+                },
+                " CAFleet member gate: allow this bash command?",
+                {
+                  "break": true
+                },
+                " $ ./permission-probe deny",
+                {
+                  "break": true
+                },
+                "   Allow once",
+                {
+                  "break": true
+                },
+                " → Deny",
+                {
+                  "break": true
+                },
+                " ↑↓ navigate  enter select  escape/ctrl+c cancel"
+              ]
+            }
+          ]
+        },
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-continuation-tmux-120-1": {
       "native_version": "1.5.0",
@@ -1115,7 +1274,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-idle-composer-tmux-120-1": {
       "native_version": "1.5.0",
@@ -1248,7 +1432,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-typed-literal-tmux-120-1": {
       "native_version": "1.5.0",
@@ -1381,7 +1590,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply with the single word done."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-post-submit-tmux-120-1": {
       "native_version": "1.5.0",
@@ -1514,7 +1755,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-empty-composer-tmux-120-1": {
       "native_version": "1.5.0",
@@ -1647,7 +1913,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-typed-literal-tmux-120-1": {
       "native_version": "1.5.0",
@@ -1780,7 +2071,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! echo cafleet-220-exec"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-post-submit-tmux-120-1": {
       "native_version": "1.5.0",
@@ -1913,7 +2236,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-allow-pre-stage-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2046,7 +2394,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-allow-continuation-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2179,7 +2562,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-deny-pre-stage-1-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2312,7 +2720,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-pre-stage-2-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2445,7 +2888,71 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                {
+                  "break": true
+                },
+                " CAFleet member gate: allow this bash command?",
+                {
+                  "break": true
+                },
+                " $ ./permission-probe deny",
+                {
+                  "break": true
+                },
+                "   Allow once",
+                {
+                  "break": true
+                },
+                " → Deny",
+                {
+                  "break": true
+                },
+                " ↑↓ navigate  enter select  escape/ctrl+c cancel"
+              ]
+            }
+          ]
+        },
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-continuation-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2578,7 +3085,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-idle-composer-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2711,7 +3243,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-typed-literal-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2844,7 +3401,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply with the single word done."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-post-submit-tmux-049-1": {
       "native_version": "1.5.0",
@@ -2977,7 +3566,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-empty-composer-tmux-049-1": {
       "native_version": "1.5.0",
@@ -3110,7 +3724,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-typed-literal-tmux-049-1": {
       "native_version": "1.5.0",
@@ -3243,7 +3882,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! echo cafleet-220-exec"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-post-submit-tmux-049-1": {
       "native_version": "1.5.0",
@@ -3376,7 +4047,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-allow-pre-stage-herdr-120-1": {
       "native_version": "1.5.0",
@@ -3509,7 +4205,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-allow-continuation-herdr-120-1": {
       "native_version": "1.5.0",
@@ -3642,7 +4373,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-deny-pre-stage-1-herdr-120-1": {
       "native_version": "1.5.0",
@@ -3775,7 +4531,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-pre-stage-2-herdr-120-1": {
       "native_version": "1.5.0",
@@ -3908,7 +4699,71 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                {
+                  "break": true
+                },
+                " CAFleet member gate: allow this bash command?",
+                {
+                  "break": true
+                },
+                " $ ./permission-probe deny",
+                {
+                  "break": true
+                },
+                "   Allow once",
+                {
+                  "break": true
+                },
+                " → Deny",
+                {
+                  "break": true
+                },
+                " ↑↓ navigate  enter select  escape/ctrl+c cancel"
+              ]
+            }
+          ]
+        },
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-continuation-herdr-120-1": {
       "native_version": "1.5.0",
@@ -4041,7 +4896,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-idle-composer-herdr-120-1": {
       "native_version": "1.5.0",
@@ -4174,7 +5054,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-typed-literal-herdr-120-1": {
       "native_version": "1.5.0",
@@ -4307,7 +5212,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply with the single word done."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-post-submit-herdr-120-1": {
       "native_version": "1.5.0",
@@ -4440,7 +5377,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-empty-composer-herdr-120-1": {
       "native_version": "1.5.0",
@@ -4573,7 +5535,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-typed-literal-herdr-120-1": {
       "native_version": "1.5.0",
@@ -4706,7 +5693,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! echo cafleet-220-exec"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-post-submit-herdr-120-1": {
       "native_version": "1.5.0",
@@ -4839,7 +5858,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-allow-pre-stage-herdr-049-1": {
       "native_version": "1.5.0",
@@ -4972,7 +6016,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-allow-continuation-herdr-049-1": {
       "native_version": "1.5.0",
@@ -5105,7 +6184,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-deny-pre-stage-1-herdr-049-1": {
       "native_version": "1.5.0",
@@ -5238,7 +6342,42 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-pre-stage-2-herdr-049-1": {
       "native_version": "1.5.0",
@@ -5371,7 +6510,71 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "pi-gate-approval",
+          "match_evidence": "complete",
+          "operation": "./permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Deny"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                {
+                  "break": true
+                },
+                " CAFleet member gate: allow this bash command?",
+                {
+                  "break": true
+                },
+                " $ ./permission-probe deny",
+                {
+                  "break": true
+                },
+                "   Allow once",
+                {
+                  "break": true
+                },
+                " → Deny",
+                {
+                  "break": true
+                },
+                " ↑↓ navigate  enter select  escape/ctrl+c cancel"
+              ]
+            }
+          ]
+        },
+        "answers": {
+          "pi-gate-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "pi-gate-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "pi-1.5.0-deny-continuation-herdr-049-1": {
       "native_version": "1.5.0",
@@ -5504,7 +6707,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-idle-composer-herdr-049-1": {
       "native_version": "1.5.0",
@@ -5637,7 +6865,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-typed-literal-herdr-049-1": {
       "native_version": "1.5.0",
@@ -5770,7 +7023,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply with the single word done."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-prompt-post-submit-herdr-049-1": {
       "native_version": "1.5.0",
@@ -5903,7 +7188,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-empty-composer-herdr-049-1": {
       "native_version": "1.5.0",
@@ -6036,7 +7346,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-typed-literal-herdr-049-1": {
       "native_version": "1.5.0",
@@ -6169,7 +7504,39 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! echo cafleet-220-exec"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-exec-post-submit-herdr-049-1": {
       "native_version": "1.5.0",
@@ -6302,7 +7669,32 @@
           "row": 34,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-final-mode-2004-tapped-v2-herdr-119-74": {
       "native_version": "1.5.0",
@@ -6359,7 +7751,32 @@
           "row": 39,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-final-mode-2004-tapped-v2-tmux-120-74": {
       "native_version": "1.5.0",
@@ -6415,7 +7832,32 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-2049-args-literal-tapped-v2-herdr-119-51": {
       "native_version": "1.5.0",
@@ -6472,7 +7914,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! [paste #1 2047 chars]"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-2049-args-literal-tapped-v2-tmux-120-51": {
       "native_version": "1.5.0",
@@ -6528,7 +8002,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! [paste #1 2047 chars]"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-herdr-119-55": {
       "native_version": "1.5.0",
@@ -6585,7 +8091,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-2049-args-post-1900ms-tapped-v2-tmux-120-55": {
       "native_version": "1.5.0",
@@ -6641,7 +8172,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-40-args-literal-tapped-v2-herdr-119-45": {
       "native_version": "1.5.0",
@@ -6698,7 +8254,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-40-args-literal-tapped-v2-tmux-120-45": {
       "native_version": "1.5.0",
@@ -6754,7 +8342,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-herdr-119-49": {
       "native_version": "1.5.0",
@@ -6811,7 +8431,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-tmux-120-49": {
       "native_version": "1.5.0",
@@ -6867,7 +8512,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-63": {
       "native_version": "1.5.0",
@@ -6924,7 +8594,32 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-literal-tapped-v2-tmux-120-63": {
       "native_version": "1.5.0",
@@ -6980,7 +8675,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! [paste #1 4083 chars]"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-67": {
       "native_version": "1.5.0",
@@ -7037,7 +8764,32 @@
           "row": 39,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-67": {
       "native_version": "1.5.0",
@@ -7093,7 +8845,32 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-40-args-literal-tapped-v2-herdr-119-39": {
       "native_version": "1.5.0",
@@ -7150,7 +8927,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-40-args-literal-tapped-v2-tmux-120-39": {
       "native_version": "1.5.0",
@@ -7206,7 +9015,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-herdr-119-43": {
       "native_version": "1.5.0",
@@ -7263,7 +9104,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-43": {
       "native_version": "1.5.0",
@@ -7319,7 +9185,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-literal-tapped-v2-herdr-119-2": {
       "native_version": "1.5.0",
@@ -7376,7 +9267,29 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-literal-tapped-v2-tmux-120-2": {
       "native_version": "1.5.0",
@@ -7432,7 +9345,29 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-herdr-119-6": {
       "native_version": "1.5.0",
@@ -7489,7 +9424,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-execution-proof-post-1900ms-tapped-v2-tmux-120-6": {
       "native_version": "1.5.0",
@@ -7545,7 +9505,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-herdr-119-57": {
       "native_version": "1.5.0",
@@ -7602,7 +9587,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-literal-tapped-v2-tmux-120-57": {
       "native_version": "1.5.0",
@@ -7658,7 +9668,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-61": {
       "native_version": "1.5.0",
@@ -7728,7 +9763,32 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-61": {
       "native_version": "1.5.0",
@@ -7797,7 +9857,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-herdr-119-70": {
       "native_version": "1.5.0",
@@ -7854,7 +9939,39 @@
           "row": 39,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-unsubmitted-literal-tapped-v2-tmux-120-70": {
       "native_version": "1.5.0",
@@ -7910,7 +10027,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1": {
       "native_version": "1.5.0",
@@ -7967,7 +10116,32 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1": {
       "native_version": "1.5.0",
@@ -8023,7 +10197,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-2049-literal-tapped-v2-herdr-119-15": {
       "native_version": "1.5.0",
@@ -8080,7 +10279,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[paste #1 2049 chars]"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-2049-literal-tapped-v2-tmux-120-15": {
       "native_version": "1.5.0",
@@ -8136,7 +10367,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[paste #1 2049 chars]"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-herdr-119-19": {
       "native_version": "1.5.0",
@@ -8193,7 +10456,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-2049-post-1900ms-tapped-v2-tmux-120-19": {
       "native_version": "1.5.0",
@@ -8249,7 +10537,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-40-literal-tapped-v2-herdr-119-9": {
       "native_version": "1.5.0",
@@ -8306,7 +10619,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-40-literal-tapped-v2-tmux-120-9": {
       "native_version": "1.5.0",
@@ -8362,7 +10707,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-herdr-119-13": {
       "native_version": "1.5.0",
@@ -8419,7 +10796,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-40-post-1900ms-tapped-v2-tmux-120-13": {
       "native_version": "1.5.0",
@@ -8475,7 +10877,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-herdr-119-27": {
       "native_version": "1.5.0",
@@ -8532,7 +10959,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[paste #1 4085 chars]"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-literal-tapped-v2-tmux-120-27": {
       "native_version": "1.5.0",
@@ -8588,7 +11047,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[paste #1 4085 chars]"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-31": {
       "native_version": "1.5.0",
@@ -8645,7 +11136,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-31": {
       "native_version": "1.5.0",
@@ -8701,7 +11217,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-40-literal-tapped-v2-herdr-119-3": {
       "native_version": "1.5.0",
@@ -8758,7 +11299,32 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-40-literal-tapped-v2-tmux-120-3": {
       "native_version": "1.5.0",
@@ -8814,7 +11380,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7": {
       "native_version": "1.5.0",
@@ -8871,7 +11462,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7": {
       "native_version": "1.5.0",
@@ -8927,7 +11543,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-literal-tapped-v2-herdr-119-21": {
       "native_version": "1.5.0",
@@ -8984,7 +11625,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-literal-tapped-v2-tmux-120-21": {
       "native_version": "1.5.0",
@@ -9040,7 +11706,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25": {
       "native_version": "1.5.0",
@@ -9110,7 +11801,32 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25": {
       "native_version": "1.5.0",
@@ -9179,7 +11895,32 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-34": {
       "native_version": "1.5.0",
@@ -9236,7 +11977,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-34": {
       "native_version": "1.5.0",
@@ -9292,7 +12065,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-69": {
       "native_version": "1.5.0",
@@ -9357,7 +12162,39 @@
           "row": 39,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33": {
       "native_version": "1.5.0",
@@ -9422,7 +12259,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33": {
       "native_version": "1.5.0",
@@ -9486,7 +12355,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.0-composer-exec-retained-authoritative-no-submit-tapped-v2-tmux-120-2": {
       "native_version": "1.5.0",
@@ -9550,7 +12451,39 @@
           "row": 36,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true CF228_RETAIN_exec_tmux_1794671923845862112"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-idle-empty-tmux-120-1": {
       "native_version": "1.5.2",
@@ -9838,7 +12771,32 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-one-tmux-120-1": {
       "native_version": "1.5.2",
@@ -10138,7 +13096,39 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-wrap-tmux-120-1": {
       "native_version": "1.5.2",
@@ -10438,7 +13428,47 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-busy-tmux-120-1": {
       "native_version": "1.5.2",
@@ -10687,7 +13717,32 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-idle-empty-herdr-120-1": {
       "native_version": "1.5.2",
@@ -10963,7 +14018,32 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-one-herdr-120-1": {
       "native_version": "1.5.2",
@@ -11251,7 +14331,39 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-wrap-herdr-120-1": {
       "native_version": "1.5.2",
@@ -11539,7 +14651,47 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-busy-herdr-120-1": {
       "native_version": "1.5.2",
@@ -11839,7 +14991,32 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "pi-working-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": []
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-composer-prompt-wrap-literal-tmux-120-1": {
       "native_version": "1.5.2",
@@ -12145,7 +15322,47 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-composer-exec-wrap-literal-tmux-120-1": {
       "native_version": "1.5.2",
@@ -12451,7 +15668,47 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-composer-prompt-words-literal-tmux-120-1": {
       "native_version": "1.5.2",
@@ -12753,7 +16010,47 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij",
+                {
+                  "break": true
+                },
+                "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij",
+                {
+                  "break": true
+                },
+                "abcdefghij"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-composer-prompt-plain-474-literal-tmux-80-1": {
       "native_version": "1.5.2",
@@ -12945,7 +16242,59 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-composer-prompt-plain-474-literal-herdr-81-1": {
       "native_version": "1.5.2",
@@ -13135,7 +16484,59 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-composer-exec-plain-474-literal-tmux-80-1": {
       "native_version": "1.5.2",
@@ -13317,7 +16718,63 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-composer-exec-plain-474-literal-herdr-81-1": {
       "native_version": "1.5.2",
@@ -13497,7 +16954,63 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "! true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-plain-474-tmux-80-1": {
       "native_version": "1.5.2",
@@ -13674,7 +17187,59 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-plain-474-herdr-81-1": {
       "native_version": "1.5.2",
@@ -13855,7 +17420,59 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "pi-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-preview-after-turn-tmux-120-1": {
       "native_version": "1.5.2",
@@ -14025,7 +17642,43 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs and",
+                {
+                  "break": true
+                },
+                "reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "pi-1.5.2-director-preview-after-turn-herdr-120-1": {
       "native_version": "1.5.2",
@@ -14309,7 +17962,43 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "pi-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": null,
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs",
+                {
+                  "break": true
+                },
+                "and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     }
   }
 }
