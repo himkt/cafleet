@@ -2966,6 +2966,386 @@ mod tests {
             }
         }
     }
+
+    mod create_validation_order {
+        use crate::cli::CliArgs;
+        use crate::cli::Command;
+        use crate::cli::member::tests::*;
+        use crate::coding_agent::CodingAgent;
+        use crate::db::test_support::table_snapshot;
+        use crate::pane_lock::LayoutLock;
+
+        enum FleetState {
+            Unknown,
+            Deleted,
+            Live,
+        }
+
+        struct InProcessCase {
+            name: &'static str,
+            fleet: FleetState,
+            hold_layout: bool,
+            arguments: &'static [&'static str],
+            expected: fn(i64) -> String,
+            exit_code: i32,
+        }
+
+        fn permission_mode_refusal(backend: CodingAgent, mode: &str) -> String {
+            match backend.resolve_policy(Some(mode)) {
+                Ok(_) => panic!("{mode} is not a {} permission mode", backend.name()),
+                Err(error) => error.message().into_owned(),
+            }
+        }
+
+        const IN_PROCESS_CASES: [InProcessCase; 8] = [
+            InProcessCase {
+                name: "an unknown fleet precedes model validation",
+                fleet: FleetState::Unknown,
+                hold_layout: false,
+                arguments: &[
+                    "--coding-agent",
+                    "opencode",
+                    "--model",
+                    "nomodel",
+                    "literal assignment",
+                ],
+                expected: |_| "fleet '999' not found.".into(),
+                exit_code: 1,
+            },
+            InProcessCase {
+                name: "a deleted fleet precedes model validation",
+                fleet: FleetState::Deleted,
+                hold_layout: false,
+                arguments: &[
+                    "--coding-agent",
+                    "opencode",
+                    "--model",
+                    "nomodel",
+                    "literal assignment",
+                ],
+                expected: |fleet| format!("fleet {fleet} is deleted"),
+                exit_code: 1,
+            },
+            InProcessCase {
+                name: "model validation precedes effort validation",
+                fleet: FleetState::Live,
+                hold_layout: false,
+                arguments: &[
+                    "--coding-agent",
+                    "opencode",
+                    "--model",
+                    "nomodel",
+                    "--effort",
+                    "high",
+                    "literal assignment",
+                ],
+                expected: |_| {
+                    "--model for the opencode backend must be '<provider-id>/<model-id>' (got 'nomodel')."
+                        .into()
+                },
+                exit_code: 2,
+            },
+            InProcessCase {
+                name: "effort validation precedes permission-mode validation",
+                fleet: FleetState::Live,
+                hold_layout: false,
+                arguments: &[
+                    "--coding-agent",
+                    "claude",
+                    "--effort",
+                    "bogus",
+                    "--permission-mode",
+                    "bogus",
+                    "literal assignment",
+                ],
+                expected: |_| {
+                    "--effort for the claude backend must be one of low, medium, high, xhigh, max (got 'bogus')."
+                        .into()
+                },
+                exit_code: 2,
+            },
+            InProcessCase {
+                name: "permission-mode validation precedes body validation",
+                fleet: FleetState::Live,
+                hold_layout: false,
+                arguments: &[
+                    "--coding-agent",
+                    "claude",
+                    "--permission-mode",
+                    "bogus",
+                    " \t ",
+                ],
+                expected: |_| permission_mode_refusal(CodingAgent::Claude, "bogus"),
+                exit_code: 2,
+            },
+            InProcessCase {
+                name: "a blank body precedes the fleet layout lock",
+                fleet: FleetState::Live,
+                hold_layout: true,
+                arguments: &["--coding-agent", "claude", " \u{3000} "],
+                expected: |_| "text may not be empty.".into(),
+                exit_code: 2,
+            },
+            InProcessCase {
+                name: "the backend's prompt check precedes the fleet layout lock",
+                fleet: FleetState::Live,
+                hold_layout: true,
+                arguments: &["--coding-agent", "pi", "@notes.md review this"],
+                expected: |_| {
+                    "a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment)."
+                        .into()
+                },
+                exit_code: 2,
+            },
+            InProcessCase {
+                name: "the fleet layout lock precedes placeholder validation",
+                fleet: FleetState::Live,
+                hold_layout: true,
+                arguments: &["--coding-agent", "claude", "assignment {nope"],
+                expected: |fleet| {
+                    format!(
+                        "fleet {fleet} pane layout remained busy for 60 seconds; member was not created."
+                    )
+                },
+                exit_code: 1,
+            },
+        ];
+
+        fn create_args(fleet: &str, extra: &[&str]) -> CreateArgs {
+            let mut arguments = vec![
+                "cafleet",
+                "member",
+                "create",
+                "--fleet-id",
+                fleet,
+                "--name",
+                "worker",
+                "--description",
+                "validation order fixture",
+            ];
+            arguments.extend_from_slice(extra);
+            let Command::Member(MemberCommand::Create(args)) =
+                CliArgs::try_parse_from(arguments).unwrap().command
+            else {
+                panic!("member create expected")
+            };
+            args
+        }
+
+        #[test]
+        fn member_create_option_body_and_layout_checks_fail_in_code_order() {
+            for case in IN_PROCESS_CASES {
+                let name = case.name;
+                let dir = crate::runtime::test_support::short_tempdir();
+                let mut conn = initialized_file_conn(&dir);
+                let (fleet, _) = create_fleet_fixture(&mut conn, "validation-order");
+                if matches!(case.fleet, FleetState::Deleted) {
+                    conn.execute(
+                        "UPDATE fleets SET deleted_at='2026-11-27T00:00:00.000000+00:00' WHERE fleet_id=?1",
+                        [fleet],
+                    )
+                    .unwrap();
+                }
+                let fleet_argument = match case.fleet {
+                    FleetState::Unknown => "999".to_owned(),
+                    FleetState::Deleted | FleetState::Live => fleet.to_string(),
+                };
+                let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+                let _held = case.hold_layout.then(|| {
+                    LayoutLock::try_acquire(&settings.database_url, fleet)
+                        .unwrap()
+                        .expect("the test holds the fleet layout")
+                });
+                let before = table_snapshot(&conn, |_| true);
+                let error = create_with_layout_wait(
+                    &mut conn,
+                    &create_args(&fleet_argument, case.arguments),
+                    Duration::from_millis(300),
+                )
+                .expect_err(name);
+                assert_eq!(error.message(), (case.expected)(fleet), "{name}");
+                assert_eq!(error.exit_code(), case.exit_code, "{name}");
+                assert_eq!(table_snapshot(&conn, |_| true), before, "{name}");
+            }
+        }
+
+        const LOGGING_FAILING_TMUX: &str =
+            "printf 'tmux %s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\nexit 1";
+        const LOGGING_WORKING_TMUX: &str = "printf 'tmux %s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \" $* \" in *' #{window_height} '*) printf '120\\n' ;; *' display-message '*) printf 'main|@1|%%1\\n' ;; *' split-window '*) exit 1 ;; esac";
+        const HERMES_WITHOUT_PROFILE: &str = "printf 'hermes %s\\n' \"$*\" >> \"$CAFLEET_TEST_PANE_LOG\"\ncase \"$*\" in\n  --version) printf 'Hermes Agent vunknown (2026.9.24)\\n' ;;\n  'config path') echo 'no profile' >&2\n    exit 4 ;;\n  *) exit 3 ;;\nesac";
+        const CLAUDE_VERSION: &str = "printf '2.1.302 (Claude Code)\\n'";
+
+        enum Stderr {
+            Exact(&'static str),
+            ForFleet(fn(i64) -> String),
+            Prefix(&'static str),
+            Excludes(&'static str),
+        }
+
+        struct ChildCase {
+            name: &'static str,
+            director_placement: bool,
+            backend: &'static str,
+            prompt: &'static str,
+            executables: &'static [(&'static str, &'static str)],
+            stderr: Stderr,
+            exit_code: i32,
+            pane_log_contains: &'static [&'static str],
+            pane_log_excludes: &'static [&'static str],
+        }
+
+        const CHILD_CASES: [ChildCase; 6] = [
+            ChildCase {
+                name: "the Director placement precedes backend availability",
+                director_placement: false,
+                backend: "claude",
+                prompt: "literal assignment on {database_url}",
+                executables: &[("tmux", LOGGING_FAILING_TMUX)],
+                stderr: Stderr::ForFleet(|fleet| {
+                    format!(
+                        "Error: fleet {fleet} has no recorded Director placement; re-create the fleet with 'cafleet fleet create'.\n"
+                    )
+                }),
+                exit_code: 1,
+                pane_log_contains: &[],
+                pane_log_excludes: &["#{window_height}"],
+            },
+            ChildCase {
+                name: "backend availability precedes slot selection",
+                director_placement: true,
+                backend: "claude",
+                prompt: "literal assignment on {database_url}",
+                executables: &[("tmux", LOGGING_FAILING_TMUX)],
+                stderr: Stderr::Exact("Error: binary claude not found on PATH\n"),
+                exit_code: 1,
+                pane_log_contains: &[],
+                pane_log_excludes: &["#{window_height}"],
+            },
+            ChildCase {
+                name: "slot selection precedes the Hermes home preflight",
+                director_placement: true,
+                backend: "hermes",
+                prompt: "literal assignment on {database_url}",
+                executables: &[
+                    ("tmux", LOGGING_FAILING_TMUX),
+                    ("hermes", HERMES_WITHOUT_PROFILE),
+                ],
+                stderr: Stderr::Excludes("hermes configuration"),
+                exit_code: 1,
+                pane_log_contains: &["#{window_height}"],
+                pane_log_excludes: &["hermes config path"],
+            },
+            ChildCase {
+                name: "the Hermes home preflight precedes placeholder validation",
+                director_placement: true,
+                backend: "hermes",
+                prompt: "assignment {nope on {database_url}",
+                executables: &[
+                    ("tmux", LOGGING_WORKING_TMUX),
+                    ("hermes", HERMES_WITHOUT_PROFILE),
+                ],
+                stderr: Stderr::Exact(
+                    "Error: cannot read hermes configuration through 'hermes config path': no profile\n",
+                ),
+                exit_code: 1,
+                pane_log_contains: &["#{window_height}", "hermes config path"],
+                pane_log_excludes: &["split-window"],
+            },
+            ChildCase {
+                name: "an unknown placeholder precedes the database_url citation check",
+                director_placement: true,
+                backend: "claude",
+                prompt: "assignment {nope}",
+                executables: &[("tmux", LOGGING_WORKING_TMUX), ("claude", CLAUDE_VERSION)],
+                stderr: Stderr::Prefix("Error: Unknown placeholder 'nope' in custom prompt."),
+                exit_code: 2,
+                pane_log_contains: &["#{window_height}"],
+                pane_log_excludes: &["split-window"],
+            },
+            ChildCase {
+                name: "a malformed prompt precedes the database_url citation check",
+                director_placement: true,
+                backend: "claude",
+                prompt: "assignment }",
+                executables: &[("tmux", LOGGING_WORKING_TMUX), ("claude", CLAUDE_VERSION)],
+                stderr: Stderr::Exact(
+                    "Error: Malformed custom prompt: single '}' encountered outside a placeholder. Double literal braces ({{, }}) to keep them as text.\n",
+                ),
+                exit_code: 2,
+                pane_log_contains: &["#{window_height}"],
+                pane_log_excludes: &["split-window"],
+            },
+        ];
+
+        #[test]
+        fn member_create_runtime_checks_fail_in_code_order() {
+            for case in CHILD_CASES {
+                let name = case.name;
+                let dir = crate::runtime::test_support::short_tempdir();
+                let mut conn = initialized_file_conn(&dir);
+                let (fleet_id, director) =
+                    create_fleet_fixture(&mut conn, "runtime-validation-order");
+                if !case.director_placement {
+                    conn.execute(
+                        "DELETE FROM member_placements WHERE member_id=?1",
+                        [director],
+                    )
+                    .unwrap();
+                }
+                let settings = Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+                let config = dir.path().join("agent config");
+                std::fs::create_dir(&config).unwrap();
+                let before = table_snapshot(&conn, |_| true);
+                let fleet = fleet_id.to_string();
+                let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                    &settings,
+                    &[
+                        "member",
+                        "create",
+                        "--fleet-id",
+                        &fleet,
+                        "--name",
+                        "worker",
+                        "--description",
+                        "runtime validation order fixture",
+                        "--coding-agent",
+                        case.backend,
+                        case.prompt,
+                    ],
+                    case.executables,
+                    &[
+                        ("TMUX_PANE", "%1"),
+                        ("CLAUDE_CONFIG_DIR", config.to_str().unwrap()),
+                        ("HERMES_HOME", config.to_str().unwrap()),
+                    ],
+                );
+                let stderr = String::from_utf8(output.stderr).unwrap();
+                assert_eq!(
+                    output.status.code(),
+                    Some(case.exit_code),
+                    "{name}: {stderr}"
+                );
+                match case.stderr {
+                    Stderr::Exact(expected) => assert_eq!(stderr, expected, "{name}"),
+                    Stderr::ForFleet(expected) => assert_eq!(stderr, expected(fleet_id), "{name}"),
+                    Stderr::Prefix(prefix) => {
+                        assert!(stderr.starts_with(prefix), "{name}: {stderr}")
+                    }
+                    Stderr::Excludes(text) => {
+                        assert!(!stderr.contains(text), "{name}: {stderr}")
+                    }
+                }
+                for call in case.pane_log_contains {
+                    assert!(pane_calls.contains(call), "{name}: {call}: {pane_calls}");
+                }
+                for call in case.pane_log_excludes {
+                    assert!(!pane_calls.contains(call), "{name}: {call}: {pane_calls}");
+                }
+                assert_eq!(table_snapshot(&conn, |_| true), before, "{name}");
+            }
+        }
+    }
+
     #[test]
     fn spawn_placeholders_substitute_and_unescape() {
         for (body, expected) in [

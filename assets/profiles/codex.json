@@ -480,7 +480,42 @@
           "row": 11,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/codex-cells-001/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/codex-cells-001/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "codex-exec-allow-y": {
+            "focused_choice_id": null
+          },
+          "codex-exec-deny-digit": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "codex-0.163.0-allow-pre-stage-1": {
       "native_version": "0.163.0",
@@ -577,7 +612,42 @@
           "row": 11,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/codex-ans-allow-001/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "codex-exec-allow-y": {
+            "focused_choice_id": null
+          },
+          "codex-exec-deny-digit": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "codex-0.163.0-deny-pre-stage-1": {
       "native_version": "0.163.0",
@@ -674,7 +744,42 @@
           "row": 11,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/codex-ans-deny-001/permission-probe deny",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "codex-exec-allow-y": {
+            "focused_choice_id": null
+          },
+          "codex-exec-deny-digit": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "codex-0.167.0-composer-exec-paste-1037-args-post-1900ms-tapped-v2-herdr-119-19": {
       "native_version": "0.167.0",
@@ -731,7 +836,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-paste-1037-args-post-1900ms-tapped-v2-tmux-120-19": {
       "native_version": "0.167.0",
@@ -787,7 +924,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-herdr-119-13": {
       "native_version": "0.167.0",
@@ -844,7 +1013,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-paste-40-args-post-1900ms-tapped-v2-tmux-120-13": {
       "native_version": "0.167.0",
@@ -900,7 +1101,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25": {
       "native_version": "0.167.0",
@@ -970,7 +1203,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-paste-4000-args-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25": {
       "native_version": "0.167.0",
@@ -1039,7 +1304,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-post-1900ms-tapped-v2-herdr-119-12": {
       "native_version": "0.167.0",
@@ -1107,7 +1404,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1000-args-execution-proof-post-1900ms-tapped-v2-tmux-120-12": {
       "native_version": "0.167.0",
@@ -1174,7 +1503,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1001-args-execution-proof-post-1900ms-tapped-v2-herdr-119-18": {
       "native_version": "0.167.0",
@@ -1231,7 +1592,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1001-args-execution-proof-post-1900ms-tapped-v2-tmux-120-18": {
       "native_version": "0.167.0",
@@ -1287,7 +1680,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1024-args-post-1900ms-tapped-v2-herdr-119-31": {
       "native_version": "0.167.0",
@@ -1344,7 +1769,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1024-args-post-1900ms-tapped-v2-tmux-120-31": {
       "native_version": "0.167.0",
@@ -1400,7 +1857,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-herdr-119-37": {
       "native_version": "0.167.0",
@@ -1457,7 +1946,43 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 1024
+            },
+            {
+              "kind": "text",
+              "items": [
+                "a"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-1025-args-post-1900ms-tapped-v2-tmux-120-37": {
       "native_version": "0.167.0",
@@ -1513,7 +2038,43 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 1024
+            },
+            {
+              "kind": "text",
+              "items": [
+                "a"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-herdr-119-7": {
       "native_version": "0.167.0",
@@ -1570,7 +2131,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-40-args-post-1900ms-tapped-v2-tmux-120-7": {
       "native_version": "0.167.0",
@@ -1626,7 +2219,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-unsubmitted-literal-confirmed-tapped-v2-herdr-119-40": {
       "native_version": "0.167.0",
@@ -1683,7 +2308,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-unsubmitted-literal-confirmed-tapped-v2-tmux-120-40": {
       "native_version": "0.167.0",
@@ -1739,7 +2396,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1": {
       "native_version": "0.167.0",
@@ -1796,7 +2485,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1": {
       "native_version": "0.167.0",
@@ -1852,7 +2573,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-1037-post-1900ms-tapped-v2-herdr-119-19": {
       "native_version": "0.167.0",
@@ -1909,7 +2662,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-1037-post-1900ms-tapped-v2-tmux-120-19": {
       "native_version": "0.167.0",
@@ -1965,7 +2750,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-40-post-1900ms-tapped-v2-herdr-119-13": {
       "native_version": "0.167.0",
@@ -2022,7 +2839,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-40-post-1900ms-tapped-v2-tmux-120-13": {
       "native_version": "0.167.0",
@@ -2078,7 +2927,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-herdr-119-25": {
       "native_version": "0.167.0",
@@ -2148,7 +3029,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-4000-max-preview-chunks-post-1900ms-tapped-v2-tmux-120-25": {
       "native_version": "0.167.0",
@@ -2217,7 +3130,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-1024-post-1900ms-tapped-v2-herdr-119-31": {
       "native_version": "0.167.0",
@@ -2285,7 +3230,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-1024-post-1900ms-tapped-v2-tmux-120-31": {
       "native_version": "0.167.0",
@@ -2352,7 +3329,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-herdr-119-37": {
       "native_version": "0.167.0",
@@ -2409,7 +3418,43 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 1024
+            },
+            {
+              "kind": "text",
+              "items": [
+                "a"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-1025-post-1900ms-tapped-v2-tmux-120-37": {
       "native_version": "0.167.0",
@@ -2465,7 +3510,43 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 1024
+            },
+            {
+              "kind": "text",
+              "items": [
+                "a"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-40-post-1900ms-tapped-v2-herdr-119-7": {
       "native_version": "0.167.0",
@@ -2522,7 +3603,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-40-post-1900ms-tapped-v2-tmux-120-7": {
       "native_version": "0.167.0",
@@ -2578,7 +3691,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-herdr-119-1": {
       "native_version": "0.167.0",
@@ -2635,7 +3780,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-unsubmitted-literal-confirmed-tapped-v2-tmux-120-1": {
       "native_version": "0.167.0",
@@ -2691,7 +3868,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-herdr-119-41": {
       "native_version": "0.167.0",
@@ -2748,7 +3957,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-unsubmitted-literal-tapped-v2-tmux-120-41": {
       "native_version": "0.167.0",
@@ -2804,7 +4045,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-herdr-119-39": {
       "native_version": "0.167.0",
@@ -2869,7 +4142,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-42-args-literal-tapped-v2-tmux-120-39": {
       "native_version": "0.167.0",
@@ -2933,7 +4238,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-herdr-119-2": {
       "native_version": "0.167.0",
@@ -3002,7 +4339,39 @@
           "row": 38,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "CF228_RETAIN_prompt_herdr_1794671922561553059"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-retained-authoritative-no-submit-tapped-v2-tmux-120-2": {
       "native_version": "0.167.0",
@@ -3070,7 +4439,39 @@
           "row": 37,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "CF228_RETAIN_prompt_tmux_1794671921279867495"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-suggestion-tmux-120-1": {
       "native_version": "0.167.0",
@@ -3371,7 +4772,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.166.0-deny-pre-stage-tmux-120-1": {
       "native_version": "0.166.0",
@@ -3605,7 +5038,42 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe deny",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe deny",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "codex-exec-allow-y": {
+            "focused_choice_id": null
+          },
+          "codex-exec-deny-digit": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "codex-0.166.0-allow-pre-stage-tmux-120-1": {
       "native_version": "0.166.0",
@@ -3846,7 +5314,42 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "codex-exec-allow-y": {
+            "focused_choice_id": null
+          },
+          "codex-exec-deny-digit": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "codex-0.167.0-deny-pre-stage-tmux-120-1": {
       "native_version": "0.167.0",
@@ -4080,7 +5583,42 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe deny",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe deny",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "codex-exec-allow-y": {
+            "focused_choice_id": null
+          },
+          "codex-exec-deny-digit": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "codex-0.167.0-deny-post-stage-tmux-120-1": {
       "native_version": "0.167.0",
@@ -4407,7 +5945,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-allow-pre-stage-tmux-120-1": {
       "native_version": "0.167.0",
@@ -4648,7 +6218,42 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "codex-exec-approval",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/cx-outside/permission-probe allow",
+          "choices": [
+            "Yes, proceed",
+            "No, and tell Codex what to do differently"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "codex-exec-allow-y": {
+            "focused_choice_id": null
+          },
+          "codex-exec-deny-digit": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "codex-0.167.0-allow-post-stage-tmux-120-1": {
       "native_version": "0.167.0",
@@ -4985,7 +6590,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-auto-status-tmux-120-1": {
       "native_version": "0.167.0",
@@ -5314,7 +6951,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.166.0-composer-prompt-plain-41-post-submit-tmux-120-1": {
       "native_version": "0.166.0",
@@ -5741,7 +7410,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.166.0-composer-exec-plain-42-literal-tmux-120-1": {
       "native_version": "0.166.0",
@@ -6111,7 +7812,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.166.0-composer-prompt-plain-41-post-submit-herdr-092-1": {
       "native_version": "0.166.0",
@@ -6459,7 +8192,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.166.0-composer-exec-plain-42-literal-herdr-092-1": {
       "native_version": "0.166.0",
@@ -6847,7 +8612,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-idle-empty-tmux-120-1": {
       "native_version": "0.167.0",
@@ -7193,7 +8990,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-41-literal-tmux-120-1": {
       "native_version": "0.167.0",
@@ -7554,7 +9383,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-41-post-submit-tmux-120-1": {
       "native_version": "0.167.0",
@@ -7981,7 +9842,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-1024-post-submit-tmux-120-1": {
       "native_version": "0.167.0",
@@ -8355,7 +10248,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-4000-post-submit-tmux-120-1": {
       "native_version": "0.167.0",
@@ -8787,7 +10712,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-42-literal-tmux-120-1": {
       "native_version": "0.167.0",
@@ -9205,7 +11162,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-998-post-submit-tmux-120-1": {
       "native_version": "0.167.0",
@@ -9616,7 +11605,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-paste-4000-post-submit-tmux-120-1": {
       "native_version": "0.167.0",
@@ -10022,7 +12043,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-idle-empty-herdr-092-1": {
       "native_version": "0.167.0",
@@ -10388,7 +12441,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-41-literal-herdr-092-1": {
       "native_version": "0.167.0",
@@ -10755,7 +12840,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-41-post-submit-herdr-092-1": {
       "native_version": "0.167.0",
@@ -11115,7 +13232,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-plain-1024-post-submit-herdr-092-1": {
       "native_version": "0.167.0",
@@ -11467,7 +13616,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-prompt-paste-4000-post-submit-herdr-092-1": {
       "native_version": "0.167.0",
@@ -11869,7 +14050,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-42-literal-herdr-092-1": {
       "native_version": "0.167.0",
@@ -12257,7 +14470,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-plain-998-post-submit-herdr-092-1": {
       "native_version": "0.167.0",
@@ -12638,7 +14883,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.167.0-composer-exec-paste-4000-post-submit-herdr-092-1": {
       "native_version": "0.167.0",
@@ -13014,7 +15291,39 @@
             "b": 103
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-idle-empty-tmux-120-1": {
       "native_version": "0.169.0",
@@ -13236,7 +15545,39 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-one-tmux-120-1": {
       "native_version": "0.169.0",
@@ -13463,7 +15804,39 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-wrap-tmux-120-1": {
       "native_version": "0.169.0",
@@ -13690,7 +16063,47 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-plain-1024-tmux-120-1": {
       "native_version": "0.169.0",
@@ -13917,7 +16330,71 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-busy-tmux-120-1": {
       "native_version": "0.169.0",
@@ -14238,7 +16715,39 @@
           "faint": true,
           "foreground": null
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-idle-empty-herdr-120-1": {
       "native_version": "0.169.0",
@@ -14462,7 +16971,39 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-one-herdr-120-1": {
       "native_version": "0.169.0",
@@ -14691,7 +17232,39 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-wrap-herdr-120-1": {
       "native_version": "0.169.0",
@@ -14920,7 +17493,47 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-plain-1024-herdr-120-1": {
       "native_version": "0.169.0",
@@ -15149,7 +17762,71 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-busy-herdr-120-1": {
       "native_version": "0.169.0",
@@ -15465,7 +18142,39 @@
           "foreground": null
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "codex-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask Codex to do anything"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-prompt-plain-1024-literal-tmux-80-1": {
       "native_version": "0.169.0",
@@ -15598,7 +18307,91 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-prompt-paste-placeholder-1024-literal-herdr-81-1": {
       "native_version": "0.169.0",
@@ -15842,7 +18635,37 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 1024
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-exec-plain-1000-literal-tmux-80-1": {
       "native_version": "0.169.0",
@@ -15985,7 +18808,91 @@
             "index": 9
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-exec-plain-1000-literal-herdr-81-1": {
       "native_version": "0.169.0",
@@ -16129,7 +19036,91 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-plain-1024-tmux-80-1": {
       "native_version": "0.169.0",
@@ -16363,7 +19354,37 @@
             "b": 144
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 1024
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-director-plain-1024-herdr-81-1": {
       "native_version": "0.169.0",
@@ -16488,7 +19509,91 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-prompt-wrap-literal-tmux-120-1": {
       "native_version": "0.169.0",
@@ -16715,7 +19820,47 @@
             "index": 5
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-exec-wrap-literal-tmux-120-1": {
       "native_version": "0.169.0",
@@ -16962,7 +20107,47 @@
             "index": 9
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-prompt-paste-2000-literal-tmux-120-1": {
       "native_version": "0.169.0",
@@ -17219,7 +20404,37 @@
             "index": 9
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 2000
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "codex-0.169.0-composer-exec-paste-2000-literal-tmux-120-1": {
       "native_version": "0.169.0",
@@ -17476,7 +20691,37 @@
             "index": 9
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "codex-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "scalars",
+              "count": 2002
+            }
+          ]
+        },
+        "answers": {}
+      }
     }
   }
 }

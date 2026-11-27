@@ -24,11 +24,11 @@ Exact command facts for running CAFleet and interpreting its results.
 | `message poll` | Read and consume incoming deliveries | `MEMBER_ID` | yes |
 | `message show` | Read one message | `MESSAGE_ID` | yes |
 
-`cafleet --version` prints `cafleet <version>` and exits 0.
+`cafleet --version` prints `cafleet <version>` and exits 0. `cafleet help COMMAND…` equals `cafleet COMMAND… --help`; `cafleet` alone, or a group such as `cafleet fleet` without its subcommand, prints help to stderr and exits 2. A flag given twice on one command (`--json --json`) is a parse error, exit 2; `--opt=value` equals `--opt value`.
 
 ## Positional subject ids
 
-Place the complete database-assigned integer subject immediately after its subcommand; related fleet and recipient state comes from that row. Missing or malformed IDs exit 2 with parser errors.
+Place the complete database-assigned integer subject immediately after its subcommand; related fleet and recipient state comes from that row. An ID may carry a leading `+` or leading zeros (`007` is 7). Missing, malformed or out-of-range IDs exit 2 with parser errors whose first line begins `error: `.
 
 ## Director-only command guard
 
@@ -38,7 +38,7 @@ Place the complete database-assigned integer subject immediately after its subco
 
 ## Database selection
 
-The global `--database-url <url>`, before or after the subcommand, selects the SQLite database. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the package version. Explicit `sqlite:///<path>` resolves relative paths against cwd and leaves literal tildes unexpanded. CAFleet reads no `CAFLEET_*` environment variable.
+The global `--database-url <url>`, before or after the subcommand, selects the SQLite database. Pass it at most once per command level (`cafleet`, the group, the subcommand); a repeat on one level exits 2, and the deepest level wins. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the package version; without `HOME` it fails with `Error: HOME is not set; cannot derive the default database path` (or `HOME is not valid UTF-8; …`), exit 1. Explicit `sqlite:///<path>` takes the text after `sqlite:///` as a plain file path: `sqlite:///etc/x` is relative to cwd, an absolute path needs four slashes (`sqlite:////var/x.db`), and literal tildes stay unexpanded. Another prefix fails with `Error: database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'`, and an empty path or `:memory:` with `Error: database URL has no file path`, both exit 1. CAFleet reads no `CAFLEET_*` environment variable.
 
 A member whose `DATABASE URL:` names a URL passes `--database-url <url>` on every `cafleet` command; without it, the command reaches the default database and fails with `no cafleet database; run 'cafleet setup'` or matches another fleet's IDs.
 
@@ -48,7 +48,7 @@ Config overrides `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR`, `HERM
 
 Text output truncates message bodies at 200 codepoints; `--json` returns compact, complete UTF-8. Place `--json` before any `--` separator; commands marked no in the summary, and the root group, reject it.
 
-Message records contain `message_id`, `from_member_id`, `to_member_id`, `created_at`, `status_state`, `status_timestamp` and `text`. Send and show return `message`; poll returns an array of the records it consumed. Fleet creation returns `fleet_id`, `name`, `created_at` and `director`; list and show return fleet records, show adding nullable `deleted_at`; deletion returns `fleet_id`, `deregistered_count` and `members`. Member deletion returns `member_id`, `pane_status`; capture returns `member_id`, `pane_id`, `lines`, `content`, `captured_at`, `content_sha256`.
+Message records contain `message_id`, `from_member_id`, `to_member_id`, `created_at`, `status_state`, `status_timestamp` and `text`. Send and show return `message`; poll returns an array of the records it consumed. Fleet creation returns `fleet_id`, `name`, `created_at` and `director`; list returns an array of `fleet_id, name, created_at, director_member_id, member_count` (`member_count` counts active members, Director included), and show returns `fleet_id, name, created_at, deleted_at, director_member_id` with nullable `deleted_at`; deletion returns `fleet_id`, `deregistered_count` and `members`. Member deletion returns `member_id`, `pane_status`; capture returns `member_id`, `pane_id`, `lines`, `content`, `captured_at`, `content_sha256`.
 
 ### Member list output
 
@@ -56,7 +56,7 @@ Roster records contain `member_id`, `name`, `kind` (`director` or `member`), `pl
 
 `placement` keys, in order, are `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id`, `mux_window_name` and `mux_pane_id` are null while creation is pending. Fleet windows are named `cafleet-<fleet_id>-<ordinal>`, ordinal `0` for the Director window; `column_side` is `left` or `right`.
 
-Text rows list `member_id`, `name`, `kind`, `backend`, `window`, `pane_id` and `idle`; pending placement prints `(pending)`, absent activity `-`:
+Rows are in ascending `member_id`. Text starts `N members:` (`1 member:` for one row; an empty roster prints only `0 members.`), then rows listing `member_id`, `name`, `kind`, `backend`, `window`, `pane_id` and `idle`; pending placement prints `(pending)`, absent activity `-`:
 
 ```text
 2 members:
@@ -71,7 +71,7 @@ Text rows list `member_id`, `name`, `kind`, `backend`, `window`, `pane_id` and `
 
 ## Text bodies
 
-Send and create take exactly one positional body or `--file PATH` (`--file -` reads UTF-8 stdin) and preserve nonblank text exactly. Missing or both sources, or a blank positional, exit 2; a blank, unreadable or invalid file or stdin exits 1 (§ Error messages).
+Send and create take exactly one positional body or `--file PATH` (`--file -` reads UTF-8 stdin) and preserve nonblank text exactly. Text is blank when every character is Unicode whitespace, the empty text included. Missing or both sources, or a blank positional, exit 2; a blank, unreadable or invalid file or stdin exits 1 (§ Error messages).
 
 ## Fleet commands
 
@@ -114,7 +114,7 @@ Each failure exits 1; only a member that cannot be ended leaves earlier members 
 |---|---|
 | Pane input lock busy | `fleet ID pane input remained busy for 5 seconds at member MEMBER_ID; fleet was not deleted.` |
 | Fleet layout lock busy for 60 seconds | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.` |
-| A member cannot be ended | `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.` |
+| A member cannot be ended | `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is that member's deletion cause (§ `member delete`) without trailing `.` and `IDS` is the ended IDs joined by `, ` or `none` |
 | Placement set changed during cleanup | `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` |
 
 ## Messages
@@ -210,7 +210,7 @@ Exit 2 errors before registration:
 | pi model ending in `:` plus a pi LEVEL (`:free` and other text pass) | `Error: --model for the pi backend names a model without a ':<thinking>' suffix; pass the thinking level with --effort (got '<value>').` |
 | pi prompt beginning with `@` | `Error: a pi spawn prompt begins with text, not '@' (pi reads a leading '@' argument as a file attachment).` |
 
-Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}`; `{database_url}` renders `default` or `sqlite:///<canonical path>`. Double literal braces `{{`/`}}`; malformed or unknown placeholders exit 2 (§ Error messages). A non-default database with a prompt lacking `{database_url}` exits 1 before registration: `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url`.
+Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}`; `{database_url}` renders `default` or `sqlite:///<canonical path>`. Double literal braces `{{`/`}}`; malformed or unknown placeholders exit 2 (§ Error messages). A placeholder name is the exact text between the braces, so `{}` and `{ fleet_id }` are unknown. The malformed `<detail>` is `unexpected '{' in placeholder name`, `expected '}' before end of string` or `single '}' encountered outside a placeholder`. A non-default database with a prompt lacking `{database_url}` exits 1 before registration: `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url`.
 
 Creation waits up to 60 seconds for the fleet's pane layout lock. The member fills the Director window's right column, then overflow windows' columns (one member per 15 rows, up to 8), opening overflow window `cafleet-<fleet_id>-<ordinal>` without taking focus when all are full. Existing members never move.
 
@@ -229,7 +229,7 @@ Backend preflights exit 1 before registration:
 
 | Condition | Error |
 |---|---|
-| `hermes config path` fails or times out under the member's `HERMES_HOME` | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
+| `hermes config path` fails or times out, run with `HERMES_HOME` set to the resolved Hermes base (`~/.hermes` when unset) | `Error: cannot read hermes configuration through 'hermes config path': <cause>` |
 | `hermes config path` prints no absolute file path | `Error: cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
 | The pi extension `<pi base>/extensions/cafleet.ts` is unreadable | `Error: cannot read the CAFleet pi extension at <path>: <cause>; run 'cafleet setup --coding-agent pi' first` |
 
@@ -249,8 +249,20 @@ The first three outcomes exit 1 and keep the member; retry after inspecting the 
 |---|---|
 | Busy pane input | `member ID's pane input remained busy for 5 seconds; member was not deleted.` |
 | Fleet layout lock busy for 60 seconds | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` |
-| Unverified Hermes stop | `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.` |
+| Unverified Hermes stop | `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.`, CAUSE being `the Hermes turn did not stop after Ctrl-C`, `the Hermes composer still holds text after clearing`, `Hermes did not report /stop`, `Hermes printed no exit summary after /exit`, `the Hermes client did not exit after /exit`, `background processes of session <id> are still running: <pids>` or `member run <run-id> has no Hermes session record` |
 | Hermes client already exited | Deletion completes with `warning: hermes client for member ID had already exited; its session work may still be running in the Hermes gateway` |
+
+Other deletion causes exit 1 and keep the member; rerun the delete after inspecting with `cafleet doctor`:
+
+| Cause | Meaning |
+|---|---|
+| `member placement or runtime ownership changed <stage>` | Another process changed the member; `<stage>` is `before cleanup`, `before pane close` or `after pane close` |
+| `member <member-id> child cleanup remains unconfirmed: <diagnostics>; inspect with cafleet doctor` | The runner shutdown could not confirm its child stopped |
+| `member recovery remains incomplete; inspect with cafleet doctor` | Recovery of a stopped runner did not finish |
+| `pane <pane-id> could not be closed: <cause>. Verify with 'cafleet doctor'.` | The multiplexer refused the pane close |
+| `pane <pane-id> was closed, but deregister failed: <cause>` | The pane is gone; rerun the delete to deregister |
+
+Text output is `Member deleted.`, `  member_id: <member-id>` and `  pane_id:   <pane-id> (killed)` (or `(pending — no pane)`).
 
 ### `member list`
 
@@ -266,10 +278,10 @@ The first three outcomes exit 1 and keep the member; retry after inspecting the 
 
 | Condition | Error body (exit 1) |
 |---|---|
-| Pre-write error, including a held runner reply | `prompt was not dispatched to member ID: CAUSE` |
-| Partial uncertainty | `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Rejected before any byte | `prompt was not dispatched to member ID: CAUSE` |
+| Held, rejected after typing began, or uncertain | `prompt delivery to member ID is STATUS[: REASON][ (method=METHOD)]`, e.g. `… is held: input requires live proven-zero revalidation` |
 
-Uncertain errors include `input_id=INPUT_ID`; inspect it and the pane before a deliberate retry. Over-limit input without safe framing gets the pre-write error with a CAUSE below (UNIT `bytes` or `characters`).
+Refusals add a context line such as `run_id=R input_id=N operation_key="…"` after the error; inspect the input and the pane before a deliberate retry. Over-limit input without safe framing gets the pre-write error with a CAUSE below (UNIT `bytes` or `characters`).
 
 | Missing delivery mechanism | CAUSE |
 |---|---|
@@ -285,10 +297,10 @@ The runner submits `! ` plus the command; the host owns cwd, environment, permis
 | Condition | Error body (exit 1) |
 |---|---|
 | Root Director, before I/O | `cannot exec in the Director's own pane` |
-| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
-| Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Rejected before any byte | `native command was not dispatched to member ID: CAUSE` |
+| Held, rejected after typing began, or uncertain | `native command delivery to member ID is STATUS[: REASON][ (method=METHOD)]` |
 
-Uncertain errors include `input_id=INPUT_ID`, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`; the command may have typed partially or executed, so inspect native output and reconcile receipts before a newly authorized retry. Over-limit CAUSE strings match [member prompt](#member-prompt). After completion, explicitly prompt continuation if the host has not resumed.
+Uncertain errors add a context line with `input_id=INPUT_ID`, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`; the command may have typed partially or executed, so inspect native output and reconcile receipts before a newly authorized retry. Over-limit CAUSE strings match [member prompt](#member-prompt). After completion, explicitly prompt continuation if the host has not resumed.
 
 ### `member press`
 
@@ -318,11 +330,13 @@ Answer request-bound decisions with `permission respond`.
 
 ### `member capture`
 
-`cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` reads trailing lines (default 20) without the input lock; `--ansi` preserves escapes, otherwise redraws and escapes are cleaned. Pending placement fails. `captured_at` stamps the read; `content_sha256` hashes the emitted `content`.
+`cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]` reads trailing lines (default 20, at least 1) without the input lock; a failure of the capture call, `--lines 0` included, exits 1 with `Error: capture failed: <cause>`, while a missing multiplexer (`tmux binary not found on PATH`) keeps its own error; `--ansi` preserves escapes, otherwise redraws and escapes are cleaned. Pending placement fails. `captured_at` stamps the read; `content_sha256` hashes the emitted `content`.
 
 ## Pane input and previews
 
 Writers share one lock per concrete pane; capture is read-only, and human input is independent.
+
+A multiplexer process failure names the backend and the full argv joined by spaces: `<backend> binary not found: <cause>`, `<backend> command was not started: <cause>: <argv>`, `<backend> command timed out at the pane input deadline: <argv>`, or `<backend> command failed: <argv>` followed by a `stderr: <stderr>` line. `fleet create`, `doctor` and `member capture` run their multiplexer commands without a deadline; every other command's are bounded by its operation deadline.
 
 Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, `Backspace`, arrows, `F1`–`F12`, `Ctrl+a`–`Ctrl+z` and `Shift+Tab`. Printable case is preserved; names and modifiers are case-insensitive, control letters canonicalize lowercase.
 
@@ -347,7 +361,7 @@ Member show appends, after `child_start_identity`:
 
 `delivery` contains `status,method,reason`; method is `profile`, `fallback` or null before selection. Held and `uncertain` prompt or exec exit 1, `uncertain` requiring reconciliation; `not_submitted` records cancellation or an evidence-based reconciliation.
 
-Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,delivery_budget_exhausted`; the fallback reason is `submission_plan_unavailable`. Later results appear in receipts and events, leaving the original command output unchanged.
+Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,delivery_budget_exhausted`; the fallback reason is `submission_plan_unavailable`. Queued text output ends with `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` Later results appear in receipts and events, leaving the original command output unchanged.
 
 ### Runtime events
 
@@ -361,7 +375,7 @@ Delivery results contain `input_id,message_id,delivery,stage`, source `runner_li
 
 `input_delivery_stalled` reports a queued head or preview that waited 3 minutes without an attempt, or input held behind an `uncertain` input. It carries ordered `input_id,message_id,blocked_by_input_id,waiting_since`, exactly one ID set. Its action is `review_stalled_delivery` with `inspect_argv` `["cafleet","member","capture","MEMBER_ID","--json"]` (clear or submit a composer draft), or, when blocked, `reconcile_uncertain_input` with `["cafleet","input","show","BLOCKER_ID","--json"]`.
 
-A `runner_degraded` event with cause `{"kind":"event_rejected","rejected_kind":KIND,"rejected_observed_at":TIMESTAMP,"error":MESSAGE}` replaces an event the runner could not store; a rejected `interaction_opened` leaves the request visible only on the member's pane. Repeated delivery records and stalled heads no longer `ready` are archived (`archive_reason` `duplicate_delivery` or `head_not_ready`) without an inbox message. Every argv appends `--database-url URL` for a non-default database. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
+A `runner_degraded` event with cause `{"kind":"event_rejected","rejected_kind":KIND,"rejected_observed_at":TIMESTAMP,"error":MESSAGE}` replaces an event the runner could not store; a rejected `interaction_opened` leaves the request visible only on the member's pane. Repeated delivery records and stalled heads no longer `ready` are archived (`archive_reason` `duplicate_delivery` or `head_not_ready`) without an inbox message. For a non-default database, the `review_stalled_delivery` and `reconcile_uncertain_input` argv arrays append `--database-url URL`; a permission or question `inspect_argv` does not, so add `--database-url URL` yourself when running it. [Director recovery](../roles/director.md#reconcile-generated-input) owns the procedure.
 
 ### `event show`
 
@@ -467,8 +481,10 @@ Application errors print to stderr prefixed `Error: `, even with `--json`; struc
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` |
 | `member create` | The selected opencode preset is unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` |
-| `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` |
-| `member create` | The fleet's root Director is inactive | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` |
+| `member create` / `member list` / `member show` | Into or of a soft-deleted fleet | `Error: fleet X is deleted` |
+| `member create` / `member list` / `member show` | The fleet's root Director is inactive | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` |
+| `setup` | `HOME` is unset (read after database preparation) | `Error: HOME is not set` |
+| `event show` / `input show` / `input reconcile` | An unknown event or input ID | `Error: Event <event-id> not found`, `Error: Input <input-id> not found` |
 | `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member delete` | Against the root Director | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` |
@@ -479,14 +495,16 @@ Application errors print to stderr prefixed `Error: `, even with `--json`; struc
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> |
 | `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member | `Error: Member <member-id> not found` |
 | `permission inspect` | An unknown `INTERACTION_ID` | `Error: Interaction <interaction-id> not found` |
+| `permission respond` | `--expected-run-id` names no run | `Error: Run <run-id> not found` |
 
 Text-body errors of `message send` and `member create`:
 
 | Situation | Error message |
 |---|---|
-| Positional body empty or whitespace-only | `Error: text may not be empty.` (exit 2) |
-| `--file <path>` to an empty file | `Error: --file <path>: file is empty.` |
-| `--file -` with empty stdin | `Error: --file -: stdin is empty.` |
-| `--file <path>` to a missing path or non-regular file | `Error: --file <path>: file does not exist or is not a regular file.` |
-| `--file <path>` to an unreadable file | `Error: --file <path>: file is not readable.` |
-| `--file <path>` to invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` |
+| Positional body blank | `Error: text may not be empty.` (exit 2) |
+| `--file <path>` to a blank file | `Error: --file <path>: file is empty.` |
+| `--file -` with blank or closed stdin | `Error: --file -: stdin is empty.` |
+| `--file <path>` to a missing path or a directory | `Error: --file <path>: file does not exist or is not a regular file. (<io error>)` |
+| `--file <path>` that cannot be read otherwise | `Error: --file <path>: file is not readable. (<io error>)` |
+| `--file <path>` or `--file -` to invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` (`--file -: …` for stdin) |
+| Reading stdin for `--file -` fails | `Error: --file -: <io error>` |

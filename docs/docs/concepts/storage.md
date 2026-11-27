@@ -4,7 +4,7 @@ Use one SQLite file for a fleet's registry and durable messages. The CLI accesse
 
 ## Backend
 
-The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Pass `--database-url sqlite:///<path>` on a command to select another file; a relative path resolves against the invoking working directory, and the selected file is then canonicalized for shared pane-lock identity. `member create` renders a non-default database into the spawn prompt's `DATABASE URL:` line, and the member passes that URL on every command; for a non-default database, a prompt without the `{database_url}` placeholder is refused ([database selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#database-selection)).
+The default path is `~/.local/share/cafleet/cafleet_<VERSION>.db`, where `<VERSION>` is the package version (the version field of `cafleet --version`, e.g. `0.31.1`). Pass `--database-url sqlite:///<path>` on a command to select another file. `<path>` is the plain file path after `sqlite:///`, so an absolute path takes four slashes (`sqlite:////srv/fleet.db`); SQLite URI forms are read as file names, and an empty path or `:memory:` is refused. A relative path resolves against the invoking working directory, and the selected file is then canonicalized for shared pane-lock identity. `member create` renders a non-default database into the spawn prompt's `DATABASE URL:` line, and the member passes that URL on every command; for a non-default database, a prompt without the `{database_url}` placeholder is refused ([database selection](https://github.com/himkt/cafleet/blob/main/SPEC.md#database-selection)).
 
 Connections enforce foreign keys and normally use `PRAGMA busy_timeout=5000`; bounded receiving caps database waits to its remaining operation budget. Fleet creation writes its registry and current Director placement in one transaction, and [Members](members.md#registration-and-readiness) covers failed member creation.
 
@@ -20,7 +20,7 @@ A compatible file has CAFleet's application identity and records that the runnin
 |---|---|
 | Missing file, or an empty SQLite file with identity zero and no user tables | Apply the embedded schema transactionally |
 | Valid file of this version | Proceed idempotently |
-| Other populated/identified file or another version's file | Report incompatible format before writes |
+| Other populated/identified file, another version's file, or a file that is not an SQLite database | Report incompatible format before writes |
 
 Run `cafleet setup` after installation. The same classifier guards normal commands and feeds doctor's read-only diagnosis; the [schema-version guard](https://github.com/himkt/cafleet/blob/main/SPEC.md#schema-version-guard) has the exact errors.
 

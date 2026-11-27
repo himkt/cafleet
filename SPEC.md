@@ -1,12 +1,28 @@
 # CAFleet — Reimplementation Specification
 
-This is the self-contained interface and observable-behavior specification for the `cafleet` CLI, broker, independent coding-agent sessions and embedded assets. Exact authored errors, JSON fields/order and command layouts govern. Text that an operating-system or library error contributes after an authored prefix (written `<io error>`, `<error>` or `<cause>`) is non-normative: an implementation preserves the error's meaning, not its wording, quoting or numeric suffix. An errno name shown in a diagnostic (such as `ECONNREFUSED`) is normative; the description after it is not. Complete module contracts appear in §6 Module specifications.
+This is the self-contained interface and observable-behavior specification for the `cafleet` CLI, broker, independent coding-agent sessions and embedded assets. Every observable this document states is normative and byte-exact, except the implementation-defined surfaces that §1.1 Conformance lists. Text that an operating-system or library error contributes after an authored prefix (written `<io error>`, `<error>` or `<cause>`) is implementation-defined: an implementation preserves the error's meaning, not its wording, quoting or numeric suffix. An errno name shown in a diagnostic (such as `ECONNREFUSED`) is normative; the description after it is not. Complete module contracts appear in §6 Module specifications.
 
 ## 1. Overview & goals
 
 CAFleet multiplexes coding-agent sessions in tmux or herdr and coordinates them with durable point-to-point SQLite messages. The host owns task continuation and native execution results; the Director owns delegation, wake handling, evidence inspection, authorization and cleanup. The shipped product consists of the CLI, embedded skills/presets and documentation site.
 
 Reproduce the documented command/option/exit surface, configuration defaults, current schema, enum values, output shapes, lifecycle, consuming poll, notification, locking, termination deferral and native dispatch semantics. The current format identity defines compatibility; required data corruption surfaces at its read boundary.
+
+### 1.1 Conformance
+
+An implementation conforms when every normative observable equals this specification's statement byte for byte. Everything not listed as implementation-defined below is normative:
+
+| Surface | Status |
+|---|---|
+| Authored stdout and stderr text, JSON bytes and key order, text layouts, exit codes | Normative |
+| Multiplexer and native argv, bytes written to a child PTY, §8 rows and their values | Normative |
+| Process, lock, signal and deadline behavior stated as observable outcomes | Normative |
+| Operating-system and library cause text after an authored prefix (`<io error>`, `<error>`, `<cause>`) | Implementation-defined |
+| `--help` layout, except the strings this specification quotes (§6.3 Help text) | Implementation-defined |
+| A parse error's stderr after the first line's `error: ` prefix and the named argument (§6.3 CLI parse rules) | Implementation-defined |
+| A diagnostic for a violated internal invariant that no conforming environment reaches; the process exits non-zero | Implementation-defined |
+| The `__member-run` descriptor file exchanged between processes of one binary version (§6.9 Runner boundary and creation transaction) | Implementation-defined |
+| Internal scheduling not stated as a constant, such as an idle tick or a pipe-drain loop | Implementation-defined |
 
 ## 2. Architecture stance
 
@@ -42,7 +58,7 @@ The broker persists/queries typed data. It performs no pane I/O. Multiplexer uti
 
 ### 5.1 Timestamps
 
-Serialize timestamps as fixed-width UTC `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` text with six fractional digits. Compare canonical timestamps lexicographically for SQL ordering/maxima. Parse only for age/idle arithmetic; externally supplied parsing accepts missing fractional parts and UTC offset spellings. Durations/deadlines use monotonic time.
+Serialize timestamps as fixed-width UTC `YYYY-MM-DDTHH:MM:SS.ffffff+00:00` text with six fractional digits. Compare canonical timestamps lexicographically for SQL ordering/maxima. One write takes one clock reading for every timestamp it stores: `message send` stores one value as `created_at`, `status_timestamp` and a self-send's `notified_at`, `fleet create` one for the fleet, the Director's `registered_at` and its placement, and member registration one for `registered_at` and the placement. Parse only for age/idle arithmetic. Stored-timestamp parsing accepts at least the canonical form and every RFC 3339 `date-time`, including a missing fractional part and any UTC offset spelling; whether it accepts any other text is implementation-defined. Durations/deadlines use monotonic time.
 
 ### 5.2 Core entities
 
@@ -136,19 +152,33 @@ Preserve the validation boundary and explicit cause. Missing member/message, ina
 
 #### Database selection
 
-The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
+The global option `--database-url <url>` selects the SQLite database. It is accepted before or after the subcommand, so a prefix allow rule such as `Bash(cafleet message *)` matches `cafleet message poll 7 --database-url <url>`. The option may appear once on each level of the command path: after `cafleet`, after a command group such as `fleet`, and after the leaf subcommand. A repeat on one level is a parse error (exit 2); when several levels carry it, the deepest level's value wins, so `cafleet --database-url A fleet list --database-url B` selects `B`. Omitted, the default `sqlite:///` + `~/.local/share/cafleet/cafleet_<VERSION>.db` applies, `<VERSION>` being the release version (§7.6), e.g. `0.31.1`.
 
-The default expands HOME once. An explicit URL has the form `sqlite:///<path>`; resolve a relative file path against the invoking working directory before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
+The default expands HOME once, before any command runs, `setup` and `doctor` included. An unset `HOME` fails with `HOME is not set; cannot derive the default database path` and a `HOME` that is not valid UTF-8 with `HOME is not valid UTF-8; cannot derive the default database path`, both exit 1; an explicit `--database-url` reads no `HOME` for selection. `member create` still reads `HOME` to decide whether `{database_url}` renders `default` (§ Spawn-prompt substitution), after its Hermes preflight and before the placeholder check, failing with the unset-`HOME` error above.
+
+An explicit URL has the form `sqlite:///<path>`: the path is the text after the literal prefix `sqlite:///`, so `sqlite:///etc/x` names the relative path `etc/x` and an absolute path needs four slashes (`sqlite:////var/x.db`). Any other prefix fails with `database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'`, exit 1. The path is a plain filesystem filename: it is never interpreted as an SQLite `file:` URI, so `sqlite:///file:x?mode=memory` names the relative file `file:x?mode=memory`. An empty path (`sqlite:///`) and the path `:memory:` fail with `database URL has no file path`, exit 1. Resolve a relative file path against the invoking working directory (§6.5 Pane spawn working directory) before canonicalizing the database file for shared pane-lock identity. A literal tilde in an explicit URL is not expanded.
 
 CAFleet reads no `CAFLEET_*` environment variable. Member creation renders the selected database into the spawn prompt (§ Spawn-prompt substitution), and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A member that omits the option on a custom-database fleet reaches the default database: when that file is absent the command fails with `no cafleet database; run 'cafleet setup'`, and when it exists its literal IDs may match another fleet. This is the same cooperative limit as the Director-only command guard (§ Director-only command guard).
 
 #### Global Options
 
-`cafleet --version` prints `cafleet <version>` and exits 0 before dispatch; `--database-url` follows § Database selection.
+`cafleet --version` and `cafleet -V` print `cafleet <version>` and exit 0 before dispatch; `--database-url` follows § Database selection.
+
+##### CLI parse rules
+
+Argument parsing completes before any other step (§ Validation order):
+
+- `-h` and `--help` print help on any command; `cafleet help [COMMAND…]` prints the same help as `cafleet COMMAND… --help`. Help, `--version` and `-V` write to stdout, exit 0 and open no database.
+- `--opt=value` and `--opt value` are equivalent, except that a separate value starting with `-`, other than `-` itself, is read as an option unless it follows `--` (a parse error such as `--from-member-id -1` or the positional `message show -5`), while the `--opt=value` form passes it to the command (`--lines=-5` reaches § Capture windowing).
+- An integer ID accepts an optional leading `+` and leading zeros (`+5` names 5 and `007` names 7); a value outside the 64-bit signed range is an invalid-value parse error.
+- An option or flag given twice on one command level (for example `--json --json`) is a parse error; `--database-url` follows § Database selection.
+- `cafleet` with no arguments, and a command group with nothing after its name (for example `cafleet fleet`), writes that command's help to stderr and exits 2; a group followed only by options, such as `cafleet fleet --database-url URL`, is a parse error.
+- `__member-run` is a hidden subcommand absent from help; it runs only as the runner a `member create` launches (§6.9 Runner boundary and creation transaction).
+- Every other parse error writes nothing to stdout and exits 2. Its first stderr line begins with `error: ` and names the offending argument (§6.3 Error Messages); the rest of its text is implementation-defined.
 
 #### Help text
 
-`--help` on any command prints its usage line, its subcommands and its options, each with a one-line description, to stdout and exits 0 without opening the database. Its layout is non-normative except for the strings this specification quotes, such as the `--permission-mode` description. Command group descriptions state the purpose given in the subcommand summary. Help derives choice lists from the same registries that validate the values:
+`--help` on any command prints its usage line, its subcommands and its options, each with a one-line description, to stdout and exits 0 without opening the database. Its layout is implementation-defined except for the strings this specification quotes, such as the `--permission-mode` description. Command group descriptions state the purpose given in the subcommand summary. Help derives choice lists from the same registries that validate the values:
 
 | Option | Help shows | Source |
 |---|---|---|
@@ -162,21 +192,21 @@ An invalid value for an option with possible values exits 2 with a usage error t
 
 | Command | Text | JSON |
 |---|---|---|
-| `fleet create` | `<fleet-id> director=<member-id>` | Ordered `fleet_id, name, created_at, director`, with Director identity/description/registration/placement |
-| `fleet list` | `FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT` columns | Fleet records |
-| `fleet show` | Fleet row with `deleted_at:` | Fleet including nullable `deleted_at` |
+| `fleet create` | `<fleet-id> director=<member-id>` | Ordered `fleet_id, name, created_at, director`; `director` is ordered `member_id, name, description, status, registered_at, kind, placement, runtime` with `runtime` null |
+| `fleet list` | Header and one row per fleet (§ `fleet list`) | Array of fleet summaries (§ `fleet list`) |
+| `fleet show` | `fleet_id:`, `name:`, `created_at:` lines and an optional `deleted_at:` line (§ `fleet show`) | Fleet record (§ `fleet show`) |
 | `fleet delete` | `Deleted fleet ID. Deregistered N members.` plus one line per ordinary member | `{fleet_id, deregistered_count, members}` |
 | `message send` | `Message sent.` then envelope | `{message}` |
 | `message poll` | Envelopes, or `No messages found.` | Full record array |
 | `message show` | Envelope | `{message}` |
 | `member create` | `ID NAME backend=AGENT pane=PANE window=WINDOW` plus runtime line | Member with placement and runtime |
-| `member delete` | `Member deleted.` with member/pane lines | `{member_id, pane_status}` |
+| `member delete` | `Member deleted.` with member/pane lines (§ `member delete`) | `{member_id, pane_status}` |
 | `member show` | `ID NAME STATUS window=WINDOW` plus wrapped runtime line | Detail including kind, placement and runtime |
 | `event show` | Event, runtime and optional interaction lines | Event and current state |
-| `input show` / `input reconcile` | Input receipt and optional decision lines | `{input}` |
+| `input show` / `input reconcile` | One `Input:` line (§ Runtime event and input commands) | `{input}` |
 | `permission inspect` | Request identity/capability lines | `{request}` |
 | `permission respond` | Answer submission status/stage line | `{response}` |
-| `member list` | Roster rows or `0 members.` | Roster array |
+| `member list` | Roster heading and rows, or `0 members.` (§ Member list output) | Roster array |
 | `member prompt` | `Sent prompt TEXT_REPR to member NAME (PANE).` or the queued line, plus delivery and input lines | `{member_id, pane_id, text, input_id, delivery}` |
 | `member exec` | `Dispatched native command to member ID (PANE). Inspect the pane for its result.` or the queued line, plus delivery and input lines | `{member_id, pane_id, coding_agent, command, dispatched, input_id, delivery}` |
 | `member press` | `Acknowledged keys KEYS_JSON for member ID (PANE).` | Ordered `member_id, pane_id, keys, status` |
@@ -185,11 +215,11 @@ An invalid value for an option with possible values exits 2 with a usage error t
 
 ##### Member list output
 
-Roster records include `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_consumed` and `idle`. `last_consumed` is the latest `status_timestamp` of the member's completed incoming messages, the time its poll consumed them. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending window or pane.
+Roster records are ordered `member_id`, `name`, `kind`, `placement`, `last_sent`, `last_recv`, `last_consumed`, `idle`. `last_sent` and `last_recv` are the latest `created_at` of the member's sent and received messages, a self-send counting as both. `last_consumed` is the latest `status_timestamp` of the member's completed incoming messages, the time its poll consumed them. `kind` follows §5.4 Member kind discriminator. Missing activity is null; the placement pane ID may be pending. Text uses `-` for absent values and `(pending)` for a pending window or pane.
 
 Every JSON `placement` object, in roster, `member create`, `member show` and `fleet create` output, has ordered keys `backend, mux_session, mux_window_id, mux_window_name, window_ordinal, column_side, mux_pane_id, coding_agent, created_at`; `mux_window_id` and `mux_window_name` are null exactly when `mux_pane_id` is null.
 
-Text rows use the format `"  {:<9}  {:<13}  {:<8}  {backend:<8}  {window:<13}  {pane:<7}  {}"` for member ID, name, kind, backend, window name, pane ID and idle:
+Rows are in ascending `member_id`. Text starts with the heading `N members:` for N ≠ 1 or `1 member:` for one row, then the column header line `  member_id  name           kind      backend   window         pane_id  idle`; an empty roster prints only `0 members.`. Each row starts with two spaces and joins its columns with two spaces: member ID, name, kind, backend (the placement's `coding_agent`), window name, pane ID and idle. Each of the first six values is left-aligned and right-padded with U+0020 to widths 9, 13, 8, 8, 13 and 7, counted in Unicode scalars; a longer value is written whole, never truncated, and the idle column is unpadded. Idle follows §6.4 Formatter helper semantics; an activity timestamp later than now yields idle `0s`.
 
 ```text
 2 members:
@@ -206,7 +236,7 @@ Place `--json` among the subcommand options, before a `--` separator that introd
 
 #### Positional subject ids
 
-Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers, without prefix resolution or environment defaults; a Director-only command also takes its caller's literal ID as `--from-member-id` (§ Director-only command guard). A missing or malformed subject is a parse error (§6.3 Error Messages).
+Place the command’s subject ID immediately after its subcommand; event, input and permission subjects use their positive durable event, input and interaction IDs. The subject row supplies related fleet/recipient state. IDs are complete DB-assigned integers in the integer forms of § CLI parse rules, without prefix resolution or environment defaults; a Director-only command also takes its caller's literal ID as `--from-member-id` (§ Director-only command guard). A missing or malformed subject is a parse error (§6.3 Error Messages).
 
 Spawned members read literal `FLEET ID:`, `YOUR MEMBER ID:`, `DIRECTOR MEMBER ID:`, `CODING AGENT:` and `DATABASE URL:` lines, pass these literal IDs on each invocation and apply `DATABASE URL:` per § Database selection.
 
@@ -220,7 +250,7 @@ The Director-only commands are exactly `member prompt`, `member exec` and `membe
 
 Each requires `--from-member-id <director-member-id>`, a positive integer: the caller's ID, or the pinned Director for `permission respond`. A missing or malformed value is a parse error, exit 2.
 
-After argument parsing and the invocation connection's schema-version guard (§ Schema-version guard), and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet — a member's own fleet, or the fleet of the run that owns an input or interaction — and requires that fleet to be live with `director_member_id` equal to `--from-member-id`. An unknown subject's not-found error precedes this check. Otherwise the command exits 1, prints nothing on stdout and writes this application error to stderr, `permission respond` included (no response attempt began, so the §6.3 Permission commands structured-response exception does not apply):
+After argument parsing and the invocation connection's schema-version guard (§ Schema-version guard), and before any multiplexer, lock, socket or file access or write, the command resolves its subject's fleet — a member's own fleet, or the fleet of the run that owns an input or interaction — and requires that fleet to be live with `director_member_id` equal to `--from-member-id`. An unknown or inactive subject skips this check, and the command's later checks run in § Validation order, so its own text and body checks can fail before its not-found error. Otherwise the command exits 1, prints nothing on stdout and writes this application error to stderr, `permission respond` included (no response attempt began, so the §6.3 Permission commands structured-response exception does not apply):
 
 ```
 Error: 'cafleet <command>' is a Director-only command and member <id> is not the root Director of fleet <fleet_id>; send the request to your Director.
@@ -243,15 +273,65 @@ CLI text output truncates only message bodies, to a fixed 200 codepoints per §6
 
 #### Text bodies (positional `TEXT` / `--file`)
 
-Send and member creation require exactly one positional body or `--file PATH`; `--file -` reads UTF-8 stdin. Preserve exact nonblank body text. Missing/both sources or a blank positional body exit 2; blank file/stdin sources and file-read errors exit 1 with the authored diagnostics below. File read/UTF-8 failures retain the actual cause.
+Send and member creation require exactly one positional body or `--file PATH`; `--file -` reads UTF-8 stdin. Preserve exact nonblank body text. A text is **blank** when every scalar in it has the Unicode `White_Space` property, the empty text included; every command that refuses blank text uses this definition. Missing/both sources or a blank positional body exit 2; blank file/stdin sources and file-read errors exit 1 with the authored diagnostics below (§6.3 Error Messages). A `--file <path>` read error appends ` (<io error>)` to its message, and a stdin read failure is `--file -: <io error>`. A closed standard input reads as empty, so `--file -` then fails with `--file -: stdin is empty.`
 
 `member prompt` takes one positional line. Native exec has the separate command contract (§6.3 `member exec`).
+
+#### Validation order
+
+Each command applies its checks in the order below. The first failing check decides the error and the exit code, and no later check runs.
+
+1. Argument parsing (§ CLI parse rules); a parse error exits 2.
+2. Without `--database-url`, the default database derivation (§ Database selection); a `HOME` error exits 1.
+3. `member press` only: key validation (§ `member press`), exit 2.
+4. The database URL form (§ Database selection), opening the database and the schema-version guard (§ Schema-version guard), exit 1. `setup` and `doctor` replace steps 4–7 with their own sections. A `member press` failure here appends the line `keys were not dispatched to member <id>.`, and a permission command's failure appends its context line (§ Error Messages).
+5. The Director-only command guard (§ Director-only command guard), exit 1.
+6. `member exec` only: the command line from its inline or `--file` source (§ `member exec`), exit 2 for an invalid line and exit 1 for a `--file` error.
+7. The command's own checks, in the order its list below gives; a command without a list performs its subject lookups in its own section's order.
+
+`message send`:
+
+1. The body source (§ Text bodies).
+2. The sender is an active member (`Sender member not found or not active: <from-member-id>`).
+3. The sender's fleet is live (`fleet <fleet-id> is deleted`, then `fleet <fleet-id>'s root Director (member <id>) is not active.`).
+4. The recipient is an active member (`Destination member not found: <to-member-id>`).
+5. Both are in the same fleet.
+
+`member prompt` and `member exec`:
+
+1. `member prompt` only: the text line (§ `member prompt`), exit 2.
+2. The target is an active member (`Member <member-id> not found`).
+3. The root Director refusal (§ `member prompt`, § `member exec`).
+4. The pending-placement refusal (§6.3 Error Messages).
+5. The runner submission (§ Member targeting and key delivery).
+
+`member press`:
+
+1. The target is an active member, and the multiplexer recorded for its fleet's Director is supported and on `PATH` (§6.5 Backend selection).
+2. The root Director refusal, then the pending-placement refusal.
+3. Termination deferral (§6.5 Termination during pane input), the pane input lock, the key-target check and the placement revalidation (§ `member press`).
+
+`member create`:
+
+1. The fleet exists (`fleet '<fleet-id>' not found.`) and is not deleted (`fleet <fleet-id> is deleted`).
+2. Without `--coding-agent`, the live-fleet guard and the Director's recorded backend.
+3. `--model`, then `--effort` (§6.7 Model selection; §6.7 Reasoning effort), exit 2.
+4. `--permission-mode` (§ Help text), exit 2.
+5. The body source (§ Text bodies), then the pi leading-`@` refusal (§6.7 Per-backend spawn argv), exit 2.
+6. The fleet layout lock (§ `member create`), then termination deferral (§6.5 Termination during pane input).
+7. The Director placement (`fleet <fleet-id> has no recorded Director placement; re-create the fleet with 'cafleet fleet create'.`), then the recorded multiplexer backend and its binary on `PATH` (§6.5 Backend selection).
+8. Backend availability: the backend's config-dir resolution (§ Config-dir resolution), its binary on `PATH`, then the opencode agent preset or the pi extension (§ `member create`).
+9. Slot selection (§6.5 Slot selection); a slot-selection error therefore follows every availability error and precedes every Hermes preflight error.
+10. `hermes` only: the Hermes availability preflight (§6.7 Hermes availability preflight), which runs concurrently with the native version probe; the probe only warns.
+11. Spawn-prompt placeholders (§ Spawn-prompt substitution), exit 2, then the `{database_url}` requirement of a non-default database.
+12. The forwarded config-location variable (§ Member environment), the runtime artifact paths (§6.9 Runner boundary and creation transaction), the working directory and the launch nonce.
+13. Registration, whose live-fleet guard runs here when step 2 did not run it, then the steps of § Creation failure compensation.
 
 #### `cafleet setup` — Onboarding and Schema Management
 
 `cafleet setup [--coding-agent AGENT...]` prepares the database first, then installs assets. It classifies the selected database before any write per §6.3 Schema-version guard, leaving a current file of this version unchanged. Compatible setup then installs embedded assets offline. Backend selection is multi-value/repeatable, deduplicated and defaults to the supported backend registry; selected backends install in registry order.
 
-After initializing, setup prints `Initialized database at {path}.`; a database that is already current prints `Database already initialized at {path}.`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation, and setup exits 1 with that backend's cause.
+Setup takes the path from the URL (§ Database selection) and creates its missing parent directories first; a failure exits 1 with `cannot create <dir>: <io error>`, `<dir>` being the database path's whole parent directory as written, even when an ancestor is the failing component. After initializing, setup prints `Initialized database at <path>.`; a database that is already current prints `Database already initialized at <path>.`. `<path>` is the path as written in the URL, neither canonicalized nor made absolute. A failure while initializing the schema exits 1 with `database initialization failed: <cause>`. Asset installation stops at the first backend whose config-dir resolution or installation fails: backends earlier in registry order keep their installation, and setup exits 1 with that backend's cause.
 
 ##### Config-dir resolution
 
@@ -270,7 +350,7 @@ OpenCode discovers skills only at the fixed path but loads agent definitions fro
 
 **Validation.** A set variable must hold an absolute path; any other value (the empty string, a relative path, a literal unexpanded `~/…`) fails at resolution time with exit 1 and `Error: <VAR> must be an absolute path (got '<value>')`. A set config-location variable or `HOME` whose value is not valid UTF-8 fails at the same point with exit 1 and `Error: <VAR> is not valid UTF-8` instead of selecting the default.
 
-Validation is lazy: a site reads and validates a variable only when it resolves that backend's directory. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds because the selector resolves only the targeted agent's directory; plain `cafleet setup` resolves each backend in registry order, so an invalid variable stops installation at that backend. `member create` resolves only the selected backend's directory during its availability check and forwards the validated value into the member environment (§6.3 Member environment). `doctor` reports a per-agent resolution error as that agent's `<agent>.configuration` check instead of aborting (§6.3 `cafleet doctor` — Environment Diagnosis).
+Validation is lazy: a site reads and validates a variable only when it resolves that backend's directory. `setup` alone reads `HOME` once after its database preparation and before its first backend, whatever the config-location variables hold, and an unset `HOME` fails with `Error: HOME is not set`, exit 1. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds because the selector resolves only the targeted agent's directory; plain `cafleet setup` resolves each backend in registry order, so an invalid variable stops installation at that backend. `member create` resolves only the selected backend's directory during its availability check and forwards the validated value into the member environment (§6.3 Member environment). `doctor` reports a per-agent resolution error as that agent's `<agent>.configuration` check instead of aborting (§6.3 `cafleet doctor` — Environment Diagnosis).
 
 ##### Asset installation
 
@@ -318,7 +398,7 @@ pi: installed extension (v<version>) -> <pi base>/extensions/cafleet.ts
 
 #### Schema-version guard
 
-Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables, with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` Preserve database open/read causes, incompatible file bytes and existing sidecars. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
+Every fleet, member, message, event, input and permission command validates the current format before any other database read or write. The classifier runs the §8 Database schema compatibility diagnosis; setup, doctor and every guarded command share it, and the check and setup work reuse the invocation's connection. Setup initializes a missing file, or an empty SQLite file with identity zero and no user tables (§8 compatibility diagnosis, `Empty` row), with the embedded schema atomically; every other guarded command refuses such a file with `no cafleet database; run 'cafleet setup'`. Every other populated or identified file, including one recorded by another cafleet version and a file SQLite reports as not a database, fails before database mutation, asset installation or asset-install recording with `database format is incompatible at 'PATH'; choose an empty database path and run 'cafleet setup'.` `PATH` and `<path>` in these errors, and in doctor's `cafleet <VERSION> at <path>`, are the URL's path as written, so a relative URL stays relative. Preserve database open/read causes, incompatible file bytes and existing sidecars: a path whose existence cannot be checked fails with `cannot inspect database at '<path>': <io error>`, an open failure with `failed to open database at '<path>': <cause>` and a connection-setting failure with `failed to apply connection PRAGMAs: <cause>`, all exit 1. Every other SQLite failure, here and in every later database operation, is `database error: <cause>`, exit 1, with `<cause>` implementation-defined. Doctor reports the classification rather than blocking, completing its other read-only diagnostics even when the database is unavailable.
 
 `--help` renders at parse time and exits before any command body runs, so neither group-level help (`cafleet fleet --help`) nor subcommand help (`cafleet fleet create --help`) triggers the guard; both print help and exit 0 even under a missing database.
 
@@ -358,6 +438,21 @@ Read the pane on the chosen server — `tmux -S <server> display-message -p -t <
 Registration follows the §6.2 Fleets bootstrap transaction. After allocating the fleet ID, overwrite the resolved Director window/tab name with `cafleet-<fleet_id>-0` through the Rename window operation, read it back and require exact equality (§6.5 Backend operations). Re-read the Director pane context and require the original session, window ID and pane ID. Record the canonical name as `mux_window_name`, construct the result before commit, and emit success only after confirmed commit. The Director has `name="Director"` and `description="Root Director for this fleet"`; its pane title/label retains its current value.
 
 Any naming, verification, insertion or result-construction failure exits 1 and rolls back active uncommitted registration, with no success payload even under `--json`. Keep the registration transaction open until the commit result is known: a failed commit rolls back an active transaction, or reports the registry outcome as unconfirmed if SQLite already ended it. Append a rollback failure to the original error. Once naming is attempted, diagnostics identify the attempted fleet ID, backend/server, concrete window and pane IDs, requested name and cause, describe the terminal name as potentially changed, and direct inspection through `fleet list` and explicit-server multiplexer commands. A rolled-back fleet ID can be reused.
+
+| Failure | Text |
+|---|---|
+| The read-back name differs | `Director window name verification failed: expected <quoted>, found <quoted>` |
+| The re-read pane context differs | `Director pane context changed during window naming: expected <context>, found <context>` |
+| A commit failure after which SQLite already ended the transaction | The cause, then the line `fleet registration outcome is unconfirmed: SQLite ended the transaction after a failed commit` |
+| The rollback fails | The original error, then the line `rolling back fleet registration failed: <cause>` |
+
+`<context>` renders a pane context as `session=<quoted> window_id=<quoted> pane_id=<quoted>` from its session, window ID and pane ID, or as `none` when the re-read finds no pane. Each failure after naming is attempted appends one more stderr line:
+
+```text
+fleet create naming attempt: fleet_id=<fleet-id> backend=<backend> server=<quoted> window_id=<quoted> pane_id=<quoted> requested_name=<quoted>; the terminal name may have changed. Inspect 'cafleet fleet list' and `<inspection>`. The attempted fleet ID can be reused after rollback.
+```
+
+`<inspection>` is `tmux -S <quoted server> display-message -p -t <quoted window_id> '#{window_id}|#{window_name}'` on tmux and `herdr --session <quoted server> tab get <quoted window_id>` on herdr, with `<quoted …>` per §6.4 Quoted text.
 
 Applied names remain after a failure, crash or fleet deletion, and the Director pane keeps running. The rename and database commit are separate operations: a crash can leave a changed name without registration, or committed registration without delivered output. An output error after confirmed commit preserves registration and the name. Existing fleets keep their recorded names, and subsequent user renames leave placement snapshots unchanged.
 
@@ -478,11 +573,11 @@ Error: cafleet fleet create cannot verify this session's pane: a shared codex ap
 
 ##### `fleet list`
 
-List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain the Director reference so its ID remains discoverable.
+`cafleet fleet list [--json]` lists non-deleted fleets by descending creation timestamp/fleet ID. Rows retain the Director reference so its ID remains discoverable. JSON is an array of objects ordered `fleet_id, name, created_at, director_member_id, member_count`, where `member_count` counts the fleet's `active` members, root Director included. Text prints the header `FLEET_ID DIRECTOR NAME MEMBERS CREATED_AT`, then one line per fleet with its `fleet_id`, `director_member_id`, `name`, `member_count` and `created_at` joined by one U+0020 and no padding; no fleets prints `No fleets found.`.
 
 ##### `fleet show`
 
-`cafleet fleet show FLEET_ID [--json]` includes soft-deleted rows. Unknown ID: `fleet 'X' not found.`, exit 1.
+`cafleet fleet show FLEET_ID [--json]` includes soft-deleted rows. Unknown ID: `fleet 'X' not found.`, exit 1. JSON is one object ordered `fleet_id, name, created_at, deleted_at, director_member_id`, with a nullable `deleted_at`. Text prints the lines `fleet_id: <fleet-id>`, `name: <name>` and `created_at: <timestamp>`, then `deleted_at: <timestamp>` only when `deleted_at` is non-null.
 
 ##### `fleet delete`
 
@@ -492,7 +587,7 @@ List non-deleted fleets by descending creation timestamp/fleet ID. Rows retain t
 2. **End members.** Under the held locks, end each active ordinary member with a concrete pane, in lock-key order, through the `member delete` procedure with the held layout lock: runner shutdown when its recorded owner is alive and recovery for a wrapped member, pane close in the placement's recorded window, that member's deregistration, then optional layout restoration of that window. The root Director's pane stays open.
 3. **Deregister the fleet.** One transaction revalidates the placement set, stamps deletion, deregisters the remaining active members (the root Director and members with a pending placement) and removes their placements.
 
-The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause and `IDS` is a comma-separated id list or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
+The first member that cannot be ended stops the command, and the fleet is not deleted. Members ended before it stay deregistered with closed panes; the failing member and every later member keep their registry rows and panes, so `member list` still shows them. The command exits 1 with `fleet ID was not deleted: member MEMBER_ID: CAUSE. Members already deleted: IDS.`, where `CAUSE` is the member deletion cause (§ `member delete`) with every trailing `.` of its last line removed, a multi-line cause keeping its lines and `IDS` is the ended member IDs in lock-key order joined by `, `, or `none`. A placement-set change after cleanup began exits 1 with `fleet ID placement or runtime ownership changed during cleanup; fleet was not deleted.` Rerunning `fleet delete` resumes with the members that remain.
 
 On success the text output is `Deleted fleet ID. Deregistered N members.` followed by one `  member MEMBER_ID: PANE_STATUS` line per ordinary member in ascending id. `N` counts every member the command deregistered, root Director included; `PANE_STATUS` takes the `member delete` values `PANE (killed)` and `(pending — no pane)`. JSON is ordered `fleet_id, deregistered_count, members`, with one `{member_id, pane_status}` entry per ordinary member in the same order.
 
@@ -500,7 +595,7 @@ On success the text output is `Deleted fleet ID. Deregistered N members.` follow
 
 A full-environment diagnosis that reports **every** check, with no early abort when the multiplexer is unavailable. `doctor` is exempt from the schema-version guard (§6.3 Schema-version guard), so a missing or incompatible database is reported, not fatal. Its optional flag is `--json` (§6.3 JSON output (`--json`)).
 
-Text output prints one `<status> <name>: <detail>` row per check in check order (§ Check rows), with each LF in the detail escaped as `\n` and each CR as `\r`. `--json` prints one JSON array of check objects in the same order, each ordered `name, status, detail`; each detail equals its text form without the `<status> <name>: ` prefix.
+Text output prints one `<status> <name>: <detail>` row per check in check order (§ Check rows), with each LF in the detail escaped as `\n` and each CR as `\r`. `--json` prints one JSON array of check objects in the same order, each ordered `name, status, detail`; each detail equals its text form without the `<status> <name>: ` prefix and with LF and CR raw.
 
 ```text
 ok multiplexer: herdr server=default
@@ -630,7 +725,7 @@ Register a member **and** spawn its coding-agent pane. A fleet has exactly one r
 
 A missing backend binary exits 1 with `Error: binary <name> not found on PATH`. The opencode backend also requires the selected launch policy's agent preset `<preset base>/agents/<mode>.md` at the resolved preset path (§ Config-dir resolution); a missing or unreadable preset or an invalid config-location variable exits 1 (§6.3 Error Messages). The hermes backend also resolves its effective home through `hermes config path`, concurrently with the native version probe (§6.7 Hermes availability preflight). The pi backend also requires the CAFleet pi extension `<pi base>/extensions/cafleet.ts`; a missing or unreadable extension exits 1 (§6.7 Contract error strings), and a pi prompt beginning with `@` exits 2 before registration (§6.7 Per-backend spawn argv).
 
-After prompt validation, `member create` acquires the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
+After its argument and body checks (§ Validation order), `member create` acquires the fleet layout lock within the layout lock wait (60 s) (§6.5 Fleet window layout) and only then captures its ten-second creation deadline, so the native version probe, spawn, `prepared` handshake, publication and `start` keep their full budget. A busy lock exits 1 with the create busy error (§6.3 Error Messages) and registers nothing. Under the lock it resolves the Director placement, reads occupancy and each scanned window's live height, chooses the slot (§6.5 Fleet window layout) and registers the member with that slot (§6.2 Members). The lock is held until creation returns, after `started` or after compensation.
 
 The pane target — a column of an existing window or a new overflow window in the Director's session — and the multiplexer server come from the registry and the fleet Director's recorded placement (§6.5 Multiplexer context); each new member placement copies the Director's `mux_server`. Publication patches the pane ID, window ID and window name together (§6.9 Runner boundary and creation transaction).
 
@@ -650,7 +745,7 @@ The native child runs in the multiplexer pane's environment overridden by the sp
 | `{coding_agent}` | The resolved backend's registry token | `CODING AGENT: <coding_agent>` |
 | `{database_url}` | `default` when the canonical database path equals the default path (§6.3 Database selection), otherwise `sqlite:///<canonical database path>` | `DATABASE URL: <database_url>` |
 
-The spawned member learns its identity and database from the literals rendered into its prompt; commands take every ID as a literal argument, and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A prompt without `{database_url}` is accepted only for the default database; against a non-default database `member create` exits 1 before registration (§6.3 Error Messages). Besides the names above, the formatter accepts only doubled literal braces (`{{` / `}}`), not Python format specifications, conversions, or attribute/index access; an unknown placeholder or malformed brace expression exits 2 before registration (§6.3 Error Messages).
+The spawned member learns its identity and database from the literals rendered into its prompt; commands take every ID as a literal argument, and a member whose `DATABASE URL:` line names a URL passes `--database-url <url>` on every `cafleet` command. A prompt without `{database_url}` is accepted only for the default database; against a non-default database `member create` exits 1 before registration (§6.3 Error Messages). Besides the names above, the formatter accepts only doubled literal braces (`{{` / `}}`), not Python format specifications, conversions, or attribute/index access; an unknown placeholder or malformed brace expression exits 2 before registration (§6.3 Error Messages). The formatter reads the body left to right: `{{` and `}}` write one brace, and a single `{` opens a placeholder whose name is the exact text up to the next `}`, so `{}` and `{ fleet_id }` are unknown placeholders. The malformed `<detail>` is `unexpected '{' in placeholder name` for a `{` inside an open placeholder, `expected '}' before end of string` for a placeholder the body never closes and `single '}' encountered outside a placeholder` for a lone `}`; the first error in body order wins.
 
 The spawn always creates the pane without stealing focus (tmux `split-window -d` / `new-window -d`, herdr `--no-focus`): the Director's pane and active window stay active (§6.5 Member pane creation). In the default output, `pane` and `window` render `(pending)` until the placement is published.
 
@@ -694,15 +789,30 @@ For a `hermes` run, after the pane lock is held and before runner shutdown, run 
 
 Revalidate pending placement and deregister atomically. For a concrete pane, retain input ownership while closing it outside a SQLite write transaction, then revalidate and finalize the registry. After successful close, mandatory registry finalization uses the later of the original deadline and one second after finalization begins; actual database failures report that the pane was closed and preserve the database cause. The close passes the placement's recorded `mux_window_id`, and optional layout restoration of that window follows mandatory finalization within the original deadline (§6.5 Delete-time pane layout). A failed or expired restoration emits a stderr diagnostic while preserving successful deregistration.
 
+Before each irreversible step the member's placement and run identity are revalidated. Each failure below exits 1 and is the member deletion cause that `fleet delete` composes (§ `fleet delete`):
+
+| Failure | Cause |
+|---|---|
+| The placement or run identity changed; `<stage>` is `before cleanup`, `before pane close` or `after pane close` | `member placement or runtime ownership changed <stage>` |
+| The owned runner shutdown reports incomplete cleanup | `member <member-id> child cleanup remains unconfirmed: <diagnostics>; inspect with cafleet doctor`, with the shutdown diagnostics joined by `; ` |
+| The run's identity changed before recovery | `member runtime ownership changed during cleanup` |
+| Recovery ends with an outcome other than recovered | `member recovery remains incomplete; inspect with cafleet doctor` |
+| The pane close fails | `pane <pane-id> could not be closed: <cause>. Verify with 'cafleet doctor'.` |
+| Registry finalization fails after the close | `pane <pane-id> was closed, but deregister failed: <cause>` |
+
+A failed optional layout restoration writes `Member <member-id> was deregistered; optional layout restoration failed: <cause>` to stderr and keeps exit 0.
+
+Text output is three lines: `Member deleted.`, `  member_id: <member-id>` and `  pane_id:   <pane-status>` (three spaces after `pane_id:`), where `<pane-status>` is `<pane-id> (killed)` or `(pending — no pane)`.
+
 ##### `member show`
 
-`cafleet member show MEMBER_ID [--json]` reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement object and the appended runtime summary (§6.3 Runtime presentation).
+`cafleet member show MEMBER_ID [--json]` resolves the active member (`Member <member-id> not found`), then applies the live-fleet checks of § `member list` to its fleet before reading its runtime; it reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement object and the appended runtime summary (§6.3 Runtime presentation).
 
 After its registry read, member show probes the ordinary member's runner through its control socket health request under a one-second deadline when the run's status is `running` or `degraded`, and reports the outcome in the four member-show runtime keys (§6.3 Runtime presentation). A failed probe is reported in those keys and leaves the exit status 0.
 
 ##### `member list`
 
-`cafleet member list FLEET_ID [--json]` lists every **active** registry entry of the fleet (root Director and ordinary members) and takes no identity flag; an empty roster prints `0 members.`. Field projection, the `window` column and absent values: §6.3 Member list output; rows and activity: §6.2 Members. Text idle values render as `Ns` / `Nm` / `Nh`. Per-member `description` and `registered_at` are on §6.3 `member show`.
+`cafleet member list FLEET_ID [--json]` requires the live-fleet checks in order — the fleet exists (`fleet '<fleet-id>' not found.`), is not deleted (`fleet <fleet-id> is deleted`) and its root Director is active (`fleet <fleet-id>'s root Director (member <id>) is not active.`), each exit 1 — then lists every **active** registry entry of the fleet (root Director and ordinary members) and takes no identity flag; an empty roster prints `0 members.`. Field projection, the `window` column and absent values: §6.3 Member list output; rows and activity: §6.2 Members. Text idle values render as `Ns` / `Nm` / `Nh`. Per-member `description` and `registered_at` are on §6.3 `member show`.
 
 ##### `member prompt`
 
@@ -712,7 +822,7 @@ A root Director target exits 1 with `cannot prompt the Director's own pane`. The
 
 A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queued prompt prints `Queued prompt for member ID (PANE).` Both add the delivery and input lines (§6.3 Runtime presentation). `TEXT_REPR` follows §6.4 Quoted text.
 
-Pre-write error, including a held runner reply: `prompt was not dispatched to member ID: CAUSE`. Partial uncertainty: `prompt delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` These exit 1 without a success record.
+A runner refusal before any byte (`rejected` at stage `zero_bytes`) prints `prompt was not dispatched to member ID: CAUSE`. Every other refusal prints `prompt delivery to member ID is STATUS`, where STATUS is `held`, `rejected` or `uncertain`, followed by `: REASON` when the runner reported a reason and ` (method=METHOD)` when a delivery method was selected, as in `prompt delivery to member 7 is held: input requires live proven-zero revalidation`. These exit 1 without a success record, followed by their context line (§6.3 Error Messages).
 
 A prompt whose staged write stops or whose submission is not confirmed records `uncertain` and exits 1 with its recorded cause, method and input ID (§6.3 Runtime presentation). Prompt input requires a deliberate retry. Oversized input without safe framing is refused before reservation or bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` and publishes its result (§6.9 Measured submission plans and settle intervals). Insufficient immediate-attempt budget accepts a zero-byte queue entry with reason `delivery_budget_exhausted`.
 
@@ -735,8 +845,8 @@ Ordered JSON is:
 | Condition | Error body (exit 1) |
 |---|---|
 | Root Director | `cannot exec in the Director's own pane` |
-| Runner refusal before typing | `native command was not dispatched to member ID: CAUSE` |
-| Typing may have begun | `native command delivery to member ID is uncertain: CAUSE. Inspect the pane before retrying.` |
+| Runner refusal before any byte (`rejected` at stage `zero_bytes`) | `native command was not dispatched to member ID: CAUSE` |
+| Every other refusal: held, rejected after typing began, or uncertain | `native command delivery to member ID is STATUS`, with `: REASON` and ` (method=METHOD)` as for `member prompt` |
 
 An exec whose staged write stops or whose submission is not confirmed records `uncertain`, exits 1 and requires a deliberate retry. An immediate oversized command with no safe framing is refused with zero bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` with a result event. Insufficient immediate budget queues with reason `delivery_budget_exhausted` (§6.9 Measured submission plans and settle intervals).
 
@@ -786,7 +896,7 @@ A missing member or placement, a pending pane (§6.3 Error Messages) and a nativ
 
 `cafleet member capture MEMBER_ID [--lines N] [--ansi] [--json]`
 
-- `--lines`: Number of trailing lines to capture (default: **20**).
+- `--lines`: Number of trailing lines to capture (default: **20**). Parsing accepts any 64-bit signed integer; §6.5 Capture windowing rejects a value below 1. Every failure of the capture call, that rejection included, exits 1 as `capture failed: <cause>`; an earlier failure to resolve the fleet's multiplexer, such as `tmux binary not found on PATH`, keeps its own text and precedes the `--lines` check.
 - `--ansi`: Preserve ANSI escapes in the raw capture. The default strips ANSI escapes and cleans carriage-return redraws.
 
 Output shapes: §6.3 Output shapes; target resolution: §6.3 Member targeting and key delivery. A pending placement is a hard error (§6.3 Error Messages).
@@ -795,7 +905,7 @@ JSON stamps `captured_at` from the local UTC clock at the capture read boundary 
 
 #### Runtime presentation
 
-Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These registry fields make no live-health claim; member show's probe keys below do.
+Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member it creates has a recorded run. `runtime` is `null` for the root Director and for an ordinary member without a recorded run, whose text output then has no runtime line. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These registry fields make no live-health claim; member show's probe keys below do.
 
 Member show alone appends four keys to the runtime object, after `child_start_identity`; member create, `member list` and `event show` keep the runtime object above:
 
@@ -803,7 +913,7 @@ Member show alone appends four keys to the runtime object, after `child_start_id
 |---|---|
 | `observation_probe` | `skipped` (the run's status is neither `running` nor `degraded`), `answered` or `failed` |
 | `observation` | The runner's observation health with ordered keys `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since`; null when skipped, failed, or answered by a runner whose child has not started |
-| `observation_error` | The probe failure's message when `failed`, otherwise null |
+| `observation_error` | The probe failure's message when `failed`, otherwise null: `member runtime: <cause>` when the runner's runtime path is missing; every other probe failure's text is implementation-defined |
 | `diagnostics` | The run's latest 5 `member_runner_diagnostics` rows (§6.9 Storage pressure and durability boundary), newest `last_at` then `diagnostic_id` first, each ordered `source,message,first_at,last_at,count` |
 
 `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. `eligibility` is the string `composer_empty` or `hold:<reason>`, where `<reason>` is `candidate`, `interaction`, `unknown`, `observer_unavailable` or `gap`; doctor member rows use the same rendering. `degraded` is a boolean, and `diagnostic` is the observation failure code, `sink_unavailable` while the event writer is degraded, or null; it is non-null whenever `degraded`, and a health reply that is `degraded` without it is a failed probe. `writer_diagnostic` is the event writer's sanitized failure text, non-null only when `degraded`, and `gap_open_since` is the RFC 3339 start of a pending observation gap, non-null only with `hold:gap` and `degraded`. A gap recorded after the native child exits has no pending start, so it reports `hold:gap`, `degraded` and a null `gap_open_since`. `pending_count` and `gap_count` are the runner's uncommitted-transition and observation-gap counters.
@@ -817,7 +927,7 @@ Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STA
 | `failed` | `unavailable` |
 | `skipped` | `-` |
 
-For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted`, states that the runner will retry and points to `cafleet input show INPUT_ID --json` for the eventual result. A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)`, and includes known receipt identity as `input_id=INPUT_ID`; run/interaction context accompanies held/rejected input.
+For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted` and adds, after its `Input:` line, the line `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)` (with no recorded cause, `… is uncertain (method=profile)`), and its context line carries the known receipt identity; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
@@ -827,7 +937,19 @@ For example, `Runtime: run=37 mode=auto status=running coverage=tested observati
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the receipt contract (§6.9 Durable input receipts and settlement). Require a nonempty evidence reference. A settled ordinary receipt with the same disposition returns its original row and evidence reference before live work; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. Owner synchronization and CAS settlement follow §6.9 Durable input receipts and settlement; uncertainty persists while the owner is unreachable or an active writer cannot be ruled out.
 
-All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
+All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows fail with `Event <event-id> not found` and `Input <input-id> not found`, exit 1. `event show` re-derives the event payload at read time and refuses any difference from the stored `payload_json` with `invalid stored value for payload_json: stored payload does not match its event`, exit 1. Values compare as JSON values, so timestamps compare as their exact text. The re-derived fields and their sources:
+
+| Field | Source |
+|---|---|
+| `event_id`, `event_seq`, `kind`, `interaction_id`, `observed_at` | The event row |
+| `run_id`, `member_id`, `fleet_id`, `director_member_id` | The event's run |
+| `classification` | The linked interaction, or null |
+| `source`, `decision_outcome` | Derived from `kind`; `decision_outcome` is `unknown` |
+| `evidence`, `close_reason` and a lifecycle `cause` | The stored payload itself, `evidence` checked only for its shape, digest and the run's `backend` |
+| `input_id`, `message_id`, `stage`, `delivery`, `blocked_by_input_id`, `waiting_since` and a delivery `cause` | The published delivery records of an `input_delivery_result` or `input_delivery_stalled` event |
+| `director_action` | The delivery records for those two kinds, otherwise rebuilt from the run, kind, classification, event and interaction |
+
+ other invalid stored state fails explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
 
 #### Permission commands
 
@@ -888,7 +1010,7 @@ Render null values as `-` and append `Reason: REASON` when nonnull. Accepted mea
 
 Exit 0 means accepted submission. A structured held/rejected/uncertain reply prints the response in the selected text/JSON form and exits 1 (§6.3 Error Messages), with stderr `Error: permission response STATUS for interaction INTERACTION_ID: REASON`. Pre-reply operational failures retain their ordinary error category and include known run/interaction context; usage failures exit 2.
 
-An attempt against a blocked current request fails before any byte. It exits 1 with the primary stderr line `Error: runner control: permission request is blocked: REASON`, followed by the known run/interaction context. Respond checks the blocker at admission, after its admission drain, and again before each answer stage. `REASON` is the bounded explanation `permission inspect` returns as `capability_reason` for that state:
+An attempt against a blocked current request fails before any byte. It exits 1 with the primary stderr line `Error: runner control: permission request is blocked: REASON`, followed by its context line (§6.3 Error Messages). Respond checks the blocker at admission, after its admission drain, and again before each answer stage. `REASON` is the bounded explanation `permission inspect` returns as `capability_reason` for that state:
 
 | Reason | Blocking state |
 |---|---|
@@ -926,10 +1048,20 @@ Application errors print to stderr even with `--json`, which selects only succes
 | (any surface resolving a config dir) | A set config-path variable holds a non-absolute value (empty string and relative paths included); `doctor` reports it as the agent's configuration check instead | §6.3 Config-dir resolution validation | 1 |
 | (any surface resolving a config dir) | A set config-path variable or `HOME` holds a value that is not valid UTF-8 (§6.3 Config-dir resolution) | `Error: <VAR> is not valid UTF-8` | 1 |
 | (any command except `setup` and `doctor`) | A missing, empty or incompatible database | §6.3 Schema-version guard | 1 |
+| (any command without `--database-url`) | `HOME` is unset, or not valid UTF-8 (§6.3 Database selection) | `Error: HOME is not set; cannot derive the default database path`, `Error: HOME is not valid UTF-8; cannot derive the default database path` | 1 |
+| (any command with a database) | The URL lacks the `sqlite:///` prefix (§6.3 Database selection) | `Error: database URL must use the sqlite scheme (sqlite:///<path>); got '<url>'` | 1 |
+| (any command with a database) | The URL's path is empty or `:memory:` (§6.3 Database selection) | `Error: database URL has no file path` | 1 |
+| (any command with a database) | The database path's existence cannot be checked, the file cannot be opened, or its connection settings fail (§6.3 Schema-version guard) | `Error: cannot inspect database at '<path>': <io error>`, `Error: failed to open database at '<path>': <cause>`, `Error: failed to apply connection PRAGMAs: <cause>` | 1 |
+| (any command with a database) | Any other SQLite failure | `Error: database error: <cause>` | 1 |
+| (any command with an operation deadline) | A bounded database scope or step starts after its operation deadline passed, for example `fleet delete` before its final commit after slow member ends | `Error: operation exceeded its deadline` | 1 |
+| (any command with a database) | Restoring the connection's busy handler after a bounded wait fails | `Error: restoring database wait failed: <cause>` | 1 |
+| `setup` | A missing parent directory of the database path cannot be created (§6.3 `cafleet setup`) | `Error: cannot create <dir>: <io error>` | 1 |
+| `setup` | Initializing the schema fails (§6.3 `cafleet setup`) | `Error: database initialization failed: <cause>` | 1 |
+| `setup` | The operating system cannot report the running executable's path for an extension's executable record (§6.3 Asset installation) | `failed to install extension into <record>: cannot resolve the running cafleet: <io error>`, `<record>` being the executable record path | 1 |
 | (any command with output) | Writing stdout fails with a broken pipe, e.g. `cafleet member list 1` piped into `head -1`; the command stops writing and nothing goes to stderr | — | The command's own result |
 | (any command with output) | Writing stdout fails with any other error | `Error: failed to write output: <cause>` | 1 |
 | `member prompt` / `member exec` / `member press` / `permission respond` / `input reconcile` | `--from-member-id` is not the live subject fleet's root Director, checked after the schema-version guard and the subject's not-found check, before multiplexer, lock, socket or file access; stdout stays empty | §6.3 Director-only command guard | 1 |
-| `input reconcile` | The pinned input has no recorded placement (deregistered member or deleted fleet), so no live runner can synchronize the receipt; the receipt stays uncertain (§6.9 Durable input receipts and settlement) | `Error: receipt reconciliation requires the member's live runner; the input stays uncertain` | 1 |
+| `input reconcile` | The pinned input has no recorded placement (a deregistered member; a deleted fleet's input fails the Director-only guard first), so no live runner can synchronize the receipt; the receipt stays uncertain (§6.9 Durable input receipts and settlement) | `Error: receipt reconciliation requires the member's live runner; the input stays uncertain` | 1 |
 | (runner queue housekeeping) | A queued receipt is no longer `ready`; the runner fences ordinary input (§6.9 Queue housekeeping) | `queued input INPUT_ID changed to STATE outside the runner queue` | — |
 | `member prompt` / `member exec` | Above the plain-input limit and profile framing is `plain`; CAUSE in the command's pre-write error | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the BACKEND profile has no bracketed-paste delivery` | 1 |
 | `member prompt` / `member exec` | Above the plain-input limit and profile framing is `bracketed_paste`, but mode 2004 is off; CAUSE in the pre-write error | `the input is N UNIT, above the BACKEND plain-input limit of MAX UNIT, and the native CLI has not enabled bracketed paste` | 1 |
@@ -942,38 +1074,50 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `member create` | The fleet layout lock stays busy for the layout lock wait (60 s); nothing is registered (§6.5 Fleet window layout) | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not created.` | 1 |
 | `member delete` | The fleet layout lock stays busy for the layout lock wait (60 s); the run, pane and row are unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` | 1 |
 | `fleet delete` | The fleet layout lock stays busy for the layout lock wait (60 s); every member is unchanged | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; fleet was not deleted.` | 1 |
-| `member create` | An overflow window's height read fails or is unparsable; nothing is registered (§6.5 Fleet window layout) | `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.` | 1 |
+| `member create` | An overflow window's height read fails or is unparsable; `<cause>` is the multiplexer error with its lines joined by `; `, so the error stays one line; nothing is registered (§6.5 Fleet window layout) | `Error: window <window-name> (ordinal <ordinal>) of fleet <fleet-id> cannot be read: <cause>. Its active members <member-ids> may have lost their panes; run 'cafleet member delete MEMBER_ID' for each, then retry.` | 1 |
 | `member create` | The conditional `last_window_ordinal` update changes a row count other than 1; the registration transaction rolls back (§6.2 Members) | `Error: fleet <fleet-id> window ordinal changed under the layout lock` | 1 |
 | `member create` | The tmux `new-window` reply is malformed; the cleanup diagnostic follows (§6.5 Member pane creation) | `Error: unexpected tmux new-window output: <quoted>` | 1 |
 | `member create` | The herdr `tab create` reply lacks `result.root_pane.pane_id` or `result.tab.tab_id`; the cleanup diagnostic follows | `Error: herdr tab create missing '<key>' field` | 1 |
 | `member create` | A herdr re-parenting move failed; a stderr diagnostic while the spawn continues (§6.5 herdr re-parenting) | `layout re-parenting incomplete: <cause>` | The command's own result |
 | `setup` | An extension file or its executable record cannot be installed (§6.3 Asset installation) | `failed to install extension into <target>: <error>` | 1 |
 | `member create` | `--coding-agent opencode` with the selected agent preset missing or unreadable at the resolved preset path, before registration or multiplexer effects. `<preset>` is the resolved `<preset base>/agents/<mode>.md` for the resolved launch policy, and `<cause>` is the read error | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` | 1 |
-| (any command-line argument) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is non-normative. | 2 |
+| (any command-line argument) | A missing positional subject id (missing-required-argument error naming the positional); a non-integer id or a `permission respond` `--choice` outside the choice-id shape (invalid-value error); neither or both of the positional body and `--file` (`message send` / `member create`) or of `--decision` and `--choice` (`permission respond`) (argument-group error). `permission respond` errors precede lock or byte effects | A parse error — an unknown subcommand or option, a missing required argument, an invalid value, or conflicting arguments — writes to stderr, leaves stdout empty and exits 2 before any command body runs. Its first line begins with `error: ` (lowercase, distinguishing it from the `Error: ` prefix of application errors). It names the offending argument: a missing required argument by its placeholder (for example `<MEMBER_ID>`), an invalid value by the argument and the rejected value, a fixed-value option additionally by its accepted values, and a conflict by both arguments. The rest of its wording is implementation-defined (§ CLI parse rules). | 2 |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID; for `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The live-fleet guard: the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
+| `member list` | An activity timestamp does not parse; the lexicographic maximum is chosen first | `Error: invalid stored value for messages.created_at: <value>` (`messages.status_timestamp` for consumption) | 1 |
+| `member list` / `member show` | The fleet is soft-deleted, or its root Director is not active (§6.3 `member list`) | `Error: fleet <fleet-id> is deleted`, `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
+| `setup` | `HOME` is unset when setup reads it after database preparation (§6.3 Config-dir resolution) | `Error: HOME is not set` | 1 |
+| `event show` / `input show` / `input reconcile` | An unknown event or input ID | `Error: Event <event-id> not found`, `Error: Input <input-id> not found` | 1 |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 |
 | `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` | 1 |
 | `message send` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` | 1 |
 | `message send` | The recipient is unknown or inactive | `Error: Destination member not found: <to-member-id>` | 1 |
 | `message send` | Sender and recipient in different fleets | `Error: members <from-member-id> and <to-member-id> are not in the same fleet.` | 1 |
+| `member capture` | The capture operation fails, a `--lines` value below 1 included (§6.3 `member capture`) | `Error: capture failed: <cause>` | 1 |
+| `member create` | The operating system's random source fails while generating the launch nonce | `Error: launch nonce unavailable: <io error>` | 1 |
+| `member prompt` / `member exec` | The operating system's random source fails while generating the input operation key | `Error: cannot generate input operation key: <io error>` | 1 |
+| `member delete` / `fleet delete` | A member deletion step fails (§6.3 `member delete`) | The member deletion cause of § `member delete`; `fleet delete` composes it per § `fleet delete` | 1 |
+| `member delete` / `fleet delete` | The member's run row is missing when recovery reads it | `Error: member <member-id> has no recorded run` | 1 |
 | `member capture` / `member prompt` / `member exec` / `member press` | The member has a pending placement | <code>Error: member &lt;id&gt; has no pane yet (pending placement) — nothing to &lt;capture&#124;prompt&#124;exec&#124;press&gt;.</code> | 1 |
-| `member show` / `prompt` / `exec` / `capture` | An unknown or inactive target member id | `Error: Member <member-id> not found` | 1 |
-| `message send` / `member create` | Positional body empty or whitespace-only | `Error: text may not be empty.` | 2 |
-| `message send` / `member create` | `--file <path>` to an empty (zero-byte or whitespace-only) file | `Error: --file <path>: file is empty.` | 1 |
-| `message send` / `member create` | `--file -` with empty or whitespace-only stdin | `Error: --file -: stdin is empty.` | 1 |
-| `message send` / `member create` | `--file <path>` to a non-existent path or non-regular file | `Error: --file <path>: file does not exist or is not a regular file.` | 1 |
-| `message send` / `member create` | `--file <path>` to an unreadable file | `Error: --file <path>: file is not readable.` | 1 |
-| `message send` / `member create` | `--file <path>` to a file containing invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` | 1 |
+| `member show` / `prompt` / `exec` / `capture` / `delete` / `press` | An unknown or inactive target member id; `member press` appends `keys were not dispatched to member <id>.` | `Error: Member <member-id> not found` | 1 |
+| `message send` / `member create` | A blank positional body (§ Text bodies) | `Error: text may not be empty.` | 2 |
+| `message send` / `member create` | `--file <path>` to a blank file, zero bytes included | `Error: --file <path>: file is empty.` | 1 |
+| `message send` / `member create` | `--file -` with blank stdin | `Error: --file -: stdin is empty.` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` to a non-existent path or a directory | `Error: --file <path>: file does not exist or is not a regular file. (<io error>)` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` that cannot be read for any other reason | `Error: --file <path>: file is not readable. (<io error>)` | 1 |
+| `message send` / `member create` / `member exec` | `--file <path>` to a file containing invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` | 1 |
+| `message send` / `member create` / `member exec` | Reading stdin for `--file -` fails | `Error: --file -: <io error>` | 1 |
+| `message send` / `member create` / `member exec` | `--file -` stdin is not valid UTF-8 | `Error: --file -: file is not valid UTF-8.` | 1 |
 | `member create` | A `--model` or `--effort` value the selected backend rejects, before any side effect | §6.7 *Model selection* and *Reasoning effort* | 2 |
 | `member create` | An unknown `{placeholder}` in the prompt, before registration | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` | 2 |
 | `member create` | A malformed brace expression in the prompt, before registration | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` | 2 |
 | `permission inspect` | An unknown `INTERACTION_ID`, ordered per §6.3 Permission commands | `Error: Interaction <interaction-id> not found` | 1 |
 | `permission respond` | `--choice` on a non-question, `--decision` on a question, a choice without a tested plan, or a second answer for the episode; the structured `rejected` response prints on stdout first, with reasons per §6.3 Permission commands | `Error: permission response rejected for interaction <interaction-id>: <reason>` | 1 |
 | `permission inspect` | The inspected run records a database identity other than the selected database's; the known interaction context follows | `Error: invalid stored value for member_runs.database_identity_json: selected database identity mismatch` | 1 |
+| `permission respond` | `--expected-run-id` names no run, checked before the interaction association; the known interaction context follows | `Error: Run <run-id> not found` | 1 |
 
-Left-in-composer prompt/exec errors append known receipt identity as `input_id=INPUT_ID`. In the plain-limit errors, UNIT is `bytes` for a byte limit and `characters` for a scalar limit; N measures rendered prefix plus literal. Uncertain errors retain their command forms with the recorded cause, for example `write_failed`.
+A *context line* is one stderr line after the primary error, made of the known fields among `run_id=<run-id>`, `interaction_id=<interaction-id>`, `input_id=<input-id>` and `operation_key=<JSON string>`, in that order, joined by one space; with no known field there is no line. A permission command's failure, from the schema-version guard on, carries the run (`permission respond`'s `--expected-run-id`) and the interaction it names, and a prompt/exec refusal or uncertainty carries `run_id` (the member's recorded run), `interaction_id` (the run's `current_interaction_id`, when set), `input_id` (when the runner reported one) and `operation_key`, the CLI-generated key `<kind>:<run-id>:<64 lowercase hex>` with `<kind>` `prompt` or `exec`; a submission transport failure carries only `run_id` and `operation_key`, and a failure after the runner's reply, such as `pane input lock remained busy after the runner reported <value>`, also carries `input_id` once the runner has recorded the receipt. In the plain-limit errors, UNIT is `bytes` for a byte limit and `characters` for a scalar limit; N measures rendered prefix plus literal. Uncertain errors retain their command forms with the recorded cause, for example `write_failed`.
 
 ### 6.4 Output & Formatting
 
@@ -1010,7 +1154,7 @@ The ordered public record is:
 | `message_id` | Bracketed ID on the first line |
 | `from_member_id` | `from:` segment |
 | `status_timestamp` | Timestamp on the first line |
-| `text` | Body on the next line when nonempty |
+| `text` | Body on the next line, always present (an empty body leaves an empty line) |
 | Recipient, creation and status fields | Available in full JSON |
 
 ```text
@@ -1018,7 +1162,7 @@ The ordered public record is:
 build OK
 ```
 
-Text bodies use a fixed 200 codepoints plus `…`; `--json` preserves the complete exact text. Pane preview lines, their folding, inline limit and long-body `message poll` pointer follow §6.5 Push notifications.
+Several envelopes are joined by one empty line. A body of at most 200 Unicode scalars renders unchanged; a longer body renders its first 200 scalars followed by `…`. `--json` preserves the complete exact text. Pane preview lines, their folding, inline limit and long-body `message poll` pointer follow §6.5 Push notifications.
 
 #### Runtime observation messages
 
@@ -1030,11 +1174,11 @@ The CSI pattern (§6.9 Pattern syntax) is exactly `\x1b\[[0-?]*[ -/]*[@-~]`: ESC
 
 #### Formatter helper semantics
 
-Absent ordinary member/fleet cells use ASCII `-`. ISO-to-HMS takes the first eight characters after `T`; an absent value or one without a `T` renders `-`. Idle renders null as `-`, seconds below 60, floor minutes below 3600 and floor hours afterward. Required fields fail if absent; nullable activity and pending placement are documented valid cases.
+Idle renders null as `-`, seconds below 60, floor minutes below 3600 and floor hours afterward. Required fields fail if absent; nullable activity and pending placement are documented valid cases.
 
 ##### Quoted text
 
-`TEXT_REPR` and `<quoted>` denote the value wrapped in `"` with these escapes: `"` → `\"`, `\` → `\\`, U+0009 → `\t`, U+000A → `\n`, U+000D → `\r`, U+0000 → `\0`; any other scalar whose general category is Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs (except U+0020), or which has the Grapheme_Extend property, → `\u{H}` with lowercase hex and no leading zeros. Every other scalar, including `'`, is written as itself. Categories and properties follow the Unicode version the implementation ships; the rendering of a scalar whose classification differs between Unicode versions is non-normative.
+`TEXT_REPR` and `<quoted>` denote the value wrapped in `"` with these escapes: `"` → `\"`, `\` → `\\`, U+0009 → `\t`, U+000A → `\n`, U+000D → `\r`, U+0000 → `\0`; any other scalar whose general category is Cc, Cf, Cs, Co, Cn, Zl, Zp or Zs (except U+0020), or which has the Grapheme_Extend property, → `\u{H}` with lowercase hex and no leading zeros. Every other scalar, including `'`, is written as itself. Categories and properties follow the Unicode version the implementation ships; the rendering of a scalar whose classification differs between Unicode versions is implementation-defined.
 
 #### JSON encoding
 
@@ -1076,11 +1220,21 @@ An explicit `fleet create --pane` selects the backend by its ID form instead of 
 
 #### Error taxonomy
 
-Both backends report failures through one multiplexer error type carrying the backend's own message text, so CLI boundaries handle both uniformly. A creation error also records its pane-cleanup outcome (below), and a key-dispatch error whether a writing process had started.
+Both backends report failures through one multiplexer error type carrying the backend's own message text, so CLI boundaries handle both uniformly. A creation error also records its pane-cleanup outcome (below), and a key-dispatch error whether a writing process had started. A process failure renders as:
+
+| Failure | Message |
+|---|---|
+| The executable is not found when the process starts | `<backend> binary not found: <io error>` |
+| The process cannot start for another reason | `<backend> command was not started: <io error>: <argv>` |
+| A bounded call's deadline passed before launch | `<backend> command was not started: command deadline expired before launch: <argv>` |
+| A bounded call's deadline passed while it ran | `<backend> command timed out at the pane input deadline: <argv>` |
+| The process exits nonzero | `<backend> command failed: <argv>`, then the line `stderr: <trimmed stderr>` |
+
+`<backend>` is `tmux` or `herdr`, `<argv>` is the complete argv, server selector included, joined by single spaces without quoting, and `<trimmed stderr>` is the decoded stderr with leading and trailing Unicode `White_Space` removed. A recorded placement whose backend is neither fails with `unsupported recorded multiplexer backend '<backend>'`.
 
 #### Pane ownership during creation
 
-The member pane spawn owns a newly created pane until it returns successfully. The backend takes ownership as soon as it extracts the pane id from the split, `new-window` or `tab create` response; herdr closes that pane itself when the subsequent `pane run` fails, returning the original run error. An owned-pane close inside the spawn receives the Column target's window ID or the window ID parsed from the `new-window` / `tab create` reply. A creation error carries one of these pane-cleanup outcomes:
+The member pane spawn owns a newly created pane until it returns successfully. The backend takes ownership as soon as it extracts the pane id from the split, `new-window` or `tab create` response; herdr closes that pane itself when the subsequent `pane run` fails, returning the original run error. An owned-pane close inside the spawn receives the Column target's window ID or the window ID parsed from the `new-window` / `tab create` reply. A creation error after the creation request carries one of these pane-cleanup outcomes; a herdr column spawn that fails before its split, because the column's layout read fails or lacks its anchor, carries none and appends nothing:
 
 | Outcome | Meaning and caller action |
 |---|---|
@@ -1092,13 +1246,20 @@ On success, the spawn returns the pane ID and its window ID, and ownership trans
 
 #### Subprocess output and deadlines
 
-The shared subprocess runner captures stdout and stderr without truncation. With a timeout, it drains both pipes concurrently from spawn using nonblocking I/O: each loop checks the monotonic deadline and the direct child's exit status, then reads at most 64 KiB per stream, polling at most 20 ms or the remaining deadline, whichever is shorter. Interrupted operations retry against the same deadline. Completion requires the child's exit and EOF on both streams. Success returns stdout, and a nonzero exit reports stderr, decoded as UTF-8 with each maximal ill-formed subsequence replaced by one U+FFFD. Calls without a timeout retain the unbounded output-collection path.
+The shared subprocess runner starts each process with null stdin and the caller's environment and captures stdout and stderr without truncation. Success returns stdout, and a nonzero exit reports stderr; both are decoded as UTF-8 with each maximal ill-formed subsequence replaced by one U+FFFD. A call with a timeout guarantees:
 
-At the deadline, including when the direct child has exited but a descendant still holds a pipe open, the runner kills and reaps the direct child, closes both read pipes and reports a timeout; descendant termination is outside this contract. FD setup, read, poll and child-status failures also release the pipes and kill/reap the child; cleanup failures accompany the primary error instead of replacing it. The deadline bounds observation and the start of cleanup; an unresponsive operating system can delay cleanup itself.
+- Both pipes are drained concurrently from spawn, so a child that fills either pipe never blocks on it.
+- The call completes once the direct child has exited and both pipes have reached end of file, and never later than the deadline.
+- An operation interrupted by a signal is retried against the same deadline.
+- A timeout that is zero, or a deadline already passed, starts no process and fails with `command deadline expired before launch` (§ Error taxonomy).
+
+The read sizes and poll intervals that achieve these guarantees are implementation-defined. A call without a timeout waits for the child's exit and both pipes' end of file without a bound. These multiplexer processes run without a deadline: every multiplexer process of `fleet create` and of `doctor`'s `multiplexer` and `multiplexer.caller_pane` rows (server discovery, pane context, pane process, window rename and its read-back) the `member capture` capture, and the captures of a Hermes work settlement that creation compensation runs (its keys stay bounded). Every other multiplexer process runs under its operation's deadline.
+
+At the deadline, including when the direct child has exited but a descendant still holds a pipe open, the runner kills and reaps the direct child, closes both read pipes and reports a timeout; descendant termination is outside this contract. FD setup, read, poll and child-status failures also release the pipes and kill/reap the child; cleanup failures accompany the primary error instead of replacing it: a failed kill or wait appends `cleanup failed for child <pid> kill: <io error>` or `cleanup failed for child <pid> wait: <io error>` as a further line of a command-failure's stderr, and for a timeout or start failure writes that line to the CLI's stderr. The deadline bounds observation and the start of cleanup; an unresponsive operating system can delay cleanup itself.
 
 #### Pane spawn working directory
 
-A member pane spawned by `cafleet member create` starts in the invoking process's working directory (the Director's pane cwd): a tmux split inherits it from the splitting pane and a tmux overflow window receives it as `new-window -c <cwd>`, and herdr receives it verbatim as `--cwd` rather than relying on herdr's own inheritance, which spawns `/bin/sh` instead of the passwd login shell when `SHELL` is unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)). An unresolvable cwd fails the spawn with `cannot resolve the working directory for pane spawn: <cause>`; there is no fallback directory.
+A member pane spawned by `cafleet member create` starts in the invoking process's working directory (the Director's pane cwd): a tmux split inherits it from the splitting pane and a tmux overflow window receives it as `new-window -c <cwd>`, and herdr receives it verbatim as `--cwd` rather than relying on herdr's own inheritance, which spawns `/bin/sh` instead of the passwd login shell when `SHELL` is unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)). The invoking working directory is the physical path `getcwd(3)` reports, never `$PWD`; the same directory governs `--cwd`, relative database paths (§6.3 Database selection), tmux `-c` and Hermes `--in` (§6.7 Per-backend spawn argv). An unresolvable cwd fails the spawn with `cannot resolve the working directory for pane spawn: <cause>`, and a cwd that is not valid UTF-8 with `cannot resolve the working directory for pane spawn: <path> is not valid UTF-8`; there is no fallback directory.
 
 #### Delete-time pane layout
 
@@ -1114,9 +1275,9 @@ Every operation that writes pane input uses one process-shared OS file lock. Acq
 |---|---|
 | Directory | `<canonical-database-file>.pane-locks/` adjacent to the database |
 | Key | SHA-256 of UTF-8 `backend + NUL + mux_session + NUL + mux_pane_id`, shared by duplicate placements for one pane |
-| File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
-| Acquisition | Exclusive nonblocking OS file lock; preserve unexpected errors with path/member context |
-| Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
+| File | `<key>.lock`, opened read/write and created without truncation with mode `0600` minus the umask; the directory is created on demand |
+| Acquisition | Exclusive nonblocking whole-file advisory lock with BSD `flock(2)` semantics: held per open file description and conflicting with every other `flock` holder of the same file; whether it interacts with `fcntl` record locks is platform-defined. Preserve unexpected errors with path/member context |
+| Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane. A holder that releases the lock for its runner and retakes it keeps the same descriptor. Before each write the holder verifies that the lock path still names a regular file, not a symlink, with the held descriptor's device and inode, failing with `held pane lock pathname identity mismatch` otherwise, or with the operating system's error when the path or descriptor cannot be inspected |
 | Contention | Deletion, wrapped clients and explicit keys retry a busy lock every 50 milliseconds; explicit keys stop waiting one second before their deadline. The runner retries an active attempt's lock on each event-loop pass and a queued request's lock every 100 milliseconds; a lock still busy at its wait bound fails that writer |
 
 No database statement runs while a writer waits for the lock.
@@ -1129,9 +1290,19 @@ No database statement runs while a writer waits for the lock.
 
 Process exit releases ownership. Read-only capture needs no input lock. Deletion locking follows §6.3 `member delete` and `fleet delete`.
 
+| Failure | Error |
+|---|---|
+| The canonical database path cannot be resolved | `cannot resolve database input-lock identity: <io error>` (`layout-lock` for the fleet layout lock) |
+| The lock directory cannot be created | `cannot create pane input-lock directory <dir>: <io error>` (`pane layout-lock` for the fleet layout lock) |
+| The lock file cannot be opened | `cannot open pane input lock <path>: <io error>` (`pane layout lock`) |
+| Locking fails other than by contention | `cannot lock pane input <path>: <io error>` (`pane layout <path>`) |
+| Releasing a held lock for the runner fails | `cannot release pane input <path>: <io error>` |
+| The member's placement changes while its pane input lock is acquired | `member <member-id> placement changed while acquiring pane input` |
+| A pane input lock error of a member-scoped writer | `member <member-id> pane input: <cause>`, wrapping the error above |
+
 #### Termination during pane input
 
-Interrupting a host turn, including through Escape-first delivery fallback, can also end the turn's in-flight shell tool, such as a running `cafleet` command. The CLI therefore defers `SIGINT`, `SIGTERM` and `SIGHUP` across every pane-input and lifecycle span: a signal received meanwhile takes its default action when the outermost span ends; spans nest.
+Interrupting a host turn, including through Escape-first delivery fallback, can also end the turn's in-flight shell tool, such as a running `cafleet` command. The CLI therefore defers `SIGINT`, `SIGTERM` and `SIGHUP` across every pane-input and lifecycle span: within a span, none of these signals delivered to the process takes its default action until the outermost span ends, and then each pending one does; spans nest. The masking mechanism is implementation-defined. A span that cannot begin fails with `cannot defer termination signals: <io error>`, exit 1.
 
 | Command | Span |
 |---|---|
@@ -1140,7 +1311,7 @@ Interrupting a host turn, including through Escape-first delivery fallback, can 
 | `member create` | From fleet layout lock acquisition (§ Fleet window layout) through `started` or the end of its compensation |
 | `member delete`, `fleet delete` | From pane lock acquisition through fleet layout lock acquisition, deregistration and layout cleanup |
 
-Every span is bounded by its own deadline, so a deferred signal waits at most one span. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts; the member session, started by the multiplexer server, does not inherit it.
+Every span is bounded by its own deadline, so a deferred signal waits at most one span. A multiplexer client process started by the thread that holds a span starts with `SIGINT`, `SIGTERM` and `SIGHUP` in its blocked set and stays bounded by its timeout; a shell or program the client runs may change its own mask. The member session, started by the multiplexer server, does not inherit the set.
 
 `SIGKILL` cannot be deferred; a kill inside a span leaves:
 
@@ -1153,11 +1324,11 @@ Every span is bounded by its own deadline, so a deferred signal waits at most on
 
 #### Explicit key dispatch
 
-`member press` maps the complete validated ordered vector from the CLI contract (§6.3 `member press`) to one writing invocation: `tmux send-keys -t PANE KEY...` or `herdr pane send-keys PANE KEY...`. The typed registry owns the common grammar and mappings below. Single printable characters preserve case; named keys and modifiers match case-insensitively, and control letters normalize to lowercase.
+`member press` maps the complete validated ordered vector from the CLI contract (§6.3 `member press`) to one writing invocation: `tmux send-keys -t PANE KEY...` or `herdr pane send-keys PANE KEY...`. The typed registry owns the common grammar and mappings below. Single printable characters preserve case; named keys and modifiers match ASCII case-insensitively, and control letters normalize to lowercase.
 
 | Common key | tmux argument | herdr argument |
 |---|---|---|
-| Single printable ASCII character, U+0021–U+007E | `0xXX` for its ASCII codepoint | Same character, with `+` as `plus`, `-` as `minus`, and `;` as `semicolon` |
+| Single printable ASCII character, U+0021–U+007E | `0x` followed by its codepoint as two lowercase hex digits (`A` → `0x41`) | Same character, with `+` as `plus`, `-` as `minus`, and `;` as `semicolon` |
 | `Space` | `Space` | `space` |
 | `Escape` | `Escape` | `esc` |
 | `Enter` | `Enter` | `enter` |
@@ -1172,11 +1343,11 @@ Accept only these productions, with the CLI's count/UTF-8 bounds and complete-ve
 
 Each backend exposes target validation against the recorded placement and key sending, which accepts only a validated vector (canonical names plus backend arguments) and performs the single bounded writing invocation. The press entry keeps its original connection and deadline and holds the validated lock through process cleanup.
 
-Acquire the canonical pane-input lock shared with deletion and validate its retained descriptor/path binding. Build the adapter from the fleet Director's recorded placement (§ Backend selection) and, on that recorded server, verify the target's complete tuple against the recorded session/workspace and window: tmux reads `#{pane_id}|#{window_id}|#{session_name}` for the target and splits only the first two separators; herdr reads its pane-list JSON and requires exactly one matching workspace/tab/pane. Re-read the active member after metadata, compare its fixed fleet/kind/full placement and validate the held lock immediately before writing. A missing, ambiguous, malformed or changed target fails before the writing invocation.
+Acquire the canonical pane-input lock shared with deletion and validate its retained descriptor/path binding. Build the adapter from the fleet Director's recorded placement (§ Backend selection) and, on that recorded server, verify the target's complete tuple against the recorded session/workspace and window: tmux reads `#{pane_id}|#{window_id}|#{session_name}` for the target and splits only the first two separators; herdr reads `herdr pane list`, requires the string fields `pane_id`, `workspace_id` and `tab_id` on every listed pane (missing: `herdr pane list missing '<key>' field`) and requires exactly one pane with the target ID, on the recorded workspace and tab. Re-read the active member after metadata, compare its fixed fleet/kind/full placement and validate the held lock immediately before writing. A missing, ambiguous, malformed or changed target fails before the writing invocation.
 
 Validation establishes the tuple within the current recorded server only: the placement records no socket/server-generation identity, so it supplies no cross-server fallback or proof of historical server/build equivalence. Keep one adapter/environment across every probe and the write.
 
-Capture one inherited-or-new five-second invocation deadline before invocation database validation. Every press process — the availability, current-context and target-metadata probes and the write, for `member press` and every other pane-input caller — runs through the shared bounded subprocess runner (§ Subprocess output and deadlines) with a timeout equal to the remaining invocation deadline, so its spawn, collection and cleanup follow that runner's contract. The lock wait reserves one second for metadata/dispatch/cleanup (not the prompt reservation). Every later check uses the remaining invocation deadline, and an expired deadline starts no new writing process.
+Capture one inherited-or-new five-second invocation deadline before invocation database validation. Every press process — the target-metadata read and the write, the only two processes `member press` runs (availability is a `PATH` lookup), and every pane-input caller's processes — runs through the shared bounded subprocess runner (§ Subprocess output and deadlines) with a timeout equal to the remaining invocation deadline, so its spawn, collection and cleanup follow that runner's contract. The lock wait reserves one second for metadata/dispatch/cleanup (not the prompt reservation). Every later check uses the remaining invocation deadline, and an expired deadline starts no new writing process.
 
 Both writing adapters acknowledge only successful process completion with empty/whitespace stdout. Unexpected non-whitespace stdout on success is unreadable acknowledgment with uncertain effects; herdr metadata retains its command-specific JSON parsing. Backend keyboard modes or key interception can affect actual PTY bytes even after acknowledgment. Use the CLI result/error contract (§6.3 `member press`), including its zero-write and no-retry cases, and observe actual native effects separately.
 
@@ -1311,7 +1482,7 @@ The constants are fixed; no flag or configuration changes them. A column in a wi
 
 Occupancy comes from the registry: the fleet's active members whose placement is concrete, grouped by `window_ordinal` and `column_side`, excluding the Director's own row (ordinal 0, `left`). A pending placement holds no slot: every creation holds the fleet layout lock until it completes or compensates, so a pending row seen under the lock belongs to a killed creation (§ Termination during pane input), which `member delete` removes. An overflow ordinal with no concrete member is a closed window and is not scanned.
 
-Each scanned window's height is read live before registration (§ Backend operations Window height). The anchors are the Director pane for ordinal 0 and every concrete member pane of the window, in registry order, for an overflow window, so one member whose pane died does not make a live herdr tab unreadable. A failed Director-window read propagates the multiplexer error unchanged. A failed or unparsable overflow-window read (the user closed the window, or every member pane in it died while the members stayed registered) fails `member create` with the unreadable-window error (§6.3 Error Messages), whose `<member-ids>` lists the window's active member IDs ascending, separated by `, `. Neither failure registers anything.
+Each scanned window's height is read live before registration (§ Backend operations Window height). The anchors are the Director pane for ordinal 0 and every concrete member pane of the window, in registry order, for an overflow window, so one member whose pane died does not make a live herdr tab unreadable. A failed Director-window read propagates the multiplexer error unchanged. A failed or unparsable overflow-window read (the user closed the window, or every member pane in it died while the members stayed registered) fails `member create` with the unreadable-window error (§6.3 Error Messages), whose `<member-ids>` lists the window's active member IDs ascending, separated by `, `. Neither failure registers anything. Slot selection runs after the backend availability check and before the Hermes preflight (§6.3 Validation order).
 
 ##### Placement policy
 
@@ -1339,11 +1510,11 @@ A fleet-scoped OS file lock serializes every operation that creates or closes a 
 | Directory | `<canonical-database-file>.layout-locks/` adjacent to the database, created on demand |
 | Key | SHA-256 hex of the fleet ID's UTF-8 decimal text |
 | File | `<key>.lock`, created `0600` |
-| Acquisition | Exclusive OS file lock retried every 50 milliseconds within the layout lock wait (60 s), a budget separate from each command's operation deadline; the OS releases it when its holder exits, including after `SIGKILL` |
+| Acquisition | The pane input lock's `flock(2)` semantics (§ Pane input lock), retried every 50 milliseconds within the layout lock wait (60 s), a budget separate from each command's operation deadline; the OS releases it when its holder exits, including after `SIGKILL` |
 
 | Holder | Acquired | Held through |
 |---|---|---|
-| `member create` | After prompt validation, before resolving the Director placement; the ten-second creation deadline starts after acquisition | `started`, or the end of compensation |
+| `member create` | After its argument and body checks (§6.3 Validation order), before resolving the Director placement; the ten-second creation deadline starts after acquisition | `started`, or the end of compensation |
 | `member delete` | After its pane lock, before any cleanup step | Deregistration and layout restoration |
 | `fleet delete` | Once, after all its pane locks and before the first member's cleanup | The last member's layout restoration |
 
@@ -1353,7 +1524,7 @@ Creation holds the lock until it completes because before publication its new pa
 
 #### Capture windowing
 
-Both backends reject `lines <= 0` before any process with `capture_pane: lines must be positive, got <lines>` and over-fetch by a fixed 1000 lines using their exact argv below. Split raw output on `"\n"` only, preserving `\r` for the CLI's later CR-defrag. Drop the trailing run of visually blank lines: test each line for whitespace-only content after per-line CSI stripping, retaining the original bytes of kept lines. This recognizes TUI-painted empty rows without altering retained ANSI sequences.
+Both backends reject `lines <= 0` before any process with `capture_pane: lines must be positive, got <lines>` and over-fetch by a fixed 1000 lines using their exact argv below. Split raw output on `"\n"` only, preserving `\r` for the CLI's later CR-defrag. Drop the trailing run of visually blank lines: test each line for content of only Unicode `White_Space` after per-line CSI stripping, retaining the original bytes of kept lines. This recognizes TUI-painted empty rows without altering retained ANSI sequences.
 
 Return the last `lines` remaining lines joined by `"\n"`, with no trailing newline; an all-blank buffer becomes the empty string. Preserve interior blank lines. Enforce the last-N window client-side even when the backend returns more than requested, so the window shows the drawn bottom rather than blank cursor space.
 
@@ -1369,25 +1540,32 @@ Director delivery sweep (§6.9 Director delivery sweep).
 | Operation | tmux argv | herdr argv | Failure handling |
 |---|---|---|---|
 | Availability | `tmux` on `PATH` | `herdr` on `PATH` | `<backend> binary not found on PATH` |
-| Pane context (`fleet create` and `doctor`) | <code>tmux display-message -p -t &lt;pane&gt; "#{session_name}&#124;#{window_id}&#124;#{pane_id}"</code>, split on the first two <code>&#124;</code> | `herdr pane current --pane <pane>`; `result.pane` supplies `workspace_id`, `tab_id`, `pane_id` | tmux: `unexpected tmux display-message output: <quoted>`; herdr: `herdr <context> missing '<key>' field`; an unknown pane fails per §6.3 `fleet create` |
+| Pane context (`fleet create` and `doctor`) | <code>tmux display-message -p -t &lt;pane&gt; "#{session_name}&#124;#{window_id}&#124;#{pane_id}"</code>, split on the first two <code>&#124;</code> | `herdr pane current --pane <pane>`; `result.pane` supplies `workspace_id`, `tab_id`, `pane_id` | An unknown pane fails per §6.3 `fleet create`: tmux exits 0 with an empty `session_name` or `window_id`, or with a `pane_id` other than `<pane>` (a missing pane prints <code>&#124;&#124;</code>), and herdr reports error code `pane_not_found`. Otherwise tmux: a reply without three <code>&#124;</code>-separated fields fails with `unexpected tmux display-message output: <quoted>`; herdr: `herdr <context> missing '<key>' field` |
 | Pane process (`fleet create` and `doctor`, §6.3 Caller pane verification) | <code>tmux display-message -p -t &lt;pane&gt; "#{pane_id}&#124;#{pane_pid}"</code>, split on the first <code>&#124;</code> | `herdr pane process-info --pane <pane>`; `result.process_info.shell_pid` supplies the pid | tmux: an empty `pane_id` or one that differs from `<pane>` is a missing pane, and with a matching `pane_id` a pid that is not a positive integer fails with `unexpected tmux display-message output: <quoted>`; herdr: error code `pane_not_found` is a missing pane, and a missing or non-integer field fails with `herdr pane process-info missing 'shell_pid' field` |
 | Rename window (`fleet create`) | `tmux rename-window -t <window_id> <name>` | `herdr tab rename <tab_id> <name>` | Propagate command failures; herdr also requires its JSON `result` envelope. Each value is one argv element on the resolved server |
 | Window name (`fleet create` verification) | <code>tmux display-message -p -t &lt;window_id&gt; "#{window_id}&#124;#{window_name}"</code>; remove exactly the final LF, split on the first <code>&#124;</code>, require the echoed window ID and preserve the remaining name exactly, including CR and embedded LF | `herdr tab get <tab_id>`; require `result.tab.tab_id` to equal the requested ID and a string `result.tab.label` | Propagate command failures and reject malformed output, missing fields and mismatched IDs; an empty name is valid for the reader, and registration requires exact equality with its canonical name |
 | Window height (`member create`) | `tmux display-message -p -t <window_id> "#{window_height}"`; the anchors are ignored | `herdr pane layout --pane <anchor>` for each anchor in order; the first successful `result.layout.area.height` is the height | tmux: output that is not a positive integer, including the empty line of a missing window, fails with `unexpected tmux display-message output: <quoted>`; herdr: a reply without the area fails with `herdr pane layout missing 'area' field`, any failure moves to the next anchor, and the read fails with the last anchor's error only when no anchor answers |
 | Spawn member pane | Per pane target, § Member pane creation | Per pane target, § Member pane creation | A failed or malformed creation response is an unknown pane-cleanup outcome (§ Pane ownership during creation); naming, equalization and re-parenting failures never fail the spawn |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
-| Director screen capture | `tmux display-message -p -t <pane> '#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}'`, `tmux capture-pane -p -e -N -t <pane>`, then the same `display-message` again; a changed metadata line retries every 50 ms within the attempt deadline | `herdr api snapshot` for the pane's `rect.width` in `snapshot.layouts[].panes[]` and its `scroll.viewport_rows` in `snapshot.panes[]`, joined by `pane_id`, then `herdr pane read <pane> --source visible --format ansi`; the row count is `scroll.viewport_rows`, and the body lines fill the screen from the top because the read keeps leading and interior blank rows and drops only trailing blank rows; a body with more lines than the row count is a capture failure | A malformed metadata line or a pane absent from the snapshot is a capture failure. tmux captures carry the cursor and alternate-screen state; herdr captures carry neither, and their columns are the layout width, an upper bound of the terminal width |
-| Director literal write | `tmux send-keys -t <pane> -l -- <chunk>` for each chunk of at most 256 characters, in order | `herdr pane send-text <pane> <literal>` | Acknowledged like § Explicit key dispatch; a failure after the first process started has possibly partial effects (§6.9 Director delivery sweep) |
-| Director submit key | `tmux send-keys -t <pane> -H <hex bytes>` | `herdr pane send-keys <pane> <key>` through the explicit-key mapping (`0d` → `enter`) | Acknowledged like § Explicit key dispatch; a failure after its process started is possibly submitted (§6.9 Director delivery sweep) |
+| Director screen capture | `tmux display-message -p -t <pane> '#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}'`, `tmux capture-pane -p -e -N -t <pane>`, then the same `display-message` again; a changed metadata line retries every 50 ms within the attempt deadline | `herdr api snapshot` for the pane's `rect.width` in `snapshot.layouts[].panes[]` and its `scroll.viewport_rows` in `snapshot.panes[]`, joined by `pane_id`, then `herdr pane read <pane> --source visible --format ansi`; the row count is `scroll.viewport_rows`, and the body lines fill the screen from the top because the read keeps leading and interior blank rows and drops only trailing blank rows; a body with more lines than the row count fails with `herdr pane read of <pane> printed <lines> rows for a <rows>-row viewport` | A malformed metadata line or a pane absent from the snapshot is a capture failure. tmux captures carry the cursor and alternate-screen state; herdr captures carry neither, and their columns are the layout width, an upper bound of the terminal width |
+| Director literal write | `tmux send-keys -t <pane> -l -- <chunk>` for each chunk of at most 256 Unicode scalars, in order | `herdr pane send-text <pane> <literal>` | Acknowledged like § Explicit key dispatch; a failure after the first process started has possibly partial effects (§6.9 Director delivery sweep) |
+| Director submit key | `tmux send-keys -t <pane> -H <hex bytes>`, one argument per byte written as two lowercase hex digits | `herdr pane send-keys <pane> <key>...`, one explicit key per byte, written as its herdr argument (§ Explicit key dispatch): U+0021–U+007E as its character key, `20` → `Space`, `1b` → `Escape`, `0d` → `Enter`, `09` → `Tab`, `7f` → `Backspace`, other `01`–`1a` → `Ctrl+<letter>`; a byte without a key fails before any process with `herdr has no key mapping for the submit bytes <hex>`, `<hex>` being every submit byte as two lowercase hex digits with no separator | Acknowledged like § Explicit key dispatch; a failure after its process started is possibly submitted (§6.9 Director delivery sweep) |
 | Close | `tmux kill-pane -t <pane>`, then the restoration of the caller-supplied window | `herdr pane close <pane>`, then the delete-time restoration of the caller-supplied tab | Close tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`); restoration is best effort (§ Delete-time pane layout) |
 
-`pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`. `<quoted>` follows §6.4 Quoted text.
+`pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string: the words joined by one space, where a non-empty word made only of ASCII alphanumerics and `_@%+=:,./-` is written as is, any other word is wrapped in `'` with each `'` written as `'"'"'`, and the empty word is `''`. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`. `<quoted>` follows §6.4 Quoted text.
 
-Process failures preserve their context in the multiplexer error:
-`<backend> binary not found: <detail>`, `<backend> command was not started:
-<detail>: <argv>`, `<backend> command timed out at the pane input deadline:
-<argv>` for a deadline-bounded call and `<backend> command failed: <argv>` followed by a
-`stderr: <trimmed stderr>` line. Other errors propagate.
+Process failures render per § Error taxonomy; other errors propagate.
+
+Reply parsing follows these rules:
+
+- **tmux replies.** A `display-message`, `split-window` or `new-window` reply is trimmed of leading and trailing Unicode `White_Space` before it is split, except the window-name reply, which loses exactly its final LF; a window-name reply without that LF or with another echoed window ID, and a malformed Director screen metadata line, fail with `unexpected tmux display-message output: <quoted>`. The Director screen metadata line splits on runs of Unicode `White_Space` into exactly five fields: four integers in 0–65535, each optionally written with a leading `+`, and a flag `0` or `1`; any other line is malformed. Integer replies such as `#{window_height}` and `#{pane_pid}` also accept a leading `+`.
+- **tmux `list-panes`.** Each non-blank reply line splits on its first `|`; a line without one fails with `unexpected tmux list-panes output: <quoted>`, quoting the whole reply. Panes group by the exact `pane_left` text, in first-appearance order.
+- **tmux pane-gone causes.** `can't find pane` and `no such pane` match the stderr case-insensitively.
+- **herdr error codes.** A herdr error code such as `pane_not_found` is the string member `error.code` of the whole stderr parsed as one JSON value; stderr that is not such a JSON value carries no code.
+- **herdr JSON numbers.** An integer field (`area.height`, `shell_pid`) requires a JSON number written without fraction or exponent. `x`, `y`, `width`, `height` of a geometry rectangle, `viewport_rows` and `ratio` accept any JSON number, and `rect.width` and `viewport_rows` must then be whole numbers from 1 to 65535 (`herdr api snapshot <field> <value> of <pane>` otherwise). A repeated JSON object key takes its last occurrence.
+- **herdr missing fields.** A missing or mistyped string field fails with `herdr <context> missing '<key>' field`, where `<context>` names the reply (`pane list`, `pane current`, `pane split`, `pane move`, `tab create`, `tab get`, `pane layout`, `api snapshot`). Other reply-shape failures are `herdr pane list missing 'panes' field`, `herdr pane layout missing 'panes' field`, `herdr pane layout missing 'splits' field`, `herdr api snapshot missing '<field>' field`, `herdr api snapshot has no pane <pane>`, `herdr tab get returned tab <quoted>, expected <quoted>`, `herdr pane split returned an empty pane ID` and, for tmux, `tmux split-window returned an empty pane ID`.
+- **herdr server discovery.** `herdr session list --json` must print JSON with a `sessions` array (`herdr session list returned non-JSON output: <quoted>`, `herdr session list missing 'sessions' field`); the first session whose `socket_path` equals `HERDR_SOCKET_PATH` supplies its `name`, and no match selects `default`. tmux server discovery fails with the no-server error (§6.3 `fleet create`) when its command exits nonzero or prints only whitespace; any other process failure follows § Error taxonomy.
+- **Write acknowledgments.** A writing process that exits 0 with non-whitespace stdout fails with `<backend> <what> acknowledgment was unreadable`, where `<what>` is `key` for explicit keys, `literal` for a tmux and `text` for a herdr Director literal write, and `submit key` for a submit key.
 
 #### Member pane creation
 
@@ -1402,7 +1580,7 @@ tmux creates the pane with one argv per target:
 | Empty `left` column (an overflow window whose left column emptied) | `tmux split-window -h -f -b -l 50% -d -t <first opposite pane> -P -F "#{pane_id}" <command>...` |
 | New window | <code>tmux new-window -d -t &lt;session&gt;: -n &lt;window_name&gt; -c &lt;cwd&gt; -P -F "#{window_id}&#124;#{pane_id}" &lt;command&gt;...</code> |
 
-A Column target's window ID is the target's own. A `new-window` reply splits on the first `|` and requires both fields non-empty; any other reply fails with `unexpected tmux new-window output: <quoted>` and an unknown pane-cleanup outcome. After creation tmux runs `tmux select-pane -t <new pane> -T <member pane name>`, then equalizes every column of the window: `tmux list-panes -t <window> -F "#{pane_id}|#{pane_left}"` groups the panes by `pane_left`, and `tmux select-layout -E -t <first pane of the group>` runs for each group of 2 or more panes. Deletion runs the same equalization (§ Delete-time pane layout).
+A Column target's window ID is the target's own. A `new-window` reply splits on the first `|` and requires both fields non-empty; any other reply fails with `unexpected tmux new-window output: <quoted>` and an unknown pane-cleanup outcome. After creation tmux runs `tmux select-pane -t <new pane> -T <member pane name>`, then equalizes every column of the window, stopping at the first failed `select-layout`: `tmux list-panes -t <window> -F "#{pane_id}|#{pane_left}"` groups the panes by `pane_left`, and `tmux select-layout -E -t <first pane of the group>` runs for each group of 2 or more panes. Deletion runs the same equalization (§ Delete-time pane layout).
 
 herdr reads every column order (top to bottom: `L1..Lk` in the left column, `R1..Rm` in the right column, the bottom pane last) from a live `herdr pane layout` read, as the panes at the column's `rect.x` sorted by `rect.y`; the target's pane lists supply only the anchor for that read. Every split, move and tab creation passes `--no-focus`, and `pane swap` is never used.
 
@@ -1439,7 +1617,7 @@ herdr has no full-height column split: `pane split --direction right` splits onl
 3. `herdr pane move R1 --tab <tab> --split right --target-pane X --no-focus` places `X` left and `R1` right.
 4. For `i = 2..m`, `herdr pane move Ri --tab <tab> --split down --target-pane R(i-1) --no-focus`. The last move empties `T'` (for m = 1, step 3 empties it).
 
-A failed move leaves the remaining panes where they are, emits the stderr diagnostic `layout re-parenting incomplete: <cause>` and lets the spawn continue. Re-parenting changes no registry placement. While a pane sits in `T'`, a concurrent `member press` to it fails its target validation against the recorded window (§ Explicit key dispatch); wrapped delivery revalidates only the registry placement.
+The temporary tab `T'` is `result.move_result.created_tab.tab_id` of the `pane move --new-tab` reply (missing: `herdr pane move missing 'tab_id' field`), and a `pane split` reply supplies the new pane as `result.pane.pane_id` (missing: `herdr pane split missing 'pane_id' field`). A failed move leaves the remaining panes where they are, emits the stderr diagnostic `layout re-parenting incomplete: <cause>` and lets the spawn continue. A move whose reply's `move_result.changed` is not `true` fails with `herdr pane move of <pane> changed nothing: <result>`, `<result>` being the reply's `result` object in compact JSON with members in herdr's order (a repeated key keeps its first position and its last value) and each number re-rendered as the shortest decimal that round-trips, a float keeping `.0`, and a column read whose layout lacks its anchor fails with `herdr pane layout of <anchor> does not contain <anchor>`. Re-parenting changes no registry placement. While a pane sits in `T'`, a concurrent `member press` to it fails its target validation against the recorded window (§ Explicit key dispatch); wrapped delivery revalidates only the registry placement.
 
 #### herdr column equalization
 
@@ -1448,10 +1626,10 @@ herdr has no single reflow command, so it rebalances every column of a tab arith
 Equal heights ⇔ split *k* has ratio `1/(N-k)` (top → `1/N`, …, bottom pair →
 `1/2`). `herdr pane resize --amount` is a signed delta on a split's ratio, so
 each split is driven to target by one resize: `delta = 1/(N-k) - ratio`
-(rounded to 4 decimal places half away from zero, written as the shortest decimal that round-trips, without exponent or trailing zeros, such as `0.1667` or `0.5`; skipped if `|delta| < 1e-3`); `delta > 0` →
+(rounded as `round_half_away_from_zero(v × 10⁴) / 10⁴` in binary64, written as the shortest decimal that round-trips, without exponent or trailing zeros, such as `0.1667` or `0.5`; skipped if `|delta| < 1e-3`); `delta > 0` →
 `herdr pane resize --pane <pane k> --direction down --amount <delta>`, else
 `--pane <pane k+1> --direction up --amount <|delta|>`. A column whose matching
-`down` split count is not `N - 1` is left untouched.
+`down` split count is not `N - 1` is left untouched. Columns group by exact binary64 equality of `rect.x` and run left to right; within a column, panes and splits sort by `rect.y` with a stable sort in which a missing `rect.y` sorts first. The first failed resize stops the remaining splits and columns, and its error is the rebalance failure.
 
 Delete-time restoration anchors at the first surviving pane in `herdr pane list` whose `tab_id` equals the caller-supplied window ID:
 
@@ -1792,7 +1970,7 @@ Each preset body has three blank-line-separated paragraphs after the heading, wi
 
 #### Hermes availability preflight
 
-After the config-dir and PATH checks, `member create` for hermes runs one concurrent batch: `hermes config path`, which resolves the effective Hermes home for settlement (§ Hermes work settlement), and the native version probe (§6.9 Native version probe). Both run the resolved executable with null stdin, the member's `HERMES_HOME` (the forwarded value, or unset) and output captured like the native version probe. `hermes config path` runs under the smaller of five seconds and the remaining ten-second creation deadline; the version probe keeps its own bound of the smaller of two seconds and that deadline. The `config path` result is evaluated first, then the version probe. Each `config path` failure exits 1 before registration with its § Contract error strings error.
+After the config-dir and PATH checks, `member create` for hermes runs one concurrent batch: `hermes config path`, which resolves the effective Hermes home for settlement (§ Hermes work settlement), and the native version probe (§6.9 Native version probe). Both run the resolved executable with null stdin and output captured like the native version probe. `hermes config path` always runs with `HERMES_HOME` set to the resolved Hermes base (§6.3 Config-dir resolution), `$HOME/.hermes` when the variable is unset, while the version probe inherits the caller's environment unchanged. `hermes config path` runs under the smaller of five seconds and the remaining ten-second creation deadline; the version probe keeps its own bound of the smaller of two seconds and that deadline. The `config path` result is evaluated first, then the version probe. Each `config path` failure exits 1 before registration with its § Contract error strings error.
 
 #### Hermes work settlement
 
@@ -1800,22 +1978,38 @@ A Hermes member's session can keep accepted work and background processes runnin
 
 | Requirement | Mechanism |
 |---|---|
-| Session identity | `member create` stores `{"hermes_home": <effective Hermes home>}` in `member_runs.native_session_json`, the directory of the file `hermes config path` names under the member's `HERMES_HOME`; settlement adds `session_id`, the full `local-<hex>` ID from the exit summary `Session: <id>` that `/exit` prints |
-| In-flight session work | While the client runs, settlement sends native input to the member's pane under the deletion's pane lock: `Ctrl+C` only when the pane shows a running turn (`type to redirect this turn`) or an open form (`↑/↓ to select`), because `Ctrl+C` on an idle composer ends the client without stopping its session. It then enters `/stop` and then `/exit` (entry steps below the table) |
-| Registered background processes | `/stop` stops the session's registered processes; settlement waits for its report (`Stopped N process(es).` or `No running background processes.`) |
+| Session identity | `member create` stores `{"hermes_home": <effective Hermes home>}` in `member_runs.native_session_json`, the directory of the file `hermes config path` names under the resolved Hermes base (§ Hermes availability preflight); settlement adds `session_id`, the full `local-<hex>` ID from the exit summary `Session: <id>` that `/exit` prints |
+| In-flight session work | While the client runs, settlement sends native input to the member's pane under the deletion's pane lock: `Ctrl+C` only when one of the last 8 non-blank lines of the ANSI-stripped capture contains `type to redirect this turn` (a running turn) or `↑/↓ to select` (an open form), because `Ctrl+C` on an idle composer ends the client without stopping its session. It then enters `/stop` and then `/exit` (entry steps below the table) |
+| Registered background processes | `/stop` stops the session's registered processes; settlement counts the matches of <code>Stopped [0-9]+ process\(es\)\.&#124;No running background processes\.</code> in the ANSI-stripped capture before typing `/stop` and waits until the count rises |
+| Exit summary | After `/exit`, settlement waits for a capture with a line matching `^Session:[\t\n\v\f\r ]+(local-[0-9a-f]+)[\t\n\v\f\r ]*$` (multi-line mode, ANSI-stripped); the last match's capture is the session ID |
 | Verification | The client printed its exit summary and the run's native child exited; no `<home>/processes.json` entry whose `owner_task_id` is the session ID has a live `pid` with its `host_start_time` (the `/proc/<pid>/stat` start field), where `<home>` is the directory of `hermes config path` under the stored base. On a platform without a comparable start time, a live `pid` counts as running. |
 
-To enter each command, settlement clears the composer by the bounded loop below, types the command, closes its completion menu with Escape, and presses Enter until it takes effect, at most three times one second apart while the client remains live.
+Each capture reads the member pane's last 400 lines (§6.5 Capture windowing). The client counts as exited when the run's status is terminal. Settlement pauses for the poll interval (200 ms) between successive captures of a wait.
 
-Each check reads one SGR-preserving capture and indexes its rows identically to the ANSI-stripped view. The bottom border is the last stripped row consisting only of `─` across the pane width. The top border is the nearest preceding full-width border beginning and ending with `─`, with an embedded title allowed; the composer region is strictly between them. Empty means exactly one region row whose stripped text starts `❯ ` and whose remaining cells in that same SGR row are blank or italic placeholder text. Multiple region rows, including blank ones, mean nonempty. Progress compares stripped region text, retaining SGR only for the placeholder decision.
+To enter each command, settlement clears the composer by the bounded loop below, then sends the command as one explicit-key invocation with one key argument per character (`/`, `s`, `t`, `o`, `p`; `/`, `e`, `x`, `i`, `t`), pauses 200 ms, closes the completion menu with `Escape` and presses `Enter` until the command takes effect: before each of at most three `Enter` presses it pauses 200 ms and stops pressing once the client has exited, and after each press it waits up to one second for the effect; it then keeps waiting until the settlement budget expires.
+
+`processes.json` is a JSON array of objects, each requiring `pid` (an unsigned 32-bit integer), `host_start_time` (an unsigned 64-bit integer) and `owner_task_id` (a string), with unknown fields ignored. A missing file counts as verified-stopped. One malformed entry, or a file that is not such an array, fails with `<home>/processes.json is not a Hermes process registry: <cause>`, and any other read failure with `cannot read <home>/processes.json: <io error>`.
+
+Each check reads one SGR-preserving capture and indexes its rows identically to the ANSI-stripped view. The bottom border is the last non-empty stripped row consisting only of `─`; its width is its own length in Unicode scalars. The top border is the nearest preceding stripped row of that same width that begins and ends with `─`, with an embedded title allowed; the composer region is strictly between them. Empty means exactly one region row whose stripped text starts `❯ ` and whose remaining scalars after those two are blank or italic placeholder text. Italic is tracked through the row's SGR sequences: each `;`-separated parameter `3` sets it and `0`, `23` or an empty parameter clears it; after `38`, `48` or `58` the next parameter is consumed, together with one more after `5` and three more after `2`; an SGR sequence containing `:` is ignored whole. Multiple region rows, including blank ones, mean nonempty. Progress compares stripped region text, retaining SGR only for the placeholder decision.
 
 1. Capture and inspect the region; an empty composer completes clearing.
-2. Send exactly 16 batches back to back: `Escape` plus 63 `Backspace` keys, then 15 batches of 64 `Backspace` keys. Pause once for the settlement poll interval (200 ms), then capture again.
+2. Send exactly 16 batches back to back, each one explicit-key invocation: `Escape` plus 63 `Backspace` keys, then 15 batches of 64 `Backspace` keys. Pause once for the settlement poll interval (200 ms), then capture again.
 3. Fail with `the Hermes composer still holds text after clearing` if stripped region text is unchanged; otherwise repeat until empty or the settlement budget expires.
 
 Each round sends 1023 Backspace keys. A draft of 8192 scalars clears within 9 rounds (144 batches) and 10 seconds on tmux and herdr, leaving at least 10 seconds of the 20-second settlement budget for `/stop` and `/exit`; their clear steps complete after one empty capture. Complete nine-round native measurements took 2.676 seconds on tmux and 2.782 seconds on herdr, with the composer first observed empty after round 3; the loop stops after its first verified empty capture. Excess Backspace on an empty composer had no effect. `Ctrl+U` and `Ctrl+A` followed by `Ctrl+K` cleared a visually wrapped single logical line, but the latter retained a multi-line draft after an ineffective submit, so the fixed clear rounds cover both layouts. The total measured clear time satisfies the bound independently of any individual batch duration.
 
-Deletion runs settlement for a `hermes` run before the runner shutdown. Each `hermes` member's settlement, in `member delete` and in `fleet delete`, has its own 20-second budget, and the time it takes extends the 5-second deletion deadline for the remaining cleanup and for later fleet members. A step that does not complete within the settlement budget, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
+Deletion runs settlement for a `hermes` run before the runner shutdown. Each `hermes` member's settlement, in `member delete` and in `fleet delete`, has its own 20-second budget, and the time it takes extends the 5-second deletion deadline for the remaining cleanup and for later fleet members. A step that does not complete within the settlement budget, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. `<cause>` is one of:
+
+| Step | Cause |
+|---|---|
+| `Ctrl+C` did not end the running turn | `the Hermes turn did not stop after Ctrl-C` |
+| Clearing made no progress or ran out of budget | `the Hermes composer still holds text after clearing` |
+| `/stop` printed no new report | `Hermes did not report /stop` |
+| `/exit` printed no exit summary | `Hermes printed no exit summary after /exit` |
+| The client stayed live after its summary | `the Hermes client did not exit after /exit` |
+| A registered process still runs | `background processes of session <session-id> are still running: <pids>`, the PIDs joined by `, ` |
+| The run has no stored session record | `member run <run-id> has no Hermes session record` |
+| A registry or pane failure | Its own error | A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
 
 CAFleet never stops or restarts a Hermes gateway, kills by process name or
 touches a session it does not own.
@@ -1956,12 +2150,13 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 | Condition | Error |
 |---|---|
 | PATH miss | `binary <name> not found on PATH` |
-| Selected opencode preset missing or unreadable | `cannot read opencode agent preset at {preset}: {cause}; run 'cafleet setup --coding-agent opencode' first` |
-| CAFleet pi extension missing or unreadable | `cannot read the CAFleet pi extension at {path}: {cause}; run 'cafleet setup --coding-agent pi' first` |
-| Invalid config-path variable (§6.3 *Config-dir resolution*) | `{var} must be an absolute path (got '{value}')` |
-| Non-UTF-8 config-path variable or `HOME` (§6.3 *Config-dir resolution*) | `{var} is not valid UTF-8` |
-| `hermes config path` cannot start, times out or exits nonzero | `cannot read hermes configuration through 'hermes config path': {cause}` |
-| `hermes config path` prints no absolute file path | `cannot read hermes configuration through 'hermes config path': printed no absolute file path: {stdout}` |
+| Selected opencode preset missing or unreadable | `cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` |
+| CAFleet pi extension missing or unreadable | `cannot read the CAFleet pi extension at <path>: <cause>; run 'cafleet setup --coding-agent pi' first` |
+| Invalid config-path variable (§6.3 *Config-dir resolution*) | `<VAR> must be an absolute path (got '<value>')` |
+| Non-UTF-8 config-path variable or `HOME` (§6.3 *Config-dir resolution*) | `<VAR> is not valid UTF-8` |
+| `HOME` is unset; the availability check reads it even when the backend's config variable is set | `HOME is not set` |
+| `hermes config path` cannot start, times out or exits nonzero | `cannot read hermes configuration through 'hermes config path': <cause>`, where `<cause>` is the trimmed stderr of a nonzero exit (`exited with code <code>` when it is blank), `hermes config path ended by <status>` for an exit without a code, `hermes config path printed non-UTF-8 output`, or a native-run failure of § Native version probe; `<status>` is the operating system's exit-status description, implementation-defined |
+| `hermes config path` prints no absolute file path | `cannot read hermes configuration through 'hermes config path': printed no absolute file path: <stdout>` |
 
 #### Host evidence and native-input authorization
 
@@ -2100,7 +2295,7 @@ Launch is independent of every profile capability; detection, composer, submissi
 
 `member create` resolves the backend's binary to one absolute executable path during the backend availability check, using the creator process's `PATH`. It searches the absolute `PATH` entries in order, skipping empty and relative entries, and selects the first `<entry>/<binary>` that is a regular file with an execute permission bit after following symbolic links. The selected path is used as found, without symbolic-link resolution, so a link or wrapper keeps its own name. When no entry matches, creation fails before registration with exit 1 and `Error: binary <name> not found on PATH`.
 
-The version probe below runs that exact path, and the same path is `argv[0]` of the runner's literal child argv; the pane's own `PATH` and shell configuration play no part in selecting the native executable.
+The version probe below runs that exact path, and the same path is `argv[0]` of the runner's literal child argv; the pane's own `PATH` and shell configuration play no part in selecting the native executable. A selected path that is not valid UTF-8 fails argv construction with `native executable must be an absolute UTF-8 path (got <path>)`, exit 1.
 
 ##### Native version probe
 
@@ -2129,7 +2324,22 @@ Hermes replaces the one-token rule with its own first-line rule. The first stdou
 
 For hermes the probe runs concurrently with `hermes config path`, which has its own bound (§6.7 Hermes availability preflight).
 
-A probe that fails a rule above, cannot start, times out or prints non-UTF-8 output records `native_version` null, and creation continues with the backend's bundled profile and its coverage. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE.`, and leaves its stdout text and JSON unchanged.
+A probe that fails a rule above, cannot start, times out or prints non-UTF-8 output records `native_version` null, and creation continues with the backend's bundled profile and its coverage. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE.`, and leaves its stdout text and JSON unchanged. `CAUSE` is `<backend> --version <detail>`:
+
+| Failure | `<detail>` |
+|---|---|
+| The executable cannot start | `could not start: <io error>` |
+| The process is still running at its bound | `did not finish within its deadline` |
+| The process exited but its output stayed open at the bound | `output did not close within its deadline` |
+| Reading its output fails | `output could not be read: <io error>` |
+| A nonzero exit whose stderr's first line is non-blank | `exited with <status>: <line>` |
+| Any other nonzero exit | `exited with <status>` |
+| Non-UTF-8 stdout | `printed non-UTF-8 output` |
+| No stdout line | `printed no output` |
+| No version token, or several | `printed no version token`, `printed several version tokens` |
+| hermes: no matching line, or a capture that is not canonical SemVer | `printed no Hermes version line`, `printed a non-SemVer Hermes version` |
+
+`<status>` is the operating system's exit-status description, implementation-defined.
 
 ##### Bundled profiles and native screen fixtures
 
@@ -2653,7 +2863,7 @@ A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts
 
 A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, `text_wrap` and `text_framed`, which replace the `composer.text` prefixes, `wrap` and `framed` for the regions that rule bounds, so one profile reads composers that differ in margin, wrapping or framing; only `composer_text` rules declare them.
 
-Cells drawn in the profile's suggestion style (§6.7 Native suggestions) are excluded before extraction, and trailing blanks are trimmed from each row. A `composer_text` rule's region runs from its start row to the first later row that matches `end_pattern`, so each start row yields one candidate, and that end row is never composer text. A start row with no later `end_pattern` row within `max_rows` is closed by the screen's bottom edge, as a composer drawn on the screen's last rows is, and every row of that region is composer text. Native transcripts echo submitted prompts in the composer's own shape, and the live composer is always below the transcript, so a `composer_text` rule takes the bottom-most candidate that satisfies its matchers instead of requiring a unique one. A wrong pick can only fail the literal comparison, which withholds the submit. `composer_text` rules rank below the empty-composer rules, so a composer that both match classifies empty. No matching rule, several matching rules or a first row that does not match `first_prefix` leave the composer text unextractable.
+Cells drawn in the profile's suggestion style (§6.7 Native suggestions) are excluded before extraction, and trailing blanks are trimmed from each row. A `composer_text` rule's region runs from its start row to the first later row that matches `end_pattern`, so each start row yields one candidate, and that end row is never composer text. A start row with no later `end_pattern` row is closed by the screen's bottom edge when it is itself on the last logical line, whatever its row span, or when the screen's last row lies within `max_rows` rows of the start row, as a composer drawn on the screen's last rows is, and every row of that region is composer text; a start row whose search reaches `max_rows` first yields no candidate. Native transcripts echo submitted prompts in the composer's own shape, and the live composer is always below the transcript, so a `composer_text` rule takes the bottom-most candidate that satisfies its matchers instead of requiring a unique one. A wrong pick can only fail the literal comparison, which withholds the submit. `composer_text` rules rank below the empty-composer rules, so a composer that both match classifies empty. No matching rule, several matching rules or a first row that does not match `first_prefix` leave the composer text unextractable.
 
 The extracted text is split left to right into segments: each placeholder match is a placeholder segment, and the text between matches is a text segment. The match walks the written literal, prefix plus rendered preview, prompt or command, in order:
 
@@ -2661,7 +2871,7 @@ The extracted text is split left to right into segments: each placeholder match 
 |---|---|
 | Text | Exactly its own characters, with the `wrap` rule at each row join |
 | Placeholder, unit `scalars` | Exactly `count` Unicode scalar values |
-| Placeholder, unit `lines` | Exactly one whole written literal chunk (one bracketed-paste write), whose line count equals `count` |
+| Placeholder, unit `lines` | Exactly one whole written literal chunk, whose line count (its `\n` count plus one) equals `count`; the chunks are the operation prefix, when non-empty, and the body without paste markers |
 
 The match succeeds only when every segment matches and both the segments and the literal are fully consumed. Examples from the bundled native screens:
 
@@ -2715,7 +2925,119 @@ Every observation that carries both keeps the cursor and screen conditions and t
 
 ###### Pattern syntax
 
-Profile patterns, frame guards and region matchers of the bundled catalog and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; and flags `i m s U` in `(?flags)` and `(?flags:…)`. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
+Profile patterns, frame guards and region matchers of the bundled catalog and the built-in patterns this specification quotes (the Hermes version line, the ANSI CSI pattern) use this syntax: literals, and a backslash before any ASCII punctuation character matching that character literally (`\.`, `\?`, `\(`, `\[`, `\$`, …); `.` (any scalar except `\n`); bracket classes with ranges, negation, POSIX `[:name:]` classes and `\p{…}` general-category or script names; the escapes `\t \n \r \f \v` and `\xHH` / `\x{H…}` for a code point; `^ $` (line anchors under `(?m)`, text anchors otherwise), `\A`, `\z`; groups `(…)`, `(?:…)`, `(?P<name>…)`; alternation; greedy and lazy quantifiers `* + ? {n} {n,} {n,m}` with counts up to 1000; and flags `i m s U` in `(?flags)` and `(?flags:…)`. POSIX `[:name:]` classes match ASCII scalars only, and `(?i)` compares under Unicode simple case folding. Matching is leftmost-first over Unicode scalar values, and match offsets are UTF-8 byte offsets. Whether a pattern outside this syntax is accepted, and how it matches, is implementation-defined.
+
+##### Profile rule object
+
+Each element of a profile's `rules` is one object. Every key not listed is refused, as is an explicit `null` for an optional key; an absent optional key takes the stated meaning.
+
+```text
+{
+  "id": NONBLANK,                     required, unique within the profile
+  "priority": INTEGER,                required
+  "observation": KIND,                required: permission_request | question | unknown_interaction |
+                                      permission_continuation | composer_empty | composer_text | unknown
+  "region": {                         required
+    "screen": "primary" | "alternate" | "either",
+    "start_pattern": PATTERN,
+    "end_pattern": PATTERN,
+    "max_rows": INTEGER 1..65535,
+    "cursor": "any" | "at_end" | "after_prompt" | "inside",
+    "panel_separator": GLYPH          optional; absent: no clipping (§ Diff sidebar clipping)
+  },
+  "matchers": [                       required
+    { "id": NONBLANK, "scope": "line" | "region", "pattern": PATTERN,
+      "focus_style": "marker" | "background" }      focus_style optional; absent: no focus
+  ],
+  "extract": {                        required
+    "operation": OPERATION | null,    required; null: no operation (§ Operation extraction)
+    "choices": [                      required, possibly empty
+      { "id": NONBLANK, "label": { "matcher_id": NONBLANK, "capture": NONBLANK },
+        "scope": "single_request" | "persistent" }
+    ]
+  },
+  "verified_noninteraction": BOOLEAN, required
+  "frame": FRAME,                     optional, interaction rules only (§ Interaction frame guard)
+  "suggestion": { "style": STYLE },   optional, composer_empty only (§6.7 Native suggestions)
+  "continues_rule_id": NONBLANK,      optional, permission_continuation only (§ Continuation screens)
+  "continues_choice_id": NONBLANK,    optional, with continues_rule_id
+  "text_prefixes": { "first_prefix": PATTERN, "continuation_prefix": PATTERN },
+                                      optional, composer_text only
+  "text_wrap": WRAP,                  optional, composer_text only
+  "text_framed": BOOLEAN,             optional, composer_text only
+  "fixture_ids": [NONBLANK, ...]      optional provenance, unread at run time
+}
+```
+
+`PATTERN` is a non-blank pattern of § Pattern syntax, `GLYPH` one non-whitespace scalar and `NONBLANK` a string with at least one scalar outside `White_Space`. `text_prefixes`, `text_wrap` and `text_framed` replace the profile's `composer.text` values for that rule's regions. The observations that accept each key and the cross-key requirements are the provenance rules of § Bundled profiles and native screen fixtures; a shipped catalog satisfies them, and how a binary reports a catalog that breaks one at run time is implementation-defined.
+
+##### Detection algorithm
+
+Detection runs one entry point over a snapshot with a set of selected rules:
+
+| Entry point | Selected rules |
+|---|---|
+| Runner observation | Every rule the profile's `detection` or `composer` capability lists, plus every `permission_continuation` rule |
+| Director observation | The profile's `director_delivery.rule_ids`, plus every interaction rule and every `permission_continuation` rule |
+
+The snapshot is *cursor-free* when it records no cursor or no screen mode. Each selected rule is matched in these steps:
+
+1. **Lines.** The rule reads the clipped logical lines of its `panel_separator`, or the unclipped ones (§ Line text); every later step uses this line set.
+2. **Frame.** A rule with `frame` is skipped unless every require pattern matches some logical line and no reject pattern matches any logical line.
+3. **Screen.** A rule whose `screen` is `primary` while the alternate screen is active, or `alternate` while the primary screen is active, has no candidate; a cursor-free snapshot ignores `screen`.
+4. **Candidates.** A logical line whose text has exactly one `start_pattern` match starts candidates. Each logical line from the start line on whose text has exactly one `end_pattern` match closes a candidate region from the start line's first row through the end line's last row, while that span stays within `max_rows` rows; the first line that would exceed `max_rows` stops the search. A `composer_text` rule closes only at the first end line after the start line; when no end line follows and either the start line is itself the last logical line, whatever its row span, or the screen's last row lies within `max_rows` rows of the start line, the screen's last row closes the region, and a start line whose search reaches `max_rows` first yields no candidate.
+5. **Cursor.** `any`, and every condition on a cursor-free snapshot, holds. `at_end` requires the cursor at the cell boundary right after the end match, `after_prompt` at the cell boundary right after the start match (the boundary after a wrapped row's last cell is column 0 of the next row, and only a logical line's final cell yields `(row, col + width)`, possibly `(row, cols)`), and `inside` on a row of the region at a column up to `cols`. A bottom-closed `composer_text` region accepts only `any` and `inside`. A rule with `suggestion` also requires every cell from the after-prompt column through the row's last non-blank cell to carry the style.
+6. **Matchers.** On a candidate, a line-scoped matcher must match exactly once across the region's logical lines and a region-scoped matcher exactly once in the region text; otherwise the candidate fails. The operation and every declared choice label must then capture non-empty text.
+7. **Selection.** A `composer_text` rule, and a `composer_empty` rule on a cursor-free snapshot, takes its last candidate that passes step 6. On a cursor-free snapshot every other rule needs exactly one candidate that passes step 6. Otherwise a rule needs exactly one candidate after step 5, and that candidate must pass step 6.
+
+On a cursor-free snapshot, the matched `composer_empty` and `composer_text` rules are then reduced to those whose composer rows end lowest on the screen; a `composer_text` region's end-pattern row is not a composer row. Of the remaining matches only those at the highest `priority` count; they sort by rule id, and the first is the reported rule. The matches *conflict* when their `(observation, operation, choices)` triples differ:
+
+| Outcome | Observation |
+|---|---|
+| No match | `unknown`, rule `unmatched-screen`, evidence `absent` |
+| Matches that conflict | `unknown_interaction` when any match is an interaction rule, otherwise `unknown`; evidence `conflicting`; no operation or choices |
+| Matches that agree | The reported rule's observation, evidence `complete`, its operation and choices, and `verified_noninteraction` as the rule declares |
+
+The semantic fingerprint of an interaction or `permission_continuation` observation is the sorted, deduplicated list of the top-priority matches' `(observation, operation, choices)` triples, compared for exact equality; the backend is fixed per detector.
+
+**Composer-text extraction** applies steps 1–7 to each `composer.text` rule only, without the cursor-free reduction or the priority filter, and needs exactly one of them to match; it then reads the region's rows through the profile's prefixes, dropping cells drawn in any of those rules' suggestion styles (§6.7 Native suggestions).
+
+**Answer matching** applies to a `complete` observation only. For each answer whose `request_rule_id` is the observed rule, focused-choice resolution reads the answer's focus matcher: `marker` selects the one choice whose label matched on the focus matcher's line, and `background` the one choice whose label cells share one background that differs from their row's majority background (the background of more than half the row's cells); any other count yields no focused choice.
+
+##### Fixture replay and expected observation
+
+A native screen fixture's screen is the state a fresh model of the fixture's `rows × cols` (§ Terminal emulation) reaches after these feeds:
+
+1. Text feed: `ESC [ ? 1049 h` when `alternate_screen` is true, then `ESC [ 2 J`, then for each row `r` whose `lines` entry is non-empty, `ESC [ <r+1> ; 1 H` followed by the entry's UTF-8 bytes. Masked rows are empty, so they stay without contents.
+2. Attribute feed, computed from the model after the text feed:
+   1. Give every cell `(row, col)` covered by a `cell_backgrounds` or `cell_styles` run an SGR parameter list holding, in order, the background parameters of its `cell_backgrounds` run (`48;5;<index>` for `indexed`, `48;2;<r>;<g>;<b>` for `rgb`), then `2` when its `cell_styles` run has `faint: true`, then the foreground parameters of that run when `foreground` is non-null (`38;5;<index>` or `38;2;<r>;<g>;<b>`), joined with `;` in decimal.
+   2. Visit the covered cells in ascending `(row, col)` order. A cell continues the open segment when it is on the segment's row, directly after the previous visited cell and has the same parameter list. Otherwise it starts a segment: emit `ESC [ 0 m` when a segment is open, then `ESC [ <row+1> ; <col+1> H` and `ESC [ <parameters> m`.
+   3. Emit each visited cell's text: nothing for a continuation, the cell's contents when it has contents, and one U+0020 otherwise.
+   4. After the last cell, emit `ESC [ 0 m` when any segment was opened.
+3. When both cursor coordinates are recorded, feed `ESC [ <cursor_row+1> ; <cursor_col+1> H`.
+
+The snapshot carries the recorded cursor and screen mode. A fixture whose `alternate_screen`, `cursor_row` and `cursor_col` are all `null` is cursor-free: its snapshot records no cursor and no screen mode.
+
+Every screen requires `expected_observation`, the detector's own output for each entry point, run with the screen's backend profile whatever the screen's `native_version`:
+
+| Key | Entry point | Value |
+|---|---|---|
+| `observe` | Runner observation | An observation object (below) |
+| `director` | Director observation | An observation object when the profile declares `director_delivery`, otherwise `null` |
+| `composer_text` | Composer-text extraction | `null` when the profile declares no `composer.text` or the extraction yields none; otherwise `{"mode_prefix", "segments"}` with `mode_prefix` the profile's `composer.text.mode_prefix` or `null` and each segment `{"kind":"text","items":[…]}`, `{"kind":"scalars","count":N}` or `{"kind":"lines","count":N}`. A text segment's items are strings of consecutive characters, with `{"break":true}` for each word-wrap row break between them |
+| `answers` | Answer matching against the `observe` result | An object keyed by each matched answer's `answer_rule_id`, each value `{"focused_choice_id": <id or null>}`; `{}` when no answer matches |
+
+| Observation key | Value |
+|---|---|
+| `kind` | `permission_request`, `permission_continuation`, `question`, `unknown_interaction`, `composer_empty`, `composer_text` or `unknown` |
+| `rule_id` | The reported rule, or `unmatched-screen` |
+| `match_evidence` | `absent`, `conflicting` or `complete` |
+| `operation` | The extracted operation, rows joined with `\n`; `null` when unmatched, on a conflict, or for a rule without an operation |
+| `choices` | The captured labels of the rule's `extract.choices` in declaration order; `[]` for a matched rule without choices; `null` when unmatched or on a conflict |
+| `verified_noninteraction` | `true` only for an agreeing match of a rule declaring `verified_noninteraction: true` |
+| `continues_rule_id` | The continued rule's id for a `permission_continuation`, otherwise `null` |
+
+The bundled-catalog guard replays each screen, runs every entry point and fails with `invalid native profile: fixture <ID> expected observation differs: <key path>` at the first differing key, in the order `observe`, `director`, `composer_text`, `answers`; the key path is `observe.<key>` or `director.<key>` for the first differing observation key in the table order, and `composer_text` or `answers` otherwise. A change that alters any detector output updates the affected `expected_observation` values in the same change; a capture added through the capture-to-fixture conversion records the values verified on the live screen.
 
 ##### Interaction frame guard
 
@@ -2734,7 +3056,7 @@ A rule's `extract.operation` names the matcher and the named capture that supply
 
 Catalog loading fails for an unknown key, an empty or multi-row `row_margin`, a `margin_rows` value other than `all` or `continuation`, `margin_rows` declared without `row_margin`, and an empty, multi-row or whitespace-bearing `row_trailer`.
 
-A request or question rule processes each captured row in this order:
+A request or question rule that declares `row_margin` or `row_trailer` processes each captured row in this order; a rule declaring neither uses its capture unchanged:
 
 1. Remove the trailer when `row_trailer` is declared.
 2. Remove `row_margin` from each row `margin_rows` selects.
@@ -2746,7 +3068,7 @@ The operation joins the processed rows with `\n`. The margin-then-trim order kee
 
 A rule's region may declare `panel_separator`, a single non-whitespace glyph. When any rule of the profile declares it, the detector derives one clipped line set per screen:
 
-1. A row is a panel row when, at some column `C` with `40 <= C < cols - 1`, the cell (§ Screen model facts) holds the separator glyph, its background differs from the cell at `C - 1` and equals the cell at `C + 1`.
+1. A row is a panel row when, at some column `C` with `40 <= C < cols - 1` (the lowest such column of the row), the cell (§ Screen model facts) holds the separator glyph, its background differs from the cell at `C - 1` and equals the cell at `C + 1`.
 2. Every panel row of the screen must share one `C`; otherwise no row is clipped.
 3. Each panel row keeps cells `0..C-1`; other rows are unchanged. A clipped row ends a logical line and is never joined to the next row.
 
@@ -2843,13 +3165,13 @@ Before the first byte and on each zero-byte reselection, render the selected del
 
 Fallback applies the same selection to its literal stage. A run whose backend has no bundled profile writes plainly with no limit. The 4000-scalar inline limit remains unchanged; framing and inline/pointer rendering are outside the digest preimage and become pinned at the first byte.
 
-A verified-composer run is one whose recorded backend's bundled profile supplies empty-composer observation and an executable plan for the operation: `prompt` for previews/prompts, `exec` for native commands. The runner and every client derive this predicate from the same recorded identity. Such an attempt begins only when its remaining budget covers `500 ms × settles + 2 s + 250 ms`: one settle for profile delivery, two for fallback. An immediate attempt below that bound queues with zero bytes and `defer_reason=delivery_budget_exhausted`; a deferred head waits with zero bytes under the same obstacle and retries with its own five-second attempt budget.
+A verified-composer run is one whose recorded backend's bundled profile supplies empty-composer observation and an executable plan for the operation: `prompt` for previews/prompts, `exec` for native commands. The runner and every client derive this predicate from the same recorded identity. Such an attempt begins only when its remaining budget covers `500 ms × settles + 2 s + 250 ms`: one settle for profile delivery, two for fallback. A run without composer verification requires `500 ms × settles + 250 ms`, the stage write margin without the verification window. An immediate attempt below that bound queues with zero bytes and `defer_reason=delivery_budget_exhausted`; a deferred head waits with zero bytes under the same obstacle and retries with its own five-second attempt budget.
 
 1. Revalidate run, placement, observer and interaction state, then durably reserve the input before any child byte.
 2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to the pre-write wait without settling; each further chunk needs a fresh write authorization after fresh ordinary draining and an interaction check.
 3. Start the 500 ms settle only after the last literal chunk, including any closing paste marker. Service child output, outer input and control traffic throughout it.
 4. Revalidate identity and interaction state; keyboard and pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget records `uncertain/deadline_expired`, stage `partial`.
-5. On a run whose profile declares `composer.text`, observe the composer, extract its text and match it against the written literal (§ Composer-text extraction). A complete match continues to the submit key. Without a match, the composer is observed again until it matches or a 1-second pre-submit window after the settle ends, whichever comes first; the attempt deadline ends the window earlier, and the stop signal ends the attempt with its own cause. A window that closes without a match, or a composer whose text cannot be extracted, writes no submit key, erases nothing and records `uncertain/literal_mismatch`, stage `partial`; a text extending beyond the literal, such as an appended human key, still mismatches at window close.
+5. On a run whose profile declares `composer.text`, observe the composer, extract its text and match it against the written literal (§ Composer-text extraction). A complete match continues to the submit key. Without a match, the composer is observed again, on every runner loop pass at an implementation-defined cadence, until it matches or a 1-second pre-submit window after the settle ends, whichever comes first; the attempt deadline ends the window earlier, and the stop signal ends the attempt with its own cause. A window that closes without a match, or a composer whose text cannot be extracted, writes no submit key, erases nothing and records `uncertain/literal_mismatch`, stage `partial`; a text extending beyond the literal, such as an appended human key, still mismatches at window close.
 6. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
 7. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `uncertain/submit_unconfirmed`, stage `submitted`.
 
@@ -2877,13 +3199,13 @@ tmux/herdr pane <--> CAFleet runner <--> child PTY <--> native agent CLI
 
 The runner owns the child PTY and reconstructs terminal state independently of the multiplexer.
 
-Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` beside the canonical selected database. The database identity is the canonical path, filesystem device/inode and the stored `runtime_database_identity` instance ID (§8); `database_namespace` is the first 26 characters of the unpadded RFC 4648 base32 encoding (alphabet `a`–`z`, `2`–`7`, most-significant bit first) of the SHA-256 digest of the canonical JSON (§6.4 JSON encoding) of the database identity object. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts.
+Store runtime artifacts in `.cafleet-runs/<database_namespace>/<run_id>/` in the directory of the canonical selected database: `identity.json` (the namespace manifest) in the namespace directory, and `launch.json` (the descriptor), `owner.lock` and `control.sock` in the run directory. The control socket's complete path is at most 107 bytes on Linux and 103 on macOS; a longer path fails creation with `complete runtime socket path exceeds platform limit`. The database identity is the JSON object `{"canonical_path": <canonical UTF-8 path>, "instance_id": <runtime_database_identity.instance_id>, "device": <st_dev>, "inode": <st_ino>}` (§8); `database_namespace` is the first 26 characters of the unpadded RFC 4648 base32 encoding (alphabet `a`–`z`, `2`–`7`, most-significant bit first) of the SHA-256 digest of the canonical JSON (§6.4 JSON encoding) of the database identity object. A private namespace manifest stores the complete identity; a prefix collision with a different manifest fails explicitly rather than sharing artifacts.
 
 Directories use `0700`, descriptor files `0600`, and a control socket is accessible only to its owner. Create each run directory exclusively and reconcile an existing directory before reuse. Reject symlinks, ownership mismatches, malformed descriptors and socket paths exceeding the platform limit against the complete resulting path before pane creation. The descriptor contains complete database identity, fleet/member/Director/run identities, ownership epoch, a random launch nonce, literal child argv, absolute cwd, required environment overrides and initial terminal dimensions. The child inherits the native configuration; CAFleet neither copies the entire environment nor creates per-member native profiles.
 
 Replacing a database file creates a different filesystem identity and namespace even when restored bytes retain the instance ID. Runners validate the selected path's file/instance identity before input and storage mutations; replacement fences the old run from the new database, holds input and initiates owned-child cleanup. Retain the old namespace for explicit reconciliation; a new creator never adopts its socket.
 
-The descriptor and control socket are local coordination mechanisms, not an authorization boundary against the same operating-system user; matching identities and the nonce reject stale endpoints. The creator's guarded cleanup deletes the descriptor on every outcome (success, handshake failure, timeout, rollback and uncertain post-`start` timeout) and reports a failed unlink explicitly. Failed run records retain only the non-secret `permission_argv_json`, never the assignment-bearing prompt element or raw environment. After a creator crash, deletion's recovery removes the descriptor only after identity/ownership validation. The runner removes its loaded descriptor after preparation when safe, independently of the creator's idempotent cleanup.
+The descriptor's file format and size bound are implementation-defined: only processes of one binary version exchange it. The descriptor and control socket are local coordination mechanisms, not an authorization boundary against the same operating-system user; matching identities and the nonce reject stale endpoints. The creator's guarded cleanup deletes the descriptor on every outcome (success, handshake failure, timeout, rollback and uncertain post-`start` timeout) and reports a failed unlink explicitly. Failed run records retain only the non-secret `permission_argv_json`, never the assignment-bearing prompt element or raw environment. After a creator crash, deletion's recovery removes the descriptor only after identity/ownership validation. The runner removes its loaded descriptor after preparation when safe, independently of the creator's idempotent cleanup.
 
 During verified ordinary recovery, retain the original ownership lock and pin a leftover launch descriptor by its opened file identity and bounded content, validating the recorded namespace/directory, private regular file, immutable database/fleet/member/Director/run identity and nonce. A positive historical descriptor epoch at or below the captured current epoch remains valid across takeover and retry; native launch loading still requires current creator ownership and the exact current epoch. Expected absence is idempotent while the pathname remains absent.
 
@@ -2915,7 +3237,7 @@ Forward outer-terminal input so a burst spanning several reads reaches the child
 | Pacing | A tick that moved input bytes, by reading outer bytes or writing a positive count to the PTY master, is followed immediately by the next tick; every other tick, including one whose queued input the master did not accept, keeps the loop's idle sleep |
 | Framing | None: forwarded bytes pass unchanged and in order, with no holding or timeout. Keyboard bytes advance `human_generation` and complete pointer reports advance `pointer_generation` (§ Terminal reply classification); replies advance neither |
 
-The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens, OSC title and a monotonic output sequence. Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and the screen model never answers a terminal query itself; every reply comes from the outer terminal.
+The PTY-reader path updates terminal state before publishing the same bytes to display and passes immutable observations to the classifier. Track cursor/cell state, primary/alternate screens and a monotonic output sequence (§ Screen model facts). Keep scrollback out of live-prompt matching. Terminal queries and replies continue through the terminal transport, and the screen model never answers a terminal query itself; every reply comes from the outer terminal.
 
 Terminal transport, classification and event storage are separate: database waits, a held Director delivery and event-commit retries never stop draining child output or accepting a human's native answer. Use bounded byte buffers and ordinary terminal backpressure for a slow outer display; a broken outer terminal triggers owned-child cleanup. Classification may coalesce intermediate working-screen snapshots, but it processes every potential interaction transition from the ordered parser stream before such coalescing. This is an observation contract for output actually rendered/read, not a guarantee to capture a dialog opened and closed between observable states.
 
@@ -2951,7 +3273,128 @@ Only the current lock/epoch owner allocates event sequences. Confirmed loss and 
 
 ##### Screen model facts
 
-The runner reconstructs the child's screen as a grid of rows × columns of cells and offers detection a snapshot of it after each step. The screen model is at least two columns wide: a one-column terminal is modelled as two columns, while the child PTY keeps the pane's size. A cell holds one base scalar plus any following zero-width scalars. A wide scalar (width 2; East Asian Ambiguous scalars are width 1) occupies a leading cell and a continuation cell, and writing it resets the continuation cell to the default background and style. Each row records whether its text continued onto the next row by automatic wrap. After a write into the last column the cursor reports column `cols` (pending wrap). A cell's colours are default, one of 256 indexed colours (SGR 30–37/40–47 and 90–97/100–107 denote indexed colours 0–15, equal to their `38;5;n`/`48;5;n` forms) or RGB, and its style includes faint. The model tracks the primary and alternate screens, the OSC window title and the bracketed-paste mode (DEC private mode 2004), resizes with the PTY, and never answers a terminal query itself.
+The runner reconstructs the child's screen as a grid of rows × columns of cells and offers detection a snapshot of it after each step. The screen model is at least two columns wide: a one-column terminal is modelled as two columns, while the child PTY keeps the pane's size. A cell holds one base scalar plus any following zero-width scalars. A wide scalar (width 2; East Asian Ambiguous scalars are width 1) occupies a leading cell and a continuation cell, and writing it resets the continuation cell to the default background and style. Each row records whether its text continued onto the next row by automatic wrap. After a write into the last column the cursor reports column `cols` (pending wrap). A cell's colours are default, one of 256 indexed colours (SGR 30–37/40–47 and 90–97/100–107 denote indexed colours 0–15, equal to their `38;5;n`/`48;5;n` forms) or RGB, and its style includes faint. The model tracks the primary and alternate screens and the bracketed-paste mode (DEC private mode 2004), resizes with the PTY, and never answers a terminal query itself. No rule reads a window title, so the model keeps none.
+
+Each PTY read is fed as steps: every ASCII control byte (0x00–0x1F and 0x7F) alone, and every maximal run of other bytes. Detection observes the snapshot after each step; a resize is not observed. `screen_seq` starts at 0, grows by the number of bytes of every step and by 1 for every resize, a resize to the current size included (vector `observe-granularity`).
+
+##### Terminal emulation
+
+The screen model is the snapshot-visible state below, changed only by the control functions this subsection lists; every other byte sequence, including every function the tables omit, leaves that state unchanged. The vectors cited in each row are in §9.2.
+
+| Snapshot-visible state | Contents |
+|---|---|
+| Cells | Each cell's contents (one base scalar plus appended zero-width scalars, or none), its wide-leading and continuation flags, its foreground and background colours (default, indexed 0–255 or RGB) and its faint attribute |
+| Rows | Each row's wrap flag |
+| Cursor | Row and column of each screen; the column equals `cols` while a wrap is pending |
+| Screen | Primary or alternate; each screen has its own cells, cursor, saved cursor, scroll region and origin mode |
+| Modes | Bracketed paste |
+
+Current attributes, one saved-attributes slot, the last printed scalar and the count of rows scrolled off the primary screen's top are shared by both screens and become visible only through later effects. The model keeps no scrollback rows.
+
+**Byte parsing.** Parser state persists across reads, so splitting input into reads never changes the result (`utf8-split-across-reads`). In the ground state a valid UTF-8 scalar below U+0020 other than ESC is a C0 control; U+0080–U+009F, U+007F and U+FFFD have no effect; every other scalar prints. Invalid UTF-8 consumes its maximal invalid subpart with no effect, and a valid scalar after it is never lost; a sequence cut by ESC is dropped before ESC is processed; a sequence cut at the end of a read waits for the next read, and when the next bytes do not complete it they are reparsed from their start (`utf8-invalid`, `utf8-partial-then-invalid`, `utf8-c1-del-fffd`). 8-bit C1 bytes never introduce a sequence (`utf8-raw-c1-not-introducer`). Inside an escape, control or string sequence:
+
+| State | C0 except CAN, SUB, ESC | CAN 0x18, SUB 0x1A | ESC |
+|---|---|---|---|
+| Escape | Executed; the state stays Escape, so the next byte is a final byte (`esc-c0-inside-escape`) | Abort to ground | Ignored |
+| Control sequence | Executed; the sequence continues | Abort to ground (`csi-c0-inside-and-can-abort`) | Restart the escape |
+| OSC string | Ignored, BEL terminates | Terminate | Terminate |
+| DCS, SOS, PM, APC string | Ignored | Terminate | Terminate |
+
+**Control-sequence parameters.** Digits accumulate decimal, saturating at 65535; `;` ends a parameter and `:` a sub-parameter; an empty parameter is 0, and 0 means the function's default. At most 32 values are kept and the final byte still dispatches; a function reading one value takes a parameter's first sub-parameter (`csi-params-saturate-and-overflow`, `csi-subparameter-first-value`). A private marker `<`, `=`, `>` or `?` is recognized only right after `CSI`; elsewhere it voids the sequence (`csi-late-private-ignored`).
+
+**C0 controls.**
+
+| Byte | Effect | Vector |
+|---|---|---|
+| BS 0x08 | Column − 1, saturating at 0; a pending wrap goes to `cols − 1` | `c0-bs`, `wrap-pending-then-bs-lf` |
+| HT 0x09 | Column ← next multiple of 8, clamped to `cols − 1` | `c0-ht` |
+| LF 0x0A, VT 0x0B, FF 0x0C | Row + 1; at the scroll-region bottom with the cursor inside the region, the region scrolls up one row; below the region the row clamps at `rows − 1`; the column is kept | `c0-lf-vt-ff`, `c0-lf-scrolls-at-bottom` |
+| CR 0x0D | Column ← 0 | `c0-cr`, `wrap-pending-then-cr` |
+| Every other C0 | No effect | `c0-ignored` |
+
+**Escape sequences.**
+
+| Sequence | Effect | Vector |
+|---|---|---|
+| `ESC 7` | Save the screen's cursor and origin mode, and the current attributes | `esc-decsc-decrc` |
+| `ESC 8` | Restore them; without a save: `(0, 0)`, origin mode off, default attributes | `esc-decsc-decrc`, `esc-decrc-without-save` |
+| `ESC M` | Row − 1; at the region top inside the region, or on row 0, the region scrolls down one row, also when row 0 is outside the region | `esc-ri`, `esc-ri-row0-outside-region` |
+| `ESC c` | A fresh screen of the same size: both screens blank, cursor `(0, 0)`, default attributes, bracketed paste off, primary screen, no last printed scalar | `esc-ris` |
+| Every other final byte and every sequence with an intermediate (`ESC D`, `ESC E`, `ESC ( 0`, `ESC # 8`) | No effect; no character-set designation | `esc-unhandled-and-charset` |
+
+**Control sequences.** `n` defaults to 1 unless stated; a sequence whose intermediate the row does not name has no effect.
+
+| Sequence | Effect | Vector |
+|---|---|---|
+| `CSI n A`, `CSI n B` | Row ∓ n, clamped to the scroll region when the cursor is inside it, else to the screen | `csi-cuu-cud-region` |
+| `CSI n C`, `CSI n D` | Column + n clamped to `cols − 1`; column − n saturating at 0 (from a pending wrap, `cols − n`) | `csi-cuf-cub` |
+| `CSI n E`, `CSI n F` | Column 0, then down or up n as `CSI n B` / `CSI n A` | `csi-cnl-cpl` |
+| `CSI n G`, ``CSI n ` ``, `CSI n d` | Column ← n − 1; row ← n − 1; clamped, ignoring origin mode and the region | `csi-cha-hpa-vpa` |
+| `CSI r ; c H`, `CSI r ; c f` | Row ← r − 1 (offset by the region top and clamped to the region under origin mode), column ← c − 1, both clamped | `csi-cup-clamps`, `dec-origin-mode` |
+| `CSI n J`, `CSI ? n J` (n defaults to 0) | 0: rows below cleared, then erase to the row end; 1: rows above cleared, then erase from the row start; 2: every row cleared, cursor kept; 3: the scrolled-off count ← 0 | `csi-ed0`, `csi-ed1`, `csi-ed2-keeps-cursor`, `csi-ed3-then-grow` |
+| `CSI n K`, `CSI ? n K` (n defaults to 0) | 0: erase from the cursor to the row end (nothing at a pending wrap); 1: erase from column 0 through the cursor; 2: clear the row | `csi-el` |
+| `CSI n X` | Erase `min(n, cols − col)` cells from the cursor | `csi-ech` |
+| `CSI n @`, `CSI n P` | Insert `min(n, cols − col)` blank cells at the cursor, discarding cells pushed off the row; delete that many, blank cells entering at the right; a wide pair cut by either is cleared, and the row's wrap flag is cleared | `csi-ich`, `csi-dch`, `wrap-cleared-by-ich-dch` |
+| `CSI n L`, `CSI n M` | Only with the cursor inside the region: insert or delete n rows at the cursor row within the region; the cursor is kept | `csi-il-dl`, `csi-il-outside-region-ignored` |
+| `CSI n S`, `CSI n T` | Scroll the region up or down n rows; rows scrolled off a region whose top is row 0 add to the scrolled-off count | `csi-su-sd` |
+| `CSI t ; b r` | Region ← rows `t − 1 … b − 1` when `t < min(b, rows)`, else the whole screen (t defaults to 1, b to `rows`); the cursor goes to `(region top, 0)` | `csi-decstbm` |
+| `CSI n b` | Print the last printed scalar n more times; the last printed scalar is the latest of width above 0; none: no effect | `csi-rep`, `csi-rep-without-last-scalar` |
+| `CSI … m` | Select graphic rendition (below) | — |
+| `CSI ? … h`, `CSI ? … l` | DEC private modes (below) | — |
+| Every other control sequence (`CSI s`, `CSI u`, `CSI 4 h`, `CSI 20 h`, `CSI > … m`, `CSI ! p`, `CSI … t`, `CSI n SP q`) | No effect | `csi-ignored` |
+
+**Select graphic rendition.** Parameters apply left to right, each colon group being one parameter:
+
+| Parameter | Effect | Vector |
+|---|---|---|
+| `0` or empty | Default attributes | `sgr-faint-bold-interplay` |
+| `1`, `2`, `22` | Bold on and faint off; faint on and bold off; both off | `sgr-faint-bold-interplay` |
+| `30`–`37`, `90`–`97`, `39` | Foreground indexed 0–7, indexed 8–15, default | `sgr-indexed-and-default` |
+| `40`–`47`, `100`–`107`, `49` | Background indexed 0–7, indexed 8–15, default | `sgr-indexed-and-default` |
+| `38;5;i`, `38;2;r;g;b`, `48;5;i`, `48;2;r;g;b` and their colon forms `38:5:i`, `38:2:r:g:b`, `48:5:i`, `48:2:r:g:b` | Indexed or RGB foreground or background | `sgr-extended-colours` |
+| Every other parameter | Skipped; processing continues | `sgr-unknown-skipped` |
+
+A colour component above 255, or a semicolon `38`/`48` with a selector other than `2` or `5` or with too few components, stops the remaining parameters of that sequence; earlier ones stay applied (`sgr-stops`). Attributes apply to scalars printed afterwards and to cells erased afterwards.
+
+**DEC private modes.** Each parameter of the list applies in order; one with sub-parameters, or an unlisted mode such as 1, 7, 25 or 1047, has no effect (`dec-ignored-modes`, `dec-multiple-parameters`).
+
+| Mode | Set | Reset | Vector |
+|---|---|---|---|
+| 6 | Origin mode on, cursor to the region's top-left | Origin mode off, cursor to `(0, 0)` | `dec-origin-mode` |
+| 47 | Switch to the alternate screen, keeping its contents and cursor | Switch to the primary screen | `dec-47-alternate` |
+| 1049 | Save the cursor and attributes as `ESC 7`, clear the alternate screen (cursor, saved cursor, region and origin mode reset), switch to it | Switch to the primary screen, then restore as `ESC 8` | `dec-1049-alternate`, `dec-1049-alternate-active` |
+| 2004 | Bracketed paste on | Bracketed paste off | `dec-2004-bracketed-paste`, `dec-2004-reset` |
+
+**Strings.** OSC (`ESC ]`) ends at BEL, ESC (so `ESC \`), CAN or SUB; DCS (`ESC P`), SOS (`ESC X`), PM (`ESC ^`) and APC (`ESC _`) end at ESC, CAN or SUB, and a raw 0x9C also ends DCS. No string changes the snapshot-visible state (`osc-bel-and-st`, `osc-raw-9c-is-data`, `dcs-pm-sos-apc`, `dcs-raw-9c-terminates`).
+
+**Scalar width.** A scalar's width is its Unicode 17.0.0 East_Asian_Width class outside an East Asian context: W and F are 2, ambiguous scalars are 1, Default_Ignorable, Grapheme_Extend, Hangul vowel and trailing jamo and prepended concatenation marks are 0, U+115F and U+17A4 are 2, U+17D8 is 2, and every other printable scalar is 1. Widths are per scalar: ZWJ sequences and emoji modifier sequences take one cell per scalar of width above 0 (`width-wide`, `width-ambiguous-is-one`, `width-emoji-zwj-not-clustered`).
+
+**Printing a scalar of width w > 0** at `(r, c)`:
+
+1. When `c + w > cols`, the cursor first moves to column 0 of the next row as an LF would. The row left behind gets its wrap flag set exactly when its last cell has contents or is a continuation, the cursor really moved to the row below and the screen has more than one row; otherwise the flag is cleared (`wrap-sets-flag`, `wrap-wide-at-last-column`, `wrap-one-row`).
+2. The cell takes the scalar and the current attributes, is wide-leading when `w = 2` and is not a continuation; the column advances by w, to `cols` when the scalar ends in the last column (`wrap-pending-then-cr`).
+3. Overwriting the continuation of a wide pair clears its leading cell; overwriting a wide-leading cell with a narrow scalar writes U+0020 with the current attributes into the next cell; a wide scalar makes the next cell a default continuation and, when that cell was wide-leading, clears the cell after it (`width-overwrite-continuation`, `width-overwrite-wide-with-narrow`, `width-overwrite-narrow-with-wide`).
+
+**Printing a scalar of width 0** appends it to the cell before the cursor (the wide pair's leading cell when that cell is a continuation, the last cell at a pending wrap), writing U+0020 into a cell without contents first; at column 0 it is dropped, and an append to a cell already holding 18 bytes or more of UTF-8 is dropped; the cursor stays. After U+FE0F the cell becomes wide-leading when its contents' string width exceeds 1; when the cell is in the last column, its contents move to column 0 of the next row (the row left behind not wrapped) and the cursor goes to column 2, otherwise the cursor advances by 1. Other zero-width scalars never change a cell's width (`width-combining`, `width-vs16-widens`, `width-vs16-at-last-column`, `width-vs15-keeps-width`).
+
+**Erasing.** An erase (`CSI J`, `CSI K`, `CSI X`) leaves cells without contents or flags in the current attributes, and the other half of a cut wide pair without contents in its own attributes (`csi-erase-takes-current-attributes`). Rows entering by scrolling, inserted or deleted rows and cells, rows and cells a resize adds, `ESC c` and the 1049 clear are default cells.
+
+**Wrap flags** are set only by printing step 1. A row's flag clears when the row is cleared, when an erase covers its last cell (`cols − 1`, or `cols − 2` when that cell is wide-leading), on `CSI @` and `CSI P`, on the region-bottom row of `CSI L` and `CSI T`, for rows entering by scroll and on any resize that changes the size; otherwise the flag moves with its row (`wrap-cleared-by-erase`, `wrap-kept-by-mid-row-erase`, `wrap-moves-with-scroll`). The last row's flag is never set.
+
+**Resize.** The model is at least two columns wide (`resize-floor-two-columns`), and a resize to the current size changes nothing (`resize-same-size`). Otherwise, on each screen, the region resets to the whole screen, then:
+
+1. Fewer rows: `k = max(0, removed − (old_rows − 1 − cursor_row))` rows scroll off the top (adding to the scrolled-off count), rows beyond the new height are dropped from the bottom, and the cursor and saved rows move up by k (`resize-shrink-rows`, `resize-shrink-rows-cursor-top`).
+2. More rows: the primary screen inserts `p = min(scrolled-off count, added)` blank rows at the top, moves the cursor and saved rows down by p and lowers the count by p; the remaining rows, and every added row of the alternate screen, join at the bottom (`resize-grow-rows-pulls-scrollback`, `resize-grow-alternate`, `csi-ed3-then-grow`).
+3. The last row's wrap flag clears; a row whose width changes is truncated (its new last cell cleared when wide-leading) or extended with default cells, and its wrap flag clears (`resize-cols`, `resize-wider-clears-wrap`).
+4. The cursor and saved columns clamp to `cols − 1`, ending a pending wrap.
+
+##### Line text
+
+Detection reads a snapshot as rows and logical lines:
+
+- A row's text is its cells, left to right, up to the last cell that has contents or is a continuation: a continuation contributes nothing, a cell with contents contributes its contents (a written U+0020 included), and a cell without contents before that last cell contributes one U+0020. An erased cell has no contents even when it carries attributes.
+- A logical line is a row joined with the following rows while each row's wrap flag is set; the last row, and a row clipped by § Diff sidebar clipping, ends its logical line.
+- Region text is the region's logical lines joined with `\n`.
 
 ##### Terminal reply classification
 
@@ -3033,7 +3476,7 @@ Human input whose bytes exactly equal an allowlisted reply and arrive within the
 
 #### Classification and episode identity
 
-Each detector consumes a reconstructed screen, title, cursor/input-region evidence, output sequence and backend, and returns a typed observation with its rule identifier, matched region, extracted visible operation/choices, a normalized semantic fingerprint and a confidence/evidence designation. Rules compile at startup, and an invalid rule definition fails. Profiles are bundled locally in CAFleet, never loaded from remote rules or herdr manifests.
+Each detector consumes a reconstructed screen, cursor and screen-mode evidence, output sequence and backend, and returns a typed observation with its rule identifier, matched region, extracted visible operation/choices, a semantic fingerprint and an evidence designation (§ Detection algorithm). Rules compile at startup, and an invalid rule definition fails. Profiles are bundled locally in CAFleet, never loaded from remote rules or herdr manifests.
 
 | Classification | Evidence needed | Meaning |
 |---|---|---|
@@ -3049,7 +3492,7 @@ A title such as `Action Required`, a quoted approval transcript, a transcript vi
 
 An episode is a CAFleet observation identity, `(run_id, episode_seq)`, not a native request ID. Allocate `episode_seq` monotonically within a run when a stable live interaction first appears. A candidate is *stable* after two compatible observations at least 100 ms apart, rechecked after 100 ms even if no bytes arrive; an episode opens only for a stable candidate. Gate programmatic input immediately on the first candidate, before this notification debounce.
 
-The fingerprint contains backend, interaction class, visible operation and stable choice labels. Exclude spinner/counter/cursor decoration. The visible operation includes its displayed row breaks, so a resize that rewraps the operation changes the fingerprint and replaces the episode. Redraws and resize matching the fingerprint keep the episode, its stored evidence and any issued request token without another opening notification. A different operation/choice/class candidate holds input immediately and replaces the active episode only once stable; the old episode stays open until then. An incompatible candidate restarts stability, while return to the original fingerprint cancels the pending replacement. After a verified native noninteraction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
+The fingerprint is the § Detection algorithm list of observation, operation and choice-label triples of the run's backend; spinner, counter and cursor decoration outside those captures never enters it. The visible operation includes its displayed row breaks, so a resize that rewraps the operation changes the fingerprint and replaces the episode. Redraws and resize matching the fingerprint keep the episode, its stored evidence and any issued request token without another opening notification. A different operation/choice/class candidate holds input immediately and replaces the active episode only once stable; the old episode stays open until then. An incompatible candidate restarts stability, while return to the original fingerprint cancels the pending replacement. After a verified native noninteraction boundary, an identical request gets a new episode. If two native requests are visually indistinguishable with no observable boundary, preserve one episode and report that identity limitation; never claim one-to-one native request coverage.
 
 | Episode transition | Event and interpretation |
 |---|---|
@@ -3082,7 +3525,7 @@ The §8 DDL fixes the runtime tables' exact columns, types, enums, nullability, 
 
 | Record | Semantics beyond the DDL |
 |---|---|
-| `member_runs` | `owner_epoch` starts at 1. `runtime_path` is canonical, each start identity is a verified platform-specific process-start token, and `recovery_origin_status` preserves the original lifecycle status while recovering. |
+| `member_runs` | `owner_epoch` starts at 1. `runtime_path` is canonical, each start identity is a verified process-start token: on Linux `<boot_id>:<starttime>`, the trimmed `/proc/sys/kernel/random/boot_id` and field 22 of `/proc/<pid>/stat` (the 20th field after the last `)`); on macOS `<seconds>:<microseconds>`, the decimal `kp_proc.p_starttime` of the `kern.proc.pid` `kinfo_proc` record, and `recovery_origin_status` preserves the original lifecycle status while recovering. |
 | `member_interactions` | `evidence_json` and `evidence_digest` are the opening event's evidence. |
 | `member_runtime_events` | `payload_json` is the final event payload, and unique `(run_id, event_seq)` supports idempotent retries. |
 | `member_input_operations` | `ready` certifies a zero-byte attempt, and a ready row with deferred metadata is a runner-queued ordinary input; `stop_cause` is a value from § Stop cause. Settled rows are retained as replay-rejection records for the lifetime of the database file. |
@@ -3222,7 +3665,7 @@ A blocker event's `director_action` is `{"kind":"reconcile_uncertain_input","ins
 Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.
 ```
 
-A verified empty composer resumes delivery on the next queue turn or sweep, and a settled blocker resumes queued input and previews. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
+A verified empty composer resumes delivery on the next queue turn or sweep, and a settled blocker resumes queued input and previews. For a non-default database, `--database-url URL` is appended to the `review_stalled_delivery` and `reconcile_uncertain_input` argv arrays only; a permission or question `inspect_argv` never carries it, and its reader adds `--database-url` per §6.3 Database selection. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
 
 #### CLI presentation contract
 
@@ -3280,7 +3723,7 @@ The runner buffers at most 32 entries keyed by source and message, each with its
 | Transient failure | Keeps the buffer and retries one second later |
 | Permanent failure | Drops the flushed entries, adds their count to the dropped counter and retries one second later |
 
-A flush never records a writer failure text, so diagnostics cannot open an observation gap. After the event writer finishes, shutdown writes the remaining buffer, the dropped counter and one `shutdown` entry per shutdown outcome diagnostic with the same write sequence, in the transaction that records `cleanup_state` and `cleanup_diagnostics_json`. When that transaction fails, the printed lines are the only copy, and the `cleanup evidence pending` diagnostic reports it. Recovery writes no runner diagnostics.
+A flush never records a writer failure text, so diagnostics cannot open an observation gap. After the event writer finishes, shutdown writes the remaining buffer, the dropped counter and one `shutdown` entry per shutdown outcome diagnostic with the same write sequence, in the transaction that records `cleanup_state` and `cleanup_diagnostics_json`. When that transaction fails, the printed lines are the only copy, and the shutdown outcome diagnostic `cleanup evidence pending: <cause>` reports it, `<cause>` being the transaction's error. Recovery writes no runner diagnostics.
 
 Member and fleet deletion run recovery on the recorded run after successful runner shutdown, or without a shutdown request when the recorded owner process is no longer alive (including a `recovering` run whose reconciler died), and before deregistration when the remaining deadline permits (§6.3 `member delete`); otherwise they retain the namespace, and a later deletion retries. Recovery never starts an agent. A five-second deadline bounds each recovery pass. Start one cleanup clock at entry to the common recovery coordinator, before snapshot, locking and process/health evidence; its two/three/four-second boundaries share that origin and are clipped to the deletion caller's deadline. An incomplete pass retains the `recovering` state for the next pass. A run that is already terminal needs no work: recovery preserves existing status and diagnostics and advances no ownership, even if the recorded current reconciler remains alive.
 
@@ -3326,6 +3769,16 @@ Replies retain exactly `protocol_version` plus one of `result` or textual `error
 The original invocation captures one expiration and carries it through framing, transit, queues, SQL and every native stage. Convert using three samples taken in order: the process's internal monotonic clock, `CLOCK_MONOTONIC`, and the internal monotonic clock again, validating sample order and overflow-checked arithmetic. Sender expiration adds the remaining original deadline measured at the third sample to the `CLOCK_MONOTONIC` sample. Receiver deadline adds the remaining expiration measured at the `CLOCK_MONOTONIC` sample to the first sample. Scheduling delay can shorten this budget and grants no extension; use no wall clock. Clock failure, overflow or expiration fails before new reservation/native bytes while preserving prior committed or possibly transmitted state.
 
 The service also caps new-operation admission at five seconds from the first observed frame-header byte; delayed framing and queueing consume that cap. Client exchange, lock acquisition, supplied-connection SQL scopes and stage advancement retain their earlier original/inherited deadline. Validate the declared frame size (above) before allocation and the complete serialized size before sending.
+
+Lifecycle requests have exactly `protocol_version`, `kind`, `identity` and, for `prepare`, `remaining_ms` (a non-negative integer) or, for `start`, `pane_id` (a string); `health` and `shutdown` carry nothing more. Every control frame, lifecycle and input alike, refuses a repeated object key at any level with `malformed or duplicate control JSON fields`. A lifecycle `result` is:
+
+| Request | `result` keys |
+|---|---|
+| `prepare` | `identity` (the control identity with the runner's new `owner_epoch`), `runner` |
+| `start` | `identity`, `runner`, `child` |
+| `health` | `identity`, `runner`, `child` (null before the native child starts), `output_seq`, and `observation` (§6.3 Runtime presentation) only once the observer reports |
+
+`runner` and `child` are `{"pid": <pid>, "start_identity": <token>}` (§8 `member_runs` start identities).
 
 ##### Bounded input draining
 
@@ -3425,7 +3878,7 @@ A queued request outlives the originating CLI connection and command deadline. E
 | Five-second deadline expires with zero bytes | Settle `not_submitted` with reason `pane_input_busy`, `storage_unavailable`, `observer_unavailable` or `delivery_budget_exhausted`, according to the last obstacle; clear the unused selected method, and advance after the terminal transaction commits | `input_delivery_result` |
 | Target/run/placement identity fails revalidation, with zero bytes | Settle `not_submitted` with reason `target_inactive` or `target_changed` immediately and advance after commit | The result with its reason and diagnostic context |
 | Queued prompt/exec exceeds its plain limit with no safe framing | Settle `not_submitted/plain_limit_exceeded` with zero bytes and advance | `input_delivery_result` |
-| A prompt or exec attempt records `uncertain` | Keep the FIFO stopped until `input reconcile` settles it | The uncertain result |
+| A prompt or exec attempt records `uncertain`, or stays `in_progress` after a failed bookkeeping write | Keep the FIFO stopped until `input reconcile` settles it | The uncertain result |
 
 **FIFO stop.** On every run, with or without composer verification, after a prompt or exec records `uncertain` the FIFO stays stopped, and no queued input and no sweep preview is written, until `input reconcile` settles that input. No later head can therefore type into a composer that may still hold the stopped text.
 
@@ -3518,7 +3971,7 @@ Every runner selects the same head and only the lock holder types, so each messa
 
 **Literal.** The literal is the canonical profile-delivery preview of §6.5 Push notifications, written with the profile's `prompt` plan prefix and submit bytes. The plan's `bracketed_paste` framing and its `plain_literal_limit` do not apply: a capture cannot observe whether the Director's application enabled mode 2004, so the Director path writes no bracketed paste and measures its limit on Director screens. A preview whose rendered line exceeds `director_delivery.plain_limit` is rendered in the pointer form.
 
-**Capture replay.** A capture (§6.5 Backend operations) replays into a fresh terminal state of the capture's size: replay enters the alternate screen when the capture reports it on, writes each row at its row position, then places the cursor when known. Classification follows § Cursor-free classification for a capture without cursor or alternate-screen data. A malformed metadata line or a pane absent from the herdr snapshot is a capture failure. CAFleet does not launch the Director, so it probes no Director native version: profile and rule selection depend only on the backend, and each Director observation's `raw_evidence.native_version` is null.
+**Capture replay.** A capture (§6.5 Backend operations) replays into a fresh terminal state of the capture's size: replay feeds a fresh model `ESC [ ? 1049 h` when the capture reports the alternate screen, then, after removing one trailing `\n` from the body and splitting it on `\n`, for each of at most `rows` lines in order `ESC [ <row+1> ; 1 H`, the line without one trailing `\r`, and `ESC [ 0 m`, blank lines included; finally `ESC [ <row+1> ; <col+1> H` when the capture reports a cursor. Classification follows § Cursor-free classification for a capture without cursor or alternate-screen data. A malformed metadata line or a pane absent from the herdr snapshot is a capture failure. CAFleet does not launch the Director, so it probes no Director native version: profile and rule selection depend only on the backend, and each Director observation's `raw_evidence.native_version` is null.
 
 **Classification and hold.** The sweep classifies the capture with the Director placement's bundled profile over the rules its `director_delivery` names plus every interaction rule. A hold leaves the message unnotified for a later tick:
 
@@ -3705,6 +4158,17 @@ A routed request that arrives with no event follows the refusal route above.
 A run whose backend has no bundled profile, and a capability its bundled profile does not declare, retain explicit `unknown` coverage and manual operation; fixed-policy launch modes use the backend's bundled profile like every other mode.
 
 With a live member runner and available storage, the latency target is two seconds from a stable prompt to inbox commit and, while the Director composer is verified empty and no older Director message is held, another two seconds from commit to the start of a Director delivery attempt (§ Director delivery sweep); while delivery is held, the preview waits until the hold clears.
+
+#### Runtime failure texts
+
+Runner and runtime-client operations fail with the texts below, exit 1 when they reach a command; each surfaces as a command's cause, a runner diagnostic (§ Storage pressure and durability boundary) or an event's error, behind any prefix its owning section names. A validation failure of a stored value renders `invalid stored value for <field>: <description>` (§6.3 Error Messages); for an unknown stored enum value, `<description>` is the raw stored value, as in `invalid stored value for members.status: paused`.
+
+| Situation | Texts |
+|---|---|
+| A concurrent cafleet process changed a row, an identity, a placement or an ownership | `episode is closed or classification changed`, `deferred input state changed`, `input state changed`, `input CAS failed`, `settlement CAS failed`, `preview recipient changed`, `director preview recipient changed`, `stale ownership token`, `database identity changed`, `runtime artifact changed while opening`, `runtime database identity changed`, `runtime directory or owner lock identity changed; explicit recovery required`, `artifact ownership changed during allocation`, `descriptor identity changed before unlink`, `recovery ownership changed before CAS`, `stale runtime owner`, `creator ownership transfer lost CAS`, `descriptor runtime ownership changed`, `descriptor pathname changed`, `descriptor appeared after absence was pinned`, `descriptor content changed before unlink`, `descriptor remains after unlink`, `shutdown ownership changed`, `permission Director is inactive`, `permission fleet/Director changed`, `composer stage selection changed`, `permission stage selection changed`, `permission inspection durable episode changed`, `permission continuation binding changed`, `permission request token or current plan binding changed`, `selected permission plan changed`, `permission stage target changed`, `input or observation changed between answer stages`, `the permission episode changed between answer stages`, `the request changed other than to the next stage's focus`, `the request changed instead of opening its continuation`, `permission response current association changed`, `permission response token identity changed`, `manual accounting failure fenced input`, `input coordinator current run changed`, `input member placement changed`, `receipt current run identity changed`, `receipt cache identity changed`, `settled input disposition changed`, `input database identity changed`, `sweep preview state changed`, `input coordinator no longer owns a running run`, `input manual generation changed`, `input reservation changed before write`, `permission retained selection changed`, `permission stage rule or choice changed`, `zero-byte selection receipt changed`, `ordinary writer selection changed`, `paste cleanup receipt changed`, `input coordinator run identity changed`, `submission run identity changed`, `submission member placement changed`, `submission health ownership changed`, `receipt run identity changed`, `receipt member placement changed`, `receipt immutable input identity changed`, `receipt changed after retirement`, `permission owner epoch changed`, `permission response association changed`, `permission inspection association changed`, `input member is inactive`, `pending member became inactive`, `prepared publication lost run ownership`, `pending placement vanished or changed before start`, `published placement vanished`, `native exit identity changed`, `descendant ownership lost its recorded process generation`, `recovery descendant PID generation changed`, `owned process group lost its pinned generation`, `owned PID was replaced by another generation`, `process generation changed before termination`, `owned PID generation changed during cleanup`, `recorded runtime disappeared during recovery`, `runtime ownership or placement changed during recovery`, `recovery takeover lost CAS`, `launch creator process identity changed`, `prepared member became inactive`, `start placement changed`, `native spawn storage lost ownership`, `selected database was replaced; input fenced`, `input drain pointer binding changed`, `input drain binding changed` |
+| A lock, an input queue or a bound is busy or full | `unresolved input limit reached`, `launch descriptor exceeds private size limit`, `control frame exceeds size limit`, `native composer payload exceeds 65536 bytes`, `another programmatic input is pending`, `input receipt cache is at capacity`, `pane input remained busy before submission`, `pane input lock remained busy after the runner reported <value>; inspect the result with cafleet input show <input-id> --json`, `pane input lock remained busy after the runner reported <value>`, `receipt pane input remained busy`, `permission pane input lock is busy`, `too many control requests per tick`, `control reply buffer is full`, `runtime observation channel is full or unavailable` |
+| Process identity, spawn, termination or cleanup could not be confirmed | `native exit remains unconfirmed`, `absolute CAFleet executable required`, `CAFleet executable requires UTF-8 path`, `runner pane spawn failed: <cause>`, `owned runner termination remains unconfirmed`, `runner pane cleanup failed: <cause>`, `current process identity unavailable`, `missing process birth time`, `cannot establish process start identity: <cause>`, `kern.proc.pgrp kept growing during the read`, `descendant ownership cannot be anchored to the recorded child generation`, `verified descendants remain after the original cleanup deadline`, `native child spawn failed`, `native child start identity unavailable`, `owned descendants remain unconfirmed`, `native start identity unavailable; descendant cleanup remains unverified`, `native child reaping remains unconfirmed`, `PTY is closed`, `human input tail remains undelivered after native termination`, `runner loop unwound`, `creator disconnected before native start`, `native startup failed; owned compensation required: <cause>` |
+| The control endpoint, the event writer or the storage path failed | `new input requires an active running member`, `cannot identify runtime database: <io error>`, `cannot inspect runtime database: <io error>`, `member_runs.native_session_json of run <run-id> is invalid: <cause>`, `descriptor unlink failed: <cause>`, `control endpoint disconnected during write`, `control endpoint disconnected before reply`, `current inspection observation unavailable`, `current executable permission request unavailable`, `current permission token unavailable`, `current permission request unavailable`, `the next stage's gate did not hold before the response deadline`, `an unexpected continuation screen appeared between answer stages`, `a different continuation screen appeared`, `permission member placement unavailable`, `shutdown exceeded its original storage deadline`, `display truncated: <bytes> undelivered bytes`, `pending events=<count> unsaved observation gap=<count>`, `owned recovery cleanup remains incomplete`, `run ownership lock is held`, `cannot bind private runtime control socket: <cause>`, `creator control disconnected before start`, `event writer is fenced`, `event writer is stopped` |
 
 ## 7. Cross-cutting concerns
 
@@ -3952,7 +4416,7 @@ Initialization runs in one `BEGIN IMMEDIATE` transaction, so concurrent initiali
 
 | File state | Condition | Result |
 |---|---|---|
-| Empty | Application identity zero and no user tables | Applies the schema and inserts the `cafleet_database` row for the running version, then commits |
+| Empty | Application identity zero and no table whose name is not `LIKE 'sqlite_%'` (SQLite's ASCII case-insensitive `LIKE`, `_` matching any one character); views, triggers and indexes alone leave a file empty | Applies the schema and inserts the `cafleet_database` row for the running version, then commits |
 | Current | A file the compatibility diagnosis above classifies current | Writes nothing and succeeds |
 | Other | Every other file | Writes nothing and fails with the §6.3 incompatible-format error naming the database path |
 
@@ -3964,4 +4428,1633 @@ The DDL above owns every runtime table column, type, enum, nullability constrain
 
 ## 9. Testing strategy
 
-A conforming implementation is verified at four levels. Command level: every §6.3 command's exit code, stdout/stderr text and JSON bytes, the multiplexer argv it issues, and the §8 rows it leaves, driven through the CLI with stand-in multiplexer and native executables. Function level: argv construction, multiplexer command choreography, terminal-reply and key parsing, ANSI stripping, catalog validation and screen classification of every catalogued native screen. Runtime level: the §6.9 runner fed scripted screens, commands and storage faults under a controlled clock, asserting events, rows, receipts and bytes written to the child. Operating-system level: real PTYs, process groups, signals, pane-lock exclusion and release on process death, and shutdown deadlines in real time.
+### 9.1 Conformance levels
+
+A conforming implementation is verified at four levels:
+
+| Level | Contract checked | Observable compared |
+|---|---|---|
+| Command | §6.3 commands, §6.4 output, §8 rows | Exit code, stdout and stderr bytes, JSON bytes, the multiplexer argv issued and the §8 rows left, driven through the CLI with stand-in multiplexer and native executables |
+| Function | §6.5 argv and reply parsing, §6.7 argv construction, §6.9 terminal emulation, reply and key parsing, ANSI stripping, catalog validation and detection | Return values of each contract function, the §9.2 terminal vectors and the §9.3 detection vectors |
+| Runtime | §6.9 runner, events, receipts and recovery | Events, rows, receipts and bytes written to the child, for scripted screens, commands and storage faults under a controlled clock |
+| Operating system | §6.5 locks and signal deferral, §6.9 PTY, process groups and shutdown | Real PTYs, process groups, signals, pane-lock exclusion and release on process death, and shutdown deadlines in real time |
+
+### 9.2 Terminal conformance vectors
+
+Each fenced block with the info string `vt-vector` is one JSON object, a normative test of the screen model (§6.9 Terminal emulation). A fresh model of `rows × cols` takes the steps in order; afterwards each `expect` key present must equal the model's state:
+
+| Key | Required | Value |
+|---|---|---|
+| `id` | yes | A string unique among the vectors |
+| `rows`, `cols` | yes | Positive integers: the initial terminal size |
+| `steps` | yes | A non-empty array, each element exactly one of `{"feed_hex": H}` (the bytes of the lowercase hex string `H`, delivered as one PTY read) or `{"resize": [ROWS, COLS]}` (rows first) |
+| `observations` | no | When present, the exact sequence of `screen_seq` values the observer sees across all steps (§6.9 Screen model facts); a resize step produces no observation |
+| `expect` | yes | The final state; each key below is asserted only when present |
+
+| `expect` key | Value |
+|---|---|
+| `lines` | One string per row, in the §6.9 Line text row rendering |
+| `wrapped` | The exact set of row indexes whose wrap flag is set, ascending |
+| `cursor` | `[row, col]`, zero-based; `col` equals the column count while a wrap is pending |
+| `alternate_screen`, `bracketed_paste` | Booleans |
+| `screen_seq` | An integer |
+| `cells` | Cell assertions, each with required `row` and `col`, plus any of `contents` (the base scalar and its zero-width scalars, `""` for a cell without contents), `wide` and `continuation` (booleans), `fg` and `bg` (`"default"`, `{"kind":"indexed","index":N}` or `{"kind":"rgb","r":R,"g":G,"b":B}`) and `faint` (a boolean) |
+
+```vt-vector
+{
+  "id": "c0-bs",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61626364656608580808080808080859"}],
+  "expect": {
+    "lines": ["YbcdeX", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-ht",
+  "rows": 2,
+  "cols": 20,
+  "steps": [{"feed_hex":"61096209630909097a"}],
+  "expect": {
+    "lines": ["a       b       c  z", ""],
+    "wrapped": [],
+    "cursor": [0, 20],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-lf-vt-ff",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"61620a63640b65660c67"}],
+  "expect": {
+    "lines": ["  cd", "", "ef", "  g"],
+    "wrapped": [],
+    "cursor": [3, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-lf-scrolls-at-bottom",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a63"}],
+  "expect": {
+    "lines": ["b", "c"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-cr",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d58"}],
+  "expect": {
+    "lines": ["Xbcd", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "c0-ignored",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"61006207630e640f651c66"}],
+  "expect": {
+    "lines": ["abcdef", ""],
+    "wrapped": [],
+    "cursor": [0, 6],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-decsc-decrc",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b323b33481b5b33316d1b371b5b306d1b5b313b3148781b3879"}],
+  "expect": {
+    "lines": ["x", "  y", ""],
+    "wrapped": [],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 27,
+    "cells": [
+      {"row":1,"col":2,"contents":"y","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-decrc-without-save",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b333b34481b387a"}],
+  "expect": {
+    "lines": ["z", "", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-ri",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a631b5b313b31481b4d78"}],
+  "expect": {
+    "lines": ["x", "a", "b"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-ri-row0-outside-region",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b33721b5b313b31481b4d78"}],
+  "expect": {
+    "lines": ["x", "", "b", "d"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 25
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-ris",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f32303034681b5b3f313034396861621b5b33316d1b637a"}],
+  "expect": {
+    "lines": ["z", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 26,
+    "cells": [
+      {"row":0,"col":0,"contents":"z","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-unhandled-and-charset",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b44621b45631b2830711b233872"}],
+  "expect": {
+    "lines": ["abcqr", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "esc-c0-inside-escape",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"611b0a7862"}],
+  "expect": {
+    "lines": ["a", " b", ""],
+    "wrapped": [],
+    "cursor": [1, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cuu-cud-region",
+  "rows": 5,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b323b34721b5b333b31481b5b3941611b5b3942621b5b313b31481b5b394263"}],
+  "expect": {
+    "lines": ["", "a", "", " b", "c"],
+    "wrapped": [],
+    "cursor": [4, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 33
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cuf-cub",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b43781b5b313b31481b5b3343791b5b39447a"}],
+  "expect": {
+    "lines": ["zbcyex", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 26
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cnl-cpl",
+  "rows": 4,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162631b5b3245641b5b4665"}],
+  "expect": {
+    "lines": ["abc", "e", "d", ""],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 12
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cha-hpa-vpa",
+  "rows": 4,
+  "cols": 8,
+  "steps": [{"feed_hex":"1b5b3547611b5b3260621b5b3364631b5b39394764"}],
+  "expect": {
+    "lines": [" b  a", "", "  c    d", ""],
+    "wrapped": [],
+    "cursor": [2, 8],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 21
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-cup-clamps",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b393b3948611b5b303b3048621b5b323b4863"}],
+  "expect": {
+    "lines": ["b", "c", "   a"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 20
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed0",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d0a656667680d0a696a6b6c1b5b323b32481b5b4a"}],
+  "expect": {
+    "lines": ["abcd", "e", ""],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 25
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed1",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d0a656667680d0a696a6b6c1b5b323b32481b5b314a"}],
+  "expect": {
+    "lines": ["", "  gh", "ijkl"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 26
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed2-keeps-cursor",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263640d0a656667681b5b324a"}],
+  "expect": {
+    "lines": ["", "", ""],
+    "wrapped": [],
+    "cursor": [1, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 14
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ed3-then-grow",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b334a"}, {"resize":[4,4]}],
+  "expect": {
+    "lines": ["b", "c", "d", ""],
+    "wrapped": [],
+    "cursor": [2, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-el",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465660d0a6768696a6b6c0d0a6d6e6f7071721b5b313b33481b5b4b1b5b323b33481b5b314b1b5b333b33481b5b324b"}],
+  "expect": {
+    "lines": ["ab", "   jkl", ""],
+    "wrapped": [],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 51
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ech",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b3358"}],
+  "expect": {
+    "lines": ["a   ef", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-erase-takes-current-attributes",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263641b5b313b32481b5b34343b326d1b5b4b"}],
+  "expect": {
+    "lines": ["a", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 20,
+    "cells": [
+      {"row":0,"col":1,"contents":"","wide":false,"continuation":false,"fg":"default","bg":{"kind":"indexed","index":4},"faint":true},
+      {"row":0,"col":3,"contents":"","wide":false,"continuation":false,"fg":"default","bg":{"kind":"indexed","index":4},"faint":true}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ich",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b3240"}],
+  "expect": {
+    "lines": ["a  bcd", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-dch",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b3250"}],
+  "expect": {
+    "lines": ["adef", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-il-dl",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b31481b5b4c1b5b343b31481b5b4d"}],
+  "expect": {
+    "lines": ["a", "", "b", ""],
+    "wrapped": [],
+    "cursor": [3, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 28
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-il-outside-region-ignored",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b33721b5b313b31481b5b4c"}],
+  "expect": {
+    "lines": ["a", "b", "c", "d"],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 25
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-su-sd",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b323b33721b5b531b5b313b31481b5b3254"}],
+  "expect": {
+    "lines": ["a", "", "", "d"],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 29
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-decstbm",
+  "rows": 4,
+  "cols": 3,
+  "steps": [{"feed_hex":"611b5b323b3372621b5b333b3272631b5b303b39397264"}],
+  "expect": {
+    "lines": ["d", "b", "", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 23
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-rep",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"61621b5b336263cc811b5b3262"}],
+  "expect": {
+    "lines": ["abbbbćcc", ""],
+    "wrapped": [],
+    "cursor": [0, 8],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 13,
+    "cells": [
+      {"row":0,"col":5,"contents":"ć","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-rep-without-last-scalar",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b336278"}],
+  "expect": {
+    "lines": ["x", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-ignored",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"61621b5b731b5b313b31481b5b751b5b3468631b5b323068641b5b3e316d651b5b217066"}],
+  "expect": {
+    "lines": ["cdef", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 36
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-params-saturate-and-overflow",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b39393939393b393939393948611b5b313b323b333b343b353b363b373b383b393b31303b31313b31323b31333b31343b31353b31363b31373b31383b31393b32303b32313b32323b32333b32343b32353b32363b32373b32383b32393b33303b33313b33323b33333b33343b3335481b5b313b314862"}],
+  "expect": {
+    "lines": ["b", "", "   a"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 120
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-late-private-ignored",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"611b5b313f324862"}],
+  "expect": {
+    "lines": ["ab", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 8
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-c0-inside-and-can-abort",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"611b5b320a48621b5b313b184863"}],
+  "expect": {
+    "lines": ["a", "bHc", ""],
+    "wrapped": [],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 14
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "csi-subparameter-first-value",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b333a354861"}],
+  "expect": {
+    "lines": ["", "", "a", ""],
+    "wrapped": [],
+    "cursor": [2, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-indexed-and-default",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"1b5b33313b34326d611b5b39343b3130336d621b5b33396d631b5b34396d641b5b306d65"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 36,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":{"kind":"indexed","index":2},"faint":false},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":{"kind":"indexed","index":12},"bg":{"kind":"indexed","index":11},"faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":"default","bg":{"kind":"indexed","index":11},"faint":false},
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":4,"contents":"e","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-faint-bold-interplay",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b326d611b5b316d621b5b326d631b5b32326d641b5b326d1b5b6d65"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 29,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":"default","bg":"default","faint":true},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":"default","bg":"default","faint":true},
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":4,"contents":"e","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-extended-colours",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b33383b353b3230306d611b5b34383b323b313b323b336d621b5b303b33383a353a396d631b5b34383a323a343a353a366d64"}],
+  "expect": {
+    "lines": ["abcd", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 52,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":{"kind":"indexed","index":200},"bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":{"kind":"indexed","index":200},"bg":{"kind":"rgb","r":1,"g":2,"b":3},"faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":{"kind":"indexed","index":9},"bg":"default","faint":false},
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":{"kind":"indexed","index":9},"bg":{"kind":"rgb","r":4,"g":5,"b":6},"faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-unknown-skipped",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b353b33313b343a333b393b32316d7a"}],
+  "expect": {
+    "lines": ["z", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17,
+    "cells": [
+      {"row":0,"col":0,"contents":"z","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "sgr-stops",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"1b5b33313b33383b353b3330303b34326d611b5b306d1b5b33323b33383b373b34336d621b5b306d1b5b33333b33383b323b313b326d63"}],
+  "expect": {
+    "lines": ["abc", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 55,
+    "cells": [
+      {"row":0,"col":0,"contents":"a","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"b","wide":false,"continuation":false,"fg":{"kind":"indexed","index":2},"bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"c","wide":false,"continuation":false,"fg":{"kind":"indexed","index":3},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-origin-mode",
+  "rows": 5,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b323b34721b5b3f36681b5b313b3148611b5b393b3148621b5b3f366c63"}],
+  "expect": {
+    "lines": ["c", "a", "", "b", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 31
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-47-alternate",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61621b5b3f34376863641b5b3f34376c651b5b3f34376866"}],
+  "expect": {
+    "lines": ["cdf", "", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": true,
+    "bracketed_paste": false,
+    "screen_seq": 24
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-1049-alternate",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61621b5b33316d1b5b3f313034396863641b5b306d1b5b3f313034396c78"}],
+  "expect": {
+    "lines": ["abx", "", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 30,
+    "cells": [
+      {"row":0,"col":2,"contents":"x","wide":false,"continuation":false,"fg":{"kind":"indexed","index":1},"bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-1049-alternate-active",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61621b5b3f31303439686364"}],
+  "expect": {
+    "lines": ["cd", "", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": true,
+    "bracketed_paste": false,
+    "screen_seq": 12
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-2004-bracketed-paste",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f323030346861"}],
+  "expect": {
+    "lines": ["a", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": true,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-2004-reset",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f32303034681b5b3f323030346c61"}],
+  "expect": {
+    "lines": ["a", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-ignored-modes",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f376c6162636465661b5b3f3130343768671b5b3f32356c1b5b3f31681b5b3f323030343a3168"}],
+  "expect": {
+    "lines": ["abcd", "efg"],
+    "wrapped": [0],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 41
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dec-multiple-parameters",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f323030343b31303439687a"}],
+  "expect": {
+    "lines": ["z", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": true,
+    "bracketed_paste": true,
+    "screen_seq": 14
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "osc-bel-and-st",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b5d303b7469746c6507621b5d323b740a781b5c63"}],
+  "expect": {
+    "lines": ["abc", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 22
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "osc-raw-9c-is-data",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b5d303b749c780762"}],
+  "expect": {
+    "lines": ["ab", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dcs-pm-sos-apc",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b50710a781b5c621b5e7007781b5c631b58731b5c641b5f7a07711b5c65"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 31
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "dcs-raw-9c-terminates",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"611b5071789c62"}],
+  "expect": {
+    "lines": ["ab", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-invalid",
+  "rows": 2,
+  "cols": 10,
+  "steps": [{"feed_hex":"61ff62e4b863c0af64eda08065"}],
+  "expect": {
+    "lines": ["abcde", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 13
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-split-across-reads",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61e4"}, {"feed_hex":"b8ad"}, {"feed_hex":"62"}],
+  "expect": {
+    "lines": ["a中b", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5,
+    "cells": [
+      {"row":0,"col":1,"contents":"中","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-partial-then-invalid",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61e4"}, {"feed_hex":"7862"}],
+  "expect": {
+    "lines": ["axb", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 4
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-c1-del-fffd",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61c285627f63efbfbd64"}],
+  "expect": {
+    "lines": ["abcd", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "utf8-raw-c1-not-introducer",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"619b33316d629d303b740763"}],
+  "expect": {
+    "lines": ["a31mb0;t", "c"],
+    "wrapped": [0],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 12,
+    "cells": [
+      {"row":0,"col":1,"contents":"3","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-wide",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"61e4b8ad62"}],
+  "expect": {
+    "lines": ["a中b", ""],
+    "wrapped": [],
+    "cursor": [0, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 5,
+    "cells": [
+      {"row":0,"col":1,"contents":"中","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":3,"contents":"b","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-ambiguous-is-one",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"ceb1e291a062"}],
+  "expect": {
+    "lines": ["α①b", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-emoji-zwj-not-clustered",
+  "rows": 2,
+  "cols": 8,
+  "steps": [{"feed_hex":"f09f91a8e2808df09f91a978"}],
+  "expect": {
+    "lines": ["👨‍👩x", ""],
+    "wrapped": [],
+    "cursor": [0, 5],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 12,
+    "cells": [
+      {"row":0,"col":0,"contents":"👨‍","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"👩","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-combining",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"65cc81e4b8adcc810d0acc81611b5b333b3348cc81"}],
+  "expect": {
+    "lines": ["é中́", "a", "  ́"],
+    "wrapped": [],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 21,
+    "cells": [
+      {"row":0,"col":0,"contents":"é","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"中́","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":2,"col":2,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-vs16-widens",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e29da4efb88f78"}],
+  "expect": {
+    "lines": ["❤️x", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7,
+    "cells": [
+      {"row":0,"col":0,"contents":"❤️","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"x","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-vs16-at-last-column",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263e29da4efb88f78"}],
+  "expect": {
+    "lines": ["abc", "❤️x", ""],
+    "wrapped": [],
+    "cursor": [1, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 10,
+    "cells": [
+      {"row":1,"col":0,"contents":"❤️","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":1,"col":1,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-vs15-keeps-width",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e29da4efb88e78"}],
+  "expect": {
+    "lines": ["❤︎x", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7,
+    "cells": [
+      {"row":0,"col":0,"contents":"❤︎","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-overwrite-continuation",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e4b8ad621b5b313b324878"}],
+  "expect": {
+    "lines": [" xb", ""],
+    "wrapped": [],
+    "cursor": [0, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11,
+    "cells": [
+      {"row":0,"col":0,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":"x","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-overwrite-wide-with-narrow",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"e4b8ad621b5b313b314878"}],
+  "expect": {
+    "lines": ["x b", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11,
+    "cells": [
+      {"row":0,"col":0,"contents":"x","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":1,"contents":" ","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "width-overwrite-narrow-with-wide",
+  "rows": 2,
+  "cols": 6,
+  "steps": [{"feed_hex":"6162e4b8ad1b5b313b3248e69687"}],
+  "expect": {
+    "lines": ["a文", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 14,
+    "cells": [
+      {"row":0,"col":1,"contents":"文","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":2,"contents":"","wide":false,"continuation":true,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":3,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false},
+      {"row":0,"col":4,"contents":"","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-pending-then-cr",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"61626364"}, {"feed_hex":"0d"}, {"resize":[2,6]}],
+  "observations": [4, 5],
+  "expect": {
+    "lines": ["abcd", ""],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6,
+    "cells": [
+      {"row":0,"col":3,"contents":"d","wide":false,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-sets-flag",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263646566"}],
+  "expect": {
+    "lines": ["abcd", "ef", ""],
+    "wrapped": [0],
+    "cursor": [1, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-pending-then-bs-lf",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636408581b5b313b3148616263640a79"}],
+  "expect": {
+    "lines": ["abcd", "", "y"],
+    "wrapped": [],
+    "cursor": [2, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 18
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-wide-at-last-column",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263e4b8ad"}, {"feed_hex":"0d0a61626364e4b8ad"}],
+  "expect": {
+    "lines": ["中", "abcd", "中"],
+    "wrapped": [1],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-cleared-by-erase",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465661b5b313b34481b5b4b"}],
+  "expect": {
+    "lines": ["abc", "ef", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-kept-by-mid-row-erase",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465661b5b313b32481b5b4b"}],
+  "expect": {
+    "lines": ["a", "ef", ""],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 15
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-cleared-by-ich-dch",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61626364656667681b5b313b31481b5b30401b5b323b31481b5b3050"}],
+  "expect": {
+    "lines": [" abc", "fgh", ""],
+    "wrapped": [],
+    "cursor": [1, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 28
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-moves-with-scroll",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465660d0a67"}],
+  "expect": {
+    "lines": ["ef", "g"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "wrap-one-row",
+  "rows": 1,
+  "cols": 3,
+  "steps": [{"feed_hex":"61626364"}],
+  "expect": {
+    "lines": ["d"],
+    "wrapped": [],
+    "cursor": [0, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 4
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-floor-two-columns",
+  "rows": 2,
+  "cols": 1,
+  "steps": [{"feed_hex":"e4b8adcc8161"}],
+  "expect": {
+    "lines": ["中́", "a"],
+    "wrapped": [0],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 6,
+    "cells": [
+      {"row":0,"col":0,"contents":"中́","wide":true,"continuation":false,"fg":"default","bg":"default","faint":false}
+    ]
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-same-size",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"616263646566"}, {"resize":[2,4]}],
+  "expect": {
+    "lines": ["abcd", "ef"],
+    "wrapped": [0],
+    "cursor": [1, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 7
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-shrink-rows",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a64"}, {"resize":[2,4]}],
+  "expect": {
+    "lines": ["c", "d"],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-shrink-rows-cursor-top",
+  "rows": 4,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a641b5b313b3148"}, {"resize":[2,4]}],
+  "expect": {
+    "lines": ["a", "b"],
+    "wrapped": [],
+    "cursor": [0, 0],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-grow-rows-pulls-scrollback",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"610d0a620d0a630d0a64"}, {"resize":[4,4]}],
+  "expect": {
+    "lines": ["", "", "c", "d"],
+    "wrapped": [],
+    "cursor": [3, 1],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 11
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-grow-alternate",
+  "rows": 2,
+  "cols": 4,
+  "steps": [{"feed_hex":"1b5b3f3130343968610d0a620d0a63"}, {"resize":[4,4]}],
+  "expect": {
+    "lines": ["b", "c", "", ""],
+    "wrapped": [],
+    "cursor": [1, 1],
+    "alternate_screen": true,
+    "bracketed_paste": false,
+    "screen_seq": 16
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-cols",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"61626364650d0a1b5b333b31486162e4b8ad"}, {"resize":[3,3]}],
+  "expect": {
+    "lines": ["abc", "e", "ab"],
+    "wrapped": [],
+    "cursor": [2, 2],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 19
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "resize-wider-clears-wrap",
+  "rows": 3,
+  "cols": 4,
+  "steps": [{"feed_hex":"6162636465666768"}, {"resize":[3,6]}],
+  "expect": {
+    "lines": ["abcd", "efgh", ""],
+    "wrapped": [],
+    "cursor": [1, 4],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 9
+  }
+}
+```
+
+```vt-vector
+{
+  "id": "observe-granularity",
+  "rows": 3,
+  "cols": 6,
+  "steps": [{"feed_hex":"61620d0a63641b5b313b3148e4b8ad"}, {"resize":[3,8]}, {"feed_hex":"78"}],
+  "observations": [2, 3, 4, 6, 7, 15, 17],
+  "expect": {
+    "lines": ["中x", "cd", ""],
+    "wrapped": [],
+    "cursor": [0, 3],
+    "alternate_screen": false,
+    "bracketed_paste": false,
+    "screen_seq": 17
+  }
+}
+```
+
+### 9.3 Detection conformance
+
+The bundled screens' `expected_observation` values are the detection vectors (§6.9 Fixture replay and expected observation): replaying each screen and running every entry point with its backend's profile must yield exactly the recorded values.

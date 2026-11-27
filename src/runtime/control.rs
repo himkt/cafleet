@@ -63,7 +63,7 @@ fn frame_control_body(body: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub(super) fn decode_lifecycle_control_body(body: &[u8]) -> Result<Value> {
-    let frame = serde_json::from_slice(body).map_err(|_| error("malformed control JSON body"))?;
+    let frame = decode_strict_json(body)?;
     validate_version(&frame)?;
     Ok(frame)
 }
@@ -3066,6 +3066,42 @@ mod tests {
                 let raw = duplicate(&good, field);
                 rejection(&good, &raw);
                 assert!(decode_service_request(&raw).is_err(), "{kind} {field}");
+            }
+        }
+    }
+    #[test]
+    fn lifecycle_requests_reject_every_repeated_key_like_input_requests() {
+        let identity = Case::new().request("submit_prompt", None)["identity"].clone();
+        for (kind, field) in [
+            ("health", None),
+            ("prepare", Some(("remaining_ms", json!(5)))),
+            ("start", Some(("pane_id", json!("%1")))),
+            ("shutdown", None),
+        ] {
+            let mut good = json!({"protocol_version":1,"kind":kind,"identity":identity});
+            if let Some((name, value)) = field {
+                good[name] = value;
+            }
+            assert!(
+                matches!(
+                    decode_service_request(&bytes(&good)).unwrap(),
+                    ServiceControlRequest::Lifecycle(_)
+                ),
+                "{kind}"
+            );
+            for field in good.as_object().unwrap().keys() {
+                assert!(
+                    decode_service_request(&duplicate(&good, field)).is_err(),
+                    "{kind}: repeated {field}"
+                );
+            }
+            for pointer in ["/identity", "/identity/database_identity_json"] {
+                for field in good.pointer(pointer).unwrap().as_object().unwrap().keys() {
+                    assert!(
+                        decode_service_request(&nested_duplicate(&good, pointer, field)).is_err(),
+                        "{kind}: repeated {pointer}/{field}"
+                    );
+                }
             }
         }
     }

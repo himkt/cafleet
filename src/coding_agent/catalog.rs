@@ -1788,6 +1788,8 @@ impl ProfileCatalog {
 pub(crate) mod test_support {
     use crate::coding_agent::NativeVersion;
     use crate::coding_agent::catalog::*;
+    use crate::coding_agent::detector::MatchEvidence;
+    use crate::coding_agent::detector::ScreenObservation;
     use serde_json::Map;
     use serde_json::json;
 
@@ -2105,7 +2107,7 @@ pub(crate) mod test_support {
         if styles {
             verify_cell_styles(&m["cell_styles"], rows, cols, &masked)?;
         }
-        Ok(())
+        verify_expected_observation(&m["expected_observation"])
     }
 
     fn verify_colour(value: &Value) -> Result<()> {
@@ -2173,7 +2175,7 @@ pub(crate) mod test_support {
         }
         Ok(())
     }
-    const SCREEN_FIELDS: [&str; 8] = [
+    const SCREEN_FIELDS: [&str; 9] = [
         "rows",
         "cols",
         "alternate_screen",
@@ -2182,7 +2184,232 @@ pub(crate) mod test_support {
         "cursor_col",
         "lines",
         "masked_rows",
+        "expected_observation",
     ];
+
+    const EXPECTED_OBSERVATION_KEYS: [&str; 4] =
+        ["observe", "director", "composer_text", "answers"];
+
+    /// The keys of an observation object, in the order the guard compares them.
+    const OBSERVATION_KEYS: [&str; 7] = [
+        "kind",
+        "rule_id",
+        "match_evidence",
+        "operation",
+        "choices",
+        "verified_noninteraction",
+        "continues_rule_id",
+    ];
+
+    fn verify_expected_observation(value: &Value) -> Result<()> {
+        let entries = object(value, &EXPECTED_OBSERVATION_KEYS)?;
+        object(&entries["observe"], &OBSERVATION_KEYS)?;
+        if !entries["director"].is_null() {
+            object(&entries["director"], &OBSERVATION_KEYS)?;
+        }
+        if !entries["composer_text"].is_null() {
+            object(&entries["composer_text"], &["mode_prefix", "segments"])?;
+        }
+        for answer in entries["answers"]
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?
+            .values()
+        {
+            object(answer, &["focused_choice_id"])?;
+        }
+        Ok(())
+    }
+
+    fn observation_kind_name(kind: ObservationKind) -> &'static str {
+        match kind {
+            ObservationKind::Interaction(class) => class.as_str(),
+            ObservationKind::PermissionContinuation => "permission_continuation",
+            ObservationKind::ComposerEmpty => "composer_empty",
+            ObservationKind::ComposerText => "composer_text",
+            ObservationKind::Unknown => "unknown",
+        }
+    }
+
+    fn observation_value(observation: &ScreenObservation) -> Value {
+        json!({
+            "kind": observation_kind_name(observation.kind),
+            "rule_id": observation.rule_id,
+            "match_evidence": match observation.match_evidence {
+                MatchEvidence::Complete => "complete",
+                MatchEvidence::Conflicting => "conflicting",
+                MatchEvidence::Absent => "absent",
+            },
+            "operation": observation.raw_evidence["operation"],
+            "choices": observation.raw_evidence["choices"],
+            "verified_noninteraction": observation.verified_noninteraction,
+            "continues_rule_id": observation.continues_rule_id,
+        })
+    }
+
+    /// Consecutive characters of a text segment form one string item.
+    fn composer_text_value(text: &ComposerText) -> Value {
+        let segments = text
+            .segments
+            .iter()
+            .map(|segment| match segment {
+                Segment::Text(items) => {
+                    let mut values = Vec::new();
+                    let mut run = String::new();
+                    for item in items {
+                        match item {
+                            TextItem::Char(c) => run.push(*c),
+                            TextItem::Break => {
+                                if !run.is_empty() {
+                                    values.push(json!(std::mem::take(&mut run)));
+                                }
+                                values.push(json!({"break": true}));
+                            }
+                        }
+                    }
+                    if !run.is_empty() {
+                        values.push(json!(run));
+                    }
+                    json!({"kind": "text", "items": values})
+                }
+                Segment::Scalars(count) => json!({"kind": "scalars", "count": count}),
+                Segment::Lines(count) => json!({"kind": "lines", "count": count}),
+            })
+            .collect::<Vec<_>>();
+        json!({"mode_prefix": text.mode_prefix, "segments": segments})
+    }
+
+    /// What the detector yields for `screen` at every detection entry point of `backend`'s
+    /// profile in `catalog`, in the shape a screen records as `expected_observation`.
+    pub(crate) fn expected_observation(
+        catalog: &ProfileCatalog,
+        backend: CodingAgent,
+        screen: &Value,
+    ) -> Result<Value> {
+        let snapshot = crate::coding_agent::detector::test_support::replay_native_fixture(
+            &crate::digest::canonical_json(screen),
+            |_| {},
+            crate::coding_agent::detector::test_support::fixture_alternate(screen),
+            None,
+        );
+        let detector = Detector::new(catalog, backend, None);
+        let observed = detector.observe(&snapshot)?;
+        let director = match catalog.director_delivery(backend) {
+            Some(delivery) => {
+                observation_value(&detector.observe_director(&snapshot, delivery.rule_ids())?)
+            }
+            None => Value::Null,
+        };
+        let composer_text = detector
+            .composer_text(&snapshot)?
+            .map_or(Value::Null, |text| composer_text_value(&text));
+        let mut answers = Map::new();
+        for plan in catalog.answer_plans(backend, &observed.rule_id) {
+            for matched in
+                detector.match_answers(&snapshot, &observed, std::slice::from_ref(&plan))?
+            {
+                answers.insert(
+                    plan.capability().answer_rule_id().to_owned(),
+                    json!({"focused_choice_id": matched.focused_choice_id()}),
+                );
+            }
+        }
+        Ok(json!({
+            "observe": observation_value(&observed),
+            "director": director,
+            "composer_text": composer_text,
+            "answers": answers,
+        }))
+    }
+
+    /// The first key path, in comparison order, where `recorded` differs from `computed`.
+    pub(crate) fn expected_observation_difference(
+        recorded: &Value,
+        computed: &Value,
+    ) -> Option<String> {
+        for entry in EXPECTED_OBSERVATION_KEYS {
+            let (recorded, computed) = (&recorded[entry], &computed[entry]);
+            if recorded == computed {
+                continue;
+            }
+            if recorded.is_object()
+                && computed.is_object()
+                && matches!(entry, "observe" | "director")
+                && let Some(key) = OBSERVATION_KEYS
+                    .iter()
+                    .find(|key| recorded[**key] != computed[**key])
+            {
+                return Some(format!("{entry}.{key}"));
+            }
+            return Some(entry.to_owned());
+        }
+        None
+    }
+
+    /// Fails on the first bundled screen whose recorded `expected_observation` differs from
+    /// what the detector yields for it.
+    fn validate_expected_observations(files: &Value, catalog: &ProfileCatalog) -> Result<()> {
+        for (name, file) in files
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?
+        {
+            let backend = crate::coding_agent::coding_agent(name)
+                .ok_or_else(|| invalid(format!("unknown backend {name}")))?;
+            for (id, screen) in file["screens"]
+                .as_object()
+                .ok_or_else(|| invalid("object required"))?
+            {
+                let computed = expected_observation(catalog, backend, screen)?;
+                if let Some(path) =
+                    expected_observation_difference(&screen["expected_observation"], &computed)
+                {
+                    return Err(invalid(format!(
+                        "fixture {id} expected observation differs: {path}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `files` with an `expected_observation` recorded from the current detector on every
+    /// screen that has none and is otherwise a valid bundled screen; other screens and files
+    /// that do not decode are returned unchanged for the guard to refuse.
+    pub(crate) fn with_recorded_observations(files: &Value) -> Value {
+        let mut recorded = files.clone();
+        let Ok(catalog) = ProfileCatalog::from_files(files) else {
+            return recorded;
+        };
+        let Some(entries) = recorded.as_object_mut() else {
+            return recorded;
+        };
+        for (name, file) in entries {
+            let Some(backend) = crate::coding_agent::coding_agent(name) else {
+                continue;
+            };
+            let Some(screens) = file["screens"].as_object_mut() else {
+                continue;
+            };
+            for screen in screens.values_mut() {
+                if screen.get("expected_observation").is_some() {
+                    continue;
+                }
+                let mut placeholder = screen.clone();
+                placeholder["expected_observation"] = json!({
+                    "observe": OBSERVATION_KEYS.map(|key| (key.to_owned(), Value::Null)).into_iter().collect::<Map<_, _>>(),
+                    "director": null,
+                    "composer_text": null,
+                    "answers": {},
+                });
+                if verify_bundled_screen(&placeholder).is_err() {
+                    continue;
+                }
+                if let Ok(observation) = expected_observation(&catalog, backend, screen) {
+                    screen["expected_observation"] = observation;
+                }
+            }
+        }
+        recorded
+    }
     fn verify_cell_backgrounds(
         value: &Value,
         rows: u16,
@@ -2943,6 +3170,7 @@ pub(crate) mod test_support {
             }
             validate_provenance(files)?;
             validate_pre_submit_fixtures(files, &catalog)?;
+            validate_expected_observations(files, &catalog)?;
             Ok(Self {
                 capture_origin: "bundled_unknown",
                 ..catalog
@@ -4533,9 +4761,11 @@ mod tests {
         use crate::coding_agent::catalog::bundled_profile_text;
         use crate::coding_agent::catalog::test_support::VERSION;
         use crate::coding_agent::catalog::test_support::bundled_files;
+        use crate::coding_agent::catalog::test_support::expected_observation;
         use crate::coding_agent::catalog::test_support::fixture_at;
         use crate::coding_agent::catalog::test_support::implicit_pattern_classes;
         use crate::coding_agent::catalog::test_support::parse_bundled_text;
+        use crate::coding_agent::catalog::test_support::with_recorded_observations;
         use crate::coding_agent::catalog::tests::definitions;
         use crate::error::CafleetError;
         use serde_json::Value;
@@ -4584,8 +4814,10 @@ mod tests {
                 fixture
             }
 
+            /// Loads the files through the bundled-catalog guard after recording each valid
+            /// screen's `expected_observation` that a test has not set itself.
             fn load(&self) -> Result<ProfileCatalog, CafleetError> {
-                ProfileCatalog::from_bundled_files(&self.files)
+                ProfileCatalog::from_bundled_files(&with_recorded_observations(&self.files))
             }
 
             fn masked() -> Self {
@@ -4714,6 +4946,193 @@ mod tests {
         fn the_bundled_catalog_guard_accepts_valid_profile_files_and_names_each_violation() {
             for (case, load, expected) in GUARD_CASES {
                 assert_eq!(failure_message(load()).as_deref(), *expected, "{case}");
+            }
+        }
+
+        /// A value of the same field that differs from `value`.
+        fn differing(value: &Value) -> Value {
+            match value {
+                Value::Null => json!("changed"),
+                Value::Bool(flag) => json!(!flag),
+                Value::String(text) => json!(format!("{text}-changed")),
+                Value::Array(items) => {
+                    let mut items = items.clone();
+                    items.push(json!("changed"));
+                    Value::Array(items)
+                }
+                other => panic!("an observation field holds no {other}"),
+            }
+        }
+
+        fn recorded() -> NativeFixtureCatalog {
+            NativeFixtureCatalog {
+                files: with_recorded_observations(&NativeFixtureCatalog::new().files),
+            }
+        }
+
+        fn differs_at(path: &str) -> Option<String> {
+            Some(format!(
+                "invalid native profile: fixture {PRIMARY} expected observation differs: {path}"
+            ))
+        }
+
+        #[test]
+        fn the_bundled_catalog_guard_names_the_first_differing_expected_observation_key() {
+            assert_eq!(
+                failure_message(recorded().load()),
+                None,
+                "a recorded screen"
+            );
+            let observation_keys = [
+                "kind",
+                "rule_id",
+                "match_evidence",
+                "operation",
+                "choices",
+                "verified_noninteraction",
+                "continues_rule_id",
+            ];
+            for key in observation_keys {
+                let mut fixture = recorded();
+                fixture.change_primary(|s| {
+                    let field = &mut s["expected_observation"]["observe"][key];
+                    *field = differing(field);
+                });
+                assert_eq!(
+                    failure_message(fixture.load()),
+                    differs_at(&format!("observe.{key}")),
+                    "observe.{key}"
+                );
+            }
+            let entry_changes: [ScreenChange; 3] = [
+                ("director", |s| {
+                    let observe = s["expected_observation"]["observe"].clone();
+                    let director = &mut s["expected_observation"]["director"];
+                    *director = if director.is_null() {
+                        observe
+                    } else {
+                        Value::Null
+                    };
+                }),
+                ("composer_text", |s| {
+                    s["expected_observation"]["composer_text"] =
+                        json!({"mode_prefix":"changed","segments":[{"kind":"lines","count":99}]});
+                }),
+                ("answers", |s| {
+                    s["expected_observation"]["answers"]["changed-answer"] =
+                        json!({"focused_choice_id":null});
+                }),
+            ];
+            for (entry, change) in entry_changes {
+                let mut fixture = recorded();
+                fixture.change_primary(change);
+                assert_eq!(
+                    failure_message(fixture.load()),
+                    differs_at(entry),
+                    "{entry}"
+                );
+            }
+            let mut both = recorded();
+            both.change_primary(|s| {
+                let operation = &mut s["expected_observation"]["observe"]["operation"];
+                *operation = differing(operation);
+                s["expected_observation"]["answers"]["changed-answer"] =
+                    json!({"focused_choice_id":null});
+            });
+            assert_eq!(
+                failure_message(both.load()),
+                differs_at("observe.operation"),
+                "the comparison order decides which difference is named"
+            );
+        }
+
+        #[test]
+        fn every_bundled_screen_replays_into_an_expected_observation_the_guard_accepts() {
+            let mut files = bundled_files();
+            for file in files.as_object_mut().unwrap().values_mut() {
+                for screen in file["screens"].as_object_mut().unwrap().values_mut() {
+                    screen
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("expected_observation");
+                }
+            }
+            assert_eq!(
+                failure_message(ProfileCatalog::from_bundled_files(
+                    &with_recorded_observations(&files)
+                )),
+                None
+            );
+        }
+
+        #[test]
+        fn a_bundled_screen_requires_an_expected_observation_of_the_reviewed_shape() {
+            let changes: [ScreenChange; 5] = [
+                ("missing", |s| {
+                    s.as_object_mut().unwrap().remove("expected_observation");
+                }),
+                ("an extra entry", |s| {
+                    s["expected_observation"]["note"] = json!("x");
+                }),
+                ("an observation without a key", |s| {
+                    s["expected_observation"]["observe"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("choices");
+                }),
+                ("an answer with an extra key", |s| {
+                    s["expected_observation"]["answers"]["changed-answer"] =
+                        json!({"focused_choice_id":null,"note":"x"});
+                }),
+                ("a composer text without segments", |s| {
+                    s["expected_observation"]["composer_text"] = json!({"mode_prefix":null});
+                }),
+            ];
+            for (case, change) in changes {
+                let mut fixture = recorded();
+                fixture.change_primary(change);
+                assert_eq!(
+                    failure_message(ProfileCatalog::from_bundled_files(&fixture.files)).as_deref(),
+                    Some("invalid native profile: exact required object fields expected"),
+                    "{case}"
+                );
+            }
+        }
+
+        /// An answer's fixtures also cover the screens after its keys, so only those showing its
+        /// complete request carry the answer; every answer has at least one.
+        #[test]
+        fn every_bundled_request_fixture_of_an_answer_records_its_answer_rule() {
+            let files = bundled_files();
+            let catalog = ProfileCatalog::from_files(&files).unwrap();
+            for &backend in CodingAgent::all() {
+                let Some(file) = files.get(backend.name()) else {
+                    continue;
+                };
+                for answer in file["profile"]["capabilities"]["answers"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    let answer_rule = answer["answer_rule_id"].as_str().unwrap();
+                    let mut requests = 0;
+                    for id in answer["fixture_ids"].as_array().unwrap() {
+                        let id = id.as_str().unwrap();
+                        let observation =
+                            expected_observation(&catalog, backend, &file["screens"][id]).unwrap();
+                        if observation["observe"]["rule_id"] != answer["request_rule_id"]
+                            || observation["observe"]["match_evidence"] != "complete"
+                        {
+                            continue;
+                        }
+                        requests += 1;
+                        assert!(
+                            observation["answers"].get(answer_rule).is_some(),
+                            "{id} records {answer_rule}: {observation}"
+                        );
+                    }
+                    assert!(requests > 0, "{answer_rule} cites a request screen");
+                }
             }
         }
 
@@ -10090,8 +10509,10 @@ mod tests {
                 .map_err(|error| error.message().into_owned())
         }
 
-        /// `files` with the `fields` of screen `id` set to null and its screen-level
-        /// `multiplexer` set to `multiplexer` when given.
+        /// `files` with the `fields` of screen `id` set to null, its screen-level
+        /// `multiplexer` set to `multiplexer` when given, and its `expected_observation`
+        /// recorded again for the changed screen when its cursor stays replayable: both
+        /// coordinates recorded or both null.
         fn nulled(files: &Value, id: &str, fields: &[&str], multiplexer: Option<&str>) -> Value {
             let mut files = files.clone();
             let screen = &mut files["codex"]["screens"][id];
@@ -10101,6 +10522,17 @@ mod tests {
             if let Some(multiplexer) = multiplexer {
                 screen["multiplexer"] = json!(multiplexer);
             }
+            if screen["cursor_row"].is_null() != screen["cursor_col"].is_null() {
+                return files;
+            }
+            let catalog = ProfileCatalog::from_files(&files).unwrap();
+            let observation = crate::coding_agent::catalog::test_support::expected_observation(
+                &catalog,
+                CodingAgent::Codex,
+                &files["codex"]["screens"][id],
+            )
+            .unwrap();
+            files["codex"]["screens"][id]["expected_observation"] = observation;
             files
         }
 

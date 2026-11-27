@@ -273,10 +273,7 @@ pub(crate) fn resolve_body(
     file: Option<&str>,
 ) -> Result<String, CafleetError> {
     let body = read_body(inline, file)?;
-    if !body
-        .chars()
-        .all(|c| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
-    {
+    if !body.chars().all(char::is_whitespace) {
         return Ok(body);
     }
     Err(match file {
@@ -401,7 +398,7 @@ pub(crate) mod test_support {
     /// Runs the CLI with only `executables` (name, shell body) on PATH and `environment` added.
     /// Runs the libtest child `test` of this binary with `command`'s environment, capturing its
     /// output and bounding it to ten seconds.
-    pub(super) fn run_test_child(
+    pub(crate) fn run_test_child(
         command: &mut std::process::Command,
         test: &str,
     ) -> std::process::Output {
@@ -554,6 +551,42 @@ mod tests {
             }
         }
         conn.execute_batch("ROLLBACK").unwrap();
+    }
+
+    #[test]
+    fn ordinary_commands_give_a_non_sqlite_file_the_incompatible_refusal_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("foreign.db");
+        let bytes = b"not a sqlite database file\n".repeat(64);
+        std::fs::write(&path, &bytes).unwrap();
+        let settings = Settings::for_database(&path);
+        let expected = format!(
+            "database format is incompatible at '{}'; choose an empty database path and run 'cafleet setup'.",
+            path.display()
+        );
+        for args in [
+            &["fleet", "list", "--json"][..],
+            &["message", "poll", "1"],
+            &["member", "press", "1", "--from-member-id", "1", "Enter"],
+            &[
+                "permission",
+                "inspect",
+                "1",
+                "--event-id",
+                "1",
+                "--from-member-id",
+                "1",
+            ],
+        ] {
+            let error = dispatch(&settings, parse(args)).expect_err("a foreign file is refused");
+            let message = error.message();
+            assert!(
+                message.lines().any(|line| line == expected),
+                "{args:?}: {message}"
+            );
+            assert_eq!(error.exit_code(), 1, "{args:?}");
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "{args:?}");
+        }
     }
 
     #[test]
@@ -940,11 +973,6 @@ mod tests {
             std::fs::write(&path, text).unwrap();
             assert_eq!(resolve_body(None, Some(name)).unwrap(), text);
         }
-        for text in ["", " \t\n", "\u{1c}\u{1f}", "\u{2003}"] {
-            std::fs::write(&path, text).unwrap();
-            assert_eq!(resolve_body(Some(text), None).unwrap_err().exit_code(), 2);
-            assert_eq!(resolve_body(None, Some(name)).unwrap_err().exit_code(), 1);
-        }
         std::fs::write(&path, [0xff]).unwrap();
         assert!(
             resolve_body(None, Some(name))
@@ -960,6 +988,125 @@ mod tests {
                 .contains(name)
         );
         assert!(resolve_body(None, Some(dir.path().to_str().unwrap())).is_err());
+    }
+
+    struct BodyCase {
+        name: &'static str,
+        text: &'static str,
+    }
+
+    const BLANK_BODIES: [BodyCase; 9] = [
+        BodyCase {
+            name: "empty text",
+            text: "",
+        },
+        BodyCase {
+            name: "ASCII spaces and controls with White_Space",
+            text: " \t\n\u{b}\u{c}\r",
+        },
+        BodyCase {
+            name: "next line",
+            text: "\u{85}",
+        },
+        BodyCase {
+            name: "no-break space",
+            text: "\u{a0}",
+        },
+        BodyCase {
+            name: "ogham space mark",
+            text: "\u{1680}",
+        },
+        BodyCase {
+            name: "en quad through hair space",
+            text: "\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}",
+        },
+        BodyCase {
+            name: "line and paragraph separators",
+            text: "\u{2028}\u{2029}",
+        },
+        BodyCase {
+            name: "narrow no-break, medium mathematical and ideographic spaces",
+            text: "\u{202f}\u{205f}\u{3000}",
+        },
+        BodyCase {
+            name: "mixed White_Space scalars",
+            text: " \u{3000}\n\u{a0}\t",
+        },
+    ];
+
+    const NONBLANK_BODIES: [BodyCase; 8] = [
+        BodyCase {
+            name: "file separator",
+            text: "\u{1c}",
+        },
+        BodyCase {
+            name: "group separator",
+            text: "\u{1d}",
+        },
+        BodyCase {
+            name: "record separator",
+            text: "\u{1e}",
+        },
+        BodyCase {
+            name: "unit separator",
+            text: "\u{1f}",
+        },
+        BodyCase {
+            name: "information separators among White_Space",
+            text: " \u{1c}\n\u{1f}\t",
+        },
+        BodyCase {
+            name: "zero width space",
+            text: "\u{200b}",
+        },
+        BodyCase {
+            name: "byte order mark",
+            text: "\u{feff}",
+        },
+        BodyCase {
+            name: "one visible scalar among White_Space",
+            text: "\u{3000}x\u{2029}",
+        },
+    ];
+
+    #[test]
+    fn a_body_is_blank_exactly_when_every_scalar_has_white_space() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("body.txt");
+        let name = path.to_str().unwrap();
+        for case in BLANK_BODIES {
+            std::fs::write(&path, case.text).unwrap();
+            let inline = resolve_body(Some(case.text), None).unwrap_err();
+            assert!(
+                matches!(&inline, CafleetError::Usage(message) if message == "text may not be empty."),
+                "{}: {inline:?}",
+                case.name
+            );
+            assert_eq!(inline.exit_code(), 2, "{}", case.name);
+            let file = resolve_body(None, Some(name)).unwrap_err();
+            assert_eq!(
+                file.message(),
+                format!("--file {name}: file is empty."),
+                "{}",
+                case.name
+            );
+            assert_eq!(file.exit_code(), 1, "{}", case.name);
+        }
+        for case in NONBLANK_BODIES {
+            std::fs::write(&path, case.text).unwrap();
+            assert_eq!(
+                resolve_body(Some(case.text), None).unwrap(),
+                case.text,
+                "{}",
+                case.name
+            );
+            assert_eq!(
+                resolve_body(None, Some(name)).unwrap(),
+                case.text,
+                "{}",
+                case.name
+            );
+        }
     }
 
     #[test]
@@ -1332,16 +1479,26 @@ mod tests {
             }
         }
 
-        struct ChildOutcome {
-            code: Option<i32>,
-            stdout: String,
-            stderr: String,
+        pub(super) struct ChildOutcome {
+            pub(super) code: Option<i32>,
+            pub(super) stdout: String,
+            pub(super) stderr: String,
         }
 
         fn run_guarded_child(args: &[String]) -> ChildOutcome {
+            run_guarded_child_with(args, |_| {})
+        }
+
+        /// Runs `run_args` on `args` in a child whose command `configure` adjusts first.
+        pub(super) fn run_guarded_child_with(
+            args: &[String],
+            configure: impl FnOnce(&mut std::process::Command),
+        ) -> ChildOutcome {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.env(CHILD_ARGV, serde_json::json!(args).to_string());
+            configure(&mut command);
             let output = crate::cli::test_support::run_test_child(
-                std::process::Command::new(std::env::current_exe().unwrap())
-                    .env(CHILD_ARGV, serde_json::json!(args).to_string()),
+                &mut command,
                 test_path!(guarded_run_child),
             );
             let stdout = String::from_utf8(output.stdout).unwrap();
@@ -1386,6 +1543,562 @@ mod tests {
                 outcome.stderr
             );
             assert!(outcome.stderr.contains("TEXT"), "{}", outcome.stderr);
+        }
+    }
+
+    mod validation_order {
+        use crate::broker::fleets::test_support::create_fleet_fixture;
+        use crate::broker::members::test_support::register;
+        use crate::cli::test_support::parse_cli;
+        use crate::cli::*;
+        use crate::db::test_support::initialized_file_conn;
+
+        const NO_DATABASE: &str = "no cafleet database; run 'cafleet setup'";
+
+        struct Registry {
+            dir: tempfile::TempDir,
+            initialized: Settings,
+            fleet: i64,
+            director: String,
+            worker: String,
+        }
+
+        impl Registry {
+            fn new() -> Self {
+                let dir = tempfile::tempdir().unwrap();
+                let mut conn = initialized_file_conn(&dir);
+                let (fleet, director) = create_fleet_fixture(&mut conn, "validation-order");
+                let worker = register(&mut conn, fleet, "worker", Some("%7"));
+                let initialized =
+                    Settings::for_database(std::path::Path::new(conn.path().unwrap()));
+                Self {
+                    dir,
+                    initialized,
+                    fleet,
+                    director: director.to_string(),
+                    worker: worker.to_string(),
+                }
+            }
+
+            fn absent_path(&self) -> std::path::PathBuf {
+                self.dir.path().join("absent.db")
+            }
+
+            fn settings(&self, database: Database) -> Settings {
+                match database {
+                    Database::Missing => Settings::for_database(&self.absent_path()),
+                    Database::Initialized => self.initialized.clone(),
+                    Database::Altered(sql) => {
+                        crate::db::connect(&self.initialized.database_url)
+                            .unwrap()
+                            .execute_batch(sql)
+                            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+                        self.initialized.clone()
+                    }
+                    Database::Url(url) => Settings::new(Some(url.into())).unwrap(),
+                }
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        enum Database {
+            Missing,
+            Initialized,
+            /// The initialized registry after this SQL runs on it.
+            Altered(&'static str),
+            Url(&'static str),
+        }
+
+        enum Expected {
+            Exact(String),
+            Prefix(String),
+            Contains(&'static str),
+        }
+
+        struct OrderCase {
+            name: &'static str,
+            database: Database,
+            args: fn(&Registry) -> Vec<String>,
+            expected: fn(&Registry) -> Expected,
+            exit_code: i32,
+        }
+
+        fn owned(args: &[&str]) -> Vec<String> {
+            args.iter().map(|arg| (*arg).to_owned()).collect()
+        }
+
+        fn guard_message(name: &str, caller: &str, registry: &Registry) -> String {
+            let conn = crate::db::connect(&registry.initialized.database_url).unwrap();
+            let fleet: i64 = conn
+                .query_row(
+                    "SELECT fleet_id FROM members WHERE member_id=?1",
+                    [caller.parse::<i64>().unwrap()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            format!(
+                "'cafleet {name}' is a Director-only command and member {caller} is not the root Director of fleet {fleet}; send the request to your Director."
+            )
+        }
+
+        fn assert_order(cases: &[OrderCase]) {
+            for case in cases {
+                let name = case.name;
+                let registry = Registry::new();
+                let settings = registry.settings(case.database);
+                let args = (case.args)(&registry);
+                let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+                let command =
+                    parse_cli(&args).unwrap_or_else(|error| panic!("{name}: {args:?}: {error}"));
+                let error = dispatch(&settings, command).expect_err(name);
+                let message = error.message();
+                let first_line = message.lines().next().unwrap_or("");
+                match (case.expected)(&registry) {
+                    Expected::Exact(expected) => assert_eq!(first_line, expected, "{name}"),
+                    Expected::Prefix(prefix) => {
+                        assert!(first_line.starts_with(&prefix), "{name}: {message}")
+                    }
+                    Expected::Contains(text) => {
+                        assert!(message.contains(text), "{name}: {message}")
+                    }
+                }
+                assert_eq!(error.exit_code(), case.exit_code, "{name}: {message}");
+                assert!(
+                    !registry.absent_path().exists(),
+                    "{name}: no database is created"
+                );
+            }
+        }
+
+        #[test]
+        fn message_send_checks_fail_in_order() {
+            assert_order(&[
+                OrderCase {
+                    name: "the database guard precedes body validation",
+                    database: Database::Missing,
+                    args: |_| {
+                        owned(&[
+                            "message",
+                            "send",
+                            "--from-member-id",
+                            "1",
+                            "--to-member-id",
+                            "2",
+                            " ",
+                        ])
+                    },
+                    expected: |_| Expected::Exact(NO_DATABASE.into()),
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "a blank body precedes the sender and recipient checks",
+                    database: Database::Initialized,
+                    args: |_| {
+                        owned(&[
+                            "message",
+                            "send",
+                            "--from-member-id",
+                            "999",
+                            "--to-member-id",
+                            "998",
+                            " \u{2028}",
+                        ])
+                    },
+                    expected: |_| Expected::Exact("text may not be empty.".into()),
+                    exit_code: 2,
+                },
+                OrderCase {
+                    name: "a --file read error precedes the sender and recipient checks",
+                    database: Database::Initialized,
+                    args: |registry| {
+                        let path = registry.dir.path().join("absent.txt");
+                        owned(&[
+                            "message",
+                            "send",
+                            "--from-member-id",
+                            "999",
+                            "--to-member-id",
+                            "998",
+                            "--file",
+                            path.to_str().unwrap(),
+                        ])
+                    },
+                    expected: |registry| {
+                        let path = registry.dir.path().join("absent.txt");
+                        Expected::Prefix(format!(
+                            "--file {}: file does not exist or is not a regular file. (",
+                            path.display()
+                        ))
+                    },
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "a deleted sender fleet precedes the recipient lookup",
+                    database: Database::Altered(
+                        "UPDATE fleets SET deleted_at='2026-11-27T00:00:00.000000+00:00'",
+                    ),
+                    args: |registry| {
+                        owned(&[
+                            "message",
+                            "send",
+                            "--from-member-id",
+                            &registry.worker,
+                            "--to-member-id",
+                            "999998",
+                            "body",
+                        ])
+                    },
+                    expected: |registry| {
+                        Expected::Exact(format!("fleet {} is deleted", registry.fleet))
+                    },
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "an inactive root Director precedes the recipient lookup",
+                    database: Database::Altered(
+                        "UPDATE members SET status='deregistered'
+                         WHERE member_id=(SELECT director_member_id FROM fleets)",
+                    ),
+                    args: |registry| {
+                        owned(&[
+                            "message",
+                            "send",
+                            "--from-member-id",
+                            &registry.worker,
+                            "--to-member-id",
+                            "999998",
+                            "body",
+                        ])
+                    },
+                    expected: |registry| {
+                        Expected::Exact(format!(
+                            "fleet {}'s root Director (member {}) is not active.",
+                            registry.fleet, registry.director
+                        ))
+                    },
+                    exit_code: 1,
+                },
+            ]);
+        }
+
+        #[test]
+        fn director_only_pane_input_checks_fail_in_order() {
+            assert_order(&[
+                OrderCase {
+                    name: "prompt: the database guard precedes the Director-only guard",
+                    database: Database::Missing,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "prompt",
+                            &registry.worker,
+                            "two\nlines",
+                            "--from-member-id",
+                            &registry.worker,
+                        ])
+                    },
+                    expected: |_| Expected::Exact(NO_DATABASE.into()),
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "prompt: the Director-only guard precedes text validation",
+                    database: Database::Initialized,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "prompt",
+                            &registry.worker,
+                            "two\nlines",
+                            "--from-member-id",
+                            &registry.worker,
+                        ])
+                    },
+                    expected: |registry| {
+                        Expected::Exact(guard_message("member prompt", &registry.worker, registry))
+                    },
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "prompt: text validation precedes the target checks",
+                    database: Database::Initialized,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "prompt",
+                            &registry.director,
+                            "two\nlines",
+                            "--from-member-id",
+                            &registry.director,
+                        ])
+                    },
+                    expected: |_| {
+                        Expected::Exact(
+                            "text must be one non-empty line without control characters.".into(),
+                        )
+                    },
+                    exit_code: 2,
+                },
+                OrderCase {
+                    name: "exec: the database guard precedes the Director-only guard",
+                    database: Database::Missing,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "exec",
+                            &registry.worker,
+                            "two\nlines",
+                            "--from-member-id",
+                            &registry.worker,
+                        ])
+                    },
+                    expected: |_| Expected::Exact(NO_DATABASE.into()),
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "exec: the Director-only guard precedes command validation",
+                    database: Database::Initialized,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "exec",
+                            &registry.worker,
+                            "two\nlines",
+                            "--from-member-id",
+                            &registry.worker,
+                        ])
+                    },
+                    expected: |registry| {
+                        Expected::Exact(guard_message("member exec", &registry.worker, registry))
+                    },
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "exec: command validation precedes the target checks",
+                    database: Database::Initialized,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "exec",
+                            &registry.director,
+                            "two\nlines",
+                            "--from-member-id",
+                            &registry.director,
+                        ])
+                    },
+                    expected: |_| {
+                        Expected::Exact(
+                            "command must be one non-empty line without control characters.".into(),
+                        )
+                    },
+                    exit_code: 2,
+                },
+            ]);
+        }
+
+        #[test]
+        fn member_press_checks_fail_in_order() {
+            assert_order(&[
+                OrderCase {
+                    name: "key parsing precedes the database guard",
+                    database: Database::Missing,
+                    args: |_| {
+                        owned(&[
+                            "member",
+                            "press",
+                            "2",
+                            "Enter",
+                            "Ctrl+1",
+                            "--from-member-id",
+                            "1",
+                        ])
+                    },
+                    expected: |_| {
+                        Expected::Exact("invalid press key at position 2: \"Ctrl+1\"".into())
+                    },
+                    exit_code: 2,
+                },
+                OrderCase {
+                    name: "key parsing precedes the database URL scheme check",
+                    database: Database::Url("mysql://cafleet"),
+                    args: |_| {
+                        owned(&[
+                            "member",
+                            "press",
+                            "2",
+                            "Enter",
+                            "Ctrl+1",
+                            "--from-member-id",
+                            "1",
+                        ])
+                    },
+                    expected: |_| {
+                        Expected::Exact("invalid press key at position 2: \"Ctrl+1\"".into())
+                    },
+                    exit_code: 2,
+                },
+                OrderCase {
+                    name: "the database guard precedes the Director-only guard",
+                    database: Database::Missing,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "press",
+                            &registry.director,
+                            "Enter",
+                            "--from-member-id",
+                            &registry.worker,
+                        ])
+                    },
+                    expected: |_| Expected::Exact(NO_DATABASE.into()),
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "the Director-only guard precedes the target checks",
+                    database: Database::Initialized,
+                    args: |registry| {
+                        owned(&[
+                            "member",
+                            "press",
+                            &registry.director,
+                            "Enter",
+                            "--from-member-id",
+                            &registry.worker,
+                        ])
+                    },
+                    expected: |registry| {
+                        Expected::Exact(guard_message("member press", &registry.worker, registry))
+                    },
+                    exit_code: 1,
+                },
+            ]);
+        }
+
+        #[test]
+        fn member_press_requires_the_fleet_multiplexer_before_the_director_refusal() {
+            let registry = Registry::new();
+            let (output, pane_calls) = crate::cli::test_support::isolated_cli_with(
+                &registry.initialized,
+                &[
+                    "member",
+                    "press",
+                    &registry.director,
+                    "Enter",
+                    "--from-member-id",
+                    &registry.director,
+                ],
+                &[],
+                &[],
+            );
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert_eq!(output.status.code(), Some(1), "{stderr}");
+            assert_eq!(
+                stderr,
+                format!(
+                    "Error: tmux binary not found on PATH\nkeys were not dispatched to member {}.\n",
+                    registry.director
+                )
+            );
+            assert_eq!(pane_calls, "");
+        }
+
+        #[test]
+        fn runtime_record_commands_check_the_database_before_the_director_only_guard() {
+            assert_order(&[
+                OrderCase {
+                    name: "permission respond",
+                    database: Database::Missing,
+                    args: |registry| {
+                        owned(&[
+                            "permission",
+                            "respond",
+                            "1",
+                            "--event-id",
+                            "1",
+                            "--from-member-id",
+                            &registry.worker,
+                            "--expected-run-id",
+                            "1",
+                            "--expected-owner-epoch",
+                            "1",
+                            "--request-token",
+                            "0000000000000000000000000000000000000000000000000000000000000000",
+                            "--decision",
+                            "allow",
+                        ])
+                    },
+                    expected: |_| Expected::Contains(NO_DATABASE),
+                    exit_code: 1,
+                },
+                OrderCase {
+                    name: "input reconcile",
+                    database: Database::Missing,
+                    args: |registry| {
+                        owned(&[
+                            "input",
+                            "reconcile",
+                            "1",
+                            "--disposition",
+                            "submitted",
+                            "--evidence-ref",
+                            "seen",
+                            "--from-member-id",
+                            &registry.worker,
+                        ])
+                    },
+                    expected: |_| Expected::Exact(NO_DATABASE.into()),
+                    exit_code: 1,
+                },
+            ]);
+        }
+
+        #[test]
+        fn the_default_database_path_is_derived_before_command_validation() {
+            struct HomeCase {
+                name: &'static str,
+                args: &'static [&'static str],
+            }
+            let cases = [
+                HomeCase {
+                    name: "before press key parsing",
+                    args: &[
+                        "member",
+                        "press",
+                        "2",
+                        "Enter",
+                        "Ctrl+1",
+                        "--from-member-id",
+                        "1",
+                    ],
+                },
+                HomeCase {
+                    name: "before message body validation",
+                    args: &[
+                        "message",
+                        "send",
+                        "--from-member-id",
+                        "1",
+                        "--to-member-id",
+                        "2",
+                        " ",
+                    ],
+                },
+            ];
+            for case in cases {
+                let outcome = super::director_only_guard::run_guarded_child_with(
+                    &owned(case.args),
+                    |command| {
+                        command.env_remove("HOME");
+                    },
+                );
+                assert_eq!(outcome.code, Some(1), "{}: {}", case.name, outcome.stderr);
+                assert_eq!(
+                    outcome.stderr,
+                    "Error: HOME is not set; cannot derive the default database path\n",
+                    "{}",
+                    case.name
+                );
+                assert_eq!(outcome.stdout, "", "{}", case.name);
+            }
         }
     }
 }

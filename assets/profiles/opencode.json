@@ -827,7 +827,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-cells-001/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-cells-001/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-allow-pre-stage-1": {
       "native_version": "2.1.4",
@@ -1058,7 +1093,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-ans-allow-001/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-ans-allow-001/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-deny-pre-stage-1": {
       "native_version": "2.1.4",
@@ -1289,7 +1359,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-ans-deny-001/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-ans-deny-001/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-deny-pre-stage-2": {
       "native_version": "2.1.4",
@@ -1520,7 +1625,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-ans-deny-002/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-ans-deny-002/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-deny-pre-stage-3": {
       "native_version": "2.1.4",
@@ -1751,7 +1891,29 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.1.4-focus-always-1": {
       "native_version": "2.1.4",
@@ -1982,7 +2144,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-focus-always-002/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-focus-always-002/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": null
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": null
+          }
+        }
+      }
     },
     "opencode-2.1.4-idle-composer-1": {
       "native_version": "2.1.4",
@@ -2035,7 +2232,29 @@
           "row": 35,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.1.4-narrow-permission-057-1": {
       "native_version": "2.1.4",
@@ -2255,7 +2474,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-cells-057/\npermission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-cells-057/\npermission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-narrow-deny-pre-stage-2-057-1": {
       "native_version": "2.1.4",
@@ -2486,7 +2740,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-deny-002-057/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-deny-002-057/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-narrow-deny-pre-stage-3-057-1": {
       "native_version": "2.1.4",
@@ -2706,7 +2995,29 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.1.4-narrow-long-command-057-1": {
       "native_version": "2.1.4",
@@ -2926,7 +3237,29 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.1.4-narrow-idle-composer-057-1": {
       "native_version": "2.1.4",
@@ -2979,7 +3312,29 @@
           "row": 35,
           "reason": "reviewed_privacy"
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.1.4-compact-permission-055-1": {
       "native_version": "2.1.4",
@@ -3199,7 +3554,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-compact-cells-055/\npermission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-compact-cells-055/\npermission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-compact-deny-pre-stage-2-055-1": {
       "native_version": "2.1.4",
@@ -3430,7 +3820,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-compact-deny-002-055/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-compact-deny-002-055/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-compact-deny-pre-stage-3-055-1": {
       "native_version": "2.1.4",
@@ -3639,7 +4064,29 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.1.4-narrow-permission-min-1": {
       "native_version": "2.1.4",
@@ -3859,7 +4306,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-\ncells-min/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-\ncells-min/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-narrow-deny-pre-stage-2-min-1": {
       "native_version": "2.1.4",
@@ -4079,7 +4561,42 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-\ndeny-002-min/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-194/opencode-narrow-\ndeny-002-min/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.1.4-narrow-deny-pre-stage-3-min-1": {
       "native_version": "2.1.4",
@@ -4288,7 +4805,29 @@
             "b": 30
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.5-composer-prompt-idle-mode-2004-tapped-v2-herdr-119-1": {
       "native_version": "2.2.5",
@@ -4340,7 +4879,29 @@
         "",
         ""
       ],
-      "masked_rows": []
+      "masked_rows": [],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.5-composer-prompt-idle-mode-2004-tapped-v2-tmux-120-1": {
       "native_version": "2.2.5",
@@ -4391,7 +4952,29 @@
         "",
         ""
       ],
-      "masked_rows": []
+      "masked_rows": [],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-herdr-119-68": {
       "native_version": "2.2.5",
@@ -4451,7 +5034,39 @@
         "",
         ""
       ],
-      "masked_rows": []
+      "masked_rows": [],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.5-composer-exec-plain-41-args-literal-tapped-v2-tmux-120-68": {
       "native_version": "2.2.5",
@@ -4510,7 +5125,39 @@
         "",
         ""
       ],
-      "masked_rows": []
+      "masked_rows": [],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-herdr-119-33": {
       "native_version": "2.2.5",
@@ -4570,7 +5217,39 @@
         "",
         ""
       ],
-      "masked_rows": []
+      "masked_rows": [],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.5-composer-prompt-plain-41-literal-tapped-v2-tmux-120-33": {
       "native_version": "2.2.5",
@@ -4629,7 +5308,39 @@
         "",
         ""
       ],
-      "masked_rows": []
+      "masked_rows": [],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.7-suggestion-tmux-120-1": {
       "native_version": "2.2.7",
@@ -4810,7 +5521,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask anything, / for commands, @ for context…"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.7-shell-mode-tmux-120-1": {
       "native_version": "2.2.7",
@@ -4955,7 +5698,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Run a command… \"git status\""
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-120-1": {
       "native_version": "2.2.7",
@@ -5686,7 +6461,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-120-1": {
       "native_version": "2.2.7",
@@ -6417,7 +7227,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/permission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-120-1": {
       "native_version": "2.2.7",
@@ -6884,7 +7729,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-post-idle-tmux-120-1": {
       "native_version": "2.2.7",
@@ -7141,7 +8008,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-057-1": {
       "native_version": "2.2.7",
@@ -7885,7 +8774,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-057-1": {
       "native_version": "2.2.7",
@@ -8629,7 +9553,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-057-1": {
       "native_version": "2.2.7",
@@ -9133,7 +10092,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-post-idle-tmux-057-1": {
       "native_version": "2.2.7",
@@ -9427,7 +10408,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-055-1": {
       "native_version": "2.2.7",
@@ -10222,7 +11225,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-055-1": {
       "native_version": "2.2.7",
@@ -11028,7 +12066,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/\npermission-probe deny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-055-1": {
       "native_version": "2.2.7",
@@ -11440,7 +12513,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-post-idle-tmux-055-1": {
       "native_version": "2.2.7",
@@ -11724,7 +12819,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-pre-stage-1-tmux-036-1": {
       "native_version": "2.2.7",
@@ -12505,7 +13622,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-\nresearch/oc-perm/permission-probe\ndeny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-\nresearch/oc-perm/permission-probe\ndeny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-2-tmux-036-1": {
       "native_version": "2.2.7",
@@ -13286,7 +14438,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-\nresearch/oc-perm/permission-probe\ndeny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission-compact",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-\nresearch/oc-perm/permission-probe\ndeny",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-compact-allow-once": {
+            "focused_choice_id": "deny-once"
+          },
+          "opencode-shell-compact-deny-once": {
+            "focused_choice_id": "deny-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-deny-pre-stage-3-tmux-036-1": {
       "native_version": "2.2.7",
@@ -13708,7 +14895,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "director": {
+          "kind": "permission_continuation",
+          "rule_id": "opencode-reject-reason-compact",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": false,
+          "continues_rule_id": "opencode-shell-permission-compact"
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-deny-post-idle-tmux-036-1": {
       "native_version": "2.2.7",
@@ -13978,7 +15187,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-allow-pre-stage-tmux-120-1": {
       "native_version": "2.2.7",
@@ -14779,7 +16010,42 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "permission_request",
+          "rule_id": "opencode-shell-permission",
+          "match_evidence": "complete",
+          "operation": "/tmp/cafleet-programmer-research/oc-perm/permission-probe allow",
+          "choices": [
+            "Allow once",
+            "Reject"
+          ],
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {
+          "opencode-shell-allow-once": {
+            "focused_choice_id": "allow-once"
+          },
+          "opencode-shell-deny-once": {
+            "focused_choice_id": "allow-once"
+          }
+        }
+      }
     },
     "opencode-2.2.7-allow-post-idle-tmux-120-1": {
       "native_version": "2.2.7",
@@ -15156,7 +16422,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-prompt-plain-41-literal-tmux-120-1": {
       "native_version": "2.2.7",
@@ -15420,7 +16708,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-prompt-plain-41-post-submit-tmux-120-1": {
       "native_version": "2.2.7",
@@ -15717,7 +17037,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-prompt-plain-4000-post-submit-tmux-120-1": {
       "native_version": "2.2.7",
@@ -16265,7 +17607,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-exec-plain-41-literal-tmux-120-1": {
       "native_version": "2.2.7",
@@ -16738,7 +18102,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-exec-plain-41-post-submit-tmux-120-1": {
       "native_version": "2.2.7",
@@ -17222,7 +18618,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-exec-plain-4000-post-submit-tmux-120-1": {
       "native_version": "2.2.7",
@@ -17662,7 +19080,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-prompt-plain-41-literal-herdr-091-1": {
       "native_version": "2.2.7",
@@ -17923,7 +19363,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-prompt-plain-41-post-submit-herdr-091-1": {
       "native_version": "2.2.7",
@@ -18217,7 +19689,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-prompt-plain-4000-post-submit-herdr-091-1": {
       "native_version": "2.2.7",
@@ -18732,7 +20226,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-exec-plain-41-literal-herdr-091-1": {
       "native_version": "2.2.7",
@@ -19172,7 +20688,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-exec-plain-41-post-submit-herdr-091-1": {
       "native_version": "2.2.7",
@@ -19671,7 +21219,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.2.7-composer-exec-plain-4000-post-submit-herdr-091-1": {
       "native_version": "2.2.7",
@@ -20126,7 +21696,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-idle-empty-tmux-120-1": {
       "native_version": "2.3.0",
@@ -20292,7 +21884,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask anything, / for commands, @ for context…"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-one-tmux-120-1": {
       "native_version": "2.3.0",
@@ -20470,7 +22094,39 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-wrap-tmux-120-1": {
       "native_version": "2.3.0",
@@ -20720,7 +22376,47 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-busy-tmux-120-1": {
       "native_version": "2.3.0",
@@ -20920,7 +22616,29 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-idle-empty-herdr-120-1": {
       "native_version": "2.3.0",
@@ -21055,7 +22773,39 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-suggestion-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Ask anything, / for commands, @ for context…"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-one-herdr-120-1": {
       "native_version": "2.3.0",
@@ -21202,7 +22952,39 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-wrap-herdr-120-1": {
       "native_version": "2.3.0",
@@ -21423,7 +23205,47 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-busy-herdr-120-1": {
       "native_version": "2.3.0",
@@ -21594,7 +23416,29 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_empty",
+          "rule_id": "opencode-idle-composer",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": null,
+        "answers": {}
+      }
     },
     "opencode-2.3.0-composer-prompt-wrap-literal-tmux-120-1": {
       "native_version": "2.3.0",
@@ -21844,7 +23688,47 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "Reply OK.",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-composer-exec-wrap-literal-tmux-120-1": {
       "native_version": "2.3.0",
@@ -22058,7 +23942,47 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-composer-prompt-plain-380-literal-tmux-80-1": {
       "native_version": "2.3.0",
@@ -22389,7 +24313,55 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-composer-prompt-plain-380-literal-herdr-82-1": {
       "native_version": "2.3.0",
@@ -22693,7 +24665,55 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-composer-exec-plain-380-literal-tmux-80-1": {
       "native_version": "2.3.0",
@@ -23024,7 +25044,59 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-composer-exec-plain-380-literal-herdr-82-1": {
       "native_version": "2.3.0",
@@ -23329,7 +25401,59 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                " true",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-plain-380-tmux-80-1": {
       "native_version": "2.3.0",
@@ -23651,7 +25775,55 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-plain-380-herdr-82-1": {
       "native_version": "2.3.0",
@@ -23946,7 +26118,55 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                {
+                  "break": true
+                },
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-preview-after-turn-tmux-120-1": {
       "native_version": "2.3.0",
@@ -24391,7 +26611,43 @@
             "b": 128
           }
         }
-      ]
+      ],
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs",
+                {
+                  "break": true
+                },
+                "and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     },
     "opencode-2.3.0-director-preview-after-turn-herdr-120-1": {
       "native_version": "2.3.0",
@@ -24616,7 +26872,43 @@
           }
         }
       ],
-      "multiplexer": "herdr"
+      "multiplexer": "herdr",
+      "expected_observation": {
+        "observe": {
+          "kind": "unknown",
+          "rule_id": "unmatched-screen",
+          "match_evidence": "absent",
+          "operation": null,
+          "choices": null,
+          "verified_noninteraction": false,
+          "continues_rule_id": null
+        },
+        "director": {
+          "kind": "composer_text",
+          "rule_id": "opencode-composer-text",
+          "match_evidence": "complete",
+          "operation": null,
+          "choices": [],
+          "verified_noninteraction": true,
+          "continues_rule_id": null
+        },
+        "composer_text": {
+          "mode_prefix": "!",
+          "segments": [
+            {
+              "kind": "text",
+              "items": [
+                "[cafleet msg 101 from 2 2026-11-23T12:36:00.123456+00:00] Please review the updated parser change in src/parser.rs",
+                {
+                  "break": true
+                },
+                "and reply with your findings when you are done. [cafleet] Resume your work if something was still running."
+              ]
+            }
+          ]
+        },
+        "answers": {}
+      }
     }
   }
 }

@@ -147,6 +147,43 @@ struct LogicalLine {
     end: u16,
     boundaries: Vec<(u16, u16)>,
 }
+pub(crate) struct RowCell<'a> {
+    pub(crate) col: u16,
+    pub(crate) text: &'a str,
+    pub(crate) width: u16,
+}
+/// The rendered cells of `row` among its first `width` columns, through the last cell that has
+/// contents or continues a wide character; an empty cell renders as a space and a wide
+/// continuation renders nothing.
+pub(crate) fn row_cells(screen: &ScreenSnapshot, row: u16, width: u16) -> Result<Vec<RowCell<'_>>> {
+    let end = (0..width)
+        .rev()
+        .find(|&col| {
+            screen
+                .screen
+                .cell(row, col)
+                .is_some_and(|c| c.has_contents() || c.is_wide_continuation())
+        })
+        .map_or(0, |col| col + 1);
+    let mut cells = Vec::new();
+    for col in 0..end {
+        let cell = screen
+            .screen
+            .cell(row, col)
+            .ok_or_else(|| CafleetError::App("screen cell geometry mismatch".into()))?;
+        if cell.is_wide_continuation() {
+            continue;
+        }
+        let text = if cell.has_contents() {
+            cell.contents()
+        } else {
+            " "
+        };
+        let width = if cell.is_wide() { 2 } else { 1 };
+        cells.push(RowCell { col, text, width });
+    }
+    Ok(cells)
+}
 /// `clips` maps a panel row to its separator column; such a row keeps only the cells left of
 /// the separator and always ends its logical line.
 fn clipped_logical_lines(
@@ -164,29 +201,7 @@ fn clipped_logical_lines(
             boundaries: vec![(row, 0)],
         });
         line.end = row;
-        let end = (0..width)
-            .rev()
-            .find(|&col| {
-                screen
-                    .screen
-                    .cell(row, col)
-                    .is_some_and(|c| c.has_contents() || c.is_wide_continuation())
-            })
-            .map_or(0, |col| col + 1);
-        for col in 0..end {
-            let cell = screen
-                .screen
-                .cell(row, col)
-                .ok_or_else(|| CafleetError::App("screen cell geometry mismatch".into()))?;
-            if cell.is_wide_continuation() {
-                continue;
-            }
-            let text = if cell.has_contents() {
-                cell.contents()
-            } else {
-                " "
-            };
-            let width = if cell.is_wide() { 2 } else { 1 };
+        for RowCell { col, text, width } in row_cells(screen, row, width)? {
             *line
                 .boundaries
                 .last_mut()

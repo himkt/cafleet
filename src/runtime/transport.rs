@@ -5227,6 +5227,226 @@ mod tests {
             );
         }
     }
+
+    /// The normative terminal conformance vectors of `SPEC.md` §9.2 are this test's inputs and
+    /// expected values, so the specification and the screen model cannot drift apart.
+    mod spec_terminal_vectors {
+        use crate::runtime::TerminalSize;
+        use crate::runtime::transport::test_support::Observer;
+        use crate::runtime::transport::*;
+        use serde_json::Value;
+        use serde_json::json;
+        use std::collections::BTreeSet;
+
+        const SPEC: &str = include_str!("../../SPEC.md");
+        const VECTOR_FENCE: &str = "```vt-vector";
+
+        fn spec_vectors() -> Vec<Value> {
+            let mut vectors = Vec::new();
+            let mut block: Option<String> = None;
+            for line in SPEC.lines() {
+                match &mut block {
+                    None if line.trim() == VECTOR_FENCE => block = Some(String::new()),
+                    None => {}
+                    Some(text) if line.trim() == "```" => {
+                        vectors.push(serde_json::from_str(text).unwrap_or_else(|error| {
+                            panic!("a vt-vector block is one JSON object: {error}: {text}")
+                        }));
+                        block = None;
+                    }
+                    Some(text) => {
+                        text.push_str(line);
+                        text.push('\n');
+                    }
+                }
+            }
+            assert!(block.is_none(), "every vt-vector block is closed");
+            vectors
+        }
+
+        fn object_keys(value: &Value, id: &str, required: &[&str], optional: &[&str]) {
+            let object = value
+                .as_object()
+                .unwrap_or_else(|| panic!("{id}: object expected: {value}"));
+            for key in required {
+                assert!(
+                    object.contains_key(*key),
+                    "{id}: {key} is required: {value}"
+                );
+            }
+            for key in object.keys() {
+                assert!(
+                    required.contains(&key.as_str()) || optional.contains(&key.as_str()),
+                    "{id}: unknown key {key}: {value}"
+                );
+            }
+        }
+
+        fn size(rows: &Value, cols: &Value, id: &str) -> TerminalSize {
+            let dimension = |value: &Value| {
+                value
+                    .as_u64()
+                    .filter(|value| *value > 0)
+                    .and_then(|value| u16::try_from(value).ok())
+                    .unwrap_or_else(|| panic!("{id}: positive dimension expected: {value}"))
+            };
+            TerminalSize {
+                rows: dimension(rows),
+                cols: dimension(cols),
+            }
+        }
+
+        fn hex_bytes(hex: &str, id: &str) -> Vec<u8> {
+            assert!(
+                hex.len().is_multiple_of(2)
+                    && hex
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                "{id}: feed_hex is lowercase hex: {hex}"
+            );
+            (0..hex.len())
+                .step_by(2)
+                .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+                .collect()
+        }
+
+        fn row_text(screen: &ScreenSnapshot, row: u16, id: &str) -> String {
+            crate::coding_agent::detector::row_cells(screen, row, screen.cols)
+                .unwrap_or_else(|error| panic!("{id}: row {row}: {error}"))
+                .into_iter()
+                .map(|cell| cell.text)
+                .collect()
+        }
+
+        fn colour(colour: vt100::Color) -> Value {
+            match colour {
+                vt100::Color::Default => json!("default"),
+                vt100::Color::Idx(index) => json!({"kind":"indexed","index":index}),
+                vt100::Color::Rgb(r, g, b) => json!({"kind":"rgb","r":r,"g":g,"b":b}),
+            }
+        }
+
+        fn assert_cell(screen: &ScreenSnapshot, expected: &Value, id: &str) {
+            object_keys(
+                expected,
+                id,
+                &["row", "col"],
+                &["contents", "wide", "continuation", "fg", "bg", "faint"],
+            );
+            let row = u16::try_from(expected["row"].as_u64().unwrap()).unwrap();
+            let col = u16::try_from(expected["col"].as_u64().unwrap()).unwrap();
+            let cell = screen
+                .screen
+                .cell(row, col)
+                .unwrap_or_else(|| panic!("{id}: cell ({row},{col}) is inside the screen"));
+            let actual = json!({
+                "contents": cell.contents(),
+                "wide": cell.is_wide(),
+                "continuation": cell.is_wide_continuation(),
+                "fg": colour(cell.fgcolor()),
+                "bg": colour(cell.bgcolor()),
+                "faint": cell.dim(),
+            });
+            for (key, value) in expected.as_object().unwrap() {
+                if key == "row" || key == "col" {
+                    continue;
+                }
+                assert_eq!(&actual[key], value, "{id}: cell ({row},{col}) {key}");
+            }
+        }
+
+        fn run_vector(vector: &Value) {
+            let id = vector["id"]
+                .as_str()
+                .unwrap_or_else(|| panic!("a vector names its id: {vector}"));
+            object_keys(
+                vector,
+                id,
+                &["id", "rows", "cols", "steps", "expect"],
+                &["observations"],
+            );
+            let mut terminal = TerminalState::new(size(&vector["rows"], &vector["cols"], id))
+                .unwrap_or_else(|error| panic!("{id}: {error}"));
+            let mut observer = Observer::default();
+            let steps = vector["steps"].as_array().unwrap();
+            assert!(!steps.is_empty(), "{id}: steps is non-empty");
+            for step in steps {
+                let step_object = step.as_object().unwrap();
+                assert_eq!(step_object.len(), 1, "{id}: one action per step: {step}");
+                if let Some(hex) = step.get("feed_hex") {
+                    let bytes = hex_bytes(hex.as_str().unwrap(), id);
+                    terminal
+                        .feed_observed(&bytes, &mut observer)
+                        .unwrap_or_else(|error| panic!("{id}: {error}"));
+                } else if let Some(resize) = step.get("resize") {
+                    let [rows, cols] = resize.as_array().unwrap().as_slice() else {
+                        panic!("{id}: resize is [ROWS, COLS]: {step}")
+                    };
+                    terminal
+                        .resize(size(rows, cols, id))
+                        .unwrap_or_else(|error| panic!("{id}: {error}"));
+                } else {
+                    panic!("{id}: a step is feed_hex or resize: {step}");
+                }
+            }
+            if let Some(observations) = vector.get("observations") {
+                let seen = observer
+                    .screens
+                    .iter()
+                    .map(|(sequence, _)| json!(sequence))
+                    .collect::<Vec<_>>();
+                assert_eq!(&json!(seen), observations, "{id}: observations");
+            }
+            let expect = &vector["expect"];
+            object_keys(
+                expect,
+                id,
+                &[],
+                &[
+                    "lines",
+                    "wrapped",
+                    "cursor",
+                    "alternate_screen",
+                    "bracketed_paste",
+                    "screen_seq",
+                    "cells",
+                ],
+            );
+            let screen = terminal.snapshot();
+            let actual = json!({
+                "lines": (0..screen.rows).map(|row| row_text(&screen, row, id)).collect::<Vec<_>>(),
+                "wrapped": (0..screen.rows).filter(|row| screen.screen.row_wrapped(*row)).collect::<Vec<_>>(),
+                "cursor": screen.cursor.map(|(row, col)| json!([row, col])),
+                "alternate_screen": screen.alternate_screen,
+                "bracketed_paste": screen.screen.bracketed_paste(),
+                "screen_seq": screen.screen_seq,
+            });
+            for (key, value) in expect.as_object().unwrap() {
+                if key == "cells" {
+                    for cell in value.as_array().unwrap() {
+                        assert_cell(&screen, cell, id);
+                    }
+                } else {
+                    assert_eq!(&actual[key], value, "{id}: {key}");
+                }
+            }
+        }
+
+        #[test]
+        fn the_screen_model_meets_every_terminal_conformance_vector_of_the_specification() {
+            let vectors = spec_vectors();
+            assert!(!vectors.is_empty(), "SPEC.md §9.2 holds vt-vector blocks");
+            let mut ids = BTreeSet::new();
+            for vector in &vectors {
+                assert!(
+                    ids.insert(vector["id"].to_string()),
+                    "vector ids are unique: {}",
+                    vector["id"]
+                );
+                run_vector(vector);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
