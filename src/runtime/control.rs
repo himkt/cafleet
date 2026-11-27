@@ -3070,6 +3070,42 @@ mod tests {
         }
     }
     #[test]
+    fn lifecycle_requests_reject_every_repeated_key_like_input_requests() {
+        let identity = Case::new().request("submit_prompt", None)["identity"].clone();
+        for (kind, field) in [
+            ("health", None),
+            ("prepare", Some(("remaining_ms", json!(5)))),
+            ("start", Some(("pane_id", json!("%1")))),
+            ("shutdown", None),
+        ] {
+            let mut good = json!({"protocol_version":1,"kind":kind,"identity":identity});
+            if let Some((name, value)) = field {
+                good[name] = value;
+            }
+            assert!(
+                matches!(
+                    decode_service_request(&bytes(&good)).unwrap(),
+                    ServiceControlRequest::Lifecycle(_)
+                ),
+                "{kind}"
+            );
+            for field in good.as_object().unwrap().keys() {
+                assert!(
+                    decode_service_request(&duplicate(&good, field)).is_err(),
+                    "{kind}: repeated {field}"
+                );
+            }
+            for pointer in ["/identity", "/identity/database_identity_json"] {
+                for field in good.pointer(pointer).unwrap().as_object().unwrap().keys() {
+                    assert!(
+                        decode_service_request(&nested_duplicate(&good, pointer, field)).is_err(),
+                        "{kind}: repeated {pointer}/{field}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
     fn request_identity_and_database_identity_reject_nested_raw_duplicates() {
         let good = Case::new().request("submit_prompt", None);
         for pointer in ["/identity", "/identity/database_identity_json"] {
