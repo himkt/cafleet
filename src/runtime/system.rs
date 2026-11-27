@@ -880,4 +880,108 @@ mod tests {
             ));
         }
     }
+
+    mod deferral_span_child_mask {
+        use crate::multiplexer::CommandRunner;
+        use crate::runtime::system::*;
+        use nix::sys::signal::SigSet;
+        use nix::sys::signal::Signal;
+
+        const BLOCKED_PREFIX: &str = "cafleet-child-blocked-set:";
+        const TERMINATION_SIGNALS: [Signal; 3] = [Signal::SIGINT, Signal::SIGTERM, Signal::SIGHUP];
+
+        /// A shell resets an inherited signal mask at startup, so the probe child is this test
+        /// binary, which reports the mask it was started with.
+        #[test]
+        #[ignore = "owned subprocess entry: reports the signal mask it inherited"]
+        fn blocked_set_child() {
+            let blocked = SigSet::thread_get_mask().unwrap();
+            let names = Signal::iterator()
+                .filter(|signal| blocked.contains(*signal))
+                .map(|signal| signal.as_str())
+                .collect::<Vec<_>>();
+            println!("{BLOCKED_PREFIX}{}", names.join(" "));
+        }
+
+        fn child_arguments() -> Vec<String> {
+            [
+                "--exact",
+                test_path!(blocked_set_child),
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+                "--quiet",
+            ]
+            .map(String::from)
+            .to_vec()
+        }
+
+        fn reported_blocked_set(stdout: &[u8]) -> Vec<String> {
+            let stdout = String::from_utf8_lossy(stdout);
+            let line = stdout
+                .lines()
+                .find_map(|line| line.strip_prefix(BLOCKED_PREFIX))
+                .unwrap_or_else(|| panic!("the probe child reported its mask: {stdout:?}"));
+            line.split_whitespace().map(str::to_owned).collect()
+        }
+
+        struct SpawnPath {
+            name: &'static str,
+            blocked_set: fn() -> Vec<String>,
+        }
+
+        const SPAWN_PATHS: [SpawnPath; 2] = [
+            SpawnPath {
+                name: "the multiplexer client runner",
+                blocked_set: || {
+                    let mut argv = vec![std::env::current_exe().unwrap().display().to_string()];
+                    argv.extend(child_arguments());
+                    let stdout = SystemRunner
+                        .run(&argv)
+                        .unwrap_or_else(|error| panic!("{error:?}"));
+                    reported_blocked_set(stdout.as_bytes())
+                },
+            },
+            SpawnPath {
+                name: "the bounded run until exit",
+                blocked_set: || {
+                    let arguments = child_arguments();
+                    let arguments = arguments.iter().map(String::as_str).collect::<Vec<_>>();
+                    match run_until_exit(
+                        &std::env::current_exe().unwrap(),
+                        &arguments,
+                        &[],
+                        Instant::now() + Duration::from_secs(10),
+                        1 << 20,
+                    ) {
+                        Ok(output) => {
+                            assert!(
+                                output.status.success(),
+                                "{}",
+                                String::from_utf8_lossy(&output.stderr)
+                            );
+                            reported_blocked_set(&output.stdout)
+                        }
+                        Err(_) => panic!("the blocked-set probe ran to completion"),
+                    }
+                },
+            },
+        ];
+
+        #[test]
+        fn children_spawned_inside_a_deferral_span_start_with_the_termination_signals_blocked() {
+            for path in SPAWN_PATHS {
+                let span = crate::time::DeferTermination::begin().unwrap();
+                let blocked = (path.blocked_set)();
+                drop(span);
+                for signal in TERMINATION_SIGNALS {
+                    assert!(
+                        blocked.iter().any(|name| name == signal.as_str()),
+                        "{}: {signal} missing from the child's blocked set {blocked:?}",
+                        path.name
+                    );
+                }
+            }
+        }
+    }
 }

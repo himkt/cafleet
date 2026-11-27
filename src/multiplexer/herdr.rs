@@ -2116,12 +2116,42 @@ mod tests {
 
         #[test]
         fn press_submit_refuses_bytes_without_a_key_mapping_before_any_process() {
-            let runner = FakeRunner::with_binary("herdr");
-            let error = on_server(runner.clone())
-                .press_submit(PANE, b"\xff")
-                .unwrap_err();
-            assert!(!error.submission_started(), "{error}");
-            assert!(runner.run_argvs().is_empty());
+            struct Case {
+                name: &'static str,
+                submit: &'static [u8],
+                expected: &'static str,
+            }
+            let cases = [
+                Case {
+                    name: "one high byte",
+                    submit: b"\xff",
+                    expected: "herdr has no key mapping for the submit bytes ff",
+                },
+                Case {
+                    name: "a mapped byte before an unmapped one",
+                    submit: b"\r\x80",
+                    expected: "herdr has no key mapping for the submit bytes 0d80",
+                },
+                Case {
+                    name: "a NUL and a C0 control without a key",
+                    submit: b"\x00\x1c\x0a",
+                    expected: "herdr has no key mapping for the submit bytes 001c0a",
+                },
+                Case {
+                    name: "UTF-8 bytes of a non-ASCII scalar",
+                    submit: "é".as_bytes(),
+                    expected: "herdr has no key mapping for the submit bytes c3a9",
+                },
+            ];
+            for case in cases {
+                let runner = FakeRunner::with_binary("herdr");
+                let error = on_server(runner.clone())
+                    .press_submit(PANE, case.submit)
+                    .unwrap_err();
+                assert_eq!(error.to_string(), case.expected, "{}", case.name);
+                assert!(!error.submission_started(), "{}: {error}", case.name);
+                assert!(runner.run_argvs().is_empty(), "{}", case.name);
+            }
         }
 
         #[test]
