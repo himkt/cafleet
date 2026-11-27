@@ -10511,7 +10511,8 @@ mod tests {
 
         /// `files` with the `fields` of screen `id` set to null, its screen-level
         /// `multiplexer` set to `multiplexer` when given, and its `expected_observation`
-        /// recorded again for the changed screen.
+        /// recorded again for the changed screen when its cursor stays replayable: both
+        /// coordinates recorded or both null.
         fn nulled(files: &Value, id: &str, fields: &[&str], multiplexer: Option<&str>) -> Value {
             let mut files = files.clone();
             let screen = &mut files["codex"]["screens"][id];
@@ -10520,6 +10521,9 @@ mod tests {
             }
             if let Some(multiplexer) = multiplexer {
                 screen["multiplexer"] = json!(multiplexer);
+            }
+            if screen["cursor_row"].is_null() != screen["cursor_col"].is_null() {
+                return files;
             }
             let catalog = ProfileCatalog::from_files(&files).unwrap();
             let observation = crate::coding_agent::catalog::test_support::expected_observation(
