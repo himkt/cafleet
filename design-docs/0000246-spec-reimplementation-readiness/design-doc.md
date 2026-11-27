@@ -1,7 +1,7 @@
 # Make SPEC.md sufficient for an independent reimplementation
 
 **Status**: Approved
-**Progress**: 17/47 tasks complete
+**Progress**: 24/47 tasks complete
 **Last Updated**: 2026-11-27
 
 ## Overview
@@ -458,13 +458,13 @@ Within each step the commits follow the project's documentation-first order: `SP
 
 ### Step 3: Multiplexer, pane input and backends
 
-- [ ] SPEC: row M1 per the experiment, and rows M2–M5 (signals, lock, working directory, A7 subprocess guarantees, undeadlined calls) <!-- completed: -->
-- [ ] SPEC: rows M6–M12 (herdr and tmux parsing, units, shell quoting, process errors) <!-- completed: -->
-- [ ] SPEC: rows M13 and M14 (Hermes registry and settlement) <!-- completed: -->
-- [ ] SPEC: every Area 2 `listed` and `reworded` sweep literal at its owner <!-- completed: -->
-- [ ] `cli.md`: carried facts for Area 2 <!-- completed: -->
-- [ ] Code: herdr submit-bytes hex rendering (row C16's herdr part) and every other Area 2 `reworded` literal, with tests <!-- completed: -->
-- [ ] Code: the child-mask test in `src/runtime/system.rs` over both spawn paths inside a `DeferTermination` span (§ Signal-mask experiment), plus the row M1 fix in those spawn paths when the experiment selects Fix code <!-- completed: -->
+- [x] SPEC: row M1 per the experiment, and rows M2–M5 (signals, lock, working directory, A7 subprocess guarantees, undeadlined calls) <!-- completed: 2026-11-27T09:22 -->
+- [x] SPEC: rows M6–M12 (herdr and tmux parsing, units, shell quoting, process errors) <!-- completed: 2026-11-27T09:22 -->
+- [x] SPEC: rows M13 and M14 (Hermes registry and settlement) <!-- completed: 2026-11-27T09:22 -->
+- [x] SPEC: every Area 2 `listed` and `reworded` sweep literal at its owner <!-- completed: 2026-11-27T09:22 -->
+- [x] `cli.md`: carried facts for Area 2 <!-- completed: 2026-11-27T09:22 -->
+- [x] Code: herdr submit-bytes hex rendering (row C16's herdr part) and every other Area 2 `reworded` literal, with tests <!-- completed: 2026-11-27T09:22 -->
+- [x] Code: the child-mask test in `src/runtime/system.rs` over both spawn paths inside a `DeferTermination` span (§ Signal-mask experiment), plus the row M1 fix in those spawn paths when the experiment selects Fix code <!-- completed: 2026-11-27T09:22 -->
 - [ ] Confirm the child-mask test's result on the `macos-15` CI run and, when it fails there alone, record the A6 case for macOS in row M1 and its SPEC text <!-- completed: -->
 - [ ] Run `mise //:test` and `mise //:lint`, commit the step, then push the branch and open the pull request <!-- completed: -->
 
@@ -509,3 +509,4 @@ Within each step the commits follow the project's documentation-first order: `SP
 | 2026-11-27 | Reviewer round 2: child-mask test moved to `src/runtime/system.rs` over both production spawn paths |
 | 2026-11-27 | User decision: one branch and one pull request in place of four; the steps become stages of that branch |
 | 2026-11-27 | Step 2 code-over-text findings: `--database-url` may appear once per command level (root, group, leaf) and the deepest level wins, more general than A3's before/after wording (row C8); `fleet delete` strips every trailing `.` from `CAUSE`, not one (row C15); `cafleet` and a command group without its subcommand print help to stderr with exit 2 instead of an `error: ` line (§ CLI parse rules); `HOME` derivation precedes `member press` key parsing, and `member create` checks `--model`, `--effort` and `--permission-mode` before its body source and validates placeholders after the layout lock and preflight (§ Blank text and validation order). Spec choice: the `database URL has no file path` refusal of rows C9 and C10 applies to every command, so `sqlite:///` with an empty path no longer reports `no cafleet database` outside `setup` |
+| 2026-11-27 | Step 3 code-over-text findings: the pane input lock holder does not reopen on a device/inode change; before each write it verifies the path still names the held file and fails with `held pane lock pathname identity mismatch` (row M3). tmux trims a whole reply, not each line, and keeps the window-name reply whole except its final LF (row M9). The undeadlined multiplexer calls are every multiplexer process of `fleet create` and of `doctor`'s multiplexer rows, and the `member capture` capture (row M5) |
