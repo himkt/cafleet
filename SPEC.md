@@ -273,7 +273,7 @@ CLI text output truncates only message bodies, to a fixed 200 codepoints per §6
 
 #### Text bodies (positional `TEXT` / `--file`)
 
-Send and member creation require exactly one positional body or `--file PATH`; `--file -` reads UTF-8 stdin. Preserve exact nonblank body text. A text is **blank** when every scalar in it has the Unicode `White_Space` property, the empty text included; every command that refuses blank text uses this definition. Missing/both sources or a blank positional body exit 2; blank file/stdin sources and file-read errors exit 1 with the authored diagnostics below (§6.3 Error Messages). A `--file <path>` read error appends ` (<io error>)` to its message, and a stdin read failure is `--file -: <io error>`.
+Send and member creation require exactly one positional body or `--file PATH`; `--file -` reads UTF-8 stdin. Preserve exact nonblank body text. A text is **blank** when every scalar in it has the Unicode `White_Space` property, the empty text included; every command that refuses blank text uses this definition. Missing/both sources or a blank positional body exit 2; blank file/stdin sources and file-read errors exit 1 with the authored diagnostics below (§6.3 Error Messages). A `--file <path>` read error appends ` (<io error>)` to its message, and a stdin read failure is `--file -: <io error>`. A closed standard input reads as empty, so `--file -` then fails with `--file -: stdin is empty.`
 
 `member prompt` takes one positional line. Native exec has the separate command contract (§6.3 `member exec`).
 
@@ -350,7 +350,7 @@ OpenCode discovers skills only at the fixed path but loads agent definitions fro
 
 **Validation.** A set variable must hold an absolute path; any other value (the empty string, a relative path, a literal unexpanded `~/…`) fails at resolution time with exit 1 and `Error: <VAR> must be an absolute path (got '<value>')`. A set config-location variable or `HOME` whose value is not valid UTF-8 fails at the same point with exit 1 and `Error: <VAR> is not valid UTF-8` instead of selecting the default.
 
-Validation is lazy: a site reads and validates a variable only when it resolves that backend's directory. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds because the selector resolves only the targeted agent's directory; plain `cafleet setup` resolves each backend in registry order, so an invalid variable stops installation at that backend. `member create` resolves only the selected backend's directory during its availability check and forwards the validated value into the member environment (§6.3 Member environment). `doctor` reports a per-agent resolution error as that agent's `<agent>.configuration` check instead of aborting (§6.3 `cafleet doctor` — Environment Diagnosis).
+Validation is lazy: a site reads and validates a variable only when it resolves that backend's directory. `setup` alone reads `HOME` once after its database preparation and before its first backend, whatever the config-location variables hold, and an unset `HOME` fails with `Error: HOME is not set`, exit 1. `cafleet setup --coding-agent claude` with an invalid `CODEX_HOME` succeeds because the selector resolves only the targeted agent's directory; plain `cafleet setup` resolves each backend in registry order, so an invalid variable stops installation at that backend. `member create` resolves only the selected backend's directory during its availability check and forwards the validated value into the member environment (§6.3 Member environment). `doctor` reports a per-agent resolution error as that agent's `<agent>.configuration` check instead of aborting (§6.3 `cafleet doctor` — Environment Diagnosis).
 
 ##### Asset installation
 
@@ -806,13 +806,13 @@ Text output is three lines: `Member deleted.`, `  member_id: <member-id>` and ` 
 
 ##### `member show`
 
-`cafleet member show MEMBER_ID [--json]` reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement object and the appended runtime summary (§6.3 Runtime presentation).
+`cafleet member show MEMBER_ID [--json]` resolves the active member (`Member <member-id> not found`), then applies the live-fleet checks of § `member list` to its fleet before reading its runtime; it reads any active registry entry (root Director included), with no multiplexer requirement. Text is the compact one-line row `ID NAME STATUS window=WINDOW` (§6.3 Member list output); an ordinary member's row appends the runtime text line, and the root Director's stays its registry row. The `--json` payload is the detailed view, including `kind` (`director` / `member`, §5.4 Member kind discriminator), the placement object and the appended runtime summary (§6.3 Runtime presentation).
 
 After its registry read, member show probes the ordinary member's runner through its control socket health request under a one-second deadline when the run's status is `running` or `degraded`, and reports the outcome in the four member-show runtime keys (§6.3 Runtime presentation). A failed probe is reported in those keys and leaves the exit status 0.
 
 ##### `member list`
 
-`cafleet member list FLEET_ID [--json]` lists every **active** registry entry of the fleet (root Director and ordinary members) and takes no identity flag; an empty roster prints `0 members.`. Field projection, the `window` column and absent values: §6.3 Member list output; rows and activity: §6.2 Members. Text idle values render as `Ns` / `Nm` / `Nh`. Per-member `description` and `registered_at` are on §6.3 `member show`.
+`cafleet member list FLEET_ID [--json]` requires the live-fleet checks in order — the fleet exists (`fleet '<fleet-id>' not found.`), is not deleted (`fleet <fleet-id> is deleted`) and its root Director is active (`fleet <fleet-id>'s root Director (member <id>) is not active.`), each exit 1 — then lists every **active** registry entry of the fleet (root Director and ordinary members) and takes no identity flag; an empty roster prints `0 members.`. Field projection, the `window` column and absent values: §6.3 Member list output; rows and activity: §6.2 Members. Text idle values render as `Ns` / `Nm` / `Nh`. Per-member `description` and `registered_at` are on §6.3 `member show`.
 
 ##### `member prompt`
 
@@ -905,7 +905,7 @@ JSON stamps `captured_at` from the local UTC clock at the capture read boundary 
 
 #### Runtime presentation
 
-Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member has a recorded run. `runtime` is `null` for the root Director. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These registry fields make no live-health claim; member show's probe keys below do.
+Member create and member show append `runtime` to their ordered `member_id,name,registered_at,placement` and `member_id,name,description,status,registered_at,kind,placement` keys respectively. Member creation records the member's run in its registration transaction, so every ordinary member it creates has a recorded run. `runtime` is `null` for the root Director and for an ordinary member without a recorded run, whose text output then has no runtime line. The runtime object has ordered keys `run_id,resolved_mode,status,owner_epoch,last_health_at,coverage,current_interaction_id,unresolved_input_ids,owner_kind,owner_pid,owner_start_identity,runner_pid,runner_start_identity,child_pid,child_start_identity`, preserving stored nullability. `unresolved_input_ids` lists, in input-ID order, the run's `in_progress`, `accepted` and `uncertain` inputs and its `ready` inputs carrying deferred metadata: `in_progress` and `uncertain` inputs need Director reconciliation, an accepted input needs none and stays listed until a settlement records its disposition, and a deferred ready input stays listed while the runner owns it in its queue. These registry fields make no live-health claim; member show's probe keys below do.
 
 Member show alone appends four keys to the runtime object, after `child_start_identity`; member create, `member list` and `event show` keep the runtime object above:
 
@@ -913,7 +913,7 @@ Member show alone appends four keys to the runtime object, after `child_start_id
 |---|---|
 | `observation_probe` | `skipped` (the run's status is neither `running` nor `degraded`), `answered` or `failed` |
 | `observation` | The runner's observation health with ordered keys `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since`; null when skipped, failed, or answered by a runner whose child has not started |
-| `observation_error` | The probe failure's message when `failed`, otherwise null |
+| `observation_error` | The probe failure's message when `failed`, otherwise null: `member runtime: <cause>` when the runner's runtime path is missing; every other probe failure's text is implementation-defined |
 | `diagnostics` | The run's latest 5 `member_runner_diagnostics` rows (§6.9 Storage pressure and durability boundary), newest `last_at` then `diagnostic_id` first, each ordered `source,message,first_at,last_at,count` |
 
 `visibility` is `visible`, `obscured`, `not_visible` or `unknown`. `eligibility` is the string `composer_empty` or `hold:<reason>`, where `<reason>` is `candidate`, `interaction`, `unknown`, `observer_unavailable` or `gap`; doctor member rows use the same rendering. `degraded` is a boolean, and `diagnostic` is the observation failure code, `sink_unavailable` while the event writer is degraded, or null; it is non-null whenever `degraded`, and a health reply that is `degraded` without it is a failed probe. `writer_diagnostic` is the event writer's sanitized failure text, non-null only when `degraded`, and `gap_open_since` is the RFC 3339 start of a pending observation gap, non-null only with `hold:gap` and `degraded`. A gap recorded after the native child exits has no pending start, so it reports `hold:gap`, `degraded` and a null `gap_open_since`. `pending_count` and `gap_count` are the runner's uncommitted-transition and observation-gap counters.
@@ -937,7 +937,7 @@ For example, `Runtime: run=37 mode=auto status=running coverage=tested observati
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the receipt contract (§6.9 Durable input receipts and settlement). Require a nonempty evidence reference. A settled ordinary receipt with the same disposition returns its original row and evidence reference before live work; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. Owner synchronization and CAS settlement follow §6.9 Durable input receipts and settlement; uncertainty persists while the owner is unreachable or an active writer cannot be ruled out.
 
-All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows and invalid stored state fail explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
+All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows fail with `Event <event-id> not found` and `Input <input-id> not found`, exit 1. `event show` re-derives the event payload from the event row, its run, its interaction and its delivery records at read time and refuses any difference with `invalid stored value for payload_json: stored payload does not match its event`, exit 1; other invalid stored state fails explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
 
 #### Permission commands
 
@@ -1072,6 +1072,9 @@ Application errors print to stderr even with `--json`, which selects only succes
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID; for `member create`, raised by the first fleet check, after the schema-version guard and before Director resolution | `Error: fleet '<fleet-id>' not found.` | 1 |
 | `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` | 1 |
 | `member create` | The live-fleet guard: the fleet's root Director is not an active member | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
+| `member list` / `member show` | The fleet is soft-deleted, or its root Director is not active (§6.3 `member list`) | `Error: fleet <fleet-id> is deleted`, `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` | 1 |
+| `setup` | `HOME` is unset when setup reads it after database preparation (§6.3 Config-dir resolution) | `Error: HOME is not set` | 1 |
+| `event show` / `input show` / `input reconcile` | An unknown event or input ID | `Error: Event <event-id> not found`, `Error: Input <input-id> not found` | 1 |
 | `member delete` | Against the root Director's id | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` | 1 |
 | `message show` | An unknown `MESSAGE_ID` | `Error: Message <message-id> not found` | 1 |
 | `message send` | The sender is unknown or inactive | `Error: Sender member not found or not active: <from-member-id>` | 1 |
@@ -4141,7 +4144,7 @@ With a live member runner and available storage, the latency target is two secon
 
 #### Runtime failure texts
 
-Runner and runtime-client operations fail with the texts below, exit 1 when they reach a command; each surfaces as a command's cause, a runner diagnostic (§ Storage pressure and durability boundary) or an event's error, behind any prefix its owning section names. A validation failure of a stored value renders `invalid stored value for <field>: <description>` (§6.3 Error Messages).
+Runner and runtime-client operations fail with the texts below, exit 1 when they reach a command; each surfaces as a command's cause, a runner diagnostic (§ Storage pressure and durability boundary) or an event's error, behind any prefix its owning section names. A validation failure of a stored value renders `invalid stored value for <field>: <description>` (§6.3 Error Messages); for an unknown stored enum value, `<description>` is the raw stored value, as in `invalid stored value for members.status: paused`.
 
 | Situation | Texts |
 |---|---|

@@ -481,8 +481,10 @@ Application errors print to stderr prefixed `Error: `, even with `--json`; struc
 | `member create` | The backend binary is missing | `Error: binary <name> not found on PATH` |
 | `member create` | The selected opencode preset is unreadable | `Error: cannot read opencode agent preset at <preset>: <cause>; run 'cafleet setup --coding-agent opencode' first` |
 | `fleet show` / `fleet delete` / `member list` / `member create` | Unknown fleet ID | `Error: fleet '<fleet-id>' not found.` |
-| `member create` | Into a soft-deleted fleet | `Error: fleet X is deleted` |
-| `member create` | The fleet's root Director is inactive | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` |
+| `member create` / `member list` / `member show` | Into or of a soft-deleted fleet | `Error: fleet X is deleted` |
+| `member create` / `member list` / `member show` | The fleet's root Director is inactive | `Error: fleet <fleet-id>'s root Director (member <id>) is not active.` |
+| `setup` | `HOME` is unset (read after database preparation) | `Error: HOME is not set` |
+| `event show` / `input show` / `input reconcile` | An unknown event or input ID | `Error: Event <event-id> not found`, `Error: Input <input-id> not found` |
 | `member create` | An unknown `{placeholder}` in the prompt | `Error: Unknown placeholder '<name>' in custom prompt. Supported placeholders: {fleet_id}, {member_id}, {director_member_id}, {coding_agent}, {database_url}. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member create` | A malformed brace expression in the prompt | `Error: Malformed custom prompt: <detail>. Double literal braces ({{, }}) to keep them as text.` (exit 2) |
 | `member delete` | Against the root Director | `Error: cannot deregister the root Director; use 'cafleet fleet delete' instead` |
@@ -500,7 +502,7 @@ Text-body errors of `message send` and `member create`:
 |---|---|
 | Positional body blank | `Error: text may not be empty.` (exit 2) |
 | `--file <path>` to a blank file | `Error: --file <path>: file is empty.` |
-| `--file -` with blank stdin | `Error: --file -: stdin is empty.` |
+| `--file -` with blank or closed stdin | `Error: --file -: stdin is empty.` |
 | `--file <path>` to a missing path or a directory | `Error: --file <path>: file does not exist or is not a regular file. (<io error>)` |
 | `--file <path>` that cannot be read otherwise | `Error: --file <path>: file is not readable. (<io error>)` |
 | `--file <path>` or `--file -` to invalid UTF-8 | `Error: --file <path>: file is not valid UTF-8.` (`--file -: …` for stdin) |
