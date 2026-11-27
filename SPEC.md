@@ -1202,7 +1202,17 @@ An explicit `fleet create --pane` selects the backend by its ID form instead of 
 
 #### Error taxonomy
 
-Both backends report failures through one multiplexer error type carrying the backend's own message text, so CLI boundaries handle both uniformly. A creation error also records its pane-cleanup outcome (below), and a key-dispatch error whether a writing process had started.
+Both backends report failures through one multiplexer error type carrying the backend's own message text, so CLI boundaries handle both uniformly. A creation error also records its pane-cleanup outcome (below), and a key-dispatch error whether a writing process had started. A process failure renders as:
+
+| Failure | Message |
+|---|---|
+| The executable is not found when the process starts | `<backend> binary not found: <io error>` |
+| The process cannot start for another reason | `<backend> command was not started: <io error>: <argv>` |
+| A bounded call's deadline passed before launch | `<backend> command was not started: command deadline expired before launch: <argv>` |
+| A bounded call's deadline passed while it ran | `<backend> command timed out at the pane input deadline: <argv>` |
+| The process exits nonzero | `<backend> command failed: <argv>`, then the line `stderr: <trimmed stderr>` |
+
+`<backend>` is `tmux` or `herdr`, `<argv>` is the complete argv, server selector included, joined by single spaces without quoting, and `<trimmed stderr>` is the decoded stderr with leading and trailing Unicode `White_Space` removed. A recorded placement whose backend is neither fails with `unsupported recorded multiplexer backend '<backend>'`.
 
 #### Pane ownership during creation
 
@@ -1218,13 +1228,20 @@ On success, the spawn returns the pane ID and its window ID, and ownership trans
 
 #### Subprocess output and deadlines
 
-The shared subprocess runner captures stdout and stderr without truncation. With a timeout, it drains both pipes concurrently from spawn using nonblocking I/O: each loop checks the monotonic deadline and the direct child's exit status, then reads at most 64 KiB per stream, polling at most 20 ms or the remaining deadline, whichever is shorter. Interrupted operations retry against the same deadline. Completion requires the child's exit and EOF on both streams. Success returns stdout, and a nonzero exit reports stderr, decoded as UTF-8 with each maximal ill-formed subsequence replaced by one U+FFFD. Calls without a timeout retain the unbounded output-collection path.
+The shared subprocess runner starts each process with null stdin and the caller's environment and captures stdout and stderr without truncation. Success returns stdout, and a nonzero exit reports stderr; both are decoded as UTF-8 with each maximal ill-formed subsequence replaced by one U+FFFD. A call with a timeout guarantees:
 
-At the deadline, including when the direct child has exited but a descendant still holds a pipe open, the runner kills and reaps the direct child, closes both read pipes and reports a timeout; descendant termination is outside this contract. FD setup, read, poll and child-status failures also release the pipes and kill/reap the child; cleanup failures accompany the primary error instead of replacing it. The deadline bounds observation and the start of cleanup; an unresponsive operating system can delay cleanup itself.
+- Both pipes are drained concurrently from spawn, so a child that fills either pipe never blocks on it.
+- The call completes once the direct child has exited and both pipes have reached end of file, and never later than the deadline.
+- An operation interrupted by a signal is retried against the same deadline.
+- A timeout that is zero, or a deadline already passed, starts no process and fails with `command deadline expired before launch` (§ Error taxonomy).
+
+The read sizes and poll intervals that achieve these guarantees are implementation-defined. A call without a timeout waits for the child's exit and both pipes' end of file without a bound. These multiplexer processes run without a deadline: every multiplexer process of `fleet create` and of `doctor`'s `multiplexer` and `multiplexer.caller_pane` rows (server discovery, pane context, pane process, window rename and its read-back) and the `member capture` capture. Every other multiplexer process runs under its operation's deadline.
+
+At the deadline, including when the direct child has exited but a descendant still holds a pipe open, the runner kills and reaps the direct child, closes both read pipes and reports a timeout; descendant termination is outside this contract. FD setup, read, poll and child-status failures also release the pipes and kill/reap the child; cleanup failures accompany the primary error instead of replacing it: a failed kill or wait appends `cleanup failed for child <pid> kill: <io error>` or `cleanup failed for child <pid> wait: <io error>` as a further line of a command-failure's stderr, and for a timeout or start failure writes that line to the CLI's stderr. The deadline bounds observation and the start of cleanup; an unresponsive operating system can delay cleanup itself.
 
 #### Pane spawn working directory
 
-A member pane spawned by `cafleet member create` starts in the invoking process's working directory (the Director's pane cwd): a tmux split inherits it from the splitting pane and a tmux overflow window receives it as `new-window -c <cwd>`, and herdr receives it verbatim as `--cwd` rather than relying on herdr's own inheritance, which spawns `/bin/sh` instead of the passwd login shell when `SHELL` is unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)). An unresolvable cwd fails the spawn with `cannot resolve the working directory for pane spawn: <cause>`; there is no fallback directory.
+A member pane spawned by `cafleet member create` starts in the invoking process's working directory (the Director's pane cwd): a tmux split inherits it from the splitting pane and a tmux overflow window receives it as `new-window -c <cwd>`, and herdr receives it verbatim as `--cwd` rather than relying on herdr's own inheritance, which spawns `/bin/sh` instead of the passwd login shell when `SHELL` is unset ([herdr discussion #1517](https://github.com/ogulcancelik/herdr/discussions/1517)). The invoking working directory is the physical path `getcwd(3)` reports, never `$PWD`; the same directory governs `--cwd`, relative database paths (§6.3 Database selection), tmux `-c` and Hermes `--in` (§6.7 Per-backend spawn argv). An unresolvable cwd fails the spawn with `cannot resolve the working directory for pane spawn: <cause>`, and a cwd that is not valid UTF-8 with `cannot resolve the working directory for pane spawn: <path> is not valid UTF-8`; there is no fallback directory.
 
 #### Delete-time pane layout
 
@@ -1240,9 +1257,9 @@ Every operation that writes pane input uses one process-shared OS file lock. Acq
 |---|---|
 | Directory | `<canonical-database-file>.pane-locks/` adjacent to the database |
 | Key | SHA-256 of UTF-8 `backend + NUL + mux_session + NUL + mux_pane_id`, shared by duplicate placements for one pane |
-| File | `<key>.lock`, read/write create without truncation, owner-only creation permissions |
-| Acquisition | Exclusive nonblocking OS file lock; preserve unexpected errors with path/member context |
-| Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane |
+| File | `<key>.lock`, opened read/write and created without truncation with mode `0600` minus the umask; the directory is created on demand |
+| Acquisition | Exclusive nonblocking whole-file advisory lock with BSD `flock(2)` semantics: held per open file description and conflicting with every other `flock` holder of the same file; whether it interacts with `fcntl` record locks is platform-defined. Preserve unexpected errors with path/member context |
+| Identity | Keep lockfiles stable while processes may use the database; unlinking a held file would let another process lock a different inode for the same pane. A holder that releases the lock for its runner and retakes it keeps the same descriptor. Before each write the holder verifies that the lock path still names a regular file, not a symlink, with the held descriptor's device and inode, failing with `held pane lock pathname identity mismatch` otherwise |
 | Contention | Deletion, wrapped clients and explicit keys retry a busy lock every 50 milliseconds; explicit keys stop waiting one second before their deadline. The runner retries an active attempt's lock on each event-loop pass and a queued request's lock every 100 milliseconds; a lock still busy at its wait bound fails that writer |
 
 No database statement runs while a writer waits for the lock.
@@ -1255,9 +1272,18 @@ No database statement runs while a writer waits for the lock.
 
 Process exit releases ownership. Read-only capture needs no input lock. Deletion locking follows §6.3 `member delete` and `fleet delete`.
 
+| Failure | Error |
+|---|---|
+| The canonical database path cannot be resolved | `cannot resolve database input-lock identity: <io error>` (`layout-lock` for the fleet layout lock) |
+| The lock directory cannot be created | `cannot create pane input-lock directory <dir>: <io error>` (`pane layout-lock` for the fleet layout lock) |
+| The lock file cannot be opened | `cannot open pane input lock <path>: <io error>` (`pane layout lock`) |
+| Locking fails other than by contention | `cannot lock pane input <path>: <io error>` (`pane layout <path>`) |
+| Releasing a held lock for the runner fails | `cannot release pane input <path>: <io error>` |
+| The member's placement changes while its pane input lock is acquired | `member <member-id> placement changed while acquiring pane input` |
+
 #### Termination during pane input
 
-Interrupting a host turn, including through Escape-first delivery fallback, can also end the turn's in-flight shell tool, such as a running `cafleet` command. The CLI therefore defers `SIGINT`, `SIGTERM` and `SIGHUP` across every pane-input and lifecycle span: a signal received meanwhile takes its default action when the outermost span ends; spans nest.
+Interrupting a host turn, including through Escape-first delivery fallback, can also end the turn's in-flight shell tool, such as a running `cafleet` command. The CLI therefore defers `SIGINT`, `SIGTERM` and `SIGHUP` across every pane-input and lifecycle span: within a span, none of these signals delivered to the process takes its default action until the outermost span ends, and then each pending one does; spans nest. The masking mechanism is implementation-defined. A span that cannot begin fails with `cannot defer termination signals: <io error>`, exit 1.
 
 | Command | Span |
 |---|---|
@@ -1266,7 +1292,7 @@ Interrupting a host turn, including through Escape-first delivery fallback, can 
 | `member create` | From fleet layout lock acquisition (§ Fleet window layout) through `started` or the end of its compensation |
 | `member delete`, `fleet delete` | From pane lock acquisition through fleet layout lock acquisition, deregistration and layout cleanup |
 
-Every span is bounded by its own deadline, so a deferred signal waits at most one span. Multiplexer client processes started inside a span inherit the blocked set and stay bounded by their timeouts; the member session, started by the multiplexer server, does not inherit it.
+Every span is bounded by its own deadline, so a deferred signal waits at most one span. A multiplexer client process started by the thread that holds a span starts with `SIGINT`, `SIGTERM` and `SIGHUP` in its blocked set and stays bounded by its timeout; a shell or program the client runs may change its own mask. The member session, started by the multiplexer server, does not inherit the set.
 
 `SIGKILL` cannot be deferred; a kill inside a span leaves:
 
@@ -1283,7 +1309,7 @@ Every span is bounded by its own deadline, so a deferred signal waits at most on
 
 | Common key | tmux argument | herdr argument |
 |---|---|---|
-| Single printable ASCII character, U+0021–U+007E | `0xXX` for its ASCII codepoint | Same character, with `+` as `plus`, `-` as `minus`, and `;` as `semicolon` |
+| Single printable ASCII character, U+0021–U+007E | `0x` followed by its codepoint as two lowercase hex digits (`A` → `0x41`) | Same character, with `+` as `plus`, `-` as `minus`, and `;` as `semicolon` |
 | `Space` | `Space` | `space` |
 | `Escape` | `Escape` | `esc` |
 | `Enter` | `Enter` | `enter` |
@@ -1465,11 +1491,11 @@ A fleet-scoped OS file lock serializes every operation that creates or closes a 
 | Directory | `<canonical-database-file>.layout-locks/` adjacent to the database, created on demand |
 | Key | SHA-256 hex of the fleet ID's UTF-8 decimal text |
 | File | `<key>.lock`, created `0600` |
-| Acquisition | Exclusive OS file lock retried every 50 milliseconds within the layout lock wait (60 s), a budget separate from each command's operation deadline; the OS releases it when its holder exits, including after `SIGKILL` |
+| Acquisition | The pane input lock's `flock(2)` semantics (§ Pane input lock), retried every 50 milliseconds within the layout lock wait (60 s), a budget separate from each command's operation deadline; the OS releases it when its holder exits, including after `SIGKILL` |
 
 | Holder | Acquired | Held through |
 |---|---|---|
-| `member create` | After prompt validation, before resolving the Director placement; the ten-second creation deadline starts after acquisition | `started`, or the end of compensation |
+| `member create` | After its argument and body checks (§6.3 Validation order), before resolving the Director placement; the ten-second creation deadline starts after acquisition | `started`, or the end of compensation |
 | `member delete` | After its pane lock, before any cleanup step | Deregistration and layout restoration |
 | `fleet delete` | Once, after all its pane locks and before the first member's cleanup | The last member's layout restoration |
 
@@ -1502,18 +1528,25 @@ Director delivery sweep (§6.9 Director delivery sweep).
 | Window height (`member create`) | `tmux display-message -p -t <window_id> "#{window_height}"`; the anchors are ignored | `herdr pane layout --pane <anchor>` for each anchor in order; the first successful `result.layout.area.height` is the height | tmux: output that is not a positive integer, including the empty line of a missing window, fails with `unexpected tmux display-message output: <quoted>`; herdr: a reply without the area fails with `herdr pane layout missing 'area' field`, any failure moves to the next anchor, and the read fails with the last anchor's error only when no anchor answers |
 | Spawn member pane | Per pane target, § Member pane creation | Per pane target, § Member pane creation | A failed or malformed creation response is an unknown pane-cleanup outcome (§ Pane ownership during creation); naming, equalization and re-parenting failures never fail the spawn |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
-| Director screen capture | `tmux display-message -p -t <pane> '#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}'`, `tmux capture-pane -p -e -N -t <pane>`, then the same `display-message` again; a changed metadata line retries every 50 ms within the attempt deadline | `herdr api snapshot` for the pane's `rect.width` in `snapshot.layouts[].panes[]` and its `scroll.viewport_rows` in `snapshot.panes[]`, joined by `pane_id`, then `herdr pane read <pane> --source visible --format ansi`; the row count is `scroll.viewport_rows`, and the body lines fill the screen from the top because the read keeps leading and interior blank rows and drops only trailing blank rows; a body with more lines than the row count is a capture failure | A malformed metadata line or a pane absent from the snapshot is a capture failure. tmux captures carry the cursor and alternate-screen state; herdr captures carry neither, and their columns are the layout width, an upper bound of the terminal width |
-| Director literal write | `tmux send-keys -t <pane> -l -- <chunk>` for each chunk of at most 256 characters, in order | `herdr pane send-text <pane> <literal>` | Acknowledged like § Explicit key dispatch; a failure after the first process started has possibly partial effects (§6.9 Director delivery sweep) |
-| Director submit key | `tmux send-keys -t <pane> -H <hex bytes>` | `herdr pane send-keys <pane> <key>` through the explicit-key mapping (`0d` → `enter`) | Acknowledged like § Explicit key dispatch; a failure after its process started is possibly submitted (§6.9 Director delivery sweep) |
+| Director screen capture | `tmux display-message -p -t <pane> '#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}'`, `tmux capture-pane -p -e -N -t <pane>`, then the same `display-message` again; a changed metadata line retries every 50 ms within the attempt deadline | `herdr api snapshot` for the pane's `rect.width` in `snapshot.layouts[].panes[]` and its `scroll.viewport_rows` in `snapshot.panes[]`, joined by `pane_id`, then `herdr pane read <pane> --source visible --format ansi`; the row count is `scroll.viewport_rows`, and the body lines fill the screen from the top because the read keeps leading and interior blank rows and drops only trailing blank rows; a body with more lines than the row count fails with `herdr pane read of <pane> printed <lines> rows for a <rows>-row viewport` | A malformed metadata line or a pane absent from the snapshot is a capture failure. tmux captures carry the cursor and alternate-screen state; herdr captures carry neither, and their columns are the layout width, an upper bound of the terminal width |
+| Director literal write | `tmux send-keys -t <pane> -l -- <chunk>` for each chunk of at most 256 Unicode scalars, in order | `herdr pane send-text <pane> <literal>` | Acknowledged like § Explicit key dispatch; a failure after the first process started has possibly partial effects (§6.9 Director delivery sweep) |
+| Director submit key | `tmux send-keys -t <pane> -H <hex bytes>`, one argument per byte written as two lowercase hex digits | `herdr pane send-keys <pane> <key>...`, one explicit key per byte: U+0021–U+007E as its character key, `20` → `Space`, `1b` → `Escape`, `0d` → `Enter`, `09` → `Tab`, `7f` → `Backspace`, other `01`–`1a` → `Ctrl+<letter>`; a byte without a key fails before any process with `herdr has no key mapping for the submit bytes <hex>`, `<hex>` being every submit byte as two lowercase hex digits with no separator | Acknowledged like § Explicit key dispatch; a failure after its process started is possibly submitted (§6.9 Director delivery sweep) |
 | Close | `tmux kill-pane -t <pane>`, then the restoration of the caller-supplied window | `herdr pane close <pane>`, then the delete-time restoration of the caller-supplied tab | Close tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`); restoration is best effort (§ Delete-time pane layout) |
 
-`pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`. `<quoted>` follows §6.4 Quoted text.
+`pane run` submits one text line into the pane's shell, so the argv command is rendered as a single POSIX-shell-quoted string: the words joined by one space, where a non-empty word made only of ASCII alphanumerics and `_@%+=:,./-` is written as is, any other word is wrapped in `'` with each `'` written as `'"'"'`, and the empty word is `''`. Every herdr JSON reply is parsed as a `result` envelope; non-JSON output fails with `herdr returned non-JSON output: <quoted>` and a reply without a `result` object with `herdr output missing 'result' object: <quoted>`. `<quoted>` follows §6.4 Quoted text.
 
-Process failures preserve their context in the multiplexer error:
-`<backend> binary not found: <detail>`, `<backend> command was not started:
-<detail>: <argv>`, `<backend> command timed out at the pane input deadline:
-<argv>` for a deadline-bounded call and `<backend> command failed: <argv>` followed by a
-`stderr: <trimmed stderr>` line. Other errors propagate.
+Process failures render per § Error taxonomy; other errors propagate.
+
+Reply parsing follows these rules:
+
+- **tmux replies.** A `display-message` or `split-window` reply is trimmed of leading and trailing Unicode `White_Space` before it is split, except the window-name reply, which loses exactly its final LF. The Director screen metadata line splits on runs of Unicode `White_Space` into exactly five fields: four integers in 0–65535, each optionally written with a leading `+`, and a flag `0` or `1`; any other line is malformed. Integer replies such as `#{window_height}` and `#{pane_pid}` also accept a leading `+`.
+- **tmux `list-panes`.** Each non-blank reply line splits on its first `|`; a line without one fails with `unexpected tmux list-panes output: <quoted>`, quoting the whole reply. Panes group by the exact `pane_left` text, in first-appearance order.
+- **tmux pane-gone causes.** `can't find pane` and `no such pane` match the stderr case-insensitively.
+- **herdr error codes.** A herdr error code such as `pane_not_found` is the string member `error.code` of the whole stderr parsed as one JSON value; stderr that is not such a JSON value carries no code.
+- **herdr JSON numbers.** An integer field (`area.height`, `shell_pid`) requires a JSON number written without fraction or exponent. `x`, `y`, `width`, `height` of a geometry rectangle, `viewport_rows` and `ratio` accept any JSON number, and `rect.width` and `viewport_rows` must then be whole numbers from 1 to 65535 (`herdr api snapshot <field> <value> of <pane>` otherwise). A repeated JSON object key takes its last occurrence.
+- **herdr missing fields.** A missing or mistyped string field fails with `herdr <context> missing '<key>' field`, where `<context>` names the reply (`pane list`, `pane current`, `pane split`, `pane move`, `tab create`, `tab get`, `pane layout`, `api snapshot`). Other reply-shape failures are `herdr pane list missing 'panes' field`, `herdr pane layout missing 'panes' field`, `herdr pane layout missing 'splits' field`, `herdr api snapshot missing '<field>' field`, `herdr api snapshot has no pane <pane>`, `herdr tab get returned tab <quoted>, expected <quoted>`, `herdr pane split returned an empty pane ID` and, for tmux, `tmux split-window returned an empty pane ID`.
+- **herdr server discovery.** `herdr session list --json` must print JSON with a `sessions` array (`herdr session list returned non-JSON output: <quoted>`, `herdr session list missing 'sessions' field`); the first session whose `socket_path` equals `HERDR_SOCKET_PATH` supplies its `name`, and no match selects `default`. tmux server discovery fails with the no-server error (§6.3 `fleet create`) when its command exits nonzero or prints only whitespace; any other process failure follows § Error taxonomy.
+- **Write acknowledgments.** A writing process that exits 0 with non-whitespace stdout fails with `<backend> <what> acknowledgment was unreadable`, where `<what>` is `key` for explicit keys, `literal` or `text` for a Director literal write and `submit key` for a submit key.
 
 #### Member pane creation
 
@@ -1565,7 +1598,7 @@ herdr has no full-height column split: `pane split --direction right` splits onl
 3. `herdr pane move R1 --tab <tab> --split right --target-pane X --no-focus` places `X` left and `R1` right.
 4. For `i = 2..m`, `herdr pane move Ri --tab <tab> --split down --target-pane R(i-1) --no-focus`. The last move empties `T'` (for m = 1, step 3 empties it).
 
-A failed move leaves the remaining panes where they are, emits the stderr diagnostic `layout re-parenting incomplete: <cause>` and lets the spawn continue. Re-parenting changes no registry placement. While a pane sits in `T'`, a concurrent `member press` to it fails its target validation against the recorded window (§ Explicit key dispatch); wrapped delivery revalidates only the registry placement.
+A failed move leaves the remaining panes where they are, emits the stderr diagnostic `layout re-parenting incomplete: <cause>` and lets the spawn continue. A move whose reply's `move_result.changed` is not `true` fails with `herdr pane move of <pane> changed nothing: <result>`, `<result>` being the reply's `result` object in compact JSON, and a column read whose layout lacks its anchor fails with `herdr pane layout of <anchor> does not contain <anchor>`. Re-parenting changes no registry placement. While a pane sits in `T'`, a concurrent `member press` to it fails its target validation against the recorded window (§ Explicit key dispatch); wrapped delivery revalidates only the registry placement.
 
 #### herdr column equalization
 
@@ -1574,10 +1607,10 @@ herdr has no single reflow command, so it rebalances every column of a tab arith
 Equal heights ⇔ split *k* has ratio `1/(N-k)` (top → `1/N`, …, bottom pair →
 `1/2`). `herdr pane resize --amount` is a signed delta on a split's ratio, so
 each split is driven to target by one resize: `delta = 1/(N-k) - ratio`
-(rounded to 4 decimal places half away from zero, written as the shortest decimal that round-trips, without exponent or trailing zeros, such as `0.1667` or `0.5`; skipped if `|delta| < 1e-3`); `delta > 0` →
+(rounded as `round_half_away_from_zero(v × 10⁴) / 10⁴` in binary64, written as the shortest decimal that round-trips, without exponent or trailing zeros, such as `0.1667` or `0.5`; skipped if `|delta| < 1e-3`); `delta > 0` →
 `herdr pane resize --pane <pane k> --direction down --amount <delta>`, else
 `--pane <pane k+1> --direction up --amount <|delta|>`. A column whose matching
-`down` split count is not `N - 1` is left untouched.
+`down` split count is not `N - 1` is left untouched. Columns group by exact binary64 equality of `rect.x` and run left to right; within a column, panes and splits sort by `rect.y` with a stable sort in which a missing `rect.y` sorts first. The first failed resize stops the remaining splits and columns, and its error is the rebalance failure.
 
 Delete-time restoration anchors at the first surviving pane in `herdr pane list` whose `tab_id` equals the caller-supplied window ID:
 
@@ -1927,13 +1960,18 @@ A Hermes member's session can keep accepted work and background processes runnin
 | Requirement | Mechanism |
 |---|---|
 | Session identity | `member create` stores `{"hermes_home": <effective Hermes home>}` in `member_runs.native_session_json`, the directory of the file `hermes config path` names under the member's `HERMES_HOME`; settlement adds `session_id`, the full `local-<hex>` ID from the exit summary `Session: <id>` that `/exit` prints |
-| In-flight session work | While the client runs, settlement sends native input to the member's pane under the deletion's pane lock: `Ctrl+C` only when the pane shows a running turn (`type to redirect this turn`) or an open form (`↑/↓ to select`), because `Ctrl+C` on an idle composer ends the client without stopping its session. It then enters `/stop` and then `/exit` (entry steps below the table) |
-| Registered background processes | `/stop` stops the session's registered processes; settlement waits for its report (`Stopped N process(es).` or `No running background processes.`) |
+| In-flight session work | While the client runs, settlement sends native input to the member's pane under the deletion's pane lock: `Ctrl+C` only when one of the last 8 non-blank lines of the ANSI-stripped capture contains `type to redirect this turn` (a running turn) or `↑/↓ to select` (an open form), because `Ctrl+C` on an idle composer ends the client without stopping its session. It then enters `/stop` and then `/exit` (entry steps below the table) |
+| Registered background processes | `/stop` stops the session's registered processes; settlement counts the matches of <code>Stopped [0-9]+ process\(es\)\.&#124;No running background processes\.</code> in the ANSI-stripped capture before typing `/stop` and waits until the count rises |
+| Exit summary | After `/exit`, settlement waits for a capture with a line matching `^Session:[\t\n\v\f\r ]+(local-[0-9a-f]+)[\t\n\v\f\r ]*$` (multi-line mode, ANSI-stripped); the last match's capture is the session ID |
 | Verification | The client printed its exit summary and the run's native child exited; no `<home>/processes.json` entry whose `owner_task_id` is the session ID has a live `pid` with its `host_start_time` (the `/proc/<pid>/stat` start field), where `<home>` is the directory of `hermes config path` under the stored base. On a platform without a comparable start time, a live `pid` counts as running. |
 
-To enter each command, settlement clears the composer by the bounded loop below, types the command, closes its completion menu with Escape, and presses Enter until it takes effect, at most three times one second apart while the client remains live.
+Each capture reads the member pane's last 400 lines (§6.5 Capture windowing). The client counts as exited when the run's status is terminal. Settlement pauses for the poll interval (200 ms) between successive captures of a wait.
 
-Each check reads one SGR-preserving capture and indexes its rows identically to the ANSI-stripped view. The bottom border is the last stripped row consisting only of `─` across the pane width. The top border is the nearest preceding full-width border beginning and ending with `─`, with an embedded title allowed; the composer region is strictly between them. Empty means exactly one region row whose stripped text starts `❯ ` and whose remaining cells in that same SGR row are blank or italic placeholder text. Multiple region rows, including blank ones, mean nonempty. Progress compares stripped region text, retaining SGR only for the placeholder decision.
+To enter each command, settlement clears the composer by the bounded loop below, then sends the command one explicit key per character (`/`, `s`, `t`, `o`, `p`; `/`, `e`, `x`, `i`, `t`), pauses 200 ms, closes the completion menu with `Escape` and presses `Enter` until the command takes effect: before each of at most three `Enter` presses it pauses 200 ms and stops pressing once the client has exited, and after each press it waits up to one second for the effect; it then keeps waiting until the settlement budget expires.
+
+`processes.json` is a JSON array of objects, each requiring `pid` (an unsigned 32-bit integer), `host_start_time` (an unsigned 64-bit integer) and `owner_task_id` (a string), with unknown fields ignored. A missing file counts as verified-stopped. One malformed entry, or a file that is not such an array, fails with `<home>/processes.json is not a Hermes process registry: <cause>`, and any other read failure with `cannot read <home>/processes.json: <io error>`.
+
+Each check reads one SGR-preserving capture and indexes its rows identically to the ANSI-stripped view. The bottom border is the last non-empty stripped row consisting only of `─`; its width is its own length in Unicode scalars. The top border is the nearest preceding stripped row of that same width that begins and ends with `─`, with an embedded title allowed; the composer region is strictly between them. Empty means exactly one region row whose stripped text starts `❯ ` and whose remaining scalars after those two are blank or italic placeholder text. Italic is tracked through the row's SGR sequences: each `;`-separated parameter `3` sets it and `0`, `23` or an empty parameter clears it; the arguments of `38`, `48` and `58` extended colours (`5;<n>` or `2;<r>;<g>;<b>`) are skipped, and a parameter with `:` subparameters is ignored. Multiple region rows, including blank ones, mean nonempty. Progress compares stripped region text, retaining SGR only for the placeholder decision.
 
 1. Capture and inspect the region; an empty composer completes clearing.
 2. Send exactly 16 batches back to back: `Escape` plus 63 `Backspace` keys, then 15 batches of 64 `Backspace` keys. Pause once for the settlement poll interval (200 ms), then capture again.
@@ -1941,7 +1979,18 @@ Each check reads one SGR-preserving capture and indexes its rows identically to 
 
 Each round sends 1023 Backspace keys. A draft of 8192 scalars clears within 9 rounds (144 batches) and 10 seconds on tmux and herdr, leaving at least 10 seconds of the 20-second settlement budget for `/stop` and `/exit`; their clear steps complete after one empty capture. Complete nine-round native measurements took 2.676 seconds on tmux and 2.782 seconds on herdr, with the composer first observed empty after round 3; the loop stops after its first verified empty capture. Excess Backspace on an empty composer had no effect. `Ctrl+U` and `Ctrl+A` followed by `Ctrl+K` cleared a visually wrapped single logical line, but the latter retained a multi-line draft after an ineffective submit, so the fixed clear rounds cover both layouts. The total measured clear time satisfies the bound independently of any individual batch duration.
 
-Deletion runs settlement for a `hermes` run before the runner shutdown. Each `hermes` member's settlement, in `member delete` and in `fleet delete`, has its own 20-second budget, and the time it takes extends the 5-second deletion deadline for the remaining cleanup and for later fleet members. A step that does not complete within the settlement budget, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
+Deletion runs settlement for a `hermes` run before the runner shutdown. Each `hermes` member's settlement, in `member delete` and in `fleet delete`, has its own 20-second budget, and the time it takes extends the 5-second deletion deadline for the remaining cleanup and for later fleet members. A step that does not complete within the settlement budget, or a running registered process, fails with `Error: hermes work for member <ID> could not be verified as stopped: <cause>; member was not deleted.` and keeps the member row. `<cause>` is one of:
+
+| Step | Cause |
+|---|---|
+| `Ctrl+C` did not end the running turn | `the Hermes turn did not stop after Ctrl-C` |
+| Clearing made no progress or ran out of budget | `the Hermes composer still holds text after clearing` |
+| `/stop` printed no new report | `Hermes did not report /stop` |
+| `/exit` printed no exit summary | `Hermes printed no exit summary after /exit` |
+| The client stayed live after its summary | `the Hermes client did not exit after /exit` |
+| A registered process still runs | `background processes of session <session-id> are still running: <pids>`, the PIDs joined by `, ` |
+| The run has no stored session record | `member run <run-id> has no Hermes session record` |
+| A registry or pane failure | Its own error | A retry after a recorded session ID and an exited client re-runs only the verification. When the client had already exited before settlement recorded a session ID, deletion prints `warning: hermes client for member <ID> had already exited; its session work may still be running in the Hermes gateway` to stderr and completes. Creation compensation runs the same settlement for a started `hermes` run, and a failure becomes a compensation diagnostic.
 
 CAFleet never stops or restarts a Hermes gateway, kills by process name or
 touches a session it does not own.
@@ -2086,7 +2135,7 @@ Model and effort rejections are in § Model selection and § Reasoning effort, a
 | CAFleet pi extension missing or unreadable | `cannot read the CAFleet pi extension at {path}: {cause}; run 'cafleet setup --coding-agent pi' first` |
 | Invalid config-path variable (§6.3 *Config-dir resolution*) | `{var} must be an absolute path (got '{value}')` |
 | Non-UTF-8 config-path variable or `HOME` (§6.3 *Config-dir resolution*) | `{var} is not valid UTF-8` |
-| `hermes config path` cannot start, times out or exits nonzero | `cannot read hermes configuration through 'hermes config path': {cause}` |
+| `hermes config path` cannot start, times out or exits nonzero | `cannot read hermes configuration through 'hermes config path': {cause}`, where `{cause}` is the trimmed stderr of a nonzero exit (`exited with code {code}` when it is blank), `hermes config path ended by {status}` for an exit without a code, `hermes config path printed non-UTF-8 output`, or a native-run failure of § Native version probe |
 | `hermes config path` prints no absolute file path | `cannot read hermes configuration through 'hermes config path': printed no absolute file path: {stdout}` |
 
 #### Host evidence and native-input authorization
@@ -2226,7 +2275,7 @@ Launch is independent of every profile capability; detection, composer, submissi
 
 `member create` resolves the backend's binary to one absolute executable path during the backend availability check, using the creator process's `PATH`. It searches the absolute `PATH` entries in order, skipping empty and relative entries, and selects the first `<entry>/<binary>` that is a regular file with an execute permission bit after following symbolic links. The selected path is used as found, without symbolic-link resolution, so a link or wrapper keeps its own name. When no entry matches, creation fails before registration with exit 1 and `Error: binary <name> not found on PATH`.
 
-The version probe below runs that exact path, and the same path is `argv[0]` of the runner's literal child argv; the pane's own `PATH` and shell configuration play no part in selecting the native executable.
+The version probe below runs that exact path, and the same path is `argv[0]` of the runner's literal child argv; the pane's own `PATH` and shell configuration play no part in selecting the native executable. A selected path that is not valid UTF-8 fails argv construction with `native executable must be an absolute UTF-8 path (got <path>)`, exit 1.
 
 ##### Native version probe
 
@@ -2255,7 +2304,22 @@ Hermes replaces the one-token rule with its own first-line rule. The first stdou
 
 For hermes the probe runs concurrently with `hermes config path`, which has its own bound (§6.7 Hermes availability preflight).
 
-A probe that fails a rule above, cannot start, times out or prints non-UTF-8 output records `native_version` null, and creation continues with the backend's bundled profile and its coverage. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE.`, and leaves its stdout text and JSON unchanged.
+A probe that fails a rule above, cannot start, times out or prints non-UTF-8 output records `native_version` null, and creation continues with the backend's bundled profile and its coverage. The command writes one stderr line, `Warning: native version unavailable for BACKEND: CAUSE.`, and leaves its stdout text and JSON unchanged. `CAUSE` is `<backend> --version <detail>`:
+
+| Failure | `<detail>` |
+|---|---|
+| The executable cannot start | `could not start: <io error>` |
+| The process is still running at its bound | `did not finish within its deadline` |
+| The process exited but its output stayed open at the bound | `output did not close within its deadline` |
+| Reading its output fails | `output could not be read: <io error>` |
+| A nonzero exit whose stderr's first line is non-blank | `exited with <status>: <line>` |
+| Any other nonzero exit | `exited with <status>` |
+| Non-UTF-8 stdout | `printed non-UTF-8 output` |
+| No stdout line | `printed no output` |
+| No version token, or several | `printed no version token`, `printed several version tokens` |
+| hermes: no matching line, or a capture that is not canonical SemVer | `printed no Hermes version line`, `printed a non-SemVer Hermes version` |
+
+`<status>` is the operating system's exit-status description, implementation-defined.
 
 ##### Bundled profiles and native screen fixtures
 

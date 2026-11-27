@@ -249,7 +249,7 @@ The first three outcomes exit 1 and keep the member; retry after inspecting the 
 |---|---|
 | Busy pane input | `member ID's pane input remained busy for 5 seconds; member was not deleted.` |
 | Fleet layout lock busy for 60 seconds | `Error: fleet <fleet-id> pane layout remained busy for 60 seconds; member was not deleted.` |
-| Unverified Hermes stop | `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.` |
+| Unverified Hermes stop | `Error: hermes work for member ID could not be verified as stopped: CAUSE; member was not deleted.`, CAUSE being `the Hermes turn did not stop after Ctrl-C`, `the Hermes composer still holds text after clearing`, `Hermes did not report /stop`, `Hermes printed no exit summary after /exit`, `the Hermes client did not exit after /exit`, `background processes of session <id> are still running: <pids>` or `member run <run-id> has no Hermes session record` |
 | Hermes client already exited | Deletion completes with `warning: hermes client for member ID had already exited; its session work may still be running in the Hermes gateway` |
 
 Other deletion causes exit 1 and keep the member; rerun the delete after inspecting with `cafleet doctor`:
@@ -335,6 +335,8 @@ Answer request-bound decisions with `permission respond`.
 ## Pane input and previews
 
 Writers share one lock per concrete pane; capture is read-only, and human input is independent.
+
+A multiplexer process failure names the backend and the full argv joined by spaces: `<backend> binary not found: <cause>`, `<backend> command was not started: <cause>: <argv>`, `<backend> command timed out at the pane input deadline: <argv>`, or `<backend> command failed: <argv>` followed by a `stderr: <stderr>` line. `fleet create`, `doctor` and `member capture` run their multiplexer commands without a deadline; every other command's are bounded by its operation deadline.
 
 Keys accept printable ASCII U+0021–U+007E, `Space`, `Escape`, `Enter`, `Tab`, `Backspace`, arrows, `F1`–`F12`, `Ctrl+a`–`Ctrl+z` and `Shift+Tab`. Printable case is preserved; names and modifiers are case-insensitive, control letters canonicalize lowercase.
 
