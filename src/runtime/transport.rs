@@ -5310,29 +5310,12 @@ mod tests {
                 .collect()
         }
 
-        fn row_text(screen: &ScreenSnapshot, row: u16) -> String {
-            let end = (0..screen.cols)
-                .rev()
-                .find(|&col| {
-                    screen
-                        .screen
-                        .cell(row, col)
-                        .is_some_and(|cell| cell.has_contents() || cell.is_wide_continuation())
-                })
-                .map_or(0, |col| col + 1);
-            let mut text = String::new();
-            for col in 0..end {
-                let cell = screen.screen.cell(row, col).unwrap();
-                if cell.is_wide_continuation() {
-                    continue;
-                }
-                if cell.has_contents() {
-                    text.push_str(cell.contents());
-                } else {
-                    text.push(' ');
-                }
-            }
-            text
+        fn row_text(screen: &ScreenSnapshot, row: u16, id: &str) -> String {
+            crate::coding_agent::detector::row_cells(screen, row, screen.cols)
+                .unwrap_or_else(|error| panic!("{id}: row {row}: {error}"))
+                .into_iter()
+                .map(|cell| cell.text)
+                .collect()
         }
 
         fn colour(colour: vt100::Color) -> Value {
@@ -5431,7 +5414,7 @@ mod tests {
             );
             let screen = terminal.snapshot();
             let actual = json!({
-                "lines": (0..screen.rows).map(|row| row_text(&screen, row)).collect::<Vec<_>>(),
+                "lines": (0..screen.rows).map(|row| row_text(&screen, row, id)).collect::<Vec<_>>(),
                 "wrapped": (0..screen.rows).filter(|row| screen.screen.row_wrapped(*row)).collect::<Vec<_>>(),
                 "cursor": screen.cursor.map(|(row, col)| json!([row, col])),
                 "alternate_screen": screen.alternate_screen,
