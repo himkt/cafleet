@@ -937,7 +937,19 @@ For example, `Runtime: run=37 mode=auto status=running coverage=tested observati
 
 Reconciliation is Director-owned. CLI disposition tokens are `submitted`, `not-submitted` and `abandoned-uncertain`, persisted with underscores as defined by the receipt contract (§6.9 Durable input receipts and settlement). Require a nonempty evidence reference. A settled ordinary receipt with the same disposition returns its original row and evidence reference before live work; a conflicting disposition fails unchanged. Settlement sends no input and establishes no native command result. One original five-second budget covers the pane wait, current-owner synchronization, supplied-connection SQL and socket exchange. Owner synchronization and CAS settlement follow §6.9 Durable input receipts and settlement; uncertainty persists while the owner is unreachable or an active writer cannot be ruled out.
 
-All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows fail with `Event <event-id> not found` and `Input <input-id> not found`, exit 1. `event show` re-derives the event payload from the event row, its run, its interaction and its delivery records at read time and refuses any difference with `invalid stored value for payload_json: stored payload does not match its event`, exit 1; other invalid stored state fails explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
+All event/input IDs are positive database-assigned integers; malformed IDs/options fail with usage exit 2. Missing rows fail with `Event <event-id> not found` and `Input <input-id> not found`, exit 1. `event show` re-derives the event payload at read time and refuses any difference from the stored `payload_json` with `invalid stored value for payload_json: stored payload does not match its event`, exit 1. Values compare as JSON values, so timestamps compare as their exact text. The re-derived fields and their sources:
+
+| Field | Source |
+|---|---|
+| `event_id`, `event_seq`, `kind`, `interaction_id`, `observed_at` | The event row |
+| `run_id`, `member_id`, `fleet_id`, `director_member_id` | The event's run |
+| `classification` | The linked interaction, or null |
+| `source`, `decision_outcome` | Derived from `kind`; `decision_outcome` is `unknown` |
+| `evidence`, `close_reason` and a lifecycle `cause` | The stored payload itself, `evidence` checked only for its shape, digest and the run's `backend` |
+| `input_id`, `message_id`, `stage`, `delivery`, `blocked_by_input_id`, `waiting_since` and a delivery `cause` | The published delivery records of an `input_delivery_result` or `input_delivery_stalled` event |
+| `director_action` | The delivery records for those two kinds, otherwise rebuilt from the run, kind, classification, event and interaction |
+
+ other invalid stored state fails explicitly. Event and input text render `-` for an unavailable optional value. Interaction fields are ordered `interaction_id,run_id,episode_seq,classification,evidence_digest,opened_at,evidence_json,closed_at,close_reason`.
 
 #### Permission commands
 
@@ -3648,7 +3660,7 @@ A blocker event's `director_action` is `{"kind":"reconcile_uncertain_input","ins
 Inspect the uncertain input and the member's pane, then settle the input with input reconcile from that evidence. Queued input and message previews resume once it settles.
 ```
 
-A verified empty composer resumes delivery on the next queue turn or sweep, and a settled blocker resumes queued input and previews. Every argv array gets `--database-url URL` appended for a non-default database. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
+A verified empty composer resumes delivery on the next queue turn or sweep, and a settled blocker resumes queued input and previews. For a non-default database, `--database-url URL` is appended to the `review_stalled_delivery` and `reconcile_uncertain_input` argv arrays only; a permission or question `inspect_argv` never carries it, and its reader adds `--database-url` per §6.3 Database selection. A composer that stays unverified after clearing indicates a profile composer-rule defect; each later input can stall in turn until corrected. Orderly shutdown and recovery preserve deduplication of head events; the live runner is the only publisher of preview events.
 
 #### CLI presentation contract
 
