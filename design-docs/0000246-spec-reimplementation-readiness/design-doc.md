@@ -1,7 +1,7 @@
 # Make SPEC.md sufficient for an independent reimplementation
 
 **Status**: Approved
-**Progress**: 40/47 tasks complete
+**Progress**: 45/47 tasks complete
 **Last Updated**: 2026-11-27
 
 ## Overview
@@ -393,11 +393,7 @@ Every `blocker` and `needs-oracle` finding gets a fix and a re-check by the same
 
 ### Accepted minor findings
 
-Filled during Implementation Step 5.
-
-| Finding | Reason accepted |
-|---|---|
-| — | — |
+None. The re-audit and its re-checks resolved every minor finding in `SPEC.md` (`.audit/reaudit-area1.md`, `.audit/reaudit-area2.md`, `.audit/reaudit-area3.md`).
 
 ### Documentation and rules
 
@@ -487,11 +483,11 @@ Within each step the commits follow the project's documentation-first order: `SP
 
 ### Step 5: Verification
 
-- [ ] Harness author: write the § Blind slice scenarios, seeds and harness under `.blind-slice/` and confirm every scenario runs against the Rust binary <!-- completed: -->
-- [ ] Blind agent: implement the slice from `SPEC.md` and `assets/` only <!-- completed: -->
-- [ ] Run the harness; resolve each difference per its class (`spec-gap` or `implementer-error`), record it in `.blind-slice/differences.md` and re-run until 0 differences <!-- completed: -->
-- [ ] Run the three § Re-audit agents and record their reports under `.audit/` <!-- completed: -->
-- [ ] Fix every `blocker` and `needs-oracle` finding and re-check it; fill § Accepted minor findings <!-- completed: -->
+- [x] Harness author: write the § Blind slice scenarios, seeds and harness under `.blind-slice/` and confirm every scenario runs against the Rust binary <!-- completed: 2026-11-27T10:53 -->
+- [x] Blind agent: implement the slice from `SPEC.md` and `assets/` only <!-- completed: 2026-11-27T10:21 -->
+- [x] Run the harness; resolve each difference per its class (`spec-gap` or `implementer-error`), record it in `.blind-slice/differences.md` and re-run until 0 differences <!-- completed: 2026-11-27T10:53 -->
+- [x] Run the three § Re-audit agents and record their reports under `.audit/` <!-- completed: 2026-11-27T10:53 -->
+- [x] Fix every `blocker` and `needs-oracle` finding and re-check it; fill § Accepted minor findings <!-- completed: 2026-11-27T10:53 -->
 - [ ] Commit the Step 5 SPEC fixes and § Accepted minor findings with `mise //:test` and `mise //:lint` passing, and push them to the pull request <!-- completed: -->
 
 ### Step 6: Closeout
