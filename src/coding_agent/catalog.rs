@@ -3,6 +3,10 @@ use crate::broker::runtime::InteractionClass;
 use crate::broker::runtime::PermissionDecision;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::detector::ObservationKind;
+use crate::coding_agent::geometry::CollapsedPaste;
+use crate::coding_agent::geometry::ComposerGeometry;
+use crate::coding_agent::geometry::ReservedRows;
+use crate::coding_agent::geometry::TextWindow;
 use crate::error::CafleetError;
 use crate::error::Result;
 use regex::Regex;
@@ -10,13 +14,12 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error as _;
 use serde::de::IgnoredAny;
+use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 #[cfg(test)]
 use crate::coding_agent::detector::Detector;
-#[cfg(test)]
-use serde_json::Value;
 #[cfg(test)]
 use std::collections::BTreeMap;
 
@@ -107,6 +110,9 @@ fn nonblank<'de, D: Deserializer<'de>>(d: D) -> Field<String, D::Error> {
 }
 fn pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Regex, D::Error> {
     Regex::new(&nonblank(d)?).map_err(|cause| D::Error::custom(format!("regex: {cause}")))
+}
+fn optional_pattern<'de, D: Deserializer<'de>>(d: D) -> Field<Option<Regex>, D::Error> {
+    pattern(d).map(Some)
 }
 fn patterns<'de, D: Deserializer<'de>>(d: D) -> Field<Vec<Regex>, D::Error> {
     Vec::<NonBlank>::deserialize(d)?
@@ -209,6 +215,10 @@ struct RawRule {
     text_wrap: Option<TextWrap>,
     #[serde(default, deserialize_with = "present")]
     text_framed: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    text_geometry: Option<Value>,
+    #[serde(default, deserialize_with = "optional_pattern")]
+    scroll_marker: Option<Regex>,
 }
 
 /// The prefixes that open a composer's first and continuation rows.
@@ -324,6 +334,8 @@ struct RawCapability {
     submission: Option<RawSubmissions>,
     #[serde(default, deserialize_with = "present")]
     text: Option<RawComposerText>,
+    #[serde(default, deserialize_with = "present")]
+    geometry: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -551,6 +563,10 @@ pub(super) struct Rule {
     pub(crate) text_wrap: Option<TextWrap>,
     /// Whether this rule's region start row frames the composer, replacing `composer.text.framed`.
     pub(crate) text_framed: Option<bool>,
+    /// Fit fields that replace the profile's `composer.geometry` values in this rule's regions.
+    pub(crate) text_geometry: Option<GeometryOverride>,
+    /// The indicator the native draws while its window hides earlier text rows.
+    pub(crate) scroll_marker: Option<Regex>,
 }
 #[derive(Clone)]
 pub(super) struct Capability {
@@ -630,14 +646,15 @@ pub(super) struct Profile {
     pub(crate) detection: Option<Capability>,
     pub(crate) composer: Option<Capability>,
     pub(crate) composer_text: Option<ComposerTextSpec>,
+    pub(crate) composer_geometry: Option<ComposerGeometry>,
     pub(crate) submissions: [Option<ComposerSubmission>; 2],
     pub(crate) answers: Vec<Answer>,
     pub(crate) director_delivery: Option<DirectorDelivery>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum TextWrap {
+pub(crate) enum TextWrap {
     /// Rows join with nothing.
     Char,
     /// A row break matches nothing or exactly one literal space.
@@ -668,6 +685,69 @@ pub(super) struct ComposerTextSpec {
     placeholders: Vec<Placeholder>,
 }
 
+/// The fit fields a `composer_text` rule's `text_geometry` replaces.
+#[derive(Clone, Default)]
+pub(super) struct GeometryOverride {
+    margin_columns: Option<u16>,
+    first_row_margin_columns: Option<u16>,
+    text_window: Option<TextWindow>,
+    reserved_rows: Option<ReservedRows>,
+    transient_rows: Option<u16>,
+    wrap_slack_rows: Option<u16>,
+    carried_space: Option<bool>,
+    fit_wrap: Option<TextWrap>,
+    collapsed_paste: Option<Option<CollapsedPaste>>,
+}
+
+impl GeometryOverride {
+    /// `base` with every fit field this override declares replaced.
+    fn apply(&self, base: &ComposerGeometry) -> ComposerGeometry {
+        let fields = self.clone();
+        ComposerGeometry {
+            margin_columns: fields.margin_columns.unwrap_or(base.margin_columns),
+            first_row_margin_columns: fields
+                .first_row_margin_columns
+                .unwrap_or(base.first_row_margin_columns),
+            text_window: fields
+                .text_window
+                .unwrap_or_else(|| base.text_window.clone()),
+            reserved_rows: fields
+                .reserved_rows
+                .unwrap_or_else(|| base.reserved_rows.clone()),
+            transient_rows: fields.transient_rows.unwrap_or(base.transient_rows),
+            wrap_slack_rows: fields.wrap_slack_rows.unwrap_or(base.wrap_slack_rows),
+            carried_space: fields.carried_space.unwrap_or(base.carried_space),
+            fit_wrap: fields.fit_wrap.unwrap_or(base.fit_wrap),
+            collapsed_paste: fields.collapsed_paste.unwrap_or(base.collapsed_paste),
+            min_rows: base.min_rows,
+            min_columns: base.min_columns,
+        }
+    }
+}
+
+impl Profile {
+    /// The effective geometry of `rule_id`, one of the profile's `composer.text` rules, or
+    /// `None` when the profile declares no composer geometry or lists no such rule.
+    pub(super) fn composer_geometry(&self, rule_id: &str) -> Option<ComposerGeometry> {
+        let geometry = self.composer_geometry.as_ref()?;
+        self.composer_text
+            .as_ref()?
+            .rule_ids
+            .iter()
+            .any(|id| id == rule_id)
+            .then_some(())?;
+        let rule = self
+            .rules
+            .iter()
+            .find(|rule| rule.id == rule_id)
+            .expect("composer.text rule ids name profile rules");
+        Some(match &rule.text_geometry {
+            Some(fields) => fields.apply(geometry),
+            None => geometry.clone(),
+        })
+    }
+}
+
 /// The composer text of one screen: its rule region, the rows the text spans and its segments.
 #[derive(Debug, Clone)]
 pub(crate) struct ComposerText {
@@ -675,9 +755,30 @@ pub(crate) struct ComposerText {
     region: crate::coding_agent::detector::ScreenRegion,
     #[cfg(test)]
     rows: usize,
+    #[cfg(test)]
+    rule_id: String,
     segments: Vec<Segment>,
     /// Leading literal text the native CLI consumes as a mode switch instead of drawing it.
     mode_prefix: Option<String>,
+    /// The screen's bottom edge closed the region.
+    clipped: bool,
+    /// The native's window hides earlier text rows: its scroll marker shows, or, for a rule
+    /// without one, the text fills the native window `V₀`.
+    scrolled: bool,
+    /// The screen displays a native marker for hidden text.
+    explicit_scroll: bool,
+}
+
+/// How pre-submit composer text compares with the written literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompareOutcome {
+    /// The segments consume the whole literal.
+    Complete,
+    /// A clipped or scrolled region holds a contiguous run of the literal: from its first
+    /// scalar when only clipped, from any offset when scrolled.
+    Partial,
+    /// Any other text, including text extending beyond the literal.
+    Contradicts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -690,8 +791,48 @@ enum Segment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextItem {
     Char(char),
-    /// A word-wrap row break, which matches nothing or one literal space.
+    /// A word-wrap row break, which can hide consecutive literal spaces.
     Break,
+}
+
+fn match_text_item(
+    literal: &[char],
+    positions: BTreeSet<usize>,
+    item: TextItem,
+) -> BTreeSet<usize> {
+    match item {
+        TextItem::Char(character) => positions
+            .into_iter()
+            .filter(|&at| literal.get(at) == Some(&character))
+            .map(|at| at + 1)
+            .collect(),
+        TextItem::Break => {
+            let mut joined = BTreeSet::new();
+            for at in positions {
+                if joined.last().is_some_and(|last| *last >= at) {
+                    continue;
+                }
+                let spaces = literal[at..].iter().take_while(|&&ch| ch == ' ').count();
+                joined.extend(at..=at + spaces);
+            }
+            joined
+        }
+    }
+}
+
+pub(super) fn matches_word_wrapped_rows(literal: &str, rows: &[&str]) -> bool {
+    let literal = literal.chars().collect::<Vec<_>>();
+    let items = rows.iter().enumerate().flat_map(|(index, row)| {
+        (index > 0)
+            .then_some(TextItem::Break)
+            .into_iter()
+            .chain(row.chars().map(TextItem::Char))
+    });
+    items
+        .fold(BTreeSet::from([0]), |positions, item| {
+            match_text_item(&literal, positions, item)
+        })
+        .contains(&literal.len())
 }
 
 /// The offset where `regex` matches `text` when the match starts at offset 0.
@@ -703,20 +844,56 @@ fn anchored_end(regex: &Regex, text: &str) -> Option<usize> {
 }
 
 impl ComposerTextSpec {
+    /// The wrap mode of the regions `rule` bounds: its `text_wrap` over the profile's `wrap`.
+    pub(super) fn wrap_of(&self, rule: &Rule) -> TextWrap {
+        rule.text_wrap.unwrap_or(self.wrap)
+    }
+
     /// The composer text of the trimmed `rows` of `region` that `rule` bounds, or `None` when
-    /// the first row does not open with the first-row prefix.
+    /// the first row opens with neither prefix it may take. `clipped` records that the screen's
+    /// bottom edge closed the region, and `window` is the native window `V₀` at the screen's
+    /// size, which classifies a rule without a scroll marker as scrolled.
     pub(super) fn read(
         &self,
         rule: &Rule,
         region: crate::coding_agent::detector::ScreenRegion,
         rows: &[String],
+        clipped: bool,
+        window: Option<usize>,
+        can_mark_scroll: impl Fn(usize) -> bool,
     ) -> Option<ComposerText> {
         let prefixes = rule.text_prefixes.as_ref().unwrap_or(&self.prefixes);
-        let wrap = rule.text_wrap.unwrap_or(self.wrap);
+        let wrap = self.wrap_of(rule);
         let framed = rule.text_framed.unwrap_or(self.framed);
-        let rows = if framed { rows.get(1..)? } else { rows };
+        let stripped = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| match &rule.scroll_marker {
+                Some(marker) if can_mark_scroll(index) => (
+                    marker.replace_all(row, "").into_owned(),
+                    marker.is_match(row),
+                ),
+                _ => (row.clone(), false),
+            })
+            .collect::<Vec<_>>();
+        let marked = stripped.iter().any(|(_, marked)| *marked);
+        let unframed = if framed {
+            stripped.get(1..)?
+        } else {
+            &stripped
+        };
+        let rows = unframed
+            .iter()
+            .filter(|(row, emptied)| !(*emptied && row.is_empty()))
+            .map(|(row, _)| row.as_str())
+            .collect::<Vec<_>>();
         let (first, rest) = rows.split_first()?;
-        let mut joined = first[anchored_end(&prefixes.first_prefix, first)?..].to_owned();
+        let opening = anchored_end(&prefixes.first_prefix, first).or_else(|| {
+            marked
+                .then(|| anchored_end(&prefixes.continuation_prefix, first))
+                .flatten()
+        })?;
+        let mut joined = first[opening..].to_owned();
         let mut breaks = BTreeSet::new();
         let mut count = 1;
         for row in rest {
@@ -728,14 +905,23 @@ impl ComposerTextSpec {
             count += 1;
         }
         #[cfg(not(test))]
-        let _ = (region, count);
+        let _ = region;
+        let scrolled = match &rule.scroll_marker {
+            Some(_) => marked,
+            None => window == Some(count),
+        };
         Some(ComposerText {
             #[cfg(test)]
             region,
             #[cfg(test)]
             rows: count,
+            #[cfg(test)]
+            rule_id: rule.id.clone(),
             segments: self.segments(&joined, &breaks, wrap)?,
             mode_prefix: self.mode_prefix.clone(),
+            clipped,
+            scrolled,
+            explicit_scroll: marked,
         })
     }
 
@@ -796,10 +982,44 @@ impl ComposerTextSpec {
     }
 }
 
+#[cfg(test)]
+impl ComposerText {
+    /// The offset in the written literal of the first scalar a text segment covers, or `None`
+    /// when the text holds no character outside placeholders before a lines placeholder.
+    pub(crate) fn first_text_offset(&self) -> Option<usize> {
+        let mut offset = 0;
+        for segment in &self.segments {
+            match segment {
+                Segment::Text(items)
+                    if items.iter().any(|item| matches!(item, TextItem::Char(_))) =>
+                {
+                    return Some(offset);
+                }
+                Segment::Text(_) => {}
+                Segment::Scalars(count) => offset += count,
+                Segment::Lines(_) => return None,
+            }
+        }
+        None
+    }
+
+    /// Whether the region is clipped or scrolled, so a contiguous run of a literal compares
+    /// `Partial`.
+    pub(crate) fn clipped_or_scrolled(&self) -> bool {
+        self.clipped || self.scrolled
+    }
+}
+
 impl ComposerText {
     #[cfg(test)]
     pub(crate) fn region(&self) -> crate::coding_agent::detector::ScreenRegion {
         self.region
+    }
+
+    /// The `composer.text` rule whose region the text was read from.
+    #[cfg(test)]
+    pub(crate) fn rule_id(&self) -> &str {
+        &self.rule_id
     }
 
     #[cfg(test)]
@@ -807,11 +1027,11 @@ impl ComposerText {
         self.rows
     }
 
-    /// Whether the segments consume exactly the literal written as `chunks`, in order: text
-    /// consumes its own characters, a scalars placeholder its count of scalars and a lines
-    /// placeholder one whole chunk of its line count. A literal beginning with the mode prefix
-    /// matches with or without it, because the native CLI may draw or consume the prefix.
-    pub(crate) fn matches(&self, chunks: &[&str]) -> bool {
+    /// How the segments compare with the literal written as `chunks`, in order: text consumes
+    /// its own characters, a scalars placeholder its count of scalars and a lines placeholder
+    /// one whole chunk of its line count. A literal beginning with the mode prefix compares
+    /// with or without it, because the native CLI may draw or consume the prefix.
+    pub(crate) fn compare(&self, chunks: &[&str]) -> CompareOutcome {
         let characters = chunks
             .iter()
             .flat_map(|chunk| chunk.chars())
@@ -822,11 +1042,37 @@ impl ComposerText {
             .map(|prefix| prefix.chars().collect::<Vec<_>>())
             .filter(|prefix| characters.starts_with(prefix))
             .map(|prefix| prefix.len());
-        self.matches_after(chunks, &characters, 0)
-            || consumed.is_some_and(|skipped| self.matches_after(chunks, &characters, skipped))
+        let skips = std::iter::once(0).chain(consumed).collect::<Vec<_>>();
+        let ends = |skipped: usize, any_offset: bool| {
+            self.ends_after(chunks, &characters, skipped, any_offset)
+        };
+        if !self.explicit_scroll
+            && skips
+                .iter()
+                .any(|&skipped| ends(skipped, false).contains(&(characters.len() - skipped)))
+        {
+            return CompareOutcome::Complete;
+        }
+        let partial = (self.clipped || self.scrolled)
+            && skips
+                .iter()
+                .any(|&skipped| !ends(skipped, self.scrolled).is_empty());
+        if partial {
+            CompareOutcome::Partial
+        } else {
+            CompareOutcome::Contradicts
+        }
     }
 
-    fn matches_after(&self, chunks: &[&str], characters: &[char], skipped: usize) -> bool {
+    /// The literal offsets, past the `skipped` prefix, at which the segments can finish when
+    /// they start at its first scalar, or at any offset when `any_offset`.
+    fn ends_after(
+        &self,
+        chunks: &[&str],
+        characters: &[char],
+        skipped: usize,
+        any_offset: bool,
+    ) -> BTreeSet<usize> {
         let literal = &characters[skipped..];
         let mut whole_chunks = std::collections::BTreeMap::new();
         let mut start = 0;
@@ -837,20 +1083,15 @@ impl ComposerText {
             }
             start = end;
         }
-        let mut positions = BTreeSet::from([0]);
+        let mut positions = if any_offset {
+            (0..=literal.len()).collect()
+        } else {
+            BTreeSet::from([0])
+        };
         for segment in &self.segments {
             positions = match segment {
-                Segment::Text(items) => items.iter().fold(positions, |positions, item| {
-                    let consume = |wanted: char| {
-                        positions
-                            .iter()
-                            .filter(move |&&at| literal.get(at) == Some(&wanted))
-                            .map(|at| at + 1)
-                    };
-                    match item {
-                        TextItem::Char(character) => consume(*character).collect(),
-                        TextItem::Break => positions.iter().copied().chain(consume(' ')).collect(),
-                    }
+                Segment::Text(items) => items.iter().fold(positions, |positions, &item| {
+                    match_text_item(literal, positions, item)
                 }),
                 Segment::Scalars(count) => positions
                     .iter()
@@ -865,10 +1106,10 @@ impl ComposerText {
                     .collect(),
             };
             if positions.is_empty() {
-                return false;
+                break;
             }
         }
-        positions.contains(&literal.len())
+        positions
     }
 }
 
@@ -990,7 +1231,7 @@ fn operation_capture(raw: RawOperation, matchers: &[Matcher]) -> Result<Capture>
     validate_capture(&capture, matchers)?;
     Ok(capture)
 }
-fn compile_rule(raw: RawRule) -> Result<Rule> {
+fn compile_rule(backend: CodingAgent, raw: RawRule) -> Result<Rule> {
     let kind = raw.observation;
     let continues = kind == ObservationKind::PermissionContinuation;
     let continuation = match (
@@ -1056,10 +1297,18 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         "only composer_empty rules declare a suggestion style",
     )?;
     require(
-        (raw.text_prefixes.is_none() && raw.text_wrap.is_none() && raw.text_framed.is_none())
+        (raw.text_prefixes.is_none()
+            && raw.text_wrap.is_none()
+            && raw.text_framed.is_none()
+            && raw.text_geometry.is_none()
+            && raw.scroll_marker.is_none())
             || kind == ObservationKind::ComposerText,
-        "only composer_text rules declare text_prefixes, text_wrap or text_framed",
+        "only composer_text rules declare text_prefixes, text_wrap, text_framed, text_geometry or scroll_marker",
     )?;
+    let text_geometry = raw
+        .text_geometry
+        .map(|value| geometry_override(&value).map_err(|field| invalid_geometry(backend, &field)))
+        .transpose()?;
     Ok(Rule {
         id: raw.id.0,
         priority: raw.priority,
@@ -1075,6 +1324,8 @@ fn compile_rule(raw: RawRule) -> Result<Rule> {
         text_prefixes: raw.text_prefixes,
         text_wrap: raw.text_wrap,
         text_framed: raw.text_framed,
+        text_geometry,
+        scroll_marker: raw.scroll_marker,
     })
 }
 fn validate_gates(
@@ -1341,7 +1592,7 @@ fn compile_profile(backend: CodingAgent, raw: RawProfile) -> Result<Profile> {
     let rules = raw
         .rules
         .into_iter()
-        .map(compile_rule)
+        .map(|rule| compile_rule(backend, rule))
         .collect::<Result<Vec<_>>>()?;
     let mut identities = BTreeSet::new();
     for rule in &rules {
@@ -1358,10 +1609,28 @@ fn compile_profile(backend: CodingAgent, raw: RawProfile) -> Result<Profile> {
     };
     let detection = group(&capabilities.detection, Group::Detection)?;
     let composer = group(&capabilities.composer, Group::Composer)?;
-    let (submission, text) = match capabilities.composer {
-        Some(composer) => (composer.submission, composer.text),
-        None => (None, None),
+    require(
+        capabilities
+            .detection
+            .as_ref()
+            .is_none_or(|detection| detection.geometry.is_none()),
+        "only the composer capability declares composer geometry",
+    )?;
+    let (submission, text, geometry) = match capabilities.composer {
+        Some(composer) => (composer.submission, composer.text, composer.geometry),
+        None => (None, None, None),
     };
+    let composer_geometry = match (&submission, geometry) {
+        (Some(_), None) => Err(invalid(format!(
+            "composer plan for {} requires composer geometry",
+            backend.name()
+        ))),
+        (_, geometry) => geometry
+            .map(|value| {
+                profile_geometry(&value).map_err(|field| invalid_geometry(backend, &field))
+            })
+            .transpose(),
+    }?;
     let composer_text = match (&submission, text) {
         (Some(_), None) => Err(invalid(format!(
             "composer plan for {} requires composer text extraction",
@@ -1400,6 +1669,7 @@ fn compile_profile(backend: CodingAgent, raw: RawProfile) -> Result<Profile> {
         detection,
         composer,
         composer_text,
+        composer_geometry,
         submissions,
         answers,
         director_delivery,
@@ -1458,6 +1728,212 @@ fn composer_text_spec(
         framed: raw.framed,
         wrap: raw.wrap,
         placeholders,
+    })
+}
+
+const FIT_FIELDS: [&str; 9] = [
+    "margin_columns",
+    "first_row_margin_columns",
+    "text_window",
+    "reserved_rows",
+    "transient_rows",
+    "wrap_slack_rows",
+    "carried_space",
+    "fit_wrap",
+    "collapsed_paste",
+];
+const MINIMUM_FIELDS: [&str; 2] = ["min_rows", "min_columns"];
+
+fn invalid_geometry(backend: CodingAgent, field: &str) -> CafleetError {
+    invalid(format!(
+        "composer geometry of {} is invalid: {field}",
+        backend.name()
+    ))
+}
+
+/// A count of at least `min` that fits a terminal dimension.
+fn count(value: &Value, min: u64) -> Option<u16> {
+    value
+        .as_u64()
+        .filter(|count| *count >= min)
+        .and_then(|count| u16::try_from(count).ok())
+}
+
+/// A nonempty list of `[min_rows, value]` pairs with strictly increasing `min_rows` of at
+/// least 1 and every value at least `min_value`.
+fn steps(value: &Value, min_value: u64) -> Option<Vec<(u16, u16)>> {
+    let steps = value
+        .as_array()?
+        .iter()
+        .map(|step| match step.as_array()?.as_slice() {
+            [rows, value] => Some((count(rows, 1)?, count(value, min_value)?)),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let increasing = steps.windows(2).all(|pair| pair[0].0 < pair[1].0);
+    (!steps.is_empty() && increasing).then_some(steps)
+}
+
+fn text_window(value: &Value) -> Field<TextWindow, String> {
+    let field = |name: &str| format!("text_window.{name}");
+    let Some(object) = value.as_object() else {
+        return value
+            .is_null()
+            .then_some(TextWindow::Unbounded)
+            .ok_or_else(|| "text_window".to_owned());
+    };
+    let keys = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    if keys == BTreeSet::from(["fraction", "offset", "min"]) {
+        let fraction = object["fraction"]
+            .as_f64()
+            .filter(|fraction| (0.0..=1.0).contains(fraction))
+            .ok_or_else(|| field("fraction"))?;
+        let offset = count(&object["offset"], 0).ok_or_else(|| field("offset"))?;
+        let min = count(&object["min"], 1).ok_or_else(|| field("min"))?;
+        Ok(TextWindow::Fraction {
+            fraction,
+            offset,
+            min,
+        })
+    } else if keys.contains("steps") && keys.is_subset(&BTreeSet::from(["steps", "uncapped_from"]))
+    {
+        let steps = steps(&object["steps"], 1).ok_or_else(|| field("steps"))?;
+        let last = steps.last().expect("a step list is nonempty").0;
+        let uncapped_from = match object.get("uncapped_from") {
+            Some(Value::Null) => None,
+            Some(value) => {
+                Some(count(value, u64::from(last) + 1).ok_or_else(|| field("uncapped_from"))?)
+            }
+            None => return Err(field("uncapped_from")),
+        };
+        Ok(TextWindow::Steps {
+            steps,
+            uncapped_from,
+        })
+    } else {
+        Err("text_window".to_owned())
+    }
+}
+
+fn reserved_rows(value: &Value) -> Field<ReservedRows, String> {
+    if let Some(rows) = count(value, 0) {
+        return Ok(ReservedRows::Fixed(rows));
+    }
+    match value.as_object() {
+        Some(object) if object.len() == 1 && object.contains_key("steps") => {
+            steps(&object["steps"], 0)
+                .map(ReservedRows::Steps)
+                .ok_or_else(|| "reserved_rows.steps".to_owned())
+        }
+        _ => Err("reserved_rows".to_owned()),
+    }
+}
+
+fn collapsed_paste(value: &Value) -> Field<Option<CollapsedPaste>, String> {
+    let Some(object) = value.as_object() else {
+        return value
+            .is_null()
+            .then_some(None)
+            .ok_or_else(|| "collapsed_paste".to_owned());
+    };
+    let keys = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    if keys != BTreeSet::from(["min_scalars", "rows"]) {
+        return Err("collapsed_paste".to_owned());
+    }
+    let min_scalars = object["min_scalars"]
+        .as_u64()
+        .filter(|scalars| *scalars >= 1)
+        .ok_or_else(|| "collapsed_paste.min_scalars".to_owned())?;
+    let rows = count(&object["rows"], 1)
+        .filter(|rows| *rows == 1)
+        .ok_or_else(|| "collapsed_paste.rows".to_owned())?;
+    Ok(Some(CollapsedPaste { min_scalars, rows }))
+}
+
+/// The fit fields `value` declares, or the path of its first invalid field. Keys outside
+/// `allowed` are invalid fields themselves.
+fn fit_fields(value: &Value, allowed: &[&str]) -> Field<GeometryOverride, String> {
+    let object = value.as_object().ok_or_else(|| "geometry".to_owned())?;
+    if let Some(unknown) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(unknown.clone());
+    }
+    let dimension = |name: &str, min: u64| -> Field<Option<u16>, String> {
+        object
+            .get(name)
+            .map(|value| count(value, min).ok_or_else(|| name.to_owned()))
+            .transpose()
+    };
+    Ok(GeometryOverride {
+        margin_columns: dimension("margin_columns", 0)?,
+        first_row_margin_columns: dimension("first_row_margin_columns", 0)?,
+        text_window: object.get("text_window").map(text_window).transpose()?,
+        reserved_rows: object.get("reserved_rows").map(reserved_rows).transpose()?,
+        transient_rows: dimension("transient_rows", 0)?,
+        wrap_slack_rows: dimension("wrap_slack_rows", 0)?
+            .map(|rows| {
+                (rows <= 1)
+                    .then_some(rows)
+                    .ok_or_else(|| "wrap_slack_rows".to_owned())
+            })
+            .transpose()?,
+        carried_space: object
+            .get("carried_space")
+            .map(|value| value.as_bool().ok_or_else(|| "carried_space".to_owned()))
+            .transpose()?,
+        fit_wrap: object
+            .get("fit_wrap")
+            .map(|value| TextWrap::deserialize(value).map_err(|_| "fit_wrap".to_owned()))
+            .transpose()?,
+        collapsed_paste: object
+            .get("collapsed_paste")
+            .map(collapsed_paste)
+            .transpose()?,
+    })
+}
+
+fn geometry_override(value: &Value) -> Field<GeometryOverride, String> {
+    fit_fields(value, &FIT_FIELDS)
+}
+
+fn profile_geometry(value: &Value) -> Field<ComposerGeometry, String> {
+    let allowed = FIT_FIELDS
+        .iter()
+        .chain(&MINIMUM_FIELDS)
+        .copied()
+        .collect::<Vec<_>>();
+    let fields = fit_fields(value, &allowed)?;
+    let object = value.as_object().expect("fit_fields accepted an object");
+    let required = |name: &str| object.get(name).ok_or_else(|| name.to_owned());
+    let minimum = |name: &str| {
+        required(name).and_then(|value| count(value, 1).ok_or_else(|| name.to_owned()))
+    };
+    let missing = |name: &str| name.to_owned();
+    Ok(ComposerGeometry {
+        margin_columns: fields
+            .margin_columns
+            .ok_or_else(|| missing("margin_columns"))?,
+        first_row_margin_columns: fields
+            .first_row_margin_columns
+            .ok_or_else(|| missing("first_row_margin_columns"))?,
+        text_window: fields.text_window.ok_or_else(|| missing("text_window"))?,
+        reserved_rows: fields
+            .reserved_rows
+            .ok_or_else(|| missing("reserved_rows"))?,
+        transient_rows: fields
+            .transient_rows
+            .ok_or_else(|| missing("transient_rows"))?,
+        wrap_slack_rows: fields
+            .wrap_slack_rows
+            .ok_or_else(|| missing("wrap_slack_rows"))?,
+        carried_space: fields
+            .carried_space
+            .ok_or_else(|| missing("carried_space"))?,
+        fit_wrap: fields.fit_wrap.ok_or_else(|| missing("fit_wrap"))?,
+        collapsed_paste: fields
+            .collapsed_paste
+            .ok_or_else(|| missing("collapsed_paste"))?,
+        min_rows: minimum("min_rows")?,
+        min_columns: minimum("min_columns")?,
     })
 }
 
@@ -1580,6 +2056,30 @@ impl ProfileCatalog {
     /// The backend's Director delivery, or `None` when its profile declares none.
     pub(crate) fn director_delivery(&self, backend: CodingAgent) -> Option<&DirectorDelivery> {
         self.profile(backend)?.director_delivery.as_ref()
+    }
+    /// The backend's profile-level `(min_rows, min_columns)`, or `None` when its profile
+    /// declares no composer geometry.
+    pub(crate) fn composer_minimum(&self, backend: CodingAgent) -> Option<(u16, u16)> {
+        self.profile(backend)?
+            .composer_geometry
+            .as_ref()
+            .map(|geometry| (geometry.min_rows, geometry.min_columns))
+    }
+    /// The effective geometry of `rule_id`, one of the backend's `composer.text` rules, or
+    /// `None` when the profile declares no composer geometry or lists no such rule.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "delivery reads the composer geometry once fit selection lands"
+        )
+    )]
+    pub(crate) fn composer_geometry(
+        &self,
+        backend: CodingAgent,
+        rule_id: &str,
+    ) -> Option<ComposerGeometry> {
+        self.profile(backend)?.composer_geometry(rule_id)
     }
 }
 
@@ -1790,6 +2290,7 @@ pub(crate) mod test_support {
     use crate::coding_agent::catalog::*;
     use crate::coding_agent::detector::MatchEvidence;
     use crate::coding_agent::detector::ScreenObservation;
+    use crate::coding_agent::geometry::Headroom;
     use serde_json::Map;
     use serde_json::json;
 
@@ -2486,6 +2987,17 @@ pub(crate) mod test_support {
         PlainLimit,
         PostSubmit,
         UnsubmittedLiteral,
+        Geometry,
+        GeometryHold,
+    }
+
+    /// The observation eligibility a `geometry_hold` screen classifies with.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+    enum HoldEligibility {
+        #[serde(rename = "hold:geometry")]
+        HoldGeometry,
+        #[serde(rename = "composer_empty")]
+        ComposerEmpty,
     }
 
     /// The literal written before a pre-submit screen was captured: the text itself, or
@@ -2541,6 +3053,24 @@ pub(crate) mod test_support {
             multiplexer: EvidenceMultiplexer,
             expected_literal: ExpectedLiteral,
         },
+        Geometry {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+            text_columns: i64,
+            visible_text_rows: u64,
+            text_rows: u64,
+            /// The literal typed into an unreadable `Partial` screen, which shows no text.
+            #[serde(default, deserialize_with = "present")]
+            typed_literal: Option<ExpectedLiteral>,
+            /// The `composer.text` rule an unreadable screen fits, since none is selected there.
+            #[serde(default, deserialize_with = "present")]
+            rule_id: Option<NonBlank>,
+        },
+        GeometryHold {
+            operation: ComposerOperation,
+            multiplexer: EvidenceMultiplexer,
+            expected_eligibility: HoldEligibility,
+        },
     }
 
     impl ComposerEvidence {
@@ -2550,7 +3080,11 @@ pub(crate) mod test_support {
                 Self::UnsubmittedLiteral {
                     expected_literal, ..
                 } => Some(expected_literal),
-                Self::Framing { .. } | Self::PlainLimit { .. } | Self::PostSubmit { .. } => None,
+                Self::Framing { .. }
+                | Self::PlainLimit { .. }
+                | Self::PostSubmit { .. }
+                | Self::Geometry { .. }
+                | Self::GeometryHold { .. } => None,
             }
         }
 
@@ -2579,6 +3113,16 @@ pub(crate) mod test_support {
                     *multiplexer,
                     ComposerEvidenceKind::UnsubmittedLiteral,
                 ),
+                Self::Geometry {
+                    operation,
+                    multiplexer,
+                    ..
+                } => (*operation, *multiplexer, ComposerEvidenceKind::Geometry),
+                Self::GeometryHold {
+                    operation,
+                    multiplexer,
+                    ..
+                } => (*operation, *multiplexer, ComposerEvidenceKind::GeometryHold),
             }
         }
 
@@ -2591,7 +3135,10 @@ pub(crate) mod test_support {
                     plain_literal_limit,
                     ..
                 } => *plain_literal_limit == plan.plain_literal_limit,
-                Self::PostSubmit { .. } | Self::UnsubmittedLiteral { .. } => true,
+                Self::PostSubmit { .. }
+                | Self::UnsubmittedLiteral { .. }
+                | Self::Geometry { .. }
+                | Self::GeometryHold { .. } => true,
             }
         }
     }
@@ -2764,6 +3311,18 @@ pub(crate) mod test_support {
                             "duplicate operation/multiplexer/evidence kind",
                         )?;
                     }
+                    let kinds = claims
+                        .iter()
+                        .map(|(_, _, kind)| *kind)
+                        .collect::<BTreeSet<_>>();
+                    require(
+                        !kinds.contains(&ComposerEvidenceKind::GeometryHold)
+                            || !(kinds.contains(&ComposerEvidenceKind::Geometry)
+                                || kinds.contains(&ComposerEvidenceKind::UnsubmittedLiteral)),
+                        &format!(
+                            "geometry_hold fixture {id} carries a geometry or unsubmitted_literal record"
+                        ),
+                    )?;
                 }
             }
         }
@@ -2826,9 +3385,33 @@ pub(crate) mod test_support {
         Ok(())
     }
 
+    /// Whether `record`'s rendered literal fits the visible text rows `V₀` of the screen's live
+    /// composer; a screen without one is fitted whole.
+    fn literal_fits(
+        file: &Value,
+        live: Option<&crate::coding_agent::geometry::LiveComposer>,
+        record: &PreSubmitRecord,
+    ) -> Result<bool> {
+        let Some(live) = live else {
+            return Ok(true);
+        };
+        let framing = literal_framing(file, record.operation)?;
+        let rendered = format!(
+            "{}{}",
+            String::from_utf8(record.operation.prefix().to_vec())
+                .expect("an operation prefix is UTF-8"),
+            record.literal
+        );
+        Ok(live
+            .geometry
+            .fit_rows(&rendered, live.cols, framing)
+            .is_some_and(|rows| rows <= live.geometry.visible_text_rows(live.rows, Headroom::Zero)))
+    }
+
     /// Every pre-submit screen that paints its rows (a `lines` field) extracts, through its
-    /// backend's `composer.text`, a composer region overlapping no masked row whose text
-    /// matches the screen's `expected_literal`.
+    /// backend's `composer.text`, a composer region overlapping no masked row. Its text
+    /// compares `Complete` with the screen's `expected_literal`, or `Partial` when the literal
+    /// does not fit the screen's visible text rows.
     pub(crate) fn validate_pre_submit_fixtures(
         files: &Value,
         catalog: &ProfileCatalog,
@@ -2844,10 +3427,11 @@ pub(crate) mod test_support {
                 .as_object()
                 .ok_or_else(|| invalid("object required"))?
             {
-                for literal in pre_submit_literals(screen)? {
+                for record in pre_submit_records(screen)? {
                     if screen.get("lines").is_none() {
                         continue;
                     }
+                    let literal = &record.literal;
                     let snapshot =
                         crate::coding_agent::detector::test_support::replay_native_fixture(
                             &crate::digest::canonical_json(screen),
@@ -2870,10 +3454,585 @@ pub(crate) mod test_support {
                             &format!("pre-submit fixture {id} masks a composer row"),
                         )?;
                     }
+                    let outcome = composer.compare(&[literal.as_str()]);
+                    let fits = literal_fits(
+                        file,
+                        detector.composer_geometry(&snapshot)?.as_ref(),
+                        &record,
+                    )?;
                     require(
-                        composer.matches(&[literal.as_str()]),
+                        outcome == CompareOutcome::Complete
+                            || (!fits && outcome == CompareOutcome::Partial),
                         &format!("pre-submit fixture {id} does not render its expected_literal"),
                     )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The wrap of the rule `rule_id` (its `text_wrap`, else the `composer.text` wrap) and the
+    /// literal framing of `operation`'s plan, which fit a pre-submit literal.
+    fn literal_framing(file: &Value, operation: ComposerOperation) -> Result<LiteralFraming> {
+        LiteralFraming::deserialize(
+            &file["profile"]["capabilities"]["composer"]["submission"][operation_name(operation)]
+                ["literal_framing"],
+        )
+        .map_err(|cause| invalid(cause.to_string()))
+    }
+
+    /// A `composer_empty` geometry hold classifies as `composer_empty`, and the rung selector
+    /// fits no rung of the shortest message, so it fits none of any message.
+    fn validate_composer_empty_hold(
+        id: &str,
+        file: &Value,
+        observed: ObservationKind,
+        live: Option<&crate::coding_agent::geometry::LiveComposer>,
+    ) -> Result<()> {
+        require(
+            observed == ObservationKind::ComposerEmpty,
+            &format!(
+                "geometry_hold fixture {id} classifies as {}, not composer_empty",
+                observation_kind_name(observed)
+            ),
+        )?;
+        let framing = LiteralFraming::deserialize(
+            &file["profile"]["capabilities"]["composer"]["submission"]["prompt"]["literal_framing"],
+        )
+        .map_err(|cause| invalid(cause.to_string()))?;
+        let shortest = crate::broker::MessageRecord::fixture(1, 1, 1, "x");
+        require(
+            crate::runtime::preview::select_rung(&shortest, 0, live, framing, &|_| true)
+                == crate::runtime::preview::RungSelection::ComposerTooSmall,
+            &format!("geometry_hold fixture {id} fits a preview rung"),
+        )
+    }
+
+    /// One `geometry` record of a screen.
+    struct GeometryRecord {
+        operation: ComposerOperation,
+        multiplexer: EvidenceMultiplexer,
+        text_columns: i64,
+        visible_text_rows: u64,
+        text_rows: u64,
+        typed_literal: Option<String>,
+        rule_id: Option<String>,
+    }
+
+    fn geometry_records(records: &[ComposerEvidence]) -> Vec<GeometryRecord> {
+        records
+            .iter()
+            .filter_map(|record| match record {
+                ComposerEvidence::Geometry {
+                    operation,
+                    multiplexer,
+                    text_columns,
+                    visible_text_rows,
+                    text_rows,
+                    typed_literal,
+                    rule_id,
+                } => Some(GeometryRecord {
+                    operation: *operation,
+                    multiplexer: *multiplexer,
+                    text_columns: *text_columns,
+                    visible_text_rows: *visible_text_rows,
+                    text_rows: *text_rows,
+                    typed_literal: typed_literal.as_ref().map(ExpectedLiteral::text),
+                    rule_id: rule_id.as_ref().map(|rule| rule.0.clone()),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Each `geometry` record of an unreadable `Partial` screen names its `rule_id` and
+    /// `typed_literal`: its `text_columns` and `visible_text_rows` are `T` and `V₀` of that rule
+    /// at the screen's size, the typed literal does not fit `V₀`, and `text_rows` equals `V₀`.
+    fn validate_unreadable_partial(
+        id: &str,
+        file: &Value,
+        screen: &Value,
+        geometry: &[GeometryRecord],
+        backend: CodingAgent,
+        catalog: &ProfileCatalog,
+    ) -> Result<()> {
+        let dimension = |key: &str| {
+            screen[key]
+                .as_u64()
+                .and_then(|value| u16::try_from(value).ok())
+                .ok_or_else(|| invalid(format!("screen {key} required")))
+        };
+        let (rows, cols) = (dimension("rows")?, dimension("cols")?);
+        for record in geometry {
+            let (Some(typed), Some(rule)) = (&record.typed_literal, &record.rule_id) else {
+                return Err(invalid(format!(
+                    "unreadable partial fixture {id} records no typed_literal and rule_id"
+                )));
+            };
+            let rule_geometry = catalog.composer_geometry(backend, rule).ok_or_else(|| {
+                invalid(format!(
+                    "unreadable partial fixture {id} names no composer.text rule {rule}"
+                ))
+            })?;
+            let columns = rule_geometry
+                .text_columns(cols)
+                .map(|columns| i64::try_from(columns).expect("text columns fit in i64"));
+            let text_columns = record.text_columns;
+            require(
+                columns == Some(text_columns),
+                &format!(
+                    "geometry fixture {id} records text_columns {text_columns}, not {}",
+                    columns.map_or_else(|| "none".to_owned(), |columns| columns.to_string())
+                ),
+            )?;
+            let visible = u64::try_from(rule_geometry.visible_text_rows(rows, Headroom::Zero))
+                .expect("visible rows fit in u64");
+            let recorded = record.visible_text_rows;
+            require(
+                recorded == visible,
+                &format!(
+                    "geometry fixture {id} records visible_text_rows {recorded}, not {visible}"
+                ),
+            )?;
+            let framing = literal_framing(file, record.operation)?;
+            let rendered = format!(
+                "{}{}",
+                String::from_utf8(record.operation.prefix().to_vec())
+                    .expect("an operation prefix is UTF-8"),
+                typed
+            );
+            let fitted = rule_geometry
+                .fit_rows(&rendered, cols, framing)
+                .map(|rows| u64::try_from(rows).expect("fitted rows fit in u64"));
+            require(
+                fitted.is_none_or(|fitted| fitted > visible),
+                &format!("unreadable partial fixture {id} fits its window"),
+            )?;
+            let text_rows = record.text_rows;
+            require(
+                text_rows == visible,
+                &format!(
+                    "geometry fixture {id} records text_rows {text_rows}, not the window {visible}"
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Checks every painted screen (a `lines` field) of a profile that reads composer text:
+    ///
+    /// - A screen observed as `composer_empty` selects exactly one `composer.text` rule.
+    /// - Each `geometry` record's `text_columns` and `visible_text_rows` equal `T` and `V₀`
+    ///   recomputed from the selected rule's effective geometry at the screen's size.
+    /// - On a pre-submit screen, the text is read through the fitted rule, each record's
+    ///   `text_rows` equals the extracted text rows and, when the record's literal fits in
+    ///   `V₀`, its fitted rows `R`.
+    pub(crate) fn validate_geometry_fixtures(
+        files: &Value,
+        catalog: &ProfileCatalog,
+    ) -> Result<()> {
+        for (name, file) in files
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?
+        {
+            let backend = crate::coding_agent::coding_agent(name)
+                .ok_or_else(|| invalid(format!("unknown backend {name}")))?;
+            if file["profile"]["capabilities"]["composer"]["text"].is_null() {
+                continue;
+            }
+            let detector = crate::coding_agent::Detector::new(catalog, backend, None);
+            for (id, screen) in file["screens"]
+                .as_object()
+                .ok_or_else(|| invalid("object required"))?
+            {
+                if screen.get("lines").is_none() {
+                    continue;
+                }
+                let records = match screen.get("composer_evidence") {
+                    Some(records) => Vec::<ComposerEvidence>::deserialize(records)
+                        .map_err(|cause| invalid(cause.to_string()))?,
+                    None => Vec::new(),
+                };
+                let snapshot = crate::coding_agent::detector::test_support::replay_native_fixture(
+                    &crate::digest::canonical_json(screen),
+                    |_| {},
+                    crate::coding_agent::detector::test_support::fixture_alternate(screen),
+                    None,
+                );
+                let live = detector.composer_geometry(&snapshot)?;
+                let observed = detector.observe(&snapshot)?.kind;
+                require(
+                    observed != ObservationKind::ComposerEmpty || live.is_some(),
+                    &format!("verified-empty fixture {id} selects no single composer.text rule"),
+                )?;
+                if records.iter().any(|record| {
+                    matches!(
+                        record,
+                        ComposerEvidence::GeometryHold {
+                            expected_eligibility: HoldEligibility::ComposerEmpty,
+                            ..
+                        }
+                    )
+                }) {
+                    validate_composer_empty_hold(id, file, observed, live.as_ref())?;
+                }
+                let geometry = geometry_records(&records);
+                if geometry.is_empty() {
+                    continue;
+                }
+                if geometry.iter().any(|record| record.typed_literal.is_some()) {
+                    require(
+                        records
+                            .iter()
+                            .all(|record| record.expected_literal().is_none()),
+                        &format!(
+                            "unreadable partial fixture {id} carries an unsubmitted_literal record"
+                        ),
+                    )?;
+                    require(
+                        detector.composer_text(&snapshot)?.is_none(),
+                        &format!("unreadable partial fixture {id} has extractable composer text"),
+                    )?;
+                    validate_unreadable_partial(id, file, screen, &geometry, backend, catalog)?;
+                    continue;
+                }
+                let live = live.ok_or_else(|| {
+                    invalid(format!(
+                        "geometry fixture {id} selects no single composer.text rule"
+                    ))
+                })?;
+                let columns = live
+                    .geometry
+                    .text_columns(live.cols)
+                    .map(|columns| i64::try_from(columns).expect("text columns fit in i64"));
+                let visible =
+                    u64::try_from(live.geometry.visible_text_rows(live.rows, Headroom::Zero))
+                        .expect("visible rows fit in u64");
+                let literals = pre_submit_records(screen)?;
+                let composer = if literals.is_empty() {
+                    None
+                } else {
+                    let composer = detector.composer_text(&snapshot)?.ok_or_else(|| {
+                        invalid(format!(
+                            "geometry fixture {id} has no extractable composer text"
+                        ))
+                    })?;
+                    require(
+                        catalog
+                            .composer_geometry(backend, composer.rule_id())
+                            .as_ref()
+                            == Some(&live.geometry),
+                        &format!(
+                            "geometry fixture {id} reads its text through a rule other than its fitted rule"
+                        ),
+                    )?;
+                    Some(composer)
+                };
+                for record in geometry {
+                    let text_columns = record.text_columns;
+                    require(
+                        columns == Some(text_columns),
+                        &format!(
+                            "geometry fixture {id} records text_columns {text_columns}, not {}",
+                            columns
+                                .map_or_else(|| "none".to_owned(), |columns| columns.to_string())
+                        ),
+                    )?;
+                    let recorded = record.visible_text_rows;
+                    require(
+                        recorded == visible,
+                        &format!(
+                            "geometry fixture {id} records visible_text_rows {recorded}, not {visible}"
+                        ),
+                    )?;
+                    let Some(composer) = &composer else {
+                        continue;
+                    };
+                    let text_rows = record.text_rows;
+                    let extracted =
+                        u64::try_from(composer.row_count()).expect("a row count fits in u64");
+                    require(
+                        text_rows == extracted,
+                        &format!(
+                            "geometry fixture {id} records text_rows {text_rows}, not the extracted {extracted}"
+                        ),
+                    )?;
+                    let multiplexer = match record.multiplexer {
+                        EvidenceMultiplexer::Tmux => crate::multiplexer::MuxBackend::Tmux,
+                        EvidenceMultiplexer::Herdr => crate::multiplexer::MuxBackend::Herdr,
+                    };
+                    let Some(literal) = literals.iter().find(|literal| {
+                        literal.operation == record.operation && literal.multiplexer == multiplexer
+                    }) else {
+                        continue;
+                    };
+                    let framing = literal_framing(file, record.operation)?;
+                    let rendered = format!(
+                        "{}{}",
+                        String::from_utf8(record.operation.prefix().to_vec())
+                            .expect("an operation prefix is UTF-8"),
+                        literal.literal
+                    );
+                    let fitted = live
+                        .geometry
+                        .fit_rows(&rendered, live.cols, framing)
+                        .map(|rows| u64::try_from(rows).expect("fitted rows fit in u64"))
+                        .ok_or_else(|| {
+                            invalid(format!("geometry fixture {id} has no text columns"))
+                        })?;
+                    let slack = if live.geometry.fit_wrap == TextWrap::Word {
+                        u64::from(live.geometry.wrap_slack_rows)
+                    } else {
+                        0
+                    };
+                    let lowest = fitted.saturating_sub(slack);
+                    require(
+                        fitted > visible || (lowest..=fitted).contains(&text_rows),
+                        &format!(
+                            "geometry fixture {id} records text_rows {text_rows}, not the fitted {lowest}..={fitted}"
+                        ),
+                    )?;
+                    let clipped =
+                        screen["rows"].as_u64() == Some(u64::from(composer.region().bottom));
+                    require(
+                        fitted <= visible || clipped || text_rows == visible,
+                        &format!(
+                            "geometry fixture {id} records text_rows {text_rows}, not the window {visible}"
+                        ),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The parts of a geometry fixture id,
+    /// `<backend>-<version>-composer-geometry-<case>-<mux>-<rows>x<cols>-<n>`, whose `<case>` is
+    /// `[<composer>-]<state>-<kind>`: `composer` names a second composer of the profile (empty
+    /// for its member composer), `state` is `idle` or `working`, and `kind` is the evidence the
+    /// screen carries (`empty`, `one`, `v0`, `partial`, `hold` or an extra such as `scrolled`).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct MatrixCell {
+        pub(crate) composer: String,
+        pub(crate) state: String,
+        pub(crate) kind: String,
+        pub(crate) multiplexer: String,
+        pub(crate) rows: u16,
+        pub(crate) cols: u16,
+    }
+
+    impl MatrixCell {
+        /// Whether this capture fills the `rows` x `cols` cell of its multiplexer's axis. A herdr
+        /// pane on the primary screen gets a PTY one column narrower than its split, so a herdr
+        /// capture also fills the cell one column wider than itself.
+        fn fills(&self, rows: u16, cols: u16) -> bool {
+            self.rows == rows
+                && (self.cols == cols || (self.multiplexer == "herdr" && self.cols + 1 == cols))
+        }
+    }
+
+    /// The matrix cell a geometry fixture id names, or `None` for any other fixture.
+    pub(crate) fn matrix_cell(id: &str) -> Option<MatrixCell> {
+        let (_, rest) = id.split_once("-composer-geometry-")?;
+        let mut parts = rest.rsplitn(4, '-');
+        let (_ordinal, size, multiplexer, case) =
+            (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+        let (rows, cols) = size.split_once('x')?;
+        let mut tokens = case.rsplitn(3, '-');
+        let (kind, state) = (tokens.next()?, tokens.next()?);
+        Some(MatrixCell {
+            composer: tokens.next().unwrap_or("").to_owned(),
+            state: state.to_owned(),
+            kind: kind.to_owned(),
+            multiplexer: multiplexer.to_owned(),
+            rows: rows.parse().ok()?,
+            cols: cols.parse().ok()?,
+        })
+    }
+
+    /// The prompt plan of every profile with an executable composer cites, on each multiplexer,
+    /// the §12 matrix for each of its composers: at every size of that multiplexer's axis and
+    /// in each state, either a `hold` screen or, at a typeable size, the `empty`, `one`, `v0`
+    /// and `partial` screens, `v0` waived when the window holds one row. Each composer state in
+    /// [`UNCAPTURED_COMPOSER_STATES`] is exempt.
+    pub(crate) fn validate_geometry_matrix(files: &Value, catalog: &ProfileCatalog) -> Result<()> {
+        validate_geometry_matrix_except(files, catalog, UNCAPTURED_COMPOSER_STATES)
+    }
+
+    /// A composer state no native capture produced, which the §12 matrix check exempts on
+    /// every multiplexer and size.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct UncapturedState {
+        pub(crate) backend: &'static str,
+        pub(crate) composer: &'static str,
+        pub(crate) state: &'static str,
+        pub(crate) reason: &'static str,
+    }
+
+    pub(crate) const UNCAPTURED_COMPOSER_STATES: &[UncapturedState] = &[UncapturedState {
+        backend: "hermes",
+        composer: "tui",
+        state: "working",
+        reason: "the geometry capture run hit a gateway error before collecting working-state \
+                 screens across the required sizes; transient_rows stays unmeasured",
+    }];
+
+    /// [`validate_geometry_matrix`] with `exempt` in place of the recorded uncaptured states.
+    pub(crate) fn validate_geometry_matrix_except(
+        files: &Value,
+        catalog: &ProfileCatalog,
+        exempt: &[UncapturedState],
+    ) -> Result<()> {
+        for (name, file) in files
+            .as_object()
+            .ok_or_else(|| invalid("object required"))?
+        {
+            let composer = &file["profile"]["capabilities"]["composer"];
+            let plan = &composer["submission"]["prompt"];
+            if plan.is_null() {
+                continue;
+            }
+            let backend = crate::coding_agent::coding_agent(name)
+                .ok_or_else(|| invalid(format!("unknown backend {name}")))?;
+            let detector = crate::coding_agent::Detector::new(catalog, backend, None);
+            let cited: Ids = serde_json::from_value(plan["fixture_ids"].clone())
+                .map_err(|cause| invalid(cause.to_string()))?;
+            let cells = cited
+                .0
+                .iter()
+                .filter_map(|id| matrix_cell(id).map(|cell| (id.clone(), cell)))
+                .collect::<Vec<_>>();
+            let text_rules = array(&composer["text"]["rule_ids"])?
+                .iter()
+                .map(|rule| rule.as_str().expect("validated composer text rule ids"))
+                .collect::<Vec<_>>();
+            let mut geometries: Vec<crate::coding_agent::geometry::ComposerGeometry> = Vec::new();
+            for rule in &text_rules {
+                let geometry = catalog
+                    .composer_geometry(backend, rule)
+                    .expect("a composer text rule has a geometry");
+                if !geometries.contains(&geometry) {
+                    geometries.push(geometry);
+                }
+            }
+            let mut composers = cells
+                .iter()
+                .map(|(_, cell)| cell.composer.clone())
+                .collect::<BTreeSet<_>>();
+            composers.insert(String::new());
+            let missing = |multiplexer: &str, what: String| {
+                invalid(format!(
+                    "composer geometry for {name} requires measured fixtures on {multiplexer}: {what}"
+                ))
+            };
+            require(
+                composers.len() >= geometries.len(),
+                &format!(
+                    "composer geometry for {name} requires measured fixtures on tmux: one composer per text geometry"
+                ),
+            )?;
+            let minimum = (
+                u16::try_from(
+                    composer["geometry"]["min_rows"]
+                        .as_u64()
+                        .expect("validated minimum"),
+                )
+                .expect("a minimum fits u16"),
+                u16::try_from(
+                    composer["geometry"]["min_columns"]
+                        .as_u64()
+                        .expect("validated minimum"),
+                )
+                .expect("a minimum fits u16"),
+            );
+            for composer_name in &composers {
+                for multiplexer in ["tmux", "herdr"] {
+                    let mut sizes = vec![(9, 80), (9, 120), (12, 80), (12, 120)];
+                    if multiplexer == "tmux" {
+                        sizes.extend([minimum, (5, 40), (2, 10)]);
+                    } else {
+                        let smallest = cells
+                            .iter()
+                            .filter(|(_, cell)| {
+                                &cell.composer == composer_name
+                                    && cell.multiplexer == multiplexer
+                                    && cell.rows < 9
+                            })
+                            .map(|(_, cell)| (cell.rows, cell.cols))
+                            .min_by_key(|(rows, cols)| u32::from(*rows) * u32::from(*cols))
+                            .ok_or_else(|| {
+                                missing(
+                                    multiplexer,
+                                    format!("{composer_name} the smallest rendered split"),
+                                )
+                            })?;
+                        sizes.push(smallest);
+                    }
+                    sizes.sort_unstable();
+                    sizes.dedup();
+                    for (rows, cols) in sizes {
+                        for state in ["idle", "working"] {
+                            if exempt.iter().any(|uncaptured| {
+                                uncaptured.backend == name
+                                    && uncaptured.composer == composer_name
+                                    && uncaptured.state == state
+                            }) {
+                                continue;
+                            }
+                            let here = cells
+                                .iter()
+                                .filter(|(_, cell)| {
+                                    &cell.composer == composer_name
+                                        && cell.multiplexer == multiplexer
+                                        && cell.state == state
+                                        && cell.fills(rows, cols)
+                                })
+                                .collect::<Vec<_>>();
+                            let kinds = here
+                                .iter()
+                                .map(|(_, cell)| cell.kind.as_str())
+                                .collect::<BTreeSet<_>>();
+                            if kinds.contains("hold") {
+                                continue;
+                            }
+                            let at = format!("{composer_name} {state} at {rows}x{cols}");
+                            let (empty_id, _) = here
+                                .iter()
+                                .find(|(_, cell)| cell.kind == "empty")
+                                .ok_or_else(|| {
+                                    missing(multiplexer, format!("{at}: empty or hold"))
+                                })?;
+                            let screen = &file["screens"][empty_id.as_str()];
+                            let snapshot =
+                                crate::coding_agent::detector::test_support::replay_native_fixture(
+                                    &crate::digest::canonical_json(screen),
+                                    |_| {},
+                                    crate::coding_agent::detector::test_support::fixture_alternate(
+                                        screen,
+                                    ),
+                                    None,
+                                );
+                            let live = detector.composer_geometry(&snapshot)?.ok_or_else(|| {
+                                invalid(format!(
+                                    "geometry fixture {empty_id} selects no single composer.text rule"
+                                ))
+                            })?;
+                            let visible =
+                                live.geometry.visible_text_rows(live.rows, Headroom::Zero);
+                            let mut required = vec!["one", "partial"];
+                            if visible > 1 {
+                                required.push("v0");
+                            }
+                            for kind in required {
+                                require(
+                                    kinds.contains(kind),
+                                    &format!(
+                                        "composer geometry for {name} requires measured fixtures on {multiplexer}: {at}: {kind}"
+                                    ),
+                                )?;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2906,14 +4065,6 @@ pub(crate) mod test_support {
                     literal: literal.text(),
                 })
             })
-            .collect())
-    }
-
-    /// The distinct `expected_literal` texts of a screen's pre-submit records.
-    fn pre_submit_literals(screen: &Value) -> Result<BTreeSet<String>> {
-        Ok(pre_submit_records(screen)?
-            .into_iter()
-            .map(|record| record.literal)
             .collect())
     }
 
@@ -2989,6 +4140,7 @@ pub(crate) mod test_support {
         let catalog = ProfileCatalog::from_files(files)?;
         validate_provenance(&with_synthetic_composer_evidence(files)?)?;
         validate_pre_submit_fixtures(files, &catalog)?;
+        validate_geometry_fixtures(files, &catalog)?;
         Ok(catalog)
     }
 
@@ -3011,6 +4163,19 @@ pub(crate) mod test_support {
             .expect("composer rule ids")
             .push(json!(SYNTHETIC_TEXT_RULE));
         composer["text"] = synthetic_text_declaration();
+        composer["text"]["rule_ids"] = composer["rule_ids"].clone();
+        composer["geometry"] = synthetic_geometry();
+    }
+
+    /// The `composer.geometry` of the synthetic composer, which collapses its typed text into
+    /// one row: every screen row holds text, so a canonical preview fits a 24x80 pane whole.
+    pub(crate) fn synthetic_geometry() -> Value {
+        json!({
+            "margin_columns":0,"first_row_margin_columns":0,
+            "text_window":{"fraction":1,"offset":0,"min":2},"reserved_rows":0,
+            "transient_rows":0,"wrap_slack_rows":0,"carried_space":false,"fit_wrap":"char","collapsed_paste":null,
+            "min_rows":2,"min_columns":18
+        })
     }
 
     pub(crate) fn synthetic_text_rule() -> Value {
@@ -3170,6 +4335,8 @@ pub(crate) mod test_support {
             }
             validate_provenance(files)?;
             validate_pre_submit_fixtures(files, &catalog)?;
+            validate_geometry_fixtures(files, &catalog)?;
+            validate_geometry_matrix(files, &catalog)?;
             validate_expected_observations(files, &catalog)?;
             Ok(Self {
                 capture_origin: "bundled_unknown",
@@ -3202,12 +4369,14 @@ pub(crate) mod test_support {
             capabilities["detection"]["fixture_ids"] = json!([id]);
             capabilities["composer"] = json!({
                 "rule_ids":["synthetic-composer_empty", SYNTHETIC_TEXT_RULE],"fixture_ids":[id],
-                "text":synthetic_text_declaration(),
+                "text":synthetic_text_declaration(),"geometry":synthetic_geometry(),
                 "submission":{
                     "prompt":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"","submit_hex":"0d","fixture_ids":[id]},
                     "exec":{"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":"0d","fixture_ids":[id]}
                 }
             });
+            capabilities["composer"]["text"]["rule_ids"] =
+                capabilities["composer"]["rule_ids"].clone();
             capabilities["answers"] = json!([{
                 "decision":"allow","request_rule_id":RULE,"answer_rule_id":format!("{name}-allow-plan"),
                 "choice_id":"allow-once","focus_matcher_id":"allow","fixture_ids":[id],
@@ -3591,9 +4760,11 @@ pub(crate) mod test_support {
         let exec = json!({"literal_framing":"plain","plain_literal_limit":null,"prefix_hex":"2120","submit_hex":exec.unwrap_or("0d"),"fixture_ids":[EXEC_FIXTURE]});
         value["codex"]["profile"]["capabilities"]["composer"] = json!({
             "rule_ids":[EMPTY, SYNTHETIC_TEXT_RULE],"fixture_ids":[FIXTURE],
-            "text":synthetic_text_declaration(),
+            "text":synthetic_text_declaration(),"geometry":synthetic_geometry(),
             "submission":{"prompt":prompt,"exec":exec}
         });
+        value["codex"]["profile"]["capabilities"]["composer"]["text"]["rule_ids"] =
+            json!([EMPTY, SYNTHETIC_TEXT_RULE]);
         value
     }
 
@@ -9110,7 +10281,8 @@ mod tests {
             })
         }
 
-        /// A composer box: a `> ` first row, `  ` continuation rows and a `-- footer` row.
+        /// A composer box: a `> ` first row, `  ` continuation rows and a `-- footer` row, fitted
+        /// with a 2-cell margin on every row and a fixed 7-row window.
         pub(super) fn box_definition(wrap: &str) -> Value {
             let mut value = definition(Some("0d"), Some("0d"));
             value["codex"]["profile"]["rules"] = json!([
@@ -9128,6 +10300,12 @@ mod tests {
                     {"pattern":"\\[Pasted (?P<count>[0-9]+) chars\\]","unit":"scalars"},
                     {"pattern":"\\[Pasted text #[0-9]+: (?P<count>[0-9]+) lines\\]","unit":"lines"}
                 ]
+            });
+            composer["geometry"] = json!({
+                "margin_columns":2,"first_row_margin_columns":0,
+                "text_window":{"fraction":0,"offset":0,"min":7},"reserved_rows":1,
+                "transient_rows":0,"wrap_slack_rows":0,"carried_space":false,"fit_wrap":wrap,"collapsed_paste":null,
+                "min_rows":2,"min_columns":10
             });
             value
         }
@@ -9242,9 +10420,16 @@ mod tests {
                 matches: true,
             },
             MatchCase {
-                name: "word wrap matches no two spaces at a row break",
+                name: "word wrap can hide multiple spaces at a row break",
                 wrap: "word",
                 rows: &["> hello", "  world"],
+                chunks: &["hello  world"],
+                matches: true,
+            },
+            MatchCase {
+                name: "word wrap preserves visible spaces within a row",
+                wrap: "word",
+                rows: &["> hello world"],
                 chunks: &["hello  world"],
                 matches: false,
             },
@@ -9314,19 +10499,344 @@ mod tests {
         ];
 
         #[test]
-        fn extracted_composer_text_matches_the_written_literal_segment_by_segment() {
+        fn a_whole_composer_compares_complete_or_contradicting_segment_by_segment() {
             for case in MATCH_CASES {
                 let composer = detector(&box_definition(case.wrap))
                     .composer_text(&box_screen(case.rows))
                     .unwrap()
                     .unwrap_or_else(|| panic!("{}: the composer text is extractable", case.name));
+                let expected = if case.matches {
+                    CompareOutcome::Complete
+                } else {
+                    CompareOutcome::Contradicts
+                };
                 assert_eq!(
-                    composer.matches(case.chunks),
-                    case.matches,
+                    composer.compare(case.chunks),
+                    expected,
                     "{}: {:?} against {:?}",
                     case.name,
                     case.rows,
                     case.chunks
+                );
+            }
+        }
+
+        /// `rows` painted on the last screen rows with no footer, so the screen bottom closes
+        /// the composer region.
+        fn clipped_screen(rows: &[&str]) -> ScreenSnapshot {
+            screen_of(format!("\x1b[2J\x1b[{};1H{}", 25 - rows.len(), rows.join("\r\n")).as_bytes())
+        }
+
+        /// The box profile whose composer window holds `window` text rows.
+        pub(super) fn windowed(window: u64) -> Value {
+            let mut value = box_definition("char");
+            value["codex"]["profile"]["capabilities"]["composer"]["geometry"]["text_window"] =
+                json!({"fraction":0,"offset":0,"min":window});
+            value
+        }
+
+        fn rule_mut<'a>(value: &'a mut Value, id: &str) -> &'a mut Value {
+            value["codex"]["profile"]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|rule| rule["id"] == id)
+                .unwrap_or_else(|| panic!("the box profile has {id}"))
+        }
+
+        const TOP_MARKER: &str = "^─ ↑ [0-9]+ more ─$";
+
+        /// The box profile with a `window`-row composer whose text rule declares `marker` and
+        /// also opens its region at a row matching `start`.
+        fn marked(window: u64, marker: &str, start: &str) -> Value {
+            let mut value = windowed(window);
+            let rule = rule_mut(&mut value, BOX_TEXT);
+            rule["scroll_marker"] = json!(marker);
+            rule["region"]["start_pattern"] = json!(format!("^> |{start}"));
+            rule["matchers"][0]["pattern"] = json!(format!("^> [^ ]|{start}"));
+            value
+        }
+
+        pub(super) fn top_marked(window: u64) -> Value {
+            marked(window, TOP_MARKER, TOP_MARKER)
+        }
+
+        /// The top-marked box profile whose text rule is framed by its first region row: a
+        /// `┌──` border, or the marker row in its place.
+        fn framed_marked() -> Value {
+            let mut value = box_definition("char");
+            let rule = rule_mut(&mut value, BOX_TEXT);
+            rule["scroll_marker"] = json!(TOP_MARKER);
+            rule["text_framed"] = json!(true);
+            rule["region"]["start_pattern"] = json!(format!("^┌─+$|{TOP_MARKER}"));
+            rule["matchers"][0]["pattern"] = json!("^(> |─ ↑ )");
+            value
+        }
+
+        struct CompareCase {
+            name: &'static str,
+            definition: fn() -> Value,
+            clipped: bool,
+            rows: &'static [&'static str],
+            literal: &'static str,
+            outcome: CompareOutcome,
+        }
+
+        fn wide() -> Value {
+            windowed(7)
+        }
+
+        fn capped() -> Value {
+            windowed(3)
+        }
+
+        fn top_marked_wide() -> Value {
+            top_marked(7)
+        }
+
+        fn top_marked_capped() -> Value {
+            top_marked(3)
+        }
+
+        fn inline_marked() -> Value {
+            marked(7, " ↑$", "  .* ↑$")
+        }
+
+        const COMPARE_CASES: &[CompareCase] = &[
+            CompareCase {
+                name: "a clipped region holding the literal's first scalars",
+                definition: wide,
+                clipped: true,
+                rows: &["> ab"],
+                literal: "abc",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a clipped region holding the whole literal",
+                definition: wide,
+                clipped: true,
+                rows: &["> abc"],
+                literal: "abc",
+                outcome: CompareOutcome::Complete,
+            },
+            CompareCase {
+                name: "a clipped region holding a later run",
+                definition: wide,
+                clipped: true,
+                rows: &["> bc"],
+                literal: "abc",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a clipped region with text past the literal",
+                definition: wide,
+                clipped: true,
+                rows: &["> abcd"],
+                literal: "abc",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a clipped region holding other text",
+                definition: wide,
+                clipped: true,
+                rows: &["> xy"],
+                literal: "abc",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a clipped region holding wrapped first scalars",
+                definition: wide,
+                clipped: true,
+                rows: &["> abc", "  def"],
+                literal: "abcdefghi",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "an unclipped region missing the literal's tail",
+                definition: wide,
+                clipped: false,
+                rows: &["> ab"],
+                literal: "abc",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a region at the window cap holding a later run",
+                definition: capped,
+                clipped: false,
+                rows: &["> def", "  ghi", "  jkl"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a region at the window cap holding the first run",
+                definition: capped,
+                clipped: false,
+                rows: &["> abc", "  def", "  ghi"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a region below the window cap holding a later run",
+                definition: capped,
+                clipped: false,
+                rows: &["> def", "  ghi"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a region at the window cap with a gap in its run",
+                definition: capped,
+                clipped: false,
+                rows: &["> def", "  xyz", "  jkl"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a region at the window cap with text past the literal",
+                definition: capped,
+                clipped: false,
+                rows: &["> jkl", "  mno", "  pqr"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a clipped region at the window cap holding a later run",
+                definition: capped,
+                clipped: true,
+                rows: &["> def", "  ghi", "  jkl"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a clipped region below the window cap holding a later run",
+                definition: capped,
+                clipped: true,
+                rows: &["> def", "  ghi"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a top-marked region holding a later run",
+                definition: top_marked_wide,
+                clipped: false,
+                rows: &["─ ↑ 1 more ─", "  def", "  ghi"],
+                literal: "abcdefghi",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a top-marked region whose visible text equals the literal",
+                definition: top_marked_wide,
+                clipped: false,
+                rows: &["─ ↑ 1 more ─", "  def", "  ghi"],
+                literal: "defghi",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a top-marked region with text past the literal",
+                definition: top_marked_wide,
+                clipped: false,
+                rows: &["─ ↑ 1 more ─", "  ghij"],
+                literal: "abcdefghi",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a marked rule at its window cap without the marker is not scrolled",
+                definition: top_marked_capped,
+                clipped: false,
+                rows: &["> def", "  ghi", "  jkl"],
+                literal: "abcdefghijklmno",
+                outcome: CompareOutcome::Contradicts,
+            },
+            CompareCase {
+                name: "a clipped top-marked region holding a later run",
+                definition: top_marked_wide,
+                clipped: true,
+                rows: &["─ ↑ 1 more ─", "  def"],
+                literal: "abcdefghi",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "an inline marker is stripped from the first visible row",
+                definition: inline_marked,
+                clipped: false,
+                rows: &["  def ↑", "  ghi"],
+                literal: "abcdefghi",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "an inline-marked region whose visible text equals the literal",
+                definition: inline_marked,
+                clipped: false,
+                rows: &["  def ↑", "  ghi"],
+                literal: "defghi",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a framed region reads below its border",
+                definition: framed_marked,
+                clipped: false,
+                rows: &["┌──", "> abc"],
+                literal: "abc",
+                outcome: CompareOutcome::Complete,
+            },
+            CompareCase {
+                name: "a marker row opening a framed region is its frame",
+                definition: framed_marked,
+                clipped: false,
+                rows: &["─ ↑ 1 more ─", "  def", "  ghi"],
+                literal: "defghi",
+                outcome: CompareOutcome::Partial,
+            },
+            CompareCase {
+                name: "a marker row in a framed region still marks it scrolled",
+                definition: framed_marked,
+                clipped: false,
+                rows: &["─ ↑ 1 more ─", "  def", "  ghi"],
+                literal: "abcdefghi",
+                outcome: CompareOutcome::Partial,
+            },
+        ];
+
+        #[test]
+        fn a_clipped_or_scrolled_region_holding_a_contiguous_run_compares_partial() {
+            for case in COMPARE_CASES {
+                let screen = if case.clipped {
+                    clipped_screen(case.rows)
+                } else {
+                    box_screen(case.rows)
+                };
+                let composer = detector(&(case.definition)())
+                    .composer_text(&screen)
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{}: the composer text is extractable", case.name));
+                assert_eq!(
+                    composer.compare(&[case.literal]),
+                    case.outcome,
+                    "{}: {:?} against {:?}",
+                    case.name,
+                    case.rows,
+                    case.literal
+                );
+            }
+        }
+
+        #[test]
+        fn the_mode_prefix_stays_optional_on_a_clipped_region() {
+            let mut value = wide();
+            value["codex"]["profile"]["capabilities"]["composer"]["text"]["mode_prefix"] =
+                json!("! ");
+            let composer = detector(&value)
+                .composer_text(&clipped_screen(&["> ls -"]))
+                .unwrap()
+                .expect("the clipped composer text is extractable");
+            for (name, literal) in [
+                ("the mode prefix drawn", "ls -la"),
+                ("the mode prefix consumed", "! ls -la"),
+            ] {
+                assert_eq!(
+                    composer.compare(&[literal]),
+                    CompareOutcome::Partial,
+                    "{name}"
                 );
             }
         }
@@ -9475,7 +10985,11 @@ mod tests {
                     .composer_text(&box_screen(&[row]))
                     .unwrap()
                     .unwrap_or_else(|| panic!("{name}: the composer text is extractable"));
-                assert_eq!(composer.matches(&[literal]), matches, "{name}");
+                assert_eq!(
+                    composer.compare(&[literal]) == CompareOutcome::Complete,
+                    matches,
+                    "{name}"
+                );
             }
         }
 
@@ -9514,7 +11028,11 @@ mod tests {
                 ("abcdefghi", false),
                 ("abcdef--ghi", false),
             ] {
-                assert_eq!(composer.matches(&[literal]), matches, "{literal}");
+                assert_eq!(
+                    composer.compare(&[literal]) == CompareOutcome::Complete,
+                    matches,
+                    "{literal}"
+                );
             }
         }
 
@@ -9526,8 +11044,8 @@ mod tests {
                 .composer_text(&screen)
                 .unwrap()
                 .expect("a framed composer reads the rows below its frame row");
-            assert!(composer.matches(&["helloworld"]));
-            assert!(!composer.matches(&["┌────helloworld"]));
+            assert!(composer.compare(&["helloworld"]) == CompareOutcome::Complete);
+            assert!(composer.compare(&["┌────helloworld"]) != CompareOutcome::Complete);
             let unframed = region_definition("^┌─+$", "^└─+$", "^│ ", false);
             assert!(
                 detector(&unframed)
@@ -9557,8 +11075,14 @@ mod tests {
                     .composer_text(&screen)
                     .unwrap()
                     .unwrap_or_else(|| panic!("{name}: the live composer is extractable"));
-                assert!(composer.matches(&["live draft"]), "{name}");
-                assert!(!composer.matches(&["echoed earlier prompt"]), "{name}");
+                assert!(
+                    composer.compare(&["live draft"]) == CompareOutcome::Complete,
+                    "{name}"
+                );
+                assert!(
+                    composer.compare(&["echoed earlier prompt"]) != CompareOutcome::Complete,
+                    "{name}"
+                );
             }
         }
 
@@ -9585,10 +11109,10 @@ mod tests {
                 .unwrap()
                 .expect("a region closed by the screen bottom is extractable");
             assert!(
-                composer.matches(&["abcdef"]),
+                composer.compare(&["abcdef"]) == CompareOutcome::Complete,
                 "every row to the bottom is text"
             );
-            assert!(!composer.matches(&["abc"]));
+            assert!(composer.compare(&["abc"]) != CompareOutcome::Complete);
             assert_eq!(composer.row_count(), 2);
         }
 
@@ -9649,7 +11173,11 @@ mod tests {
                     .composer_text(&box_screen(rows))
                     .unwrap()
                     .unwrap_or_else(|| panic!("{name}: the composer text is extractable"));
-                assert_eq!(composer.matches(&[literal]), matches, "{name}");
+                assert_eq!(
+                    composer.compare(&[literal]) == CompareOutcome::Complete,
+                    matches,
+                    "{name}"
+                );
             }
         }
 
@@ -9692,7 +11220,11 @@ mod tests {
                     .composer_text(&box_screen(rows))
                     .unwrap()
                     .unwrap_or_else(|| panic!("{name}: the composer text is extractable"));
-                assert_eq!(composer.matches(&[literal]), matches, "{name}");
+                assert_eq!(
+                    composer.compare(&[literal]) == CompareOutcome::Complete,
+                    matches,
+                    "{name}"
+                );
             }
         }
     }
@@ -9783,6 +11315,1480 @@ mod tests {
         }
     }
 
+    mod composer_geometry {
+        use crate::coding_agent::catalog::tests::composer_text::*;
+        use crate::coding_agent::catalog::tests::*;
+
+        fn composer_mut(value: &mut Value) -> &mut Value {
+            &mut value["codex"]["profile"]["capabilities"]["composer"]
+        }
+
+        fn with_geometry(change: impl FnOnce(&mut Value)) -> Value {
+            let mut value = definition(Some("0d"), Some("0d"));
+            change(&mut composer_mut(&mut value)["geometry"]);
+            value
+        }
+
+        fn accepted(value: &Value, label: &str) -> ProfileCatalog {
+            load(value).unwrap_or_else(|error| panic!("{label}: {}", error.message()))
+        }
+
+        fn geometry_of(catalog: &ProfileCatalog, rule: &str, label: &str) -> ComposerGeometry {
+            catalog
+                .composer_geometry(CodingAgent::Codex, rule)
+                .unwrap_or_else(|| panic!("{label}: {rule} has a composer geometry"))
+        }
+
+        fn assert_invalid_field(value: &Value, field: &str, label: &str) {
+            let message = message_of(load(value), label);
+            let expected = "composer geometry of codex is invalid: ";
+            assert!(
+                message.contains(expected) && message.ends_with(field),
+                "{label}: {message}"
+            );
+        }
+
+        #[test]
+        fn an_executable_composer_plan_requires_composer_geometry() {
+            accepted(
+                &definition(Some("0d"), Some("0d")),
+                "the synthetic geometry",
+            );
+            let mut absent = definition(Some("0d"), Some("0d"));
+            composer_mut(&mut absent)
+                .as_object_mut()
+                .unwrap()
+                .remove("geometry");
+            assert_rejected(
+                &absent,
+                "composer plan for codex requires composer geometry",
+                "no composer.geometry",
+            );
+            assert!(
+                load(&with_geometry(|geometry| *geometry = Value::Null)).is_err(),
+                "a null composer.geometry"
+            );
+        }
+
+        #[test]
+        fn every_bundled_executable_composer_plan_requires_its_geometry() {
+            let files = bundled_files();
+            let mut executable = 0;
+            for (name, file) in files.as_object().unwrap() {
+                if file["profile"]["capabilities"]["composer"]["submission"].is_null() {
+                    continue;
+                }
+                executable += 1;
+                let mut single = json!({ name: file.clone() });
+                ProfileCatalog::from_files(&single)
+                    .unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+                single[name]["profile"]["capabilities"]["composer"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("geometry");
+                let message = message_of(ProfileCatalog::from_files(&single), name);
+                assert!(
+                    message.contains(&format!(
+                        "composer plan for {name} requires composer geometry"
+                    )),
+                    "{name}: {message}"
+                );
+            }
+            assert!(executable > 0, "the bundled catalog has executable plans");
+        }
+
+        struct InvalidCase {
+            name: &'static str,
+            field: &'static str,
+            change: fn(&mut Value),
+        }
+
+        const INVALID_CASES: &[InvalidCase] = &[
+            InvalidCase {
+                name: "a negative margin_columns",
+                field: "margin_columns",
+                change: |g| g["margin_columns"] = json!(-1),
+            },
+            InvalidCase {
+                name: "a string margin_columns",
+                field: "margin_columns",
+                change: |g| g["margin_columns"] = json!("4"),
+            },
+            InvalidCase {
+                name: "a negative first_row_margin_columns",
+                field: "first_row_margin_columns",
+                change: |g| g["first_row_margin_columns"] = json!(-2),
+            },
+            InvalidCase {
+                name: "a missing transient_rows",
+                field: "transient_rows",
+                change: |g| {
+                    g.as_object_mut().unwrap().remove("transient_rows");
+                },
+            },
+            InvalidCase {
+                name: "a negative transient_rows",
+                field: "transient_rows",
+                change: |g| g["transient_rows"] = json!(-1),
+            },
+            InvalidCase {
+                name: "a missing fit_wrap",
+                field: "fit_wrap",
+                change: |g| {
+                    g.as_object_mut().unwrap().remove("fit_wrap");
+                },
+            },
+            InvalidCase {
+                name: "an unknown fit_wrap",
+                field: "fit_wrap",
+                change: |g| g["fit_wrap"] = json!("line"),
+            },
+            InvalidCase {
+                name: "a missing carried_space",
+                field: "carried_space",
+                change: |g| {
+                    g.as_object_mut().unwrap().remove("carried_space");
+                },
+            },
+            InvalidCase {
+                name: "a numeric carried_space",
+                field: "carried_space",
+                change: |g| g["carried_space"] = json!(1),
+            },
+            InvalidCase {
+                name: "a wrap_slack_rows of 2",
+                field: "wrap_slack_rows",
+                change: |g| g["wrap_slack_rows"] = json!(2),
+            },
+            InvalidCase {
+                name: "a window fraction above 1",
+                field: "text_window.fraction",
+                change: |g| g["text_window"] = json!({"fraction":1.5,"offset":0,"min":1}),
+            },
+            InvalidCase {
+                name: "a negative window fraction",
+                field: "text_window.fraction",
+                change: |g| g["text_window"] = json!({"fraction":-0.1,"offset":0,"min":1}),
+            },
+            InvalidCase {
+                name: "a negative window offset",
+                field: "text_window.offset",
+                change: |g| g["text_window"] = json!({"fraction":0.5,"offset":-1,"min":1}),
+            },
+            InvalidCase {
+                name: "a zero window minimum",
+                field: "text_window.min",
+                change: |g| g["text_window"] = json!({"fraction":0,"offset":0,"min":0}),
+            },
+            InvalidCase {
+                name: "an empty window step list",
+                field: "text_window.steps",
+                change: |g| g["text_window"] = json!({"steps":[],"uncapped_from":null}),
+            },
+            InvalidCase {
+                name: "unordered window steps",
+                field: "text_window.steps",
+                change: |g| g["text_window"] = json!({"steps":[[12,4],[9,8]],"uncapped_from":null}),
+            },
+            InvalidCase {
+                name: "repeated window step rows",
+                field: "text_window.steps",
+                change: |g| g["text_window"] = json!({"steps":[[9,3],[9,4]],"uncapped_from":null}),
+            },
+            InvalidCase {
+                name: "a window step from row 0",
+                field: "text_window.steps",
+                change: |g| g["text_window"] = json!({"steps":[[0,3]],"uncapped_from":null}),
+            },
+            InvalidCase {
+                name: "a zero-row window step",
+                field: "text_window.steps",
+                change: |g| g["text_window"] = json!({"steps":[[9,0]],"uncapped_from":null}),
+            },
+            InvalidCase {
+                name: "uncapped_from at the last step",
+                field: "text_window.uncapped_from",
+                change: |g| g["text_window"] = json!({"steps":[[9,3],[12,4]],"uncapped_from":12}),
+            },
+            InvalidCase {
+                name: "uncapped_from below the last step",
+                field: "text_window.uncapped_from",
+                change: |g| g["text_window"] = json!({"steps":[[9,3],[12,4]],"uncapped_from":10}),
+            },
+            InvalidCase {
+                name: "a window step list without uncapped_from",
+                field: "text_window.uncapped_from",
+                change: |g| g["text_window"] = json!({"steps":[[9,3]]}),
+            },
+            InvalidCase {
+                name: "a window with both a fraction and steps",
+                field: "text_window",
+                change: |g| {
+                    g["text_window"] = json!({"fraction":0.5,"offset":0,"min":1,"steps":[[9,3]],"uncapped_from":null})
+                },
+            },
+            InvalidCase {
+                name: "a negative reserved_rows",
+                field: "reserved_rows",
+                change: |g| g["reserved_rows"] = json!(-1),
+            },
+            InvalidCase {
+                name: "a fraction reserved_rows",
+                field: "reserved_rows",
+                change: |g| g["reserved_rows"] = json!({"fraction":0.5,"offset":0,"min":1}),
+            },
+            InvalidCase {
+                name: "an empty reserved_rows step list",
+                field: "reserved_rows.steps",
+                change: |g| g["reserved_rows"] = json!({"steps":[]}),
+            },
+            InvalidCase {
+                name: "unordered reserved_rows steps",
+                field: "reserved_rows.steps",
+                change: |g| g["reserved_rows"] = json!({"steps":[[12,4],[9,8]]}),
+            },
+            InvalidCase {
+                name: "a negative reserved_rows step",
+                field: "reserved_rows.steps",
+                change: |g| g["reserved_rows"] = json!({"steps":[[9,-1]]}),
+            },
+            InvalidCase {
+                name: "a two-row collapsed paste",
+                field: "collapsed_paste.rows",
+                change: |g| g["collapsed_paste"] = json!({"min_scalars":1000,"rows":2}),
+            },
+            InvalidCase {
+                name: "a zero min_rows",
+                field: "min_rows",
+                change: |g| g["min_rows"] = json!(0),
+            },
+            InvalidCase {
+                name: "a zero min_columns",
+                field: "min_columns",
+                change: |g| g["min_columns"] = json!(0),
+            },
+            InvalidCase {
+                name: "the removed anchor field",
+                field: "anchor",
+                change: |g| g["anchor"] = json!("composer_row"),
+            },
+        ];
+
+        #[test]
+        fn catalog_loading_names_each_invalid_geometry_field() {
+            for case in INVALID_CASES {
+                assert_invalid_field(&with_geometry(case.change), case.field, case.name);
+            }
+        }
+
+        struct FormCase {
+            name: &'static str,
+            change: fn(&mut Value),
+        }
+
+        const FORM_CASES: &[FormCase] = &[
+            FormCase {
+                name: "an unbounded window",
+                change: |g| g["text_window"] = Value::Null,
+            },
+            FormCase {
+                name: "a fixed window",
+                change: |g| g["text_window"] = json!({"fraction":0,"offset":0,"min":6}),
+            },
+            FormCase {
+                name: "a pane-fraction window",
+                change: |g| g["text_window"] = json!({"fraction":0.5,"offset":5,"min":3}),
+            },
+            FormCase {
+                name: "a full-pane window",
+                change: |g| g["text_window"] = json!({"fraction":1,"offset":0,"min":1}),
+            },
+            FormCase {
+                name: "a step window capped at every size",
+                change: |g| g["text_window"] = json!({"steps":[[5,3],[8,6]],"uncapped_from":null}),
+            },
+            FormCase {
+                name: "a step window uncapped from a larger size",
+                change: |g| {
+                    g["text_window"] = json!({"steps":[[5,3],[6,4],[18,10]],"uncapped_from":21})
+                },
+            },
+            FormCase {
+                name: "stepped reserved rows",
+                change: |g| g["reserved_rows"] = json!({"steps":[[9,8],[12,4]]}),
+            },
+            FormCase {
+                name: "a fixed reserved row count",
+                change: |g| g["reserved_rows"] = json!(3),
+            },
+            FormCase {
+                name: "a collapsed paste",
+                change: |g| g["collapsed_paste"] = json!({"min_scalars":1000,"rows":1}),
+            },
+            FormCase {
+                name: "one wrap slack row",
+                change: |g| g["wrap_slack_rows"] = json!(1),
+            },
+            FormCase {
+                name: "a space carried to the next row",
+                change: |g| g["carried_space"] = json!(true),
+            },
+            FormCase {
+                name: "a word-wrapped fit",
+                change: |g| g["fit_wrap"] = json!("word"),
+            },
+            FormCase {
+                name: "a wider first-row prefix",
+                change: |g| g["first_row_margin_columns"] = json!(4),
+            },
+            FormCase {
+                name: "the measured claude geometry",
+                change: |g| {
+                    *g = json!({
+                        "margin_columns":4,"first_row_margin_columns":0,
+                        "text_window":{"fraction":0.5,"offset":5,"min":3},
+                        "reserved_rows":{"steps":[[9,8],[12,4]]},
+                        "transient_rows":4,"wrap_slack_rows":0,"carried_space":false,"fit_wrap":"char","collapsed_paste":null,
+                        "min_rows":9,"min_columns":80
+                    })
+                },
+            },
+        ];
+
+        #[test]
+        fn every_text_window_and_reserved_rows_form_loads_as_a_distinct_geometry() {
+            let baseline = geometry_of(
+                &accepted(
+                    &definition(Some("0d"), Some("0d")),
+                    "the synthetic geometry",
+                ),
+                SYNTHETIC_TEXT_RULE,
+                "the synthetic geometry",
+            );
+            for case in FORM_CASES {
+                let catalog = accepted(&with_geometry(case.change), case.name);
+                let geometry = geometry_of(&catalog, SYNTHETIC_TEXT_RULE, case.name);
+                assert_ne!(geometry, baseline, "{}: the form is retained", case.name);
+            }
+        }
+
+        #[test]
+        fn composer_geometry_is_offered_only_for_composer_text_rules_of_the_backend() {
+            let catalog = accepted(&box_definition("char"), "the box composer");
+            for rule in [BOX_EMPTY, BOX_TEXT] {
+                geometry_of(&catalog, rule, "a composer.text rule");
+            }
+            assert!(
+                catalog
+                    .composer_geometry(CodingAgent::Codex, "no-such-rule")
+                    .is_none(),
+                "an unknown rule"
+            );
+            for &backend in CodingAgent::all() {
+                if backend != CodingAgent::Codex {
+                    assert!(
+                        catalog.composer_geometry(backend, BOX_TEXT).is_none(),
+                        "{backend:?} has no profile in the catalog"
+                    );
+                }
+            }
+            assert!(
+                synthetic_catalog()
+                    .composer_geometry(CodingAgent::Codex, RULE)
+                    .is_none(),
+                "a profile without a composer"
+            );
+        }
+
+        fn box_rule_mut<'a>(value: &'a mut Value, rule: &str) -> &'a mut Value {
+            value["codex"]["profile"]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|candidate| candidate["id"] == rule)
+                .unwrap_or_else(|| panic!("the box profile has {rule}"))
+        }
+
+        #[test]
+        fn a_rule_text_geometry_replaces_the_profile_fit_fields_for_that_rule_only() {
+            let fields = json!({"margin_columns":6,"text_window":null,"reserved_rows":3,"transient_rows":2,"carried_space":true,"fit_wrap":"word"});
+            let mut overriding = box_definition("char");
+            box_rule_mut(&mut overriding, BOX_TEXT)["text_geometry"] = fields.clone();
+            let mut merged = box_definition("char");
+            for (key, field) in fields.as_object().unwrap() {
+                composer_mut(&mut merged)["geometry"][key] = field.clone();
+            }
+            let plain = accepted(&box_definition("char"), "no text_geometry");
+            let overriding = accepted(&overriding, "a text_geometry on the text rule");
+            let merged = accepted(&merged, "the merged profile geometry");
+            assert_eq!(
+                geometry_of(&overriding, BOX_TEXT, "the overriding rule"),
+                geometry_of(&merged, BOX_TEXT, "the merged profile"),
+                "the overriding rule takes its text_geometry over the profile values"
+            );
+            assert_eq!(
+                geometry_of(&overriding, BOX_EMPTY, "the other rule"),
+                geometry_of(&plain, BOX_EMPTY, "the plain profile"),
+                "a rule without text_geometry keeps the profile values"
+            );
+            assert_ne!(
+                geometry_of(&overriding, BOX_TEXT, "the overriding rule"),
+                geometry_of(&overriding, BOX_EMPTY, "the other rule"),
+                "the override applies to its own rule only"
+            );
+        }
+
+        #[test]
+        fn a_rule_text_geometry_rejects_minimums_and_invalid_fit_fields() {
+            for (name, fields, field) in [
+                (
+                    "a text_geometry min_rows",
+                    json!({"min_rows":9}),
+                    "min_rows",
+                ),
+                (
+                    "a text_geometry min_columns",
+                    json!({"min_columns":40}),
+                    "min_columns",
+                ),
+                (
+                    "a text_geometry zero window minimum",
+                    json!({"text_window":{"fraction":0,"offset":0,"min":0}}),
+                    "text_window.min",
+                ),
+                (
+                    "a text_geometry unordered reserved_rows steps",
+                    json!({"reserved_rows":{"steps":[[12,4],[9,8]]}}),
+                    "reserved_rows.steps",
+                ),
+                (
+                    "an unknown text_geometry field",
+                    json!({"anchor":"screen_bottom"}),
+                    "anchor",
+                ),
+            ] {
+                let mut value = box_definition("char");
+                box_rule_mut(&mut value, BOX_TEXT)["text_geometry"] = fields;
+                assert_invalid_field(&value, field, name);
+            }
+        }
+
+        #[test]
+        fn a_composer_text_rule_scroll_marker_is_a_nonblank_pattern() {
+            for (name, marker, valid) in [
+                ("an indicator pattern", json!("^─+ ↑ [0-9]+ more ─+$"), true),
+                ("a trailing arrow", json!("↑$"), true),
+                ("an invalid regex", json!("(unclosed"), false),
+                ("a blank pattern", json!(" "), false),
+                ("a number", json!(3), false),
+            ] {
+                let mut value = box_definition("char");
+                box_rule_mut(&mut value, BOX_TEXT)["scroll_marker"] = marker;
+                if valid {
+                    accepted(&value, name);
+                } else {
+                    assert!(load(&value).is_err(), "{name}: the marker is rejected");
+                }
+            }
+        }
+    }
+
+    mod geometry_matrix {
+        use crate::coding_agent::catalog::tests::composer_text::*;
+        use crate::coding_agent::catalog::tests::*;
+        use crate::runtime::preview::minimal_preview_line;
+
+        /// The box composer fitted with a 2-cell margin, a fixed 7-row window and one reserved
+        /// row, with a 5x40 minimum and room for a full window above its footer.
+        fn matrix_definition() -> Value {
+            let mut value = box_definition("char");
+            for rule in value["codex"]["profile"]["rules"].as_array_mut().unwrap() {
+                rule["region"]["max_rows"] = json!(9);
+            }
+            value["codex"]["profile"]["capabilities"]["composer"]["geometry"] = json!({
+                "margin_columns":2,"first_row_margin_columns":0,
+                "text_window":{"fraction":0,"offset":0,"min":7},"reserved_rows":1,
+                "transient_rows":0,"wrap_slack_rows":0,"carried_space":false,"fit_wrap":"char","collapsed_paste":null,
+                "min_rows":5,"min_columns":40
+            });
+            value
+        }
+
+        fn painted(rows: u16, cols: u16, composer: &[String], evidence: Value) -> Value {
+            let mut lines = vec![String::new(); usize::from(rows)];
+            for (index, row) in composer.iter().enumerate() {
+                lines[index] = row.clone();
+            }
+            lines[composer.len()] = "-- footer".into();
+            json!({
+                "native_version":VERSION,"rows":rows,"cols":cols,"alternate_screen":false,
+                "screen_seq":0,"cursor_row":0,"cursor_col":2,"lines":lines,"masked_rows":[],
+                "composer_evidence":evidence
+            })
+        }
+
+        /// The box rows of `literal` wrapped at `width` cells, of which the first `shown` appear.
+        fn box_rows(literal: &str, width: usize, shown: usize) -> Vec<String> {
+            literal
+                .as_bytes()
+                .chunks(width)
+                .take(shown)
+                .enumerate()
+                .map(|(index, chunk)| {
+                    format!(
+                        "{}{}",
+                        if index == 0 { "> " } else { "  " },
+                        std::str::from_utf8(chunk).unwrap()
+                    )
+                })
+                .collect()
+        }
+
+        /// Whether the minimal rung of a one-digit message fits `visible` rows of `width` cells,
+        /// which makes the size typeable.
+        fn typeable(width: usize, visible: usize) -> bool {
+            let message = crate::broker::MessageRecord::fixture(1, 1, 1, "x");
+            minimal_preview_line(&message)
+                .chars()
+                .count()
+                .div_ceil(width)
+                <= visible
+        }
+
+        /// The cited screens of one matrix cell, keyed by kind.
+        fn cell_screens(multiplexer: &str, rows: u16, cols: u16) -> Vec<(&'static str, Value)> {
+            let width = usize::from(cols - 2);
+            let visible = usize::from(rows - 1).min(7);
+            let geometry = |text_rows: usize| json!({"operation":"prompt","multiplexer":multiplexer,"kind":"geometry","text_columns":width,"visible_text_rows":visible,"text_rows":text_rows});
+            let unsubmitted = |literal: &str| json!({"operation":"prompt","multiplexer":multiplexer,"kind":"unsubmitted_literal","expected_literal":literal});
+            let empty = vec!["> ".to_owned()];
+            if !typeable(width, visible) {
+                let hold = json!({"operation":"prompt","multiplexer":multiplexer,"kind":"geometry_hold","expected_eligibility":"composer_empty"});
+                return vec![("hold", painted(rows, cols, &empty, json!([hold])))];
+            }
+            let literal_screen = |literal: String, shown: usize, text_rows: usize| {
+                painted(
+                    rows,
+                    cols,
+                    &box_rows(&literal, width, shown),
+                    json!([unsubmitted(&literal), geometry(text_rows)]),
+                )
+            };
+            vec![
+                ("empty", painted(rows, cols, &empty, json!([geometry(1)]))),
+                ("one", literal_screen("www".into(), 1, 1)),
+                (
+                    "v0",
+                    literal_screen("w".repeat(width * visible), visible, visible),
+                ),
+                (
+                    "partial",
+                    literal_screen("w".repeat(width * (visible + 1)), visible, visible),
+                ),
+            ]
+        }
+
+        const TMUX_SIZES: &[(u16, u16)] =
+            &[(9, 80), (9, 120), (12, 80), (12, 120), (5, 40), (2, 10)];
+        const HERDR_SIZES: &[(u16, u16)] = &[(9, 80), (9, 120), (12, 80), (12, 120), (5, 40)];
+
+        /// The box profile citing the full §12 matrix from its prompt plan.
+        fn matrix_files() -> Value {
+            matrix_files_at(TMUX_SIZES, HERDR_SIZES)
+        }
+
+        /// The box profile citing, from its prompt plan, a full set of screens captured at each
+        /// of `tmux` and `herdr` sizes.
+        fn matrix_files_at(tmux: &[(u16, u16)], herdr: &[(u16, u16)]) -> Value {
+            let mut value = matrix_definition();
+            let mut cited = vec![json!(PROMPT_FIXTURE)];
+            for (multiplexer, sizes) in [("tmux", tmux), ("herdr", herdr)] {
+                for &(rows, cols) in sizes {
+                    for state in ["idle", "working"] {
+                        for (kind, screen) in cell_screens(multiplexer, rows, cols) {
+                            let id = format!(
+                                "box-0.0.1-composer-geometry-{state}-{kind}-{multiplexer}-{rows}x{cols}-1"
+                            );
+                            value["codex"]["screens"][&id] = screen;
+                            cited.push(json!(id));
+                        }
+                    }
+                }
+            }
+            value["codex"]["profile"]["capabilities"]["composer"]["submission"]["prompt"]["fixture_ids"] =
+                json!(cited);
+            value
+        }
+
+        fn checked(files: &Value) -> Result<()> {
+            validate_geometry_matrix(files, &load(files)?)
+        }
+
+        #[test]
+        fn a_geometry_fixture_id_names_its_matrix_cell() {
+            for (id, expected) in [
+                (
+                    "claude-2.1.327-composer-geometry-idle-v0-tmux-12x80-1",
+                    Some(("", "idle", "v0", "tmux", 12, 80)),
+                ),
+                (
+                    "hermes-2026.9.24-composer-geometry-tui-working-empty-herdr-9x120-2",
+                    Some(("tui", "working", "empty", "herdr", 9, 120)),
+                ),
+                ("codex-0.170.0-composer-prompt-plain-1", None),
+            ] {
+                let cell = matrix_cell(id).map(|cell| {
+                    (
+                        cell.composer,
+                        cell.state,
+                        cell.kind,
+                        cell.multiplexer,
+                        cell.rows,
+                        cell.cols,
+                    )
+                });
+                assert_eq!(
+                    cell,
+                    expected.map(|(composer, state, kind, multiplexer, rows, cols)| {
+                        (
+                            composer.to_owned(),
+                            state.to_owned(),
+                            kind.to_owned(),
+                            multiplexer.to_owned(),
+                            rows,
+                            cols,
+                        )
+                    }),
+                    "{id}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_plan_citing_the_full_matrix_on_both_multiplexers_is_accepted() {
+            checked(&matrix_files()).unwrap_or_else(|error| panic!("{}", error.message()));
+        }
+
+        #[test]
+        fn a_herdr_capture_one_column_narrower_fills_its_split_cell() {
+            const NARROW_HERDR: &[(u16, u16)] = &[(9, 79), (9, 119), (12, 79), (12, 119), (5, 40)];
+            const NARROW_TMUX: &[(u16, u16)] =
+                &[(9, 79), (9, 120), (12, 80), (12, 120), (5, 40), (2, 10)];
+            checked(&matrix_files_at(TMUX_SIZES, NARROW_HERDR))
+                .unwrap_or_else(|error| panic!("herdr at 9x79: {}", error.message()));
+            let message = match checked(&matrix_files_at(NARROW_TMUX, HERDR_SIZES)) {
+                Ok(()) => panic!("tmux at 9x79: the 9x80 cell is unfilled"),
+                Err(error) => error.message().into_owned(),
+            };
+            assert!(
+                message.contains("composer geometry for codex requires measured fixtures on tmux")
+                    && message.contains("at 9x80"),
+                "tmux at 9x79: {message}"
+            );
+        }
+
+        #[test]
+        fn the_only_uncaptured_composer_state_is_the_hermes_tui_working_state() {
+            let exempt = UNCAPTURED_COMPOSER_STATES
+                .iter()
+                .map(|uncaptured| (uncaptured.backend, uncaptured.composer, uncaptured.state))
+                .collect::<Vec<_>>();
+            assert_eq!(exempt, [("hermes", "tui", "working")]);
+            assert!(
+                UNCAPTURED_COMPOSER_STATES
+                    .iter()
+                    .all(|uncaptured| !uncaptured.reason.trim().is_empty()),
+                "every exemption states its reason"
+            );
+        }
+
+        #[test]
+        fn an_uncaptured_composer_state_is_exempt_and_no_other() {
+            const WORKING: UncapturedState = UncapturedState {
+                backend: "codex",
+                composer: "",
+                state: "working",
+                reason: "the box composer has no working state",
+            };
+            let mut files = matrix_files();
+            let plan =
+                &mut files["codex"]["profile"]["capabilities"]["composer"]["submission"]["prompt"];
+            let cited = plan["fixture_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|id| !id.as_str().unwrap().contains("-composer-geometry-working-"))
+                .cloned()
+                .collect::<Vec<_>>();
+            plan["fixture_ids"] = json!(cited);
+            let catalog = load(&files).unwrap_or_else(|error| panic!("{}", error.message()));
+            validate_geometry_matrix_except(&files, &catalog, &[WORKING])
+                .unwrap_or_else(|error| panic!("the exempt working state: {}", error.message()));
+            for (name, exempt) in [
+                ("no exemption", None),
+                (
+                    "the idle state exempt",
+                    Some(UncapturedState {
+                        state: "idle",
+                        ..WORKING
+                    }),
+                ),
+                (
+                    "another composer exempt",
+                    Some(UncapturedState {
+                        composer: "tui",
+                        ..WORKING
+                    }),
+                ),
+                (
+                    "another backend exempt",
+                    Some(UncapturedState {
+                        backend: "hermes",
+                        ..WORKING
+                    }),
+                ),
+            ] {
+                let exempt = exempt.as_slice();
+                let message = match validate_geometry_matrix_except(&files, &catalog, exempt) {
+                    Ok(()) => panic!("{name}: the working cells are required"),
+                    Err(error) => error.message().into_owned(),
+                };
+                assert!(
+                    message.contains(
+                        "composer geometry for codex requires measured fixtures on tmux:  working at"
+                    ),
+                    "{name}: {message}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_profile_without_an_executable_plan_needs_no_matrix() {
+            checked(&definitions()).unwrap_or_else(|error| panic!("{}", error.message()));
+        }
+
+        #[test]
+        fn each_missing_matrix_cell_names_its_multiplexer() {
+            type Drops = fn(&str) -> bool;
+            let cases: [(&str, Drops, bool, &str); 6] = [
+                (
+                    "a working V₀ screen on herdr",
+                    |id| id == "box-0.0.1-composer-geometry-working-v0-herdr-12x120-1",
+                    true,
+                    "herdr",
+                ),
+                (
+                    "a hold screen on tmux",
+                    |id| id == "box-0.0.1-composer-geometry-idle-hold-tmux-2x10-1",
+                    true,
+                    "tmux",
+                ),
+                (
+                    "every herdr screen below the four sizes",
+                    |id| id.ends_with("-herdr-5x40-1"),
+                    true,
+                    "herdr",
+                ),
+                (
+                    "a one-row screen at the minimum",
+                    |id| id == "box-0.0.1-composer-geometry-idle-one-tmux-5x40-1",
+                    true,
+                    "tmux",
+                ),
+                (
+                    "an empty screen in the working state",
+                    |id| id == "box-0.0.1-composer-geometry-working-empty-tmux-9x80-1",
+                    true,
+                    "tmux",
+                ),
+                (
+                    "a citation of a recorded partial screen",
+                    |id| id == "box-0.0.1-composer-geometry-idle-partial-tmux-9x120-1",
+                    false,
+                    "tmux",
+                ),
+            ];
+            for (name, drops, from_screens, multiplexer) in cases {
+                let mut files = matrix_files();
+                let plan = &mut files["codex"]["profile"]["capabilities"]["composer"]["submission"]
+                    ["prompt"];
+                let cited = plan["fixture_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|id| !drops(id.as_str().unwrap()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                plan["fixture_ids"] = json!(cited);
+                if from_screens {
+                    files["codex"]["screens"]
+                        .as_object_mut()
+                        .unwrap()
+                        .retain(|id, _| !drops(id));
+                }
+                let message = match checked(&files) {
+                    Ok(()) => panic!("{name}: the matrix is incomplete"),
+                    Err(error) => error.message().into_owned(),
+                };
+                assert!(
+                    message.contains(&format!(
+                        "composer geometry for codex requires measured fixtures on {multiplexer}"
+                    )),
+                    "{name}: {message}"
+                );
+            }
+        }
+    }
+
+    mod geometry_evidence {
+        use crate::coding_agent::catalog::tests::composer_text::*;
+        use crate::coding_agent::catalog::tests::*;
+
+        const SCREEN: &str = "box-composer-geometry-tmux-24x80-1";
+
+        fn geometry(text_columns: i64, text_rows: u64) -> Value {
+            geometry_with(text_columns, 7, text_rows)
+        }
+
+        fn geometry_with(text_columns: i64, visible_text_rows: u64, text_rows: u64) -> Value {
+            json!({"operation":"prompt","multiplexer":"tmux","kind":"geometry","text_columns":text_columns,"visible_text_rows":visible_text_rows,"text_rows":text_rows})
+        }
+
+        fn rule_mut<'a>(value: &'a mut Value, rule: &str) -> &'a mut Value {
+            value["codex"]["profile"]["rules"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|candidate| candidate["id"] == rule)
+                .unwrap_or_else(|| panic!("the box profile has {rule}"))
+        }
+
+        fn painted_empty(evidence: Option<Value>) -> Value {
+            let mut screen = painted(&["> "], json!([]));
+            match evidence {
+                Some(evidence) => screen["composer_evidence"] = evidence,
+                None => {
+                    screen.as_object_mut().unwrap().remove("composer_evidence");
+                }
+            }
+            screen
+        }
+
+        /// An unreadable `Partial` record of the box text rule at 24x80: `T = 78`, `V₀ = 7`.
+        fn unreadable(typed_rows: usize, text_rows: u64) -> Value {
+            json!({
+                "operation":"prompt","multiplexer":"tmux","kind":"geometry","text_columns":78,
+                "visible_text_rows":7,"text_rows":text_rows,
+                "typed_literal":"w".repeat(78 * typed_rows),"rule_id":BOX_TEXT
+            })
+        }
+
+        /// A screen whose composer rows lost the `> ` row, so no composer text reads.
+        fn headless(evidence: Value) -> Value {
+            painted(&["  www", "  www"], evidence)
+        }
+
+        #[test]
+        fn an_unreadable_partial_screen_fits_its_named_rule_and_overflows_its_window() {
+            accepted(
+                &with_screen(headless(json!([unreadable(8, 7)]))),
+                "a literal one row past the window",
+            );
+            let mut unknown = unreadable(8, 7);
+            unknown["rule_id"] = json!("no-such-rule");
+            let mut without_rule = unreadable(8, 7);
+            without_rule.as_object_mut().unwrap().remove("rule_id");
+            let mut other_window = unreadable(8, 7);
+            other_window["visible_text_rows"] = json!(6);
+            for (name, screen, expected) in [
+                (
+                    "a literal that fits the window",
+                    headless(json!([unreadable(7, 7)])),
+                    format!("unreadable partial fixture {SCREEN} fits its window"),
+                ),
+                (
+                    "text rows short of the window",
+                    headless(json!([unreadable(8, 5)])),
+                    format!("geometry fixture {SCREEN} records text_rows 5, not the window 7"),
+                ),
+                (
+                    "visible rows of another window",
+                    headless(json!([other_window])),
+                    format!("geometry fixture {SCREEN} records visible_text_rows 6, not 7"),
+                ),
+                (
+                    "a readable composer",
+                    painted(&["> www"], json!([unreadable(8, 7)])),
+                    format!("unreadable partial fixture {SCREEN} has extractable composer text"),
+                ),
+                (
+                    "a literal record beside it",
+                    painted(&["> www"], json!([unreadable(8, 7), unsubmitted("www")])),
+                    format!(
+                        "unreadable partial fixture {SCREEN} carries an unsubmitted_literal record"
+                    ),
+                ),
+                (
+                    "an unknown rule",
+                    headless(json!([unknown])),
+                    format!(
+                        "unreadable partial fixture {SCREEN} names no composer.text rule no-such-rule"
+                    ),
+                ),
+                (
+                    "no rule",
+                    headless(json!([without_rule])),
+                    format!(
+                        "unreadable partial fixture {SCREEN} records no typed_literal and rule_id"
+                    ),
+                ),
+            ] {
+                assert_rejected(&with_screen(screen), &expected, name);
+            }
+        }
+
+        fn unsubmitted(literal: &str) -> Value {
+            json!({"operation":"prompt","multiplexer":"tmux","kind":"unsubmitted_literal","expected_literal":literal})
+        }
+
+        fn hold(eligibility: &str) -> Value {
+            json!({"operation":"prompt","multiplexer":"tmux","kind":"geometry_hold","expected_eligibility":eligibility})
+        }
+
+        /// A painted 24x80 box screen holding `rows` from row 17, a blank row and the footer.
+        fn painted(rows: &[&str], evidence: Value) -> Value {
+            let mut lines = vec![String::new(); 24];
+            lines[2] = "transcript".into();
+            for (offset, row) in rows.iter().enumerate() {
+                lines[17 + offset] = (*row).into();
+            }
+            lines[18 + rows.len()] = "-- footer".into();
+            json!({
+                "native_version":VERSION,"rows":24,"cols":80,"alternate_screen":false,
+                "screen_seq":0,"cursor_row":17,"cursor_col":5,"lines":lines,"masked_rows":[],
+                "composer_evidence":evidence
+            })
+        }
+
+        fn stub(evidence: Value) -> Value {
+            json!({"native_version":VERSION,"composer_evidence":evidence})
+        }
+
+        fn with_screen(screen: Value) -> Value {
+            let mut value = box_definition("char");
+            value["codex"]["screens"][SCREEN] = screen;
+            value
+        }
+
+        fn accepted(value: &Value, label: &str) {
+            load(value).unwrap_or_else(|error| panic!("{label}: {}", error.message()));
+        }
+
+        #[test]
+        fn geometry_and_geometry_hold_records_require_their_fields() {
+            for (name, record, valid) in [
+                ("a complete geometry record", geometry(78, 1), true),
+                ("a hold:geometry hold", hold("hold:geometry"), true),
+                ("a composer_empty hold", hold("composer_empty"), true),
+                (
+                    "a geometry record without text_rows",
+                    json!({"operation":"prompt","multiplexer":"tmux","kind":"geometry","text_columns":78,"visible_text_rows":7}),
+                    false,
+                ),
+                (
+                    "a geometry record without visible_text_rows",
+                    json!({"operation":"prompt","multiplexer":"tmux","kind":"geometry","text_columns":78,"text_rows":1}),
+                    false,
+                ),
+                (
+                    "a geometry record without text_columns",
+                    json!({"operation":"prompt","multiplexer":"tmux","kind":"geometry","visible_text_rows":7,"text_rows":1}),
+                    false,
+                ),
+                (
+                    "a geometry record with an expected_literal",
+                    json!({"operation":"prompt","multiplexer":"tmux","kind":"geometry","text_columns":78,"visible_text_rows":7,"text_rows":1,"expected_literal":"abc"}),
+                    false,
+                ),
+                ("a hold:unknown hold", hold("hold:unknown"), false),
+                (
+                    "a hold without expected_eligibility",
+                    json!({"operation":"prompt","multiplexer":"tmux","kind":"geometry_hold"}),
+                    false,
+                ),
+            ] {
+                let value = with_screen(stub(json!([record])));
+                if valid {
+                    accepted(&value, name);
+                } else {
+                    assert!(load(&value).is_err(), "{name}: the record is rejected");
+                }
+            }
+        }
+
+        #[test]
+        fn a_geometry_hold_screen_carries_no_geometry_or_literal_record() {
+            let expected = format!(
+                "geometry_hold fixture {SCREEN} carries a geometry or unsubmitted_literal record"
+            );
+            accepted(
+                &with_screen(stub(json!([hold("composer_empty")]))),
+                "a hold alone",
+            );
+            for (name, other) in [
+                ("a geometry record", geometry(78, 1)),
+                ("an unsubmitted_literal record", unsubmitted("abc")),
+                (
+                    "a herdr geometry record",
+                    json!({"operation":"exec","multiplexer":"herdr","kind":"geometry","text_columns":78,"visible_text_rows":7,"text_rows":1}),
+                ),
+            ] {
+                assert_rejected(
+                    &with_screen(stub(json!([hold("composer_empty"), other]))),
+                    &expected,
+                    name,
+                );
+            }
+        }
+
+        #[test]
+        fn a_pre_submit_geometry_record_matches_the_screen_columns_and_extracted_rows() {
+            accepted(
+                &with_screen(painted(
+                    &["> abc"],
+                    json!([unsubmitted("abc"), geometry(78, 1)]),
+                )),
+                "a one-row literal",
+            );
+            let wrapped = format!("{}bbb", "a".repeat(78));
+            let first_row = format!("> {}", "a".repeat(78));
+            accepted(
+                &with_screen(painted(
+                    &[first_row.as_str(), "  bbb"],
+                    json!([unsubmitted(&wrapped), geometry(78, 2)]),
+                )),
+                "a literal wrapped at the text columns",
+            );
+            for (name, rows, literal, record, expected) in [
+                (
+                    "visible text rows other than the window",
+                    &["> abc"][..],
+                    "abc",
+                    geometry_with(78, 4, 1),
+                    format!("geometry fixture {SCREEN} records visible_text_rows 4, not 7"),
+                ),
+                (
+                    "visible text rows above the window",
+                    &["> abc"][..],
+                    "abc",
+                    geometry_with(78, 23, 1),
+                    format!("geometry fixture {SCREEN} records visible_text_rows 23, not 7"),
+                ),
+                (
+                    "a fitting literal painted over more rows than it fits",
+                    &["> ab", "  c"][..],
+                    "abc",
+                    geometry(78, 2),
+                    format!("geometry fixture {SCREEN} records text_rows 2, not the fitted 1..=1"),
+                ),
+                (
+                    "text columns that ignore the margin",
+                    &["> abc"][..],
+                    "abc",
+                    geometry(80, 1),
+                    format!("geometry fixture {SCREEN} records text_columns 80, not 78"),
+                ),
+                (
+                    "a text row count above the extracted rows",
+                    &["> abc"][..],
+                    "abc",
+                    geometry(78, 2),
+                    format!("geometry fixture {SCREEN} records text_rows 2, not the extracted 1"),
+                ),
+                (
+                    "a text row count below the extracted rows",
+                    &["> ab", "  c"][..],
+                    "abc",
+                    geometry(78, 1),
+                    format!("geometry fixture {SCREEN} records text_rows 1, not the extracted 2"),
+                ),
+            ] {
+                assert_rejected(
+                    &with_screen(painted(rows, json!([unsubmitted(literal), record]))),
+                    &expected,
+                    name,
+                );
+            }
+        }
+
+        #[test]
+        fn text_columns_follow_the_text_geometry_of_the_rule_the_text_was_read_through() {
+            let mut value = with_screen(painted(
+                &["> abc"],
+                json!([unsubmitted("abc"), geometry(74, 1)]),
+            ));
+            rule_mut(&mut value, BOX_TEXT)["text_geometry"] = json!({"margin_columns":6});
+            accepted(&value, "the text rule's margin_columns");
+            value["codex"]["screens"][SCREEN]["composer_evidence"] =
+                json!([unsubmitted("abc"), geometry(78, 1)]);
+            assert_rejected(
+                &value,
+                &format!("geometry fixture {SCREEN} records text_columns 78, not 74"),
+                "the profile-level margin_columns",
+            );
+        }
+
+        /// The word-wrapped box composer whose fit adds `slack` rows.
+        fn word_wrapped(slack: u64) -> Value {
+            let mut value = box_definition("word");
+            value["codex"]["profile"]["capabilities"]["composer"]["geometry"]["wrap_slack_rows"] =
+                json!(slack);
+            value
+        }
+
+        #[test]
+        fn a_word_wrapped_pre_submit_record_may_take_up_to_its_slack_rows_fewer() {
+            let one_word_per_row = || {
+                painted(
+                    &["> a", "  b"],
+                    json!([unsubmitted("a b"), geometry(78, 2)]),
+                )
+            };
+            accepted(
+                &on(word_wrapped(1), one_word_per_row()),
+                "a wasted row within the slack",
+            );
+            accepted(
+                &on(
+                    word_wrapped(1),
+                    painted(&["> a b"], json!([unsubmitted("a b"), geometry(78, 1)])),
+                ),
+                "the greedy row count below the slack bound",
+            );
+            assert_rejected(
+                &on(word_wrapped(0), one_word_per_row()),
+                &format!("geometry fixture {SCREEN} records text_rows 2, not the fitted 1..=1"),
+                "a wasted row without slack",
+            );
+            assert_rejected(
+                &on(
+                    word_wrapped(1),
+                    painted(
+                        &["> a", "  b", "  c"],
+                        json!([unsubmitted("a b c"), geometry(78, 3)]),
+                    ),
+                ),
+                &format!("geometry fixture {SCREEN} records text_rows 3, not the fitted 1..=2"),
+                "two wasted rows past a one-row slack",
+            );
+        }
+
+        #[test]
+        fn an_empty_screen_geometry_record_matches_the_selected_rule() {
+            accepted(
+                &with_screen(painted_empty(Some(json!([geometry(78, 1)])))),
+                "the empty rule's geometry",
+            );
+            for (name, record, expected) in [
+                (
+                    "text columns that ignore the margin",
+                    geometry(80, 1),
+                    format!("geometry fixture {SCREEN} records text_columns 80, not 78"),
+                ),
+                (
+                    "visible text rows other than the window",
+                    geometry_with(78, 6, 1),
+                    format!("geometry fixture {SCREEN} records visible_text_rows 6, not 7"),
+                ),
+            ] {
+                assert_rejected(
+                    &with_screen(painted_empty(Some(json!([record])))),
+                    &expected,
+                    name,
+                );
+            }
+            assert_rejected(
+                &with_screen(painted(&["plain output"], json!([geometry(78, 1)]))),
+                &format!("geometry fixture {SCREEN} selects no single composer.text rule"),
+                "a screen no composer.text rule bounds",
+            );
+        }
+
+        #[test]
+        fn every_verified_empty_screen_selects_one_composer_text_rule() {
+            accepted(&with_screen(painted_empty(None)), "one matching rule");
+            let mut ambiguous = with_screen(painted_empty(None));
+            rule_mut(&mut ambiguous, BOX_TEXT)["matchers"][0]["pattern"] = json!("^>");
+            assert_rejected(
+                &ambiguous,
+                &format!("verified-empty fixture {SCREEN} selects no single composer.text rule"),
+                "both composer.text rules match the empty screen",
+            );
+        }
+
+        /// A painted `rows` x `cols` box screen: `composer` above the footer on the last row.
+        fn painted_box(rows: usize, cols: usize, composer: &str, evidence: Value) -> Value {
+            let mut lines = vec![String::new(); rows];
+            lines[rows - 2] = composer.into();
+            lines[rows - 1] = "-- footer".into();
+            json!({
+                "native_version":VERSION,"rows":rows,"cols":cols,"alternate_screen":false,
+                "screen_seq":0,"cursor_row":rows - 2,"cursor_col":2,"lines":lines,
+                "masked_rows":[],"composer_evidence":evidence
+            })
+        }
+
+        #[test]
+        fn a_composer_empty_hold_classifies_empty_and_fits_no_rung() {
+            accepted(
+                &with_screen(painted_box(2, 10, "> ", json!([hold("composer_empty")]))),
+                "a 2x10 box whose one text row holds no minimal rung",
+            );
+            for (name, screen, expected) in [
+                (
+                    "a 24x80 box fits the minimal rung",
+                    painted_box(24, 80, "> ", json!([hold("composer_empty")])),
+                    format!("geometry_hold fixture {SCREEN} fits a preview rung"),
+                ),
+                (
+                    "a 3x10 box fits the minimal rung on two rows",
+                    painted_box(3, 10, "> ", json!([hold("composer_empty")])),
+                    format!("geometry_hold fixture {SCREEN} fits a preview rung"),
+                ),
+                (
+                    "a typed composer is no empty-composer hold",
+                    painted_box(2, 10, "> abc", json!([hold("composer_empty")])),
+                    format!(
+                        "geometry_hold fixture {SCREEN} classifies as composer_text, not composer_empty"
+                    ),
+                ),
+            ] {
+                assert_rejected(&with_screen(screen), &expected, name);
+            }
+        }
+
+        /// A 78-cell text row of `letter`, filling one box row at 80 columns.
+        fn full_row(letter: char) -> String {
+            letter.to_string().repeat(78)
+        }
+
+        /// The literal filling one full box row per letter.
+        fn rows_literal(letters: &str) -> String {
+            letters.chars().map(full_row).collect()
+        }
+
+        /// The box rows showing one full row per letter: `> ` on the first, `  ` after it.
+        fn box_rows(letters: &str) -> Vec<String> {
+            letters
+                .chars()
+                .enumerate()
+                .map(|(index, letter)| {
+                    format!(
+                        "{}{}",
+                        if index == 0 { "> " } else { "  " },
+                        full_row(letter)
+                    )
+                })
+                .collect()
+        }
+
+        /// A painted 24x80 screen holding `rows` on its last rows with no footer.
+        fn painted_bottom(rows: &[String], evidence: Value) -> Value {
+            let mut lines = vec![String::new(); 24];
+            for (offset, row) in rows.iter().enumerate() {
+                lines[24 - rows.len() + offset] = row.clone();
+            }
+            json!({
+                "native_version":VERSION,"rows":24,"cols":80,"alternate_screen":false,
+                "screen_seq":0,"cursor_row":23,"cursor_col":79,"lines":lines,"masked_rows":[],
+                "composer_evidence":evidence
+            })
+        }
+
+        fn on(mut value: Value, screen: Value) -> Value {
+            value["codex"]["screens"][SCREEN] = screen;
+            value
+        }
+
+        #[test]
+        fn a_pre_submit_screen_compares_partial_only_for_a_literal_past_its_window() {
+            let window = || windowed(3);
+            let three = box_rows("abc");
+            let three = three.iter().map(String::as_str).collect::<Vec<_>>();
+            accepted(
+                &on(
+                    window(),
+                    painted(
+                        &three,
+                        json!([unsubmitted(&rows_literal("abc")), geometry_with(78, 3, 3)]),
+                    ),
+                ),
+                "a literal filling the window",
+            );
+            accepted(
+                &on(
+                    window(),
+                    painted(
+                        &three,
+                        json!([unsubmitted(&rows_literal("abcd")), geometry_with(78, 3, 3)]),
+                    ),
+                ),
+                "a literal one row past the window scrolls",
+            );
+            accepted(
+                &on(
+                    window(),
+                    painted_bottom(
+                        &box_rows("ab"),
+                        json!([unsubmitted(&rows_literal("abcd")), geometry_with(78, 3, 2)]),
+                    ),
+                ),
+                "a literal past the window clipped by the screen bottom",
+            );
+            assert_rejected(
+                &on(
+                    window(),
+                    painted_bottom(&box_rows("ab"), json!([unsubmitted(&rows_literal("abc"))])),
+                ),
+                &format!("pre-submit fixture {SCREEN} does not render its expected_literal"),
+                "a clipped literal that fits the window",
+            );
+        }
+
+        #[test]
+        fn a_scrolled_pre_submit_screen_records_the_window_as_its_text_rows() {
+            let rows = [
+                "─ ↑ 1 more ─".to_owned(),
+                format!("  {}", full_row('b')),
+                format!("  {}", full_row('c')),
+            ];
+            let rows = rows.iter().map(String::as_str).collect::<Vec<_>>();
+            assert_rejected(
+                &on(
+                    top_marked(3),
+                    painted(
+                        &rows,
+                        json!([unsubmitted(&rows_literal("abcd")), geometry_with(78, 3, 2)]),
+                    ),
+                ),
+                &format!("geometry fixture {SCREEN} records text_rows 2, not the window 3"),
+                "a marked region showing fewer rows than its window",
+            );
+        }
+    }
+
+    mod bundled_compare {
+        use crate::coding_agent::catalog::tests::*;
+
+        /// `screen` cut to its first `rows` rows and replayed cursor-free, as a pane whose
+        /// bottom edge closes the composer.
+        fn cut(screen: &Value, rows: usize) -> ScreenSnapshot {
+            let mut cut = screen.clone();
+            cut["rows"] = json!(rows);
+            cut["lines"] = json!(screen["lines"].as_array().unwrap()[..rows]);
+            cut["cursor_row"] = Value::Null;
+            cut["cursor_col"] = Value::Null;
+            let limit = u64::try_from(rows).unwrap();
+            for key in ["masked_rows", "cell_backgrounds", "cell_styles"] {
+                if let Some(items) = screen.get(key) {
+                    cut[key] = json!(
+                        items
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter(|item| item["row"].as_u64().unwrap() < limit)
+                            .collect::<Vec<_>>()
+                    );
+                }
+            }
+            replay(&cut)
+        }
+
+        fn replay(screen: &Value) -> ScreenSnapshot {
+            replay_native_fixture(
+                &crate::digest::canonical_json(screen),
+                |_| {},
+                fixture_alternate(screen),
+                None,
+            )
+        }
+
+        /// `literal` with the scalar at `offset` replaced by another.
+        fn contradicting(literal: &str, offset: usize) -> String {
+            literal
+                .chars()
+                .enumerate()
+                .map(|(index, scalar)| match (index == offset, scalar) {
+                    (true, 'Z') => 'Y',
+                    (true, _) => 'Z',
+                    (false, scalar) => scalar,
+                })
+                .collect()
+        }
+
+        #[test]
+        fn every_bundled_pre_submit_literal_cut_by_the_screen_bottom_stays_readable() {
+            let files = bundled_files();
+            for (name, file) in files.as_object().unwrap() {
+                let backend = crate::coding_agent::coding_agent(name).unwrap();
+                let detector = Detector::new(ProfileCatalog::bundled(), backend, None);
+                for (id, screen) in file["screens"].as_object().unwrap() {
+                    if screen.get("lines").is_none() {
+                        continue;
+                    }
+                    for record in pre_submit_records(screen).unwrap() {
+                        let literal = record.literal.as_str();
+                        let composer = detector
+                            .composer_text(&replay(screen))
+                            .unwrap()
+                            .unwrap_or_else(|| panic!("{id}: the pre-submit composer reads"));
+                        if composer.compare(&[literal]) != CompareOutcome::Complete {
+                            continue;
+                        }
+                        if let Some(offset) = composer.first_text_offset() {
+                            let outcome =
+                                composer.compare(&[contradicting(literal, offset).as_str()]);
+                            if composer.clipped_or_scrolled() {
+                                assert_ne!(
+                                    outcome,
+                                    CompareOutcome::Complete,
+                                    "{id}: another scalar where the text segment starts"
+                                );
+                            } else {
+                                assert_eq!(
+                                    outcome,
+                                    CompareOutcome::Contradicts,
+                                    "{id}: another scalar where the text segment starts"
+                                );
+                            }
+                        }
+                        let region = composer.region();
+                        for rows in usize::from(region.top) + 2..usize::from(region.bottom) {
+                            let outcome = detector
+                                .composer_text(&cut(screen, rows))
+                                .unwrap()
+                                .map(|text| text.compare(&[literal]));
+                            if backend == crate::coding_agent::CodingAgent::Pi {
+                                assert!(
+                                    matches!(outcome, Some(CompareOutcome::Contradicts) | None),
+                                    "{id} cut to {rows} rows: an unmarked pi cut never compares Partial: {outcome:?}"
+                                );
+                            } else {
+                                assert!(
+                                    matches!(
+                                        outcome,
+                                        Some(CompareOutcome::Partial | CompareOutcome::Complete)
+                                    ),
+                                    "{id} cut to {rows} rows: {outcome:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     mod director_delivery {
         use crate::coding_agent::catalog::tests::*;
         use crate::multiplexer::MuxBackend;
@@ -9860,6 +12866,16 @@ mod tests {
                     .unwrap()
                     .plain_literal_allowed(&"あ".repeat(4000))
             );
+        }
+
+        #[test]
+        fn the_bundled_codex_director_plain_limit_counts_utf8_bytes() {
+            let delivery = ProfileCatalog::bundled()
+                .director_delivery(CodingAgent::Codex)
+                .unwrap();
+            let compact = format!("{}…", "x".repeat(1021));
+            assert!(delivery.plain_literal_allowed(&compact));
+            assert!(!delivery.plain_literal_allowed(&format!("{compact}.")));
         }
 
         #[test]
@@ -10332,9 +13348,13 @@ mod tests {
                     .composer_text(&screen)
                     .unwrap()
                     .unwrap_or_else(|| panic!("{name}: the TUI composer is extractable"));
-                assert!(composer.matches(&[&preview]), "{name}: {rows:?}");
                 assert!(
-                    !composer.matches(&["an earlier prompt from the operator"]),
+                    composer.compare(&[&preview]) == CompareOutcome::Complete,
+                    "{name}: {rows:?}"
+                );
+                assert!(
+                    composer.compare(&["an earlier prompt from the operator"])
+                        != CompareOutcome::Complete,
                     "{name}: the transcript turn is not the composer"
                 );
                 let observation = detector

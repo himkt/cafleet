@@ -1,5 +1,6 @@
 pub(crate) mod catalog;
 pub(crate) mod detector;
+pub(crate) mod geometry;
 pub(crate) mod hermes;
 
 use crate::broker::runtime::Coverage;

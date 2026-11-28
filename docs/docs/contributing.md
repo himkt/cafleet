@@ -96,7 +96,7 @@ The Director delivery probe establishes `pane delivery` as [SPEC Role requiremen
 6. **Draft hold.** Type a draft into the Director composer, send one message, wait 10 s, then clear the draft. Nothing may be typed while the draft exists and the draft must stay intact; after clearing, the preview must arrive.
 7. **Interaction hold.** Open a native approval dialog with the setup below, send one message, then answer the dialog. Nothing may be typed into the dialog; the preview must arrive after it closes.
 8. **Burst.** During a foreground command, send 10 messages. Every preview must be accepted, and polls must return every ID.
-9. **Long preview.** Send a body whose preview reaches the profile's `director_delivery.plain_limit` (the 4000-scalar inline limit when it is null) and one above it. The first preview must arrive intact inline, and the second in the pointer form.
+9. **Long preview.** Send a body that fits the full rung. In a pane large enough to fit the compact rung, send a longer inline body that exceeds the plain limit or available rows. Verify that the first preview arrives intact and that the second carries the excerpt and remaining character count.
 10. **Settle race.** Type a key during the settle window of a delivery. The attempt must record `literal_mismatch` in the delivering member's `director_delivery` diagnostic without a submit key; after you clear the composer, the preview must arrive.
 11. Record the backend, native version, multiplexer and its version, pane geometry, message IDs and the check date in the design doc's evidence record.
 

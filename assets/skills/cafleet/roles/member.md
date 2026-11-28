@@ -18,7 +18,7 @@ cafleet message send --from-member-id <my-member-id> --to-member-id <director-me
 cafleet message poll <my-member-id> --json
 ```
 
-Poll after ready, on every wake (any arriving preview, even one carrying its body inline) and before completion reports, recording each message under the core [Poll](../SKILL.md#poll) rule. When that poll returns `[]`, an earlier poll consumed the message; read it with `message show MESSAGE_ID --json`. Deduplicate preview lines by message ID. Handle queued assignments before idling; end the turn when none remain.
+Poll after ready, on every wake (any arriving `[cafleet msg ID…]` preview, from one carrying its body inline to a bare `[cafleet msg ID]`) and before completion reports, recording each message under the core [Poll](../SKILL.md#poll) rule. When that poll returns `[]`, an earlier poll consumed the message; read it with `message show MESSAGE_ID --json`. Deduplicate preview lines by message ID. Handle queued assignments before idling; end the turn when none remain.
 
 ## BASE
 

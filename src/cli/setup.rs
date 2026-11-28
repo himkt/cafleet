@@ -270,7 +270,7 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
     let backends = resolve_backends(inputs.probe, inputs.home);
     std::thread::scope(|scope| {
         let mut checks = multiplexer_rows((inputs.caller)());
-        let (database_check, runs) = database(inputs.settings);
+        let (database_check, runs, directors) = database(inputs.settings);
         checks.push(database_check);
         let probes: Vec<_> = runs
             .into_iter()
@@ -281,15 +281,41 @@ pub(crate) fn gather(inputs: &DoctorInputs<'_>) -> Report {
                 })
             })
             .collect();
+        let captures: Vec<_> = directors
+            .into_iter()
+            .map(|director| {
+                scope.spawn(move || {
+                    let capture = director_capture(&director.placement, DOCTOR_CAPTURE_DEADLINE);
+                    (director, capture)
+                })
+            })
+            .collect();
         let agents = agent_checks(&backends);
         let now = Utc::now();
         let database_url = inputs
             .settings
             .database_url_explicit
             .then_some(inputs.settings.database_url.as_str());
-        checks.extend(probes.into_iter().map(|probe| {
+        for probe in probes {
             let (run, probe) = probe.join().expect("a member probe thread completes");
-            member_runtime_check(run.member_id, &run, &probe, now, database_url)
+            checks.push(member_runtime_check(
+                run.member_id,
+                &run,
+                &probe,
+                now,
+                database_url,
+            ));
+            checks.push(member_geometry_check(run.member_id, &run, &probe));
+        }
+        checks.extend(captures.into_iter().map(|capture| {
+            let (director, capture) = capture.join().expect("a Director capture thread completes");
+            director_geometry_check(
+                director.fleet_id,
+                director.director_member_id,
+                &director.placement.coding_agent,
+                &capture,
+                director.minimum,
+            )
         }));
         checks.extend(agents);
         Report { checks }
@@ -387,14 +413,30 @@ fn escape(detail: &str) -> String {
     detail.replace('\n', "\\n").replace('\r', "\\r")
 }
 
-/// The `database` row, and the runs that get member rows when that row is `ok`.
-fn database(settings: &Settings) -> (Check, Vec<RunRecord>) {
+/// A fleet's root Director pane that receives Director delivery under a profile with
+/// composer geometry.
+struct DirectorPane {
+    fleet_id: i64,
+    director_member_id: i64,
+    placement: crate::broker::Placement,
+    minimum: crate::runtime::TerminalSize,
+}
+
+/// The `database` row, and the runs and Director panes that get rows when that row is `ok`.
+fn database(settings: &Settings) -> (Check, Vec<RunRecord>, Vec<DirectorPane>) {
     let conn = match crate::db::open_existing(&settings.database_url, true) {
         Ok(Some(conn)) => conn,
-        Ok(None) => return (database_row(settings, &SchemaState::Missing), Vec::new()),
+        Ok(None) => {
+            return (
+                database_row(settings, &SchemaState::Missing),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
         Err(cause) => {
             return (
                 database_row(settings, &SchemaState::Unreachable { cause }),
+                Vec::new(),
                 Vec::new(),
             );
         }
@@ -404,18 +446,98 @@ fn database(settings: &Settings) -> (Check, Vec<RunRecord>) {
         &db::classify_selected_schema(&conn, &settings.database_url),
     );
     if check.status != CheckStatus::Ok {
-        return (check, Vec::new());
+        return (check, Vec::new(), Vec::new());
     }
-    match crate::broker::runtime::live_member_runs(&conn) {
-        Ok(runs) => (check, runs),
-        Err(cause) => (
+    match (
+        crate::broker::runtime::live_member_runs(&conn),
+        director_panes(&conn),
+    ) {
+        (Ok(runs), Ok(panes)) => (check, runs, panes),
+        (Err(cause), _) | (_, Err(cause)) => (
             Check::new("database", CheckStatus::Error, cause.to_string()),
+            Vec::new(),
             Vec::new(),
         ),
     }
 }
 
+/// Every live fleet, in fleet-ID order, whose active root Director has a concrete pane on a
+/// multiplexer its bundled profile's Director delivery lists, under a profile with composer
+/// geometry.
+fn director_panes(conn: &rusqlite::Connection) -> Result<Vec<DirectorPane>, CafleetError> {
+    let catalog = crate::coding_agent::ProfileCatalog::bundled();
+    let mut fleets = crate::broker::fleets::list_fleets(conn)?;
+    fleets.sort_by_key(|fleet| fleet.fleet_id);
+    let mut panes = Vec::new();
+    for fleet in fleets {
+        match crate::broker::fleets::require_live_fleet(conn, fleet.fleet_id) {
+            Ok(_) => {}
+            Err(CafleetError::App(_)) => continue,
+            Err(cause) => return Err(cause),
+        }
+        let placement = crate::broker::fleets::director_placement(conn, fleet.fleet_id)?;
+        if placement.mux_pane_id.is_none() {
+            continue;
+        }
+        let backend =
+            crate::coding_agent::coding_agent(&placement.coding_agent).ok_or_else(|| {
+                CafleetError::InvalidStoredValue {
+                    field: "member_placements.coding_agent".into(),
+                    value: placement.coding_agent.clone(),
+                }
+            })?;
+        let covered =
+            crate::multiplexer::MuxBackend::parse(&placement.backend).is_ok_and(|multiplexer| {
+                catalog
+                    .director_delivery(backend)
+                    .is_some_and(|delivery| delivery.covers(multiplexer))
+            });
+        let Some((rows, cols)) = catalog.composer_minimum(backend).filter(|_| covered) else {
+            continue;
+        };
+        panes.push(DirectorPane {
+            fleet_id: fleet.fleet_id,
+            director_member_id: fleet.director_member_id,
+            placement,
+            minimum: crate::runtime::TerminalSize { rows, cols },
+        });
+    }
+    Ok(panes)
+}
+
+/// One read-only capture of the Director pane within `deadline`, sized as the Director sweep
+/// fits its previews.
+fn director_capture(
+    placement: &crate::broker::Placement,
+    deadline: Duration,
+) -> std::result::Result<crate::runtime::TerminalSize, String> {
+    let multiplexer = crate::multiplexer::MuxBackend::parse(&placement.backend)
+        .map_err(|cause| cause.to_string())?;
+    let mux = crate::multiplexer::multiplexer_for_server(
+        &placement.backend,
+        &placement.mux_server,
+        Rc::new(SystemRunner),
+    )
+    .map_err(|cause| cause.to_string())?
+    .bounded(crate::time::Deadline::until(
+        std::time::Instant::now() + deadline,
+    ));
+    let pane = placement
+        .mux_pane_id
+        .as_deref()
+        .expect("a Director pane probe has a concrete pane");
+    let capture = mux
+        .capture_screen(pane)
+        .map_err(|cause| cause.to_string())?;
+    Ok(crate::runtime::TerminalSize {
+        rows: capture.rows,
+        cols: crate::runtime::service::fit_columns(multiplexer, &capture),
+    })
+}
+
 pub(crate) const DOCTOR_GAP_ERROR_AGE: Duration = Duration::from_secs(30);
+/// The deadline of doctor's read-only Director pane capture, as of its member probes.
+const DOCTOR_CAPTURE_DEADLINE: Duration = Duration::from_secs(1);
 
 pub(crate) fn member_runtime_check(
     member_id: i64,
@@ -469,6 +591,81 @@ pub(crate) fn member_runtime_check(
         }
     };
     Check::new(format!("member.{member_id}.runtime"), status, detail)
+}
+
+/// The member's live pane size against its backend's minimum, from the runtime row's probe.
+pub(crate) fn member_geometry_check(
+    member_id: i64,
+    run: &RunRecord,
+    probe: &ObservationProbe,
+) -> Check {
+    let run_id = run.run_id;
+    let geometry = match probe {
+        ObservationProbe::Answered(Some(health)) => health.geometry,
+        ObservationProbe::Skipped
+        | ObservationProbe::Failed(_)
+        | ObservationProbe::Answered(None) => None,
+    };
+    let (status, detail) = match geometry {
+        None => (
+            CheckStatus::Info,
+            format!("run={run_id} geometry=unavailable"),
+        ),
+        Some(geometry) if geometry.below_minimum => (
+            CheckStatus::Warn,
+            format!(
+                "run={run_id} rows={} columns={} below the {} minimum {}x{}; previews shorten or hold until the pane grows",
+                geometry.rows,
+                geometry.columns,
+                run.backend,
+                geometry.min_rows,
+                geometry.min_columns
+            ),
+        ),
+        Some(geometry) => (
+            CheckStatus::Ok,
+            format!(
+                "run={run_id} rows={} columns={}",
+                geometry.rows, geometry.columns
+            ),
+        ),
+    };
+    Check::new(format!("member.{member_id}.geometry"), status, detail)
+}
+
+/// The Director pane's captured size against its backend's minimum.
+pub(crate) fn director_geometry_check(
+    fleet_id: i64,
+    director_member_id: i64,
+    backend: &str,
+    capture: &std::result::Result<crate::runtime::TerminalSize, String>,
+    minimum: crate::runtime::TerminalSize,
+) -> Check {
+    let (status, detail) = match capture {
+        Err(cause) => (
+            CheckStatus::Info,
+            format!("director={director_member_id} geometry=unavailable: {cause}"),
+        ),
+        Ok(size) if size.rows < minimum.rows || size.cols < minimum.cols => (
+            CheckStatus::Warn,
+            format!(
+                "director={director_member_id} rows={} columns={} below the {backend} minimum {}x{}; Director previews shorten or hold until the pane grows",
+                size.rows, size.cols, minimum.rows, minimum.cols
+            ),
+        ),
+        Ok(size) => (
+            CheckStatus::Ok,
+            format!(
+                "director={director_member_id} rows={} columns={}",
+                size.rows, size.cols
+            ),
+        ),
+    };
+    Check::new(
+        format!("fleet.{fleet_id}.director.geometry"),
+        status,
+        detail,
+    )
 }
 
 fn gap_age(since: &str, now: DateTime<Utc>) -> Duration {
@@ -776,6 +973,121 @@ mod tests {
                 diagnostic: degraded.then(|| "sink_unavailable".to_owned()),
                 writer_diagnostic: None,
                 gap_open_since,
+                geometry: None,
+            }
+        }
+
+        fn sized(rows: u16, columns: u16) -> ObservationHealth {
+            ObservationHealth {
+                geometry: Some(crate::runtime::observation::PaneGeometry {
+                    rows,
+                    columns,
+                    min_rows: 9,
+                    min_columns: 80,
+                    below_minimum: rows < 9 || columns < 80,
+                }),
+                ..health(InputEligibility::ComposerEmpty, false, None)
+            }
+        }
+
+        #[test]
+        fn member_geometry_check_reports_the_live_pane_against_the_backend_minimum() {
+            type Expect = fn(i64) -> String;
+            let cases: Vec<(&str, ObservationProbe, CheckStatus, Expect)> = vec![
+                (
+                    "a run not probed",
+                    ObservationProbe::Skipped,
+                    CheckStatus::Info,
+                    |run| format!("run={run} geometry=unavailable"),
+                ),
+                (
+                    "a failed probe",
+                    ObservationProbe::Failed("cannot connect to the runner".into()),
+                    CheckStatus::Info,
+                    |run| format!("run={run} geometry=unavailable"),
+                ),
+                (
+                    "an answer before the child started",
+                    ObservationProbe::Answered(None),
+                    CheckStatus::Info,
+                    |run| format!("run={run} geometry=unavailable"),
+                ),
+                (
+                    "a profile without geometry",
+                    ObservationProbe::Answered(Some(health(
+                        InputEligibility::ComposerEmpty,
+                        false,
+                        None,
+                    ))),
+                    CheckStatus::Info,
+                    |run| format!("run={run} geometry=unavailable"),
+                ),
+                (
+                    "a pane below the minimum",
+                    ObservationProbe::Answered(Some(sized(5, 40))),
+                    CheckStatus::Warn,
+                    |run| {
+                        format!(
+                            "run={run} rows=5 columns=40 below the codex minimum 9x80; previews shorten or hold until the pane grows"
+                        )
+                    },
+                ),
+                (
+                    "a pane at the minimum",
+                    ObservationProbe::Answered(Some(sized(9, 80))),
+                    CheckStatus::Ok,
+                    |run| format!("run={run} rows=9 columns=80"),
+                ),
+            ];
+            for (name, probe, expected_status, detail) in cases {
+                let run = run("running");
+                assert_eq!(run.backend, "codex", "the fixture run is a codex run");
+                let check = member_geometry_check(MEMBER, &run, &probe);
+                assert_eq!(check.name, format!("member.{MEMBER}.geometry"), "{name}");
+                assert_eq!(check.status, expected_status, "{name}");
+                assert_eq!(check.detail, detail(run.run_id), "{name}");
+            }
+        }
+
+        #[test]
+        fn director_geometry_check_reports_the_capture_against_the_director_minimum() {
+            const FLEET: i64 = 4;
+            const DIRECTOR: i64 = 11;
+            let minimum = crate::runtime::TerminalSize { rows: 9, cols: 80 };
+            for (name, capture, expected_status, detail) in [
+                (
+                    "a failed capture",
+                    Err("pane %3 not found".to_owned()),
+                    CheckStatus::Info,
+                    "director=11 geometry=unavailable: pane %3 not found",
+                ),
+                (
+                    "a capture with too few rows",
+                    Ok(crate::runtime::TerminalSize { rows: 8, cols: 120 }),
+                    CheckStatus::Warn,
+                    "director=11 rows=8 columns=120 below the claude minimum 9x80; Director previews shorten or hold until the pane grows",
+                ),
+                (
+                    "a capture with too few columns",
+                    Ok(crate::runtime::TerminalSize { rows: 40, cols: 79 }),
+                    CheckStatus::Warn,
+                    "director=11 rows=40 columns=79 below the claude minimum 9x80; Director previews shorten or hold until the pane grows",
+                ),
+                (
+                    "a capture at the minimum",
+                    Ok(crate::runtime::TerminalSize { rows: 9, cols: 80 }),
+                    CheckStatus::Ok,
+                    "director=11 rows=9 columns=80",
+                ),
+            ] {
+                let check = director_geometry_check(FLEET, DIRECTOR, "claude", &capture, minimum);
+                assert_eq!(
+                    check.name,
+                    format!("fleet.{FLEET}.director.geometry"),
+                    "{name}"
+                );
+                assert_eq!(check.status, expected_status, "{name}");
+                assert_eq!(check.detail, detail, "{name}");
             }
         }
 
@@ -2466,20 +2778,38 @@ mod tests {
             let (exited, _) = member_with_run(&mut conn, fleet, director, "exited", 'c', "exited");
             let views = scenario.views();
             views.assert_exit(1);
-            let database = views
-                .text
-                .iter()
-                .position(|line| row_name(line) == "database")
-                .expect("the database row");
+            let row = |name: &str| {
+                views
+                    .text
+                    .iter()
+                    .position(|line| row_name(line) == name)
+                    .unwrap_or_else(|| panic!("the {name} row: {:?}", views.text))
+            };
+            let database = row("database");
+            let prepared_runtime = row(&format!("member.{prepared}.runtime"));
+            let running_runtime = row(&format!("member.{running}.runtime"));
+            assert!(
+                database < prepared_runtime && prepared_runtime < running_runtime,
+                "{:?}",
+                views.text
+            );
+            for (member, runtime) in [(prepared, prepared_runtime), (running, running_runtime)] {
+                assert_eq!(
+                    row(&format!("member.{member}.geometry")),
+                    runtime + 1,
+                    "the geometry row follows the runtime row: {:?}",
+                    views.text
+                );
+            }
             assert_eq!(
-                views.text[database + 1],
+                views.text[prepared_runtime],
                 format!(
                     "info member.{prepared}.runtime: run={prepared_run} status=prepared: not probed"
                 ),
                 "{:?}",
                 views.text
             );
-            let failed = &views.text[database + 2];
+            let failed = &views.text[running_runtime];
             let url = Settings::for_database(&scenario.database).database_url;
             assert!(
                 failed.starts_with(&format!(

@@ -139,18 +139,32 @@ Profile previews are `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [ca
 
 Previews fold newlines to `⏎`, tabs to `␉` and other C0/DEL controls to `\xNN`; stored text stays exact. A body over 4000 Unicode scalars becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, never carrying `--database-url`. A preview leaves the message `input_required`.
 
+A verified-composer member preview and every Director preview take the first form that fits the live pane:
+
+| Form | Literal |
+|---|---|
+| `full` | The profile preview above |
+| `compact` | `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] EXCERPT… (N more characters; run cafleet message poll RECIPIENT_ID --json) [cafleet] Resume your work if something was still running.` |
+| `pointer` | `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it. [cafleet] Resume your work if something was still running.` |
+| `cue` | `[cafleet msg MESSAGE_ID] run cafleet message poll RECIPIENT_ID --json` |
+| `minimal` | `[cafleet msg MESSAGE_ID]` |
+
+Every form, `[cafleet msg MESSAGE_ID]` alone included, is a wake that calls for one `cafleet message poll RECIPIENT_ID --json`. A message is typed at most twice: after an uncertain first typing it is typed once more as `pointer`, `cue` or `minimal`, and a second uncertain outcome stops typing it, leaving it for the next poll. When no form fits, the preview waits with zero bytes until the pane grows.
+
 ### Director previews
 
 Every live member runner types the root Director's pending messages into the Director's pane as profile previews, oldest first across senders, one per message. On each `[cafleet msg …]` preview, run `cafleet message poll <director-id> --json` once; `[]` means an earlier poll already consumed the message.
 
-A preview is typed only while the Director-screen profile verifies the composer empty with no open interaction, as a plain literal with no Escape and no bracketed paste. A body above the Director profile's plain limit arrives as the `poll` pointer. These hold the oldest Director message, and every newer one behind it, with no runtime event:
+A preview is typed only while the Director-screen profile verifies the composer empty with no open interaction, as a plain literal with no Escape and no bracketed paste. A body above the Director profile's plain limit arrives as the `poll` pointer, and a pane too small for the full preview receives a shorter form. These hold the oldest Director message, and every newer one behind it, with no runtime event:
 
 - a draft or leftover literal in the Director composer, an unrecognized screen or a pane narrower than the profile's layouts;
+- a Director pane too small for every form, or below the profile's minimum size on an unrecognized screen (`composer_too_small`);
+- an earlier typing of the message parked for late submission, which submits the literal once the pane shows it whole, within 120 seconds;
 - an open permission dialog, question or unknown interaction in the Director pane;
 - an unavailable Director pane, multiplexer or storage;
 - no live member runner in the fleet.
 
-A key typed during a delivery leaves the literal in the composer unsubmitted; clearing or submitting it resumes delivery, and a submitted leftover may repeat a preview, so deduplicate by message ID. A Director backend or multiplexer without Director-screen coverage receives nothing in its pane and reads by manual poll. A delivering member's `cafleet member show MEMBER_ID --json` `diagnostics` show `director delivery: message <id> held: <reason>` after 3 minutes, `director delivery: message <id> uncertain: <cause>` (`storage_unavailable` when storage fails after a confirmed submission), `director delivery: pane <pane-id> unavailable: <cause>` and `director delivery: storage unavailable: <cause>`.
+A key typed during a delivery leaves the literal in the composer unsubmitted; clearing or submitting it resumes delivery, and a submitted leftover may repeat a preview once in a short form, so deduplicate by message ID. A Director backend or multiplexer without Director-screen coverage receives nothing in its pane and reads by manual poll. A delivering member's `cafleet member show MEMBER_ID --json` `diagnostics` show `director delivery: message <id> held: <reason>` after 3 minutes, or at once for `composer_too_small`, `director delivery: message <id> uncertain: <cause>` (`storage_unavailable` when storage fails after a confirmed submission; `composer_clipped` or `composer_unreadable` when a resize hid part of the literal), `director delivery: message <id> abandoned after pointer retry: <cause>`, `director delivery: message <id> park ended: consumed`, `director delivery: pane <pane-id> unavailable: <cause>` and `director delivery: storage unavailable: <cause>`.
 
 Run a manual `cafleet message poll <director-id> --json` at these points:
 
@@ -163,7 +177,7 @@ Run a manual `cafleet message poll <director-id> --json` at these points:
 
 ### Wrapped delivery methods
 
-With a measured plan from its backend profile, the runner types prompt, exec and preview input without Escape; on a verified-composer run, only into a verified empty composer. An open or candidate interaction (`permission_request`, `question`, `unknown_interaction`) or earlier queued input defers input with zero bytes. A nonempty composer queues prompt and exec under `composer_busy`; a human draft blocks previews until cleared or submitted. A working member with an empty composer receives input queued natively behind its turn; interrupt with `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
+With a measured plan from its backend profile, the runner types prompt, exec and preview input without Escape; on a verified-composer run, only into a verified empty composer. An open or candidate interaction (`permission_request`, `question`, `unknown_interaction`) or earlier queued input defers input with zero bytes. A nonempty composer queues prompt and exec under `composer_busy`; a human draft blocks previews until cleared or submitted. A prompt or exec literal that does not fit the live composer queues with zero bytes under `composer_too_small` (`composer_geometry_unavailable` when the profile does not describe the screen) and drains once it fits. A working member with an empty composer receives input queued natively behind its turn; interrupt with `cafleet member press MEMBER_ID --from-member-id DIRECTOR_ID Escape`.
 
 Without a plan or profile, fallback `submission_plan_unavailable` sends Escape, the literal (`! ` prefix for exec) and Enter; it can interrupt work, dismiss undetected prompts or merge with unsent drafts. Prompt and exec carry no clause, so inspect open prompts first.
 
@@ -173,9 +187,9 @@ Over-limit input uses bracketed paste when available; otherwise a preview become
 
 Deferred prompt and exec input returns durable `ready` with `deferred_at`, `defer_reason` and its input ID, drains automatically and is inspected with `cafleet input show INPUT_ID --json`. The Director receives one `input_delivery_result` per input's first outcome and per stopped immediate write.
 
-Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `plain_limit_exceeded`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
+Zero-byte reasons are `pane_input_busy`, `storage_unavailable`, `observer_unavailable`, `delivery_budget_exhausted`, `composer_too_small`, `composer_geometry_unavailable`, `plain_limit_exceeded`, `target_inactive`, `target_changed`, `runner_stopped` or `runner_lost`.
 
-Queued input precedes previews. A composer showing only a native suggestion counts as empty. An uncertain preview publishes an `input_delivery_result` with null `input_id` and its `message_id` and may be typed again, so recipients deduplicate by message ID. After a prompt or exec records `uncertain`, the runner writes no queued input and no preview until `input reconcile` settles it. Input waiting 3 minutes raises `input_delivery_stalled` ([Runtime events](#runtime-events)).
+Queued input precedes previews. A composer showing only a native suggestion counts as empty. An uncertain preview publishes an `input_delivery_result` with null `input_id` and its `message_id` and may be typed once more in a short form, so recipients deduplicate by message ID. A pre-submit check that finds the literal clipped or scrolled records `composer_clipped`, and unreadable text `composer_unreadable`; a preview then waits up to 120 seconds for the pane to show it whole before its outcome is uncertain. After a prompt or exec records `uncertain`, the runner writes no queued input and no preview until `input reconcile` settles it. Input waiting 3 minutes raises `input_delivery_stalled` ([Runtime events](#runtime-events)); time spent too small for the input, or below the backend's minimum pane size, does not count.
 
 ### Held delivery
 
@@ -212,7 +226,7 @@ Exit 2 errors before registration:
 
 Substitute exactly `{fleet_id}`, `{member_id}`, `{director_member_id}`, `{coding_agent}` and `{database_url}`; `{database_url}` renders `default` or `sqlite:///<canonical path>`. Double literal braces `{{`/`}}`; malformed or unknown placeholders exit 2 (§ Error messages). A placeholder name is the exact text between the braces, so `{}` and `{ fleet_id }` are unknown. The malformed `<detail>` is `unexpected '{' in placeholder name`, `expected '}' before end of string` or `single '}' encountered outside a placeholder`. A non-default database with a prompt lacking `{database_url}` exits 1 before registration: `Error: the fleet database is not the default; the spawn prompt must include {database_url} so the member passes --database-url`.
 
-Creation waits up to 60 seconds for the fleet's pane layout lock. The member fills the Director window's right column, then overflow windows' columns (one member per 15 rows, up to 8), opening overflow window `cafleet-<fleet_id>-<ordinal>` without taking focus when all are full. Existing members never move.
+Creation waits up to 60 seconds for the fleet's pane layout lock. The member fills the Director window's right column, then overflow windows' columns (one member per 15 rows on tmux and 16 on herdr, more for a backend whose profile needs taller panes, up to 8), opening overflow window `cafleet-<fleet_id>-<ordinal>` without taking focus when all are full. Existing members never move.
 
 Text output is `ID NAME backend=AGENT pane=PANE window=WINDOW` plus the runtime line; `PANE` and `WINDOW` print `(pending)` while pending.
 
@@ -351,17 +365,17 @@ Member show appends, after `child_start_identity`:
 | Key | Value |
 |---|---|
 | `observation_probe` | `skipped` (status neither `running` nor `degraded`), `answered` or `failed` |
-| `observation` | Ordered `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since`; null when skipped, failed or before child start |
+| `observation` | Ordered `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since,geometry`; null when skipped, failed or before child start |
 | `observation_error` | The probe failure message when `failed`, otherwise null |
 | `diagnostics` | The run's latest 5 runner diagnostics, newest first, each `source,message,first_at,last_at,count` |
 
-`eligibility` is `composer_empty` or `hold:<reason>` (`candidate`, `interaction`, `unknown`, `observer_unavailable`, `gap`). `degraded` true means the runner cannot store its events, named by `writer_diagnostic`, and holds generated input. The text runtime line appends ` observation=STATE` (the eligibility; `pending` without an observation, `unavailable` when failed, `-` when skipped), then ` degraded` when degraded: `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`.
+`eligibility` is `composer_empty` or `hold:<reason>` (`candidate`, `interaction`, `unknown`, `geometry`, `observer_unavailable`, `gap`); `hold:geometry` is an unrecognized screen in a pane below the backend's minimum size. `geometry` is null without profile geometry, otherwise ordered `rows,columns,min_rows,min_columns,below_minimum` for the live pane; `below_minimum` clears when the pane grows. `degraded` true means the runner cannot store its events, named by `writer_diagnostic`, and holds generated input. The text runtime line appends ` observation=STATE` (the eligibility; `pending` without an observation, `unavailable` when failed, `-` when skipped), then ` degraded` when degraded and ` geometry=ROWSxCOLUMNS below_minimum` when below the minimum: `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`.
 
 ### Delivery reporting
 
 `delivery` contains `status,method,reason`; method is `profile`, `fallback` or null before selection. Held and `uncertain` prompt or exec exit 1, `uncertain` requiring reconciliation; `not_submitted` records cancellation or an evidence-based reconciliation.
 
-Queue reasons are `interaction_open,interaction_candidate,composer_busy,earlier_input,delivery_budget_exhausted`; the fallback reason is `submission_plan_unavailable`. Queued text output ends with `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` Later results appear in receipts and events, leaving the original command output unchanged.
+Queue reasons are `interaction_open,interaction_candidate,composer_busy,composer_too_small,composer_geometry_unavailable,earlier_input,delivery_budget_exhausted`; the fallback reason is `submission_plan_unavailable`. Queued text output ends with `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` Later results appear in receipts and events, leaving the original command output unchanged.
 
 ### Runtime events
 
@@ -450,6 +464,22 @@ When `database` is `ok`, one `member.<member_id>.runtime` row follows per active
 | Otherwise | `ok` | `run=<run_id> observation=<eligibility>` |
 
 `<hint>` is `inspect with 'cafleet member show <member_id> --json'; if it does not recover, run 'cafleet member delete <member_id>' and create a replacement member`, each quoted command appending ` --database-url URL` for a non-default database.
+
+A `member.<member_id>.geometry` row follows each runtime row from the same probe:
+
+| Situation | Status | Detail |
+|---|---|---|
+| Not probed, probe failed, or no geometry | `info` | `run=<run_id> geometry=unavailable` |
+| `below_minimum` | `warn` | `run=<run_id> rows=<r> columns=<c> below the <backend> minimum <min_rows>x<min_columns>; previews shorten or hold until the pane grows` |
+| Otherwise | `ok` | `run=<run_id> rows=<r> columns=<c>` |
+
+After the member rows, one `fleet.<fleet_id>.director.geometry` row per fleet, in fleet-ID order, reports a Director pane that receives Director previews and whose profile declares composer geometry, from one read-only capture within 1 s:
+
+| Situation | Status | Detail |
+|---|---|---|
+| Capture failed | `info` | `director=<member_id> geometry=unavailable: <cause>` |
+| Below the minimum | `warn` | `director=<member_id> rows=<r> columns=<c> below the <backend> minimum <min_rows>x<min_columns>; Director previews shorten or hold until the pane grows` |
+| Otherwise | `ok` | `director=<member_id> rows=<r> columns=<c>` |
 
 `multiplexer` reports `ok` `<backend> server=<server>`; the following `multiplexer.caller_pane` reports the `fleet create` pane verification without `--pane` (§ Fleet commands):
 

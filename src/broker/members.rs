@@ -122,6 +122,24 @@ pub(crate) fn concrete_occupancy(
     Ok(windows)
 }
 
+/// The coding agent of every concrete member pane of the fleet, keyed by pane id.
+pub(crate) fn concrete_pane_agents(
+    conn: &Connection,
+    fleet_id: i64,
+) -> Result<std::collections::BTreeMap<String, String>, CafleetError> {
+    let mut stmt = conn.prepare(
+        "SELECT p.mux_pane_id, p.coding_agent
+         FROM members m JOIN fleets f ON f.fleet_id=m.fleet_id
+         JOIN member_placements p ON p.member_id=m.member_id
+         WHERE m.fleet_id=?1 AND m.status='active' AND p.mux_pane_id IS NOT NULL
+           AND f.director_member_id IS NOT m.member_id",
+    )?;
+    let rows = stmt.query_map([fleet_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 pub(crate) fn window_member_ids(
     conn: &Connection,
     fleet_id: i64,

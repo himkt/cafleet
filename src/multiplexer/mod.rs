@@ -48,6 +48,22 @@ pub(crate) struct ScreenCapture {
     pub(crate) body: String,
 }
 
+impl ScreenCapture {
+    pub(crate) fn widest_row_columns(&self) -> u16 {
+        let widest = self
+            .body
+            .lines()
+            .map(|line| {
+                unicode_width::UnicodeWidthStr::width(
+                    crate::output::strip_ansi(line).trim_end_matches('\r'),
+                )
+            })
+            .max()
+            .unwrap_or_default();
+        u16::try_from(widest).unwrap_or(u16::MAX)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SpawnedPane {
     pub(crate) pane_id: String,

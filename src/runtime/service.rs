@@ -1,6 +1,7 @@
 use crate::broker;
 use crate::broker::runtime as storage;
 use crate::broker::runtime::*;
+use crate::coding_agent::catalog::CompareOutcome;
 use crate::config::Settings;
 use crate::runtime::control::AdmittedControlFrame;
 use crate::runtime::control::ServiceControlRequest;
@@ -1514,6 +1515,7 @@ fn director_target(
 pub(crate) const DIRECTOR_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 const DIRECTOR_ATTEMPT: Duration = Duration::from_secs(5);
 const DIRECTOR_SETTLE: Duration = Duration::from_millis(500);
+const DIRECTOR_PRE_SUBMIT_WINDOW: Duration = Duration::from_secs(2);
 const DIRECTOR_VERIFICATION: Duration = Duration::from_secs(2);
 const DIRECTOR_VERIFICATION_POLL: Duration = Duration::from_millis(100);
 const DIRECTOR_WRITE_MARGIN: Duration = Duration::from_millis(250);
@@ -1523,6 +1525,10 @@ const DIRECTOR_HELD_REPORT: Duration = Duration::from_secs(180);
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DirectorHold {
     ComposerBusy,
+    /// No rung fits the verified empty composer, or no rule matches a pane below the minimum.
+    ComposerTooSmall,
+    /// The verified empty screen selects no single `composer.text` rule.
+    ComposerGeometryUnavailable,
     InteractionOpen,
     PaneUnavailable,
     StorageUnavailable,
@@ -1532,6 +1538,8 @@ impl DirectorHold {
     fn reason(self) -> &'static str {
         match self {
             Self::ComposerBusy => "composer_busy",
+            Self::ComposerTooSmall => "composer_too_small",
+            Self::ComposerGeometryUnavailable => "composer_geometry_unavailable",
             Self::InteractionOpen => "interaction_open",
             Self::PaneUnavailable => "pane_unavailable",
             Self::StorageUnavailable => "storage_unavailable",
@@ -1547,8 +1555,30 @@ enum DirectorOutcome {
     Unavailable(String),
     /// Bytes may be in the Director composer and the message stays unnotified.
     Uncertain(&'static str),
+    /// The pre-submit window closed on a clipped or unreadable composer: the typed literal
+    /// waits for late submission.
+    Parked {
+        cause: &'static str,
+        literal: String,
+        submit: Vec<u8>,
+        awaiting_render: bool,
+    },
     /// The stop signal or the attempt budget ended the attempt before its first byte.
     NotStarted,
+}
+
+/// A Director preview typed into the pane and parked for late submission until `until`.
+#[derive(Clone)]
+struct DirectorPark {
+    message_id: i64,
+    placement: broker::Placement,
+    literal: String,
+    submit: Vec<u8>,
+    cause: &'static str,
+    until: Instant,
+    awaiting_render: bool,
+    /// The parked typing is the message's second, so an uncertain end stamps it.
+    second: bool,
 }
 
 /// A held head's continuous hold, reported once when it reaches [`DIRECTOR_HELD_REPORT`].
@@ -1570,6 +1600,7 @@ pub(crate) struct DirectorSweep {
     backoff: Duration,
     backoff_until: Option<Instant>,
     held: Option<HeldHead>,
+    parked: Option<DirectorPark>,
 }
 
 impl DirectorSweep {
@@ -1590,6 +1621,7 @@ impl DirectorSweep {
             backoff: SWEEP_BACKOFF_FLOOR,
             backoff_until: None,
             held: None,
+            parked: None,
         }
     }
 
@@ -1637,16 +1669,27 @@ impl DirectorSweep {
         shutdown: Option<Instant>,
     ) -> Result<()> {
         let now = self.clock.now();
+        let clock = self.clock.clone();
+        let clipped = |at: Instant| shutdown.map_or(at, |shutdown| shutdown.min(at));
+        let storage_until =
+            |at: Instant| Instant::now() + at.saturating_duration_since(clock.now());
+        if self.parked.is_some() && stop.load(Ordering::Acquire) {
+            self.end_park(
+                conn,
+                storage_until(clipped(now + DIRECTOR_ATTEMPT)),
+                "runner_stopped",
+            );
+            return Ok(());
+        }
         if self.next_pass.is_some_and(|at| now < at)
             || self.backoff_until.is_some_and(|at| now < at)
         {
             return Ok(());
         }
         self.next_pass = Some(now + DIRECTOR_SWEEP_INTERVAL);
-        let clock = self.clock.clone();
-        let clipped = |at: Instant| shutdown.map_or(at, |shutdown| shutdown.min(at));
-        let storage_until =
-            |at: Instant| Instant::now() + at.saturating_duration_since(clock.now());
+        if self.parked.is_some() {
+            return self.tick_park(conn, stop, clipped(now + DIRECTOR_ATTEMPT));
+        }
         let snapshot = with_database_deadline(
             conn,
             storage_until(clipped(now + DIRECTOR_ATTEMPT)),
@@ -1667,11 +1710,7 @@ impl DirectorSweep {
             }
         };
         let message_id = target.message.message_id;
-        let database_url = format!(
-            "sqlite:///{}",
-            conn.path()
-                .ok_or_else(|| error("the Director sweep database has no file path"))?
-        );
+        let database_url = director_database_url(conn)?;
         let lock = match crate::pane_lock::PaneLock::try_acquire(&database_url, &target.placement) {
             Ok(Some(lock)) => lock,
             Ok(None) => return Ok(()),
@@ -1696,7 +1735,72 @@ impl DirectorSweep {
                 return Ok(());
             }
         }
-        match self.attempt(&target, deadline, stop) {
+        let state = with_database_deadline(conn, storage_until(deadline), |conn| {
+            Ok((
+                storage::preview_parked_until(conn, message_id)?,
+                storage::preview_typings(conn, message_id)?,
+            ))
+        });
+        let (parked, typings) = match state {
+            Ok(state) => state,
+            Err(_) => {
+                self.storage_hold(message_id);
+                return Ok(());
+            }
+        };
+        if parked
+            .as_ref()
+            .is_some_and(|until| *until > crate::time::format_utc(self.clock.wall_now()))
+        {
+            return Ok(());
+        }
+        if typings == 2 {
+            let cause = if parked.is_some() {
+                "runner_stopped"
+            } else {
+                "typings_exhausted"
+            };
+            self.abandon(conn, storage_until(deadline), message_id, cause);
+            return Ok(());
+        }
+        if parked.is_some() {
+            if with_database_deadline(conn, storage_until(deadline), |conn| {
+                storage::clear_preview_park(conn, message_id)
+            })
+            .is_err()
+            {
+                self.storage_hold(message_id);
+                return Ok(());
+            }
+            self.record(&format!(
+                "director delivery: message {message_id} uncertain: runner_stopped"
+            ));
+        }
+        let mut counted = None;
+        let mut count = || {
+            let wall_now = crate::time::format_utc(self.clock.wall_now());
+            with_database_deadline(conn, storage_until(deadline), |conn| {
+                // The deadline wrapper can report expiration after the update commits.
+                counted = storage::count_preview_typing(conn, message_id, &wall_now)?;
+                Ok(counted.is_some())
+            })
+        };
+        let outcome = self.attempt(&target, deadline, stop, typings, &mut count);
+        if let Some(reserved) = counted
+            && matches!(
+                &outcome,
+                DirectorOutcome::Held(_)
+                    | DirectorOutcome::Unavailable(_)
+                    | DirectorOutcome::NotStarted
+            )
+        {
+            let release_until = clipped(deadline.max(clock.now() + DIRECTOR_WRITE_MARGIN));
+            with_database_deadline(conn, storage_until(release_until), |conn| {
+                storage::release_preview_typing(conn, message_id, reserved)
+            })?;
+        }
+        let second = counted == Some(2);
+        match outcome {
             DirectorOutcome::Delivered => {
                 let stamped = with_database_deadline(conn, storage_until(deadline), |conn| {
                     crate::broker::runtime::stamp_director_preview(
@@ -1729,15 +1833,276 @@ impl DirectorSweep {
                 self.note_hold(message_id, DirectorHold::PaneUnavailable);
                 self.back_off(now);
             }
+            DirectorOutcome::Uncertain(cause) if second => {
+                self.abandon(conn, storage_until(deadline), message_id, cause);
+            }
             DirectorOutcome::Uncertain(cause) => {
                 self.record(&format!(
                     "director delivery: message {message_id} uncertain: {cause}"
                 ));
             }
+            DirectorOutcome::Parked {
+                cause,
+                literal,
+                submit,
+                awaiting_render,
+            } => {
+                let until = crate::time::format_utc(
+                    self.clock.wall_now()
+                        + chrono::Duration::from_std(crate::runtime::input::LATE_SUBMISSION_WINDOW)
+                            .expect("the late-submission window is representable"),
+                );
+                match with_database_deadline(conn, storage_until(deadline), |conn| {
+                    storage::park_preview(conn, message_id, &until)
+                }) {
+                    Ok(true) => {
+                        self.parked = Some(DirectorPark {
+                            message_id,
+                            placement: target.placement.clone(),
+                            literal,
+                            submit,
+                            cause,
+                            until: self.clock.now() + crate::runtime::input::LATE_SUBMISSION_WINDOW,
+                            awaiting_render,
+                            second,
+                        });
+                    }
+                    Ok(false) => self.record(&format!(
+                        "director delivery: message {message_id} park ended: consumed"
+                    )),
+                    Err(_) => self.record(&format!(
+                        "director delivery: message {message_id} uncertain: {cause}"
+                    )),
+                }
+            }
             DirectorOutcome::NotStarted => {}
         }
         drop(lock);
         Ok(())
+    }
+
+    /// Ends the park as uncertain with `cause`, clearing its column; a second typing's end
+    /// stamps the message.
+    fn end_park(&mut self, conn: &mut Connection, storage_deadline: Instant, cause: &str) {
+        let park = self.parked.take().expect("a park ends only while parked");
+        if park.second {
+            self.abandon(conn, storage_deadline, park.message_id, cause);
+        } else {
+            self.clear_park(conn, storage_deadline, park.message_id);
+            self.record(&format!(
+                "director delivery: message {} uncertain: {cause}",
+                park.message_id
+            ));
+        }
+    }
+
+    /// Stamps a message that ends its typings uncertain, so the head advances; it stays
+    /// `input_required` for a later poll.
+    fn abandon(
+        &mut self,
+        conn: &mut Connection,
+        storage_deadline: Instant,
+        message_id: i64,
+        cause: &str,
+    ) {
+        match with_database_deadline(conn, storage_deadline, |conn| {
+            crate::broker::runtime::stamp_director_preview(conn, &self.run.owner(), message_id)
+        }) {
+            Ok(_) => {
+                self.held = None;
+                self.record(&format!(
+                    "director delivery: message {message_id} abandoned after pointer retry: {cause}"
+                ));
+            }
+            Err(_) => self.storage_hold(message_id),
+        }
+    }
+
+    /// Clears a message's park; a storage failure leaves the column for the runner that
+    /// selects the head after it lapses, and is diagnosed.
+    fn clear_park(&self, conn: &mut Connection, storage_deadline: Instant, message_id: i64) {
+        if let Err(cause) = with_database_deadline(conn, storage_deadline, |conn| {
+            storage::clear_preview_park(conn, message_id)
+        }) {
+            self.record(&format!(
+                "director delivery: storage unavailable: {}",
+                cause.message()
+            ));
+        }
+    }
+
+    /// One check of the parked preview: a consumed message ends the park, a whole literal is
+    /// submitted under a fresh attempt deadline, and contradicting text, an emptied composer or
+    /// the window's end stops it as uncertain.
+    fn tick_park(
+        &mut self,
+        conn: &mut Connection,
+        stop: &AtomicBool,
+        deadline: Instant,
+    ) -> Result<()> {
+        let clock = self.clock.clone();
+        let storage_until =
+            |at: Instant| Instant::now() + at.saturating_duration_since(clock.now());
+        let park = self.parked.clone().expect("a parked preview");
+        let message_id = park.message_id;
+        let message = match with_database_deadline(conn, storage_until(deadline), |conn| {
+            crate::broker::get_message(conn, message_id)
+        }) {
+            Ok(message) => message,
+            Err(_) => {
+                self.back_off(self.clock.now());
+                return Ok(());
+            }
+        };
+        if message.status != crate::broker::MessageStatus::InputRequired {
+            self.parked = None;
+            self.clear_park(conn, storage_until(deadline), message_id);
+            self.record(&format!(
+                "director delivery: message {message_id} park ended: consumed"
+            ));
+            return Ok(());
+        }
+        if self.clock.now() >= park.until {
+            self.end_park(conn, storage_until(deadline), park.cause);
+            return Ok(());
+        }
+        let stopped = || stop.load(Ordering::Acquire);
+        let Ok((mux, detector, delivery)) = self.director_tools(&park.placement, deadline) else {
+            return Ok(());
+        };
+        let delivery = delivery.clone();
+        let pane = park
+            .placement
+            .mux_pane_id
+            .as_deref()
+            .expect("concrete pane");
+        let Ok(screen) = capture(mux.as_ref(), pane) else {
+            return Ok(());
+        };
+        let empty = detector
+            .observe_director(&screen, delivery.rule_ids())
+            .is_ok_and(|observed| {
+                observed.kind == crate::coding_agent::ObservationKind::ComposerEmpty
+                    && observed.match_evidence == crate::coding_agent::MatchEvidence::Complete
+            });
+        let comparison = detector
+            .composer_text(&screen)
+            .ok()
+            .flatten()
+            .map(|text| text.compare(&[park.literal.as_str()]));
+        if empty {
+            if !park.awaiting_render {
+                self.end_park(conn, storage_until(deadline), park.cause);
+            }
+            return Ok(());
+        }
+        if comparison.is_some() {
+            self.parked
+                .as_mut()
+                .expect("a parked preview")
+                .awaiting_render = false;
+        }
+        match comparison {
+            Some(CompareOutcome::Complete) => {}
+            Some(CompareOutcome::Contradicts) => {
+                self.end_park(conn, storage_until(deadline), "literal_mismatch");
+                return Ok(());
+            }
+            Some(CompareOutcome::Partial) | None => return Ok(()),
+        }
+        let database_url = director_database_url(conn)?;
+        let Ok(Some(lock)) =
+            crate::pane_lock::PaneLock::try_acquire(&database_url, &park.placement)
+        else {
+            return Ok(());
+        };
+        let Ok(screen) = capture(mux.as_ref(), pane) else {
+            return Ok(());
+        };
+        let still_whole = detector
+            .composer_text(&screen)
+            .ok()
+            .flatten()
+            .is_some_and(|text| text.compare(&[park.literal.as_str()]) == CompareOutcome::Complete);
+        if !still_whole || stopped() {
+            return Ok(());
+        }
+        let outcome = self.submit_and_verify(
+            mux.as_ref(),
+            pane,
+            &detector,
+            &delivery,
+            &park.submit,
+            detector
+                .has_queued_preview(&screen, &park.literal)
+                .is_ok_and(|queued| !queued)
+                .then_some(park.literal.as_str()),
+            deadline,
+            &stopped,
+        );
+        match outcome {
+            DirectorOutcome::Delivered => {
+                self.parked = None;
+                let stamped = with_database_deadline(conn, storage_until(deadline), |conn| {
+                    crate::broker::runtime::stamp_director_preview(
+                        conn,
+                        &self.run.owner(),
+                        message_id,
+                    )
+                });
+                if stamped.is_ok() {
+                    self.backoff = SWEEP_BACKOFF_FLOOR;
+                    self.backoff_until = None;
+                    self.held = None;
+                } else {
+                    self.record(&format!(
+                        "director delivery: message {message_id} uncertain: storage_unavailable"
+                    ));
+                }
+            }
+            DirectorOutcome::Uncertain(cause) => {
+                self.end_park(conn, storage_until(deadline), cause);
+            }
+            DirectorOutcome::Held(_)
+            | DirectorOutcome::Unavailable(_)
+            | DirectorOutcome::Parked { .. }
+            | DirectorOutcome::NotStarted => {}
+        }
+        drop(lock);
+        Ok(())
+    }
+
+    /// The bounded multiplexer, detector and Director delivery of a Director placement.
+    fn director_tools(
+        &self,
+        placement: &broker::Placement,
+        deadline: Instant,
+    ) -> std::result::Result<
+        (
+            Box<dyn crate::multiplexer::Multiplexer>,
+            crate::coding_agent::Detector,
+            &crate::coding_agent::catalog::DirectorDelivery,
+        ),
+        String,
+    > {
+        let backend = crate::coding_agent::coding_agent(&placement.coding_agent)
+            .expect("the snapshot resolved the Director backend");
+        let delivery = self
+            .catalog
+            .director_delivery(backend)
+            .expect("the snapshot found Director delivery");
+        let detector = crate::coding_agent::Detector::new(&self.catalog, backend, None);
+        let real_deadline = crate::time::Deadline::until(
+            Instant::now() + deadline.saturating_duration_since(self.clock.now()),
+        );
+        let mux = crate::multiplexer::multiplexer_for_server(
+            &placement.backend,
+            &placement.mux_server,
+            self.runner.clone(),
+        )
+        .map_err(|cause| cause.to_string())?
+        .bounded(real_deadline);
+        Ok((mux, detector, delivery))
     }
 
     fn back_off(&mut self, now: Instant) {
@@ -1763,7 +2128,8 @@ impl DirectorSweep {
                 reported: false,
             },
         };
-        let reached = now.saturating_duration_since(held.since) >= DIRECTOR_HELD_REPORT;
+        let reached = hold == DirectorHold::ComposerTooSmall
+            || now.saturating_duration_since(held.since) >= DIRECTOR_HELD_REPORT;
         let reported = held.reported || reached;
         if reached && !held.reported {
             self.record(&format!(
@@ -1779,37 +2145,27 @@ impl DirectorSweep {
         target: &DirectorTarget,
         deadline: Instant,
         stop: &AtomicBool,
+        typings: u8,
+        count: &mut dyn FnMut() -> Result<bool>,
     ) -> DirectorOutcome {
         let placement = &target.placement;
         let pane = placement.mux_pane_id.as_deref().expect("concrete pane");
         let backend = crate::coding_agent::coding_agent(&placement.coding_agent)
             .expect("the snapshot resolved the Director backend");
-        let delivery = self
-            .catalog
-            .director_delivery(backend)
-            .expect("the snapshot found Director delivery");
         let plan = self
             .catalog
             .composer_plan(backend, crate::coding_agent::ComposerOperation::Prompt)
             .expect("Director delivery requires a prompt plan");
-        let detector = crate::coding_agent::Detector::new(&self.catalog, backend, None);
         let stopped = || stop.load(Ordering::Acquire);
-        let real_deadline = crate::time::Deadline::until(
-            Instant::now() + deadline.saturating_duration_since(self.clock.now()),
-        );
-        let mux = match crate::multiplexer::multiplexer_for_server(
-            &placement.backend,
-            &placement.mux_server,
-            self.runner.clone(),
-        ) {
-            Ok(mux) => mux.bounded(real_deadline),
-            Err(cause) => return DirectorOutcome::Unavailable(cause.to_string()),
+        let (mux, detector, delivery) = match self.director_tools(placement, deadline) {
+            Ok(tools) => tools,
+            Err(cause) => return DirectorOutcome::Unavailable(cause),
         };
         if stopped() {
             return DirectorOutcome::NotStarted;
         }
-        let screen = match capture(mux.as_ref(), pane) {
-            Ok(screen) => screen,
+        let (screen, columns) = match fitted_capture(mux.as_ref(), pane, &placement.backend) {
+            Ok(fitted) => fitted,
             Err(cause) => return DirectorOutcome::Unavailable(cause),
         };
         let observed = match detector.observe_director(&screen, delivery.rule_ids()) {
@@ -1823,13 +2179,36 @@ impl DirectorSweep {
             | crate::coding_agent::ObservationKind::PermissionContinuation => {
                 return DirectorOutcome::Held(DirectorHold::InteractionOpen);
             }
+            crate::coding_agent::ObservationKind::Unknown
+                if self.catalog.composer_minimum(backend).is_some_and(
+                    |(min_rows, min_columns)| screen.rows < min_rows || columns < min_columns,
+                ) =>
+            {
+                return DirectorOutcome::Held(DirectorHold::ComposerTooSmall);
+            }
             _ => return DirectorOutcome::Held(DirectorHold::ComposerBusy),
         }
-        let canonical = crate::runtime::preview::canonical_preview_line(&target.message);
-        let line = if delivery.plain_literal_allowed(&canonical) {
-            canonical
-        } else {
-            crate::runtime::preview::pointer_preview_line(&target.message)
+        let live = match detector.composer_geometry(&screen) {
+            Ok(live) => live.map(|live| crate::coding_agent::geometry::LiveComposer {
+                cols: columns,
+                ..live
+            }),
+            Err(cause) => return DirectorOutcome::Unavailable(cause.message().into_owned()),
+        };
+        let line = match crate::runtime::preview::select_rung(
+            &target.message,
+            typings,
+            live.as_ref(),
+            crate::coding_agent::catalog::LiteralFraming::Plain,
+            &|literal| delivery.plain_literal_allowed(literal),
+        ) {
+            crate::runtime::preview::RungSelection::Selected { literal, .. } => literal,
+            crate::runtime::preview::RungSelection::ComposerTooSmall => {
+                return DirectorOutcome::Held(DirectorHold::ComposerTooSmall);
+            }
+            crate::runtime::preview::RungSelection::ComposerGeometryUnavailable => {
+                return DirectorOutcome::Held(DirectorHold::ComposerGeometryUnavailable);
+            }
         };
         let [literal, submit] = plan
             .stages(&line, crate::coding_agent::catalog::LiteralFraming::Plain)
@@ -1837,6 +2216,14 @@ impl DirectorSweep {
         let literal = String::from_utf8(literal).expect("an encoded preview is UTF-8");
         let required = DIRECTOR_SETTLE + DIRECTOR_VERIFICATION + DIRECTOR_WRITE_MARGIN;
         if stopped() || deadline.saturating_duration_since(self.clock.now()) < required {
+            return DirectorOutcome::NotStarted;
+        }
+        match count() {
+            Ok(true) => {}
+            Ok(false) => return DirectorOutcome::NotStarted,
+            Err(_) => return DirectorOutcome::Held(DirectorHold::StorageUnavailable),
+        }
+        if stopped() {
             return DirectorOutcome::NotStarted;
         }
         match mux.type_literal_until(pane, &literal, &stopped) {
@@ -1854,28 +2241,87 @@ impl DirectorSweep {
         if stopped() {
             return DirectorOutcome::Uncertain("runner_stopped");
         }
-        let window_until = (self.clock.now() + crate::runtime::input::PRE_SUBMIT_WINDOW)
+        let window_until = (self.clock.now() + DIRECTOR_PRE_SUBMIT_WINDOW)
             .min(deadline - (DIRECTOR_VERIFICATION + DIRECTOR_WRITE_MARGIN));
-        loop {
-            let rendered = capture(mux.as_ref(), pane)
-                .ok()
-                .and_then(|screen| detector.composer_text(&screen).ok().flatten())
-                .is_some_and(|text| text.matches(&[literal.as_str()]));
-            if rendered {
-                break;
+        let mut saw_partial = false;
+        let queue_literal = loop {
+            let screen = capture(mux.as_ref(), pane).ok();
+            let comparison = screen
+                .as_ref()
+                .and_then(|screen| detector.composer_text(screen).ok().flatten())
+                .map(|text| text.compare(&[literal.as_str()]));
+            if comparison == Some(CompareOutcome::Complete) {
+                let screen = screen
+                    .as_ref()
+                    .expect("the complete literal came from a capture");
+                break detector
+                    .has_queued_preview(screen, &literal)
+                    .is_ok_and(|queued| !queued)
+                    .then_some(literal.as_str());
             }
+            saw_partial |= comparison == Some(CompareOutcome::Partial);
             if self.clock.now() + DIRECTOR_VERIFICATION_POLL > window_until {
-                return DirectorOutcome::Uncertain("literal_mismatch");
+                let empty = screen.as_ref().is_some_and(|screen| {
+                    detector
+                        .observe_director(screen, delivery.rule_ids())
+                        .is_ok_and(|observed| {
+                            observed.kind == crate::coding_agent::ObservationKind::ComposerEmpty
+                                && observed.match_evidence
+                                    == crate::coding_agent::MatchEvidence::Complete
+                        })
+                });
+                let cause = match comparison {
+                    Some(CompareOutcome::Partial) => "composer_clipped",
+                    Some(CompareOutcome::Contradicts) if !empty => {
+                        return DirectorOutcome::Uncertain("literal_mismatch");
+                    }
+                    _ => "composer_unreadable",
+                };
+                return DirectorOutcome::Parked {
+                    cause,
+                    literal,
+                    submit,
+                    awaiting_render: !saw_partial && empty,
+                };
             }
             self.clock.sleep(DIRECTOR_VERIFICATION_POLL);
             if stopped() {
                 return DirectorOutcome::Uncertain("runner_stopped");
             }
-        }
+        };
         if stopped() {
             return DirectorOutcome::Uncertain("runner_stopped");
         }
-        if mux.press_submit(pane, &submit).is_err() {
+        self.submit_and_verify(
+            mux.as_ref(),
+            pane,
+            &detector,
+            delivery,
+            &submit,
+            queue_literal,
+            deadline,
+            &stopped,
+        )
+    }
+
+    /// Writes the submit key and confirms it through a verified empty Director composer or a
+    /// newly visible echo of the preview in Claude's native queue.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one locked Director attempt's state"
+    )]
+    fn submit_and_verify(
+        &self,
+        mux: &dyn crate::multiplexer::Multiplexer,
+        pane: &str,
+        detector: &crate::coding_agent::Detector,
+        delivery: &crate::coding_agent::catalog::DirectorDelivery,
+        submit: &[u8],
+        queue_literal: Option<&str>,
+        deadline: Instant,
+        stopped: &dyn Fn() -> bool,
+    ) -> DirectorOutcome {
+        if mux.press_submit(pane, submit).is_err() {
             return DirectorOutcome::Uncertain("write_failed");
         }
         let verify_until = (self.clock.now() + DIRECTOR_VERIFICATION).min(deadline);
@@ -1883,14 +2329,21 @@ impl DirectorSweep {
             if stopped() {
                 return DirectorOutcome::Uncertain("runner_stopped");
             }
-            let empty = capture(mux.as_ref(), pane)
-                .ok()
-                .and_then(|screen| detector.observe_director(&screen, delivery.rule_ids()).ok())
-                .is_some_and(|observed| {
-                    observed.kind == crate::coding_agent::ObservationKind::ComposerEmpty
-                        && observed.match_evidence == crate::coding_agent::MatchEvidence::Complete
-                });
-            if empty {
+            let confirmed = capture(mux, pane).is_ok_and(|screen| {
+                detector
+                    .observe_director(&screen, delivery.rule_ids())
+                    .is_ok_and(|observed| {
+                        observed.kind == crate::coding_agent::ObservationKind::ComposerEmpty
+                            && observed.match_evidence
+                                == crate::coding_agent::MatchEvidence::Complete
+                    })
+                    || queue_literal.is_some_and(|literal| {
+                        detector
+                            .has_queued_preview(&screen, literal)
+                            .is_ok_and(|queued| queued)
+                    })
+            });
+            if confirmed {
                 return DirectorOutcome::Delivered;
             }
             if self.clock.now() + DIRECTOR_VERIFICATION_POLL > verify_until {
@@ -1899,6 +2352,53 @@ impl DirectorSweep {
             self.clock.sleep(DIRECTOR_VERIFICATION_POLL);
         }
     }
+}
+
+/// The `sqlite:///` URL of the Director sweep's database file.
+fn director_database_url(conn: &Connection) -> Result<String> {
+    Ok(format!(
+        "sqlite:///{}",
+        conn.path()
+            .ok_or_else(|| error("the Director sweep database has no file path"))?
+    ))
+}
+
+/// The columns a herdr pane's layout `rect` adds around its PTY.
+pub(crate) const HERDR_PANE_CHROME_COLUMNS: u16 = 2;
+
+/// The text columns a Director capture fits a preview into. tmux reports the PTY width; herdr
+/// reports the layout `rect`, which a tab off screen no longer matches, so the fit takes the
+/// narrower of the rect less its chrome and the widest captured row, since no captured row is
+/// wider than the PTY.
+pub(crate) fn fit_columns(
+    backend: crate::multiplexer::MuxBackend,
+    capture: &crate::multiplexer::ScreenCapture,
+) -> u16 {
+    match backend {
+        crate::multiplexer::MuxBackend::Tmux => capture.cols,
+        crate::multiplexer::MuxBackend::Herdr => capture
+            .cols
+            .saturating_sub(HERDR_PANE_CHROME_COLUMNS)
+            .min(capture.widest_row_columns()),
+    }
+}
+
+/// The Director pane's screen as a replayed snapshot with the columns a preview fits into, or
+/// the capture failure's text.
+fn fitted_capture(
+    mux: &dyn crate::multiplexer::Multiplexer,
+    pane: &str,
+    backend: &str,
+) -> std::result::Result<(ScreenSnapshot, u16), String> {
+    let backend =
+        crate::multiplexer::MuxBackend::parse(backend).map_err(|cause| cause.to_string())?;
+    let capture = mux
+        .capture_screen(pane)
+        .map_err(|cause| cause.to_string())?;
+    let columns = fit_columns(backend, &capture);
+    let screen = crate::runtime::TerminalState::replay(&capture)
+        .map_err(|cause| cause.message().into_owned())?;
+    Ok((screen, columns))
 }
 
 /// The Director pane's screen as a replayed snapshot, or the capture failure's text.
@@ -2015,8 +2515,9 @@ impl InputTurns {
         io: &mut impl InputTurnIo,
     ) -> Result<InputTurnOutcome> {
         let deadline = match self.pending.as_ref().expect("an attempt is in flight") {
-            PendingAttempt::Client { deadline, .. } | PendingAttempt::Sweep { deadline } => {
-                *deadline
+            PendingAttempt::Client { deadline, .. } => *deadline,
+            PendingAttempt::Sweep { deadline } => {
+                coordinator.pending_deadline().unwrap_or(*deadline)
             }
         };
         let result = match io.quiesce(coordinator, deadline) {
@@ -4258,7 +4759,9 @@ pub(crate) mod test_support {
     /// coordinator over a scripted native child, fake terminal and temporary database, driven in
     /// the runner loop's turn order on one virtual [`TestClock`].
     pub(crate) mod scenario {
+        use std::cell::Cell;
         use std::io;
+        use std::rc::Rc;
         use std::sync::Arc;
         use std::time::Duration;
         use std::time::Instant;
@@ -4590,15 +5093,120 @@ pub(crate) mod test_support {
             pub(crate) held_pane: Option<crate::pane_lock::PaneLock>,
             writer_hooks: Arc<ScenarioWriterHooks>,
             turns: InputTurns,
+            /// How a synthetic runner's child paints written text.
+            paint: Option<Rc<Cell<Paint>>>,
             finished: bool,
+        }
+
+        /// How the synthetic child paints the text written since the last submit key.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(crate) enum Paint {
+            /// The whole text in its composer row above `State end`.
+            Whole,
+            /// Its first twenty scalars on the last screen row, which closes the composer.
+            Clipped,
+            /// Other text in a whole composer.
+            Contradicting,
+            /// Plain output with no composer.
+            Unrelated,
+            /// The empty composer.
+            Empty,
+        }
+
+        pub(crate) const SYNTHETIC_EMPTY: &[u8] = b"\x1b[2J\x1b[23;1HSynthetic state\r\nState end";
+
+        fn synthetic_paint(paint: Paint, typed: &str) -> Vec<u8> {
+            use crate::coding_agent::catalog::test_support::synthetic_composer_echo;
+            use crate::coding_agent::catalog::test_support::synthetic_composer_line;
+            match paint {
+                Paint::Whole => synthetic_composer_echo(typed),
+                Paint::Clipped => {
+                    let shown = typed.chars().take(20).collect::<String>();
+                    format!("\x1b[2J\x1b[24;1H{}", synthetic_composer_line(&shown)).into_bytes()
+                }
+                Paint::Contradicting => format!(
+                    "\x1b[2J\x1b[23;1H{}\r\nState end",
+                    synthetic_composer_line("an unrelated draft")
+                )
+                .into_bytes(),
+                Paint::Unrelated => b"\x1b[2J\x1b[1;1Hunrelated output".to_vec(),
+                Paint::Empty => SYNTHETIC_EMPTY.to_vec(),
+            }
         }
 
         impl Runner {
             /// A started run of the backend and version that recorded `screen`, at its size, with
             /// the child showing `screen`.
             pub(crate) fn new(screen: &str, redraw: Option<&str>) -> Self {
-                let catalog = ProfileCatalog::bundled();
                 let native = native_screen(screen);
+                let painter = crate::coding_agent::catalog::test_support::native_composer_painter(
+                    native.backend,
+                    native.size,
+                    &screen_bytes(screen),
+                );
+                Self::build(
+                    ProfileCatalog::bundled(),
+                    native,
+                    screen_bytes(screen),
+                    painter,
+                    redraw.map(screen_bytes),
+                )
+            }
+
+            /// A started run of the synthetic codex composer at 24x80 on its empty screen,
+            /// whose child paints written text as `paint` currently says and shows the empty
+            /// composer again after each submit key.
+            pub(crate) fn synthetic(paint: Rc<Cell<Paint>>) -> Self {
+                Self::synthetic_with(paint, |_| {})
+            }
+
+            /// [`Runner::synthetic`] with its composer capability adjusted by `change`.
+            pub(crate) fn synthetic_with(
+                paint: Rc<Cell<Paint>>,
+                change: impl FnOnce(&mut serde_json::Value),
+            ) -> Self {
+                let mut definition =
+                    crate::coding_agent::catalog::test_support::definition(Some("0d"), Some("0d"));
+                change(&mut definition["codex"]["profile"]["capabilities"]["composer"]);
+                let catalog =
+                    crate::coding_agent::catalog::test_support::load(&definition).unwrap();
+                let native = NativeScreen {
+                    backend: CodingAgent::Codex,
+                    version: crate::coding_agent::catalog::test_support::VERSION.into(),
+                    size: TerminalSize { rows: 24, cols: 80 },
+                };
+                let mut runner = Self::build(
+                    &catalog,
+                    native,
+                    SYNTHETIC_EMPTY.to_vec(),
+                    Some(Box::new({
+                        let paint = paint.clone();
+                        move |typed: &str| synthetic_paint(paint.get(), typed)
+                    })),
+                    Some(SYNTHETIC_EMPTY.to_vec()),
+                );
+                runner.paint = Some(paint);
+                runner
+            }
+
+            /// Switches the synthetic child to `paint` and repaints the text written since the
+            /// last submit key.
+            pub(crate) fn repaint(&mut self, paint: Paint) {
+                self.paint
+                    .as_ref()
+                    .expect("a synthetic runner repaints")
+                    .set(paint);
+                let typed = String::from_utf8_lossy(&self.child.typed).into_owned();
+                self.child.draw(synthetic_paint(paint, &typed));
+            }
+
+            fn build(
+                catalog: &ProfileCatalog,
+                native: NativeScreen,
+                screen: Vec<u8>,
+                painter: Option<crate::coding_agent::catalog::test_support::ComposerPainter>,
+                redraw: Option<Vec<u8>>,
+            ) -> Self {
                 let clock = Arc::new(
                     TestClock::starting_at(
                         Instant::now() + crate::runtime::test_support::VIRTUAL_LEAD,
@@ -4683,7 +5291,7 @@ pub(crate) mod test_support {
                     clock.now() + Duration::from_secs(10),
                 )
                 .unwrap();
-                let redraw = redraw.map(|id| {
+                let redraw = redraw.map(|bytes| {
                     let plan = catalog
                         .composer_plan(native.backend, ComposerOperation::Prompt)
                         .expect("a redraw after submit needs the profile's prompt plan");
@@ -4693,22 +5301,18 @@ pub(crate) mod test_support {
                         .into_iter()
                         .last()
                         .expect("a prompt plan ends with its submit key");
-                    (submit, screen_bytes(id))
+                    (submit, bytes)
                 });
                 let mut child = NativeChild {
                     screens: FakeInput::default(),
                     written: Vec::new(),
                     redraw,
                     interrupt: None,
-                    painter: crate::coding_agent::catalog::test_support::native_composer_painter(
-                        native.backend,
-                        native.size,
-                        &screen_bytes(screen),
-                    ),
+                    painter,
                     typed: Vec::new(),
                     programmatic: false,
                 };
-                child.draw(screen_bytes(screen));
+                child.draw(screen);
                 Self {
                     clock,
                     fixture,
@@ -4724,6 +5328,7 @@ pub(crate) mod test_support {
                     held_pane: None,
                     writer_hooks,
                     turns: InputTurns::new(),
+                    paint: None,
                     finished: false,
                 }
             }
@@ -5002,6 +5607,82 @@ pub(crate) mod test_support {
                         |row| row.get(0),
                     )
                     .unwrap()
+            }
+
+            pub(crate) fn typings(&self, body: &str) -> i64 {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT preview_typings FROM messages WHERE text=?1",
+                        [body],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            pub(crate) fn set_typings(&self, body: &str, typings: i64) {
+                self.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET preview_typings=?2 WHERE text=?1",
+                        rusqlite::params![body, typings],
+                    )
+                    .unwrap();
+            }
+
+            /// Consumes every message pending for the member, as its `message poll` does.
+            pub(crate) fn poll_all(&self) {
+                self.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET status_state='completed' WHERE to_member_id=?1",
+                        [self.fixture.run.member_id],
+                    )
+                    .unwrap();
+            }
+
+            /// Switches how the synthetic child paints text it receives from now on.
+            pub(crate) fn set_paint(&self, paint: Paint) {
+                self.paint
+                    .as_ref()
+                    .expect("a synthetic runner paints")
+                    .set(paint);
+            }
+
+            pub(crate) fn parked_until(&self, body: &str) -> Option<String> {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT preview_parked_until FROM messages WHERE text=?1",
+                        [body],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            /// Sets the message's `preview_parked_until` `offset` from the wall clock, as
+            /// another runner's park leaves it.
+            pub(crate) fn park_elsewhere(&self, body: &str, offset: chrono::Duration) {
+                self.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET preview_parked_until=?2 WHERE text=?1",
+                        rusqlite::params![
+                            body,
+                            crate::time::format_utc(self.clock.wall_now() + offset)
+                        ],
+                    )
+                    .unwrap();
+            }
+
+            /// The cause kinds of the delivery results that name the message with this body.
+            pub(crate) fn result_causes(&self, body: &str) -> Vec<Option<String>> {
+                let message_id = self.message(body).message_id;
+                self.payloads("input_delivery_result")
+                    .into_iter()
+                    .filter(|payload| payload["message_id"] == message_id)
+                    .map(|payload| payload["cause"]["kind"].as_str().map(str::to_owned))
+                    .collect()
             }
 
             pub(crate) fn payloads(&self, kind: &str) -> Vec<serde_json::Value> {
@@ -6393,6 +7074,364 @@ mod tests {
         }
     }
 
+    mod late_submission_scenarios {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use std::time::Duration;
+
+        use crate::runtime::service::test_support::scenario::*;
+
+        const BODY: &str = "a preview the pane first clips";
+        const NEWER: &str = "a preview behind the parked head";
+
+        fn submitted_last(runner: &Runner) -> bool {
+            runner.child.written.ends_with(b"\r")
+        }
+
+        /// A synthetic runner whose child paints written text as `paint`, after its sweep has
+        /// typed `BODY` once and parked it at the close of the pre-submit window.
+        fn parked(paint: Paint) -> Runner {
+            let mut runner = Runner::synthetic(Rc::new(Cell::new(paint)));
+            runner.settle();
+            runner.step(Step::Message(BODY));
+            runner.run_for(Duration::from_secs(5));
+            let line = runner.preview_line(BODY);
+            assert_eq!(runner.typed(&line), 1, "the preview is typed once");
+            assert!(!submitted_last(&runner), "no submit key at the park");
+            assert!(!runner.notified(BODY));
+            assert!(
+                runner.parked_until(BODY).is_some(),
+                "the attempt parks: {:?}",
+                runner.result_causes(BODY)
+            );
+            assert!(
+                runner.result_causes(BODY).is_empty(),
+                "a park publishes no outcome"
+            );
+            runner
+        }
+
+        #[test]
+        fn a_parked_preview_revealed_whole_is_submitted_late_without_retyping() {
+            let mut runner = parked(Paint::Clipped);
+            runner.run_for(Duration::from_secs(3));
+            assert!(
+                runner.parked_until(BODY).is_some(),
+                "a clipped composer stays parked"
+            );
+            runner.repaint(Paint::Whole);
+            runner.run_for(Duration::from_secs(3));
+            assert!(runner.notified(BODY), "the late submission is confirmed");
+            assert_eq!(runner.parked_until(BODY), None);
+            assert!(submitted_last(&runner), "the submit key follows the reveal");
+            assert_eq!(
+                runner.typed(&runner.preview_line(BODY)),
+                1,
+                "the literal is not retyped"
+            );
+            assert!(runner.result_causes(BODY).iter().all(Option::is_none));
+        }
+
+        #[test]
+        fn a_parked_preview_ends_uncertain_on_contradicting_text_or_an_emptied_composer() {
+            for (paint, cause) in [
+                (Paint::Contradicting, "literal_mismatch"),
+                (Paint::Empty, "composer_clipped"),
+            ] {
+                let mut runner = parked(Paint::Clipped);
+                let written = runner.child.written.len();
+                runner.repaint(paint);
+                runner.run_for(Duration::from_secs(2));
+                assert_eq!(runner.parked_until(BODY), None, "{paint:?}");
+                assert!(!runner.notified(BODY), "{paint:?}");
+                assert!(
+                    runner.result_causes(BODY).contains(&Some(cause.into())),
+                    "{paint:?}: {:?}",
+                    runner.result_causes(BODY)
+                );
+                assert!(
+                    !runner.child.written[..written].ends_with(b"\r"),
+                    "{paint:?}: no submit key before the outcome"
+                );
+            }
+        }
+
+        #[test]
+        fn a_parked_preview_consumed_by_a_poll_ends_without_an_outcome() {
+            let mut runner = parked(Paint::Clipped);
+            let id = runner.message(BODY).message_id;
+            runner
+                .fixture
+                .conn
+                .execute(
+                    "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                    [id],
+                )
+                .unwrap();
+            runner.run_for(Duration::from_secs(3));
+            assert_eq!(runner.parked_until(BODY), None);
+            assert!(
+                runner.result_causes(BODY).is_empty(),
+                "no uncertain outcome"
+            );
+            assert!(!submitted_last(&runner), "no submit key");
+            assert_eq!(runner.typed(&runner.preview_line(BODY)), 1);
+        }
+
+        #[test]
+        fn a_park_that_outlasts_the_window_ends_uncertain_with_its_cause() {
+            for (paint, cause) in [
+                (Paint::Clipped, "composer_clipped"),
+                (Paint::Unrelated, "composer_unreadable"),
+            ] {
+                let mut runner = parked(paint);
+                runner.run_for(Duration::from_secs(110));
+                assert!(
+                    runner.parked_until(BODY).is_some(),
+                    "{paint:?}: inside the window"
+                );
+                assert!(runner.result_causes(BODY).is_empty(), "{paint:?}");
+                runner.run_for(Duration::from_secs(15));
+                assert_eq!(runner.parked_until(BODY), None, "{paint:?}");
+                assert!(
+                    runner.result_causes(BODY).contains(&Some(cause.into())),
+                    "{paint:?}: {:?}",
+                    runner.result_causes(BODY)
+                );
+                assert!(!submitted_last(&runner), "{paint:?}: no submit key");
+                assert_eq!(runner.typed(&runner.preview_line(BODY)), 1, "{paint:?}");
+            }
+        }
+
+        #[test]
+        fn a_head_another_runner_parked_holds_the_sweep_in_order() {
+            let mut runner = Runner::synthetic(Rc::new(Cell::new(Paint::Whole)));
+            runner.settle();
+            runner.step(Step::Message(BODY));
+            runner.park_elsewhere(BODY, chrono::Duration::seconds(60));
+            runner.step(Step::Message(NEWER));
+            runner.run_for(Duration::from_secs(10));
+            assert_eq!(
+                runner.typed(&runner.preview_line(BODY)),
+                0,
+                "the parked head"
+            );
+            assert_eq!(
+                runner.typed(&runner.preview_line(NEWER)),
+                0,
+                "a newer message waits behind it"
+            );
+            assert!(runner.parked_until(BODY).is_some());
+        }
+
+        #[test]
+        fn a_lapsed_park_of_a_lost_runner_is_cleared_as_runner_stopped_before_typing() {
+            let mut runner = Runner::synthetic(Rc::new(Cell::new(Paint::Whole)));
+            runner.settle();
+            runner.step(Step::Message(BODY));
+            runner.park_elsewhere(BODY, chrono::Duration::seconds(-1));
+            runner.run_for(Duration::from_secs(5));
+            assert_eq!(runner.parked_until(BODY), None, "the lapsed park clears");
+            assert!(
+                runner
+                    .result_causes(BODY)
+                    .contains(&Some("runner_stopped".into())),
+                "{:?}",
+                runner.result_causes(BODY)
+            );
+            assert!(
+                runner.typed(&format!("[cafleet msg {}", runner.message(BODY).message_id)) >= 1,
+                "the head is typed after the clear"
+            );
+        }
+    }
+
+    mod pane_geometry_scenarios {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use std::time::Duration;
+
+        use crate::runtime::TerminalSize;
+        use crate::runtime::service::test_support::scenario::*;
+        use serde_json::json;
+
+        fn geometry(runner: &Runner) -> (u16, u16, u16, u16, bool) {
+            let geometry = runner
+                .controller
+                .health(&runner.writer)
+                .geometry
+                .expect("a profile with geometry reports the live pane");
+            (
+                geometry.rows,
+                geometry.columns,
+                geometry.min_rows,
+                geometry.min_columns,
+                geometry.below_minimum,
+            )
+        }
+
+        fn resize(runner: &mut Runner, rows: u16) {
+            runner
+                .transport
+                .resize(&mut runner.child, TerminalSize { rows, cols: 80 })
+                .unwrap();
+            runner.run_for(Duration::from_secs(1));
+        }
+
+        #[test]
+        fn observation_geometry_follows_the_live_pane_and_clears_without_operator_action() {
+            let mut runner = Runner::synthetic_with(Rc::new(Cell::new(Paint::Whole)), |composer| {
+                composer["geometry"]["min_rows"] = json!(20);
+            });
+            runner.settle();
+            assert_eq!(geometry(&runner), (24, 80, 20, 18, false), "at start");
+            resize(&mut runner, 18);
+            assert_eq!(geometry(&runner), (18, 80, 20, 18, true), "after a shrink");
+            resize(&mut runner, 24);
+            assert_eq!(geometry(&runner), (24, 80, 20, 18, false), "after a grow");
+        }
+    }
+
+    mod pointer_retry_scenarios {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use std::time::Duration;
+
+        use crate::runtime::service::test_support::scenario::*;
+
+        const BODY: &str = "a preview typed at most twice";
+        const NEWER: &str = "a preview queued behind it";
+
+        fn synthetic(paint: Paint) -> Runner {
+            let mut runner = Runner::synthetic(Rc::new(Cell::new(paint)));
+            runner.settle();
+            runner
+        }
+
+        fn pointer(runner: &Runner, body: &str) -> String {
+            crate::runtime::preview::pointer_preview_line(&runner.message(body))
+        }
+
+        /// A runner whose first typing of `BODY` ended uncertain on contradicting text, with the
+        /// composer emptied again and the child painting `second` from now on.
+        fn after_one_uncertain_typing(second: Paint) -> Runner {
+            let mut runner = synthetic(Paint::Contradicting);
+            runner.step(Step::Message(BODY));
+            runner.run_for(Duration::from_secs(5));
+            assert_eq!(
+                runner.typed(&runner.preview_line(BODY)),
+                1,
+                "the first typing"
+            );
+            assert_eq!(runner.typings(BODY), 1);
+            assert!(
+                !runner.notified(BODY),
+                "one uncertain outcome leaves it unnotified"
+            );
+            assert!(
+                runner
+                    .result_causes(BODY)
+                    .contains(&Some("literal_mismatch".into()))
+            );
+            runner.repaint(Paint::Empty);
+            runner.set_paint(second);
+            runner
+        }
+
+        #[test]
+        fn the_second_typing_is_the_pointer_rung_and_can_deliver() {
+            let mut runner = after_one_uncertain_typing(Paint::Whole);
+            runner.run_for(Duration::from_secs(5));
+            assert_eq!(runner.typed(&pointer(&runner, BODY)), 1, "the pointer rung");
+            assert_eq!(
+                runner.typed(&runner.preview_line(BODY)),
+                1,
+                "no full retype"
+            );
+            assert_eq!(runner.typings(BODY), 2);
+            assert!(runner.notified(BODY));
+        }
+
+        #[test]
+        fn a_second_uncertain_typing_stamps_the_message_and_ends_its_delivery() {
+            let mut runner = after_one_uncertain_typing(Paint::Contradicting);
+            runner.run_for(Duration::from_secs(5));
+            assert_eq!(runner.typed(&pointer(&runner, BODY)), 1);
+            assert_eq!(runner.typings(BODY), 2);
+            assert!(
+                runner.notified(BODY),
+                "the second outcome stamps notified_at"
+            );
+            let pending: String = runner
+                .fixture
+                .conn
+                .query_row(
+                    "SELECT status_state FROM messages WHERE text=?1",
+                    [BODY],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(pending, "input_required", "a later poll still reads it");
+            runner.repaint(Paint::Empty);
+            runner.set_paint(Paint::Whole);
+            runner.run_for(Duration::from_secs(5));
+            assert_eq!(runner.typed(&pointer(&runner, BODY)), 1, "no third typing");
+            assert_eq!(runner.typed(&runner.preview_line(BODY)), 1);
+            assert_eq!(runner.typings(BODY), 2);
+        }
+
+        #[test]
+        fn a_reservation_held_with_zero_bytes_counts_no_typing() {
+            let mut runner = synthetic(Paint::Whole);
+            runner.step(Step::HoldPane);
+            runner.step(Step::Message(BODY));
+            runner.run_for(Duration::from_secs(5));
+            assert_eq!(runner.typed(&runner.preview_line(BODY)), 0, "zero bytes");
+            assert_eq!(runner.typings(BODY), 0, "a held reservation counts nothing");
+            runner.step(Step::ReleasePane);
+            runner.run_for(Duration::from_secs(5));
+            assert!(runner.notified(BODY));
+            assert_eq!(runner.typings(BODY), 1);
+        }
+
+        #[test]
+        fn an_exhausted_head_is_stamped_and_the_next_message_is_delivered() {
+            let mut runner = synthetic(Paint::Whole);
+            runner.step(Step::Message(BODY));
+            runner.set_typings(BODY, 2);
+            runner.step(Step::Message(NEWER));
+            runner.run_for(Duration::from_secs(5));
+            assert!(runner.notified(BODY), "the exhausted head is stamped");
+            assert_eq!(
+                runner.typed(&format!("[cafleet msg {}", runner.message(BODY).message_id)),
+                0
+            );
+            assert!(runner.notified(NEWER), "the next message is delivered");
+            assert_eq!(runner.typed(&runner.preview_line(NEWER)), 1);
+        }
+
+        #[test]
+        fn the_pointer_retry_poll_delivers_the_newer_messages() {
+            let mut runner = after_one_uncertain_typing(Paint::Whole);
+            runner.step(Step::Message(NEWER));
+            for _ in 0..100 {
+                if runner.notified(BODY) {
+                    break;
+                }
+                runner.run_for(Duration::from_millis(50));
+            }
+            assert!(runner.notified(BODY), "the pointer rung is submitted");
+            runner.poll_all();
+            runner.run_for(Duration::from_secs(5));
+            assert_eq!(
+                runner.typed(&runner.preview_line(NEWER)),
+                0,
+                "the newer message reached the member through the pointer's poll"
+            );
+            assert_eq!(runner.typings(NEWER), 0);
+        }
+    }
+
     mod scenarios {
         use std::time::Duration;
 
@@ -6709,7 +7748,7 @@ mod tests {
         }
 
         #[test]
-        fn an_uncertain_preview_publishes_one_receipt_free_result_and_is_typed_again_once_verified_empty()
+        fn an_uncertain_preview_publishes_one_receipt_free_result_and_is_retyped_as_its_pointer_once_verified_empty()
          {
             const UNCERTAIN: Scenario = Scenario {
                 name: "uncertain preview",
@@ -6738,7 +7777,14 @@ mod tests {
             assert!(!runner.notified(body));
             runner.step(Step::Screen(IDLE));
             runner.step(Step::Run(Duration::from_secs(5)));
-            assert_eq!(runner.typed(&line), 2, "the stopped literal and its retry");
+            assert_eq!(runner.typed(&line), 1, "the stopped literal");
+            assert_eq!(
+                runner.typed(&crate::runtime::preview::pointer_preview_line(
+                    &runner.message(body)
+                )),
+                1,
+                "the single retry is the pointer rung"
+            );
             assert!(runner.notified(body));
             assert_eq!(
                 runner
@@ -7049,6 +8095,7 @@ mod tests {
 
         const ROWS: u16 = 24;
         const COLS: u16 = 80;
+        const HERDR_PANE: &str = "w1:p2";
         const TMUX_LIMIT: &str = "director-tmux-limit";
         const HERDR_LIMIT: &str = "director-herdr-limit";
 
@@ -7076,11 +8123,17 @@ mod tests {
         /// commands from its modelled screen, appends literal keys to its composer and empties
         /// the composer on the submit key.
         struct PaneState {
+            height: u16,
             cols: u16,
+            /// The pane is a herdr pane whose layout `rect` is this wide; its PTY stays `cols`
+            /// wide and draws a full-width border row above its content.
+            herdr_rect: Option<u16>,
             shown: Shown,
             typed: String,
             submit_clears: bool,
             capture_failure: Option<String>,
+            type_not_started: bool,
+            poll_on_capture: Option<(String, i64)>,
             human_key_after_type: Option<&'static str>,
             /// A database the pane locks exclusively when the submit key arrives, as a
             /// concurrent writer that takes the lock between submission and the stamp.
@@ -7090,6 +8143,13 @@ mod tests {
             /// a native composer that renders its input late.
             render_delay: usize,
             unrendered: usize,
+            /// How many typed scalars the composer shows, as a composer whose window hides the
+            /// rest; `None` shows them all.
+            visible_prefix: Option<usize>,
+            /// The typed composer loses its `State end` row, so the pane bottom closes it.
+            clip_footer: bool,
+            /// The first typed chunk replaces the composer with plain output.
+            plain_after_type: bool,
             stop_at: Option<(StopAt, Arc<AtomicBool>)>,
             events: Vec<PaneEvent>,
             calls: usize,
@@ -7102,10 +8162,17 @@ mod tests {
                     Shown::Composer if self.typed.is_empty() => {
                         vec!["Synthetic state".into(), "State end".into()]
                     }
-                    Shown::Composer => vec![
-                        profiles::synthetic_composer_line(&self.typed),
-                        "State end".into(),
-                    ],
+                    Shown::Composer => {
+                        let shown = match self.visible_prefix {
+                            Some(count) => self.typed.chars().take(count).collect(),
+                            None => self.typed.clone(),
+                        };
+                        let mut rows = vec![profiles::synthetic_composer_line(&shown)];
+                        if !self.clip_footer {
+                            rows.push("State end".into());
+                        }
+                        rows
+                    }
                     Shown::Permission => [
                         "Synthetic permission request",
                         "Operation: rm -rf build",
@@ -7132,9 +8199,12 @@ mod tests {
                             .collect::<Vec<String>>()
                     })
                     .collect();
-                let blank = usize::from(ROWS).saturating_sub(rows.len());
+                let blank = usize::from(self.height).saturating_sub(rows.len());
                 let mut screen = vec![String::new(); blank];
                 screen.append(&mut rows);
+                if self.herdr_rect.is_some() && blank > 0 {
+                    screen[0] = "─".repeat(width);
+                }
                 screen
             }
 
@@ -7142,7 +8212,7 @@ mod tests {
                 let rows = self.rows();
                 let last = rows.len() - 1;
                 let cursor_col = rows[last].chars().count().min(usize::from(self.cols));
-                format!("{ROWS} {} {last} {cursor_col} 0\n", self.cols)
+                format!("{} {} {last} {cursor_col} 0\n", self.height, self.cols)
             }
 
             fn stop(&self, stage: StopAt) {
@@ -7160,16 +8230,23 @@ mod tests {
         impl FakePane {
             fn new() -> Self {
                 Self(Rc::new(RefCell::new(PaneState {
+                    height: ROWS,
                     cols: COLS,
+                    herdr_rect: None,
                     shown: Shown::Composer,
                     typed: String::new(),
                     submit_clears: true,
                     capture_failure: None,
+                    type_not_started: false,
+                    poll_on_capture: None,
                     human_key_after_type: None,
                     lock_on_submit: None,
                     held_lock: None,
                     render_delay: 0,
                     unrendered: 0,
+                    visible_prefix: None,
+                    clip_footer: false,
+                    plain_after_type: false,
                     stop_at: None,
                     events: Vec::new(),
                     calls: 0,
@@ -7182,6 +8259,50 @@ mod tests {
 
             fn events(&self) -> Vec<PaneEvent> {
                 self.0.borrow().events.clone()
+            }
+
+            /// Answers a herdr `api snapshot` from the pane's rect width and viewport rows, and
+            /// serves its reads and keys as the tmux pane does.
+            fn run_herdr(&self, argv: &[String]) -> Result<String, RunError> {
+                let command: Vec<&str> = argv[3..].iter().map(String::as_str).collect();
+                let tmux = |parts: &[&str]| {
+                    ["tmux", "-L", "herdr-fake"]
+                        .iter()
+                        .chain(parts)
+                        .map(|part| (*part).to_owned())
+                        .collect::<Vec<String>>()
+                };
+                match command.as_slice() {
+                    ["api", "snapshot"] => {
+                        let mut state = self.0.borrow_mut();
+                        state.calls += 1;
+                        let width = state.herdr_rect.expect("a herdr Director pane");
+                        Ok(crate::multiplexer::test_support::herdr_envelope(json!({
+                            "snapshot": {
+                                "layouts": [{"panes": [{
+                                    "focused": false,"pane_id": HERDR_PANE,
+                                    "rect": {"height": state.height, "width": width, "x": 0, "y": 0}
+                                }], "tab_id": "w1:t1"}],
+                                "panes": [{
+                                    "agent_status": "unknown","focused": false,"pane_id": HERDR_PANE,
+                                    "scroll": {"max_offset_from_bottom": 0, "offset_from_bottom": 0, "viewport_rows": state.height},
+                                    "workspace_id": "w1"
+                                }],
+                                "version": 1
+                            }
+                        })))
+                    }
+                    ["pane", "read", pane, ..] => {
+                        self.run(&tmux(&["capture-pane", "-p", "-e", "-N", "-t", pane]))
+                    }
+                    ["pane", "send-text", pane, literal] => {
+                        self.run(&tmux(&["send-keys", "-t", pane, "-l", "--", literal]))
+                    }
+                    ["pane", "send-keys", pane, "enter"] => {
+                        self.run(&tmux(&["send-keys", "-t", pane, "-H", "0d"]))
+                    }
+                    other => panic!("unexpected herdr command for the Director pane: {other:?}"),
+                }
             }
 
             fn typed_literals(&self) -> String {
@@ -7211,10 +8332,13 @@ mod tests {
 
         impl CommandRunner for FakePane {
             fn binary_exists(&self, name: &str) -> bool {
-                name == "tmux"
+                name == "tmux" || name == "herdr"
             }
 
             fn run(&self, argv: &[String]) -> Result<String, RunError> {
+                if argv[0] == "herdr" {
+                    return self.run_herdr(argv);
+                }
                 let mut state = self.0.borrow_mut();
                 state.calls += 1;
                 assert_eq!(
@@ -7235,6 +8359,15 @@ mod tests {
                     ["capture-pane", "-p", "-e", "-N", "-t", _] => {
                         state.events.push(PaneEvent::Capture);
                         state.stop(StopAt::Capture);
+                        if let Some((path, director)) = state.poll_on_capture.take() {
+                            let conn = rusqlite::Connection::open(path).unwrap();
+                            assert_eq!(
+                                crate::broker::messaging::poll_messages(&conn, director)
+                                    .unwrap()
+                                    .len(),
+                                1
+                            );
+                        }
                         let mut body = if state.unrendered > 0 {
                             state.unrendered -= 1;
                             let typed = std::mem::take(&mut state.typed);
@@ -7249,6 +8382,11 @@ mod tests {
                         Ok(body)
                     }
                     ["send-keys", "-t", _, "-l", "--", chunk] => {
+                        if state.type_not_started {
+                            return Err(RunError::NotStarted(
+                                "literal subprocess did not spawn".into(),
+                            ));
+                        }
                         let first = !state
                             .events
                             .iter()
@@ -7256,6 +8394,9 @@ mod tests {
                         state.events.push(PaneEvent::Type((*chunk).to_owned()));
                         state.typed.push_str(chunk);
                         state.unrendered = state.render_delay;
+                        if state.plain_after_type {
+                            state.shown = Shown::Plain;
+                        }
                         if let Some(key) = state.human_key_after_type.take() {
                             state.typed.push_str(key);
                         }
@@ -7297,7 +8438,21 @@ mod tests {
         /// The synthetic codex profile with a permission request rule and, when `multiplexers`
         /// is given, Director delivery on them with a `max`-scalar plain limit.
         fn catalog(multiplexers: Option<&[&str]>, max: u64) -> ProfileCatalog {
+            catalog_with(multiplexers, max, |_| {})
+        }
+
+        /// The Director-delivering catalog with its composer capability adjusted by `change`.
+        fn delivering_with(change: impl FnOnce(&mut Value)) -> ProfileCatalog {
+            catalog_with(Some(&["tmux", "herdr"]), 1024, change)
+        }
+
+        fn catalog_with(
+            multiplexers: Option<&[&str]>,
+            max: u64,
+            change: impl FnOnce(&mut Value),
+        ) -> ProfileCatalog {
             let mut value = profiles::definition(Some("0d"), Some("0d"));
+            change(&mut value["codex"]["profile"]["capabilities"]["composer"]);
             let permission =
                 profiles::synthetic_definitions()["codex"]["profile"]["rules"][0].clone();
             value["codex"]["profile"]["rules"]
@@ -7393,6 +8548,54 @@ mod tests {
 
             fn report(&mut self, body: &str) -> crate::broker::MessageRecord {
                 self.send(self.fixture.run.member_id, body)
+            }
+
+            /// Moves the Director to a herdr pane whose PTY is `pty_cols` wide inside a layout
+            /// `rect` `rect_width` wide, `rows` high.
+            fn on_herdr(&mut self, rows: u16, pty_cols: u16, rect_width: u16) {
+                self.fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_placements SET backend='herdr',mux_server='herdr-fake',mux_session='w1',mux_window_id='w1:t1',mux_pane_id=?2 WHERE member_id=?1",
+                        rusqlite::params![self.fixture.run.director_member_id, HERDR_PANE],
+                    )
+                    .unwrap();
+                let mut state = self.pane.state();
+                state.height = rows;
+                state.cols = pty_cols;
+                state.herdr_rect = Some(rect_width);
+            }
+
+            fn typings(&self, message_id: i64) -> i64 {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT preview_typings FROM messages WHERE message_id=?1",
+                        [message_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            }
+
+            fn set_typings(&self, message_id: i64, typings: i64) {
+                self.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET preview_typings=?2 WHERE message_id=?1",
+                        [message_id, typings],
+                    )
+                    .unwrap();
+            }
+
+            fn parked_until(&self, message_id: i64) -> Option<String> {
+                self.fixture
+                    .conn
+                    .query_row(
+                        "SELECT preview_parked_until FROM messages WHERE message_id=?1",
+                        [message_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
             }
 
             fn notified(&self, message_id: i64) -> bool {
@@ -8149,6 +9352,135 @@ mod tests {
             assert_eq!(receipts, 0);
         }
 
+        /// A 30-row Director minimum, which the 24-row pane is below.
+        fn tall_minimum() -> ProfileCatalog {
+            delivering_with(|composer| composer["geometry"]["min_rows"] = json!(30))
+        }
+
+        /// Ten text columns and, at 24 rows, one visible text row: every rung needs two, which
+        /// a 27-row pane gives.
+        fn narrow() -> ProfileCatalog {
+            delivering_with(|composer| {
+                composer["geometry"]["margin_columns"] = json!(70);
+                composer["geometry"]["reserved_rows"] = json!(23);
+            })
+        }
+
+        fn too_small(message: &crate::broker::MessageRecord) -> Vec<(String, i64)> {
+            vec![(
+                format!(
+                    "director delivery: message {} held: composer_too_small",
+                    message.message_id
+                ),
+                1,
+            )]
+        }
+
+        #[test]
+        fn an_unmatched_capture_below_the_minimum_holds_at_once_and_a_grow_delivers() {
+            let mut run = DirectorRun::new();
+            run.pane.state().shown = Shown::Plain;
+            let message = run.report("held by a short Director pane");
+            let mut sweep = run.sweep(tall_minimum());
+            run.tick(&mut sweep);
+            assert_eq!(
+                run.director_diagnostics(),
+                too_small(&message),
+                "the hold is diagnosed at once"
+            );
+            run.clock.advance(Duration::from_secs(1));
+            run.tick_for(&mut sweep, 200);
+            assert_eq!(
+                run.director_diagnostics(),
+                too_small(&message),
+                "one diagnostic per continuous hold"
+            );
+            assert!(run.pane.typed_literals().is_empty(), "zero bytes");
+            assert!(!run.notified(message.message_id));
+            {
+                let mut state = run.pane.state();
+                state.shown = Shown::Composer;
+                state.height = 30;
+            }
+            run.tick(&mut sweep);
+            assert_eq!(
+                run.pane.submits(),
+                1,
+                "a grow delivers without Director action"
+            );
+            assert!(run.notified(message.message_id));
+        }
+
+        #[test]
+        fn a_capture_the_minimum_does_not_hold_stays_composer_busy_for_three_minutes() {
+            type Setup = fn(&mut PaneState);
+            type Case = (&'static str, fn() -> ProfileCatalog, Setup);
+            let cases: [Case; 2] = [
+                ("an unmatched capture at the minimum", delivering, |state| {
+                    state.shown = Shown::Plain
+                }),
+                ("a draft below the minimum", tall_minimum, |state| {
+                    state.typed = "draft".into()
+                }),
+            ];
+            for (name, catalog, setup) in cases {
+                let mut run = DirectorRun::new();
+                setup(&mut run.pane.state());
+                let message = run.report(name);
+                let mut sweep = run.sweep(catalog());
+                run.tick_for(&mut sweep, 179);
+                assert!(
+                    run.director_diagnostics().is_empty(),
+                    "{name}: no hold diagnostic before three minutes"
+                );
+                run.tick_for(&mut sweep, 360);
+                assert_eq!(
+                    run.director_diagnostics(),
+                    [(
+                        format!(
+                            "director delivery: message {} held: composer_busy",
+                            message.message_id
+                        ),
+                        1
+                    )],
+                    "{name}"
+                );
+                assert!(run.pane.typed_literals().is_empty(), "{name}: zero bytes");
+            }
+        }
+
+        #[test]
+        fn a_verified_empty_composer_that_fits_no_rung_holds_until_the_pane_grows() {
+            let mut run = DirectorRun::new();
+            let message = run.report("held by a narrow composer");
+            let mut sweep = run.sweep(narrow());
+            run.tick(&mut sweep);
+            assert_eq!(run.director_diagnostics(), too_small(&message));
+            assert!(run.pane.typed_literals().is_empty(), "zero bytes");
+            run.pane.state().height = 27;
+            run.clock.advance(Duration::from_secs(1));
+            run.tick(&mut sweep);
+            assert_eq!(
+                run.pane.typed_literals(),
+                crate::runtime::preview::minimal_preview_line(&message),
+                "the grown pane fits the minimal rung"
+            );
+            assert_eq!(run.pane.submits(), 1);
+            assert!(run.notified(message.message_id));
+        }
+
+        #[test]
+        fn a_verified_empty_composer_selecting_no_rule_types_nothing() {
+            let mut run = DirectorRun::new();
+            let message = run.report("held by an undescribed Director screen");
+            let mut sweep = run.sweep(delivering_with(|composer| {
+                composer["text"]["rule_ids"] = json!([profiles::SYNTHETIC_TEXT_RULE]);
+            }));
+            run.tick_for(&mut sweep, 5);
+            assert!(run.pane.typed_literals().is_empty(), "zero bytes");
+            assert!(!run.notified(message.message_id));
+        }
+
         #[test]
         fn a_held_message_records_one_diagnostic_when_its_hold_reaches_three_minutes() {
             let mut run = DirectorRun::new();
@@ -8208,15 +9540,24 @@ mod tests {
         }
 
         #[test]
-        fn a_preview_above_the_director_plain_limit_types_the_pointer_form_without_a_paste() {
+        fn a_preview_whose_pointer_exceeds_the_director_plain_limit_types_the_cue_without_a_paste()
+        {
             let mut run = DirectorRun::new();
             let message = run.report(&"a".repeat(300));
             let mut sweep = run.sweep(catalog(Some(&["tmux", "herdr"]), 120));
             run.tick(&mut sweep);
             let typed = run.pane.typed_literals();
+            assert!(
+                crate::runtime::preview::pointer_preview_line(&message)
+                    .chars()
+                    .count()
+                    > 120,
+                "the pointer exceeds the 120-scalar limit"
+            );
             assert_eq!(
                 typed,
-                crate::runtime::preview::pointer_preview_line(&message)
+                crate::runtime::preview::cue_preview_line(&message),
+                "the first rung the plain limit allows"
             );
             assert!(!typed.contains("\x1b[200~"), "no bracketed paste");
             assert!(run.notified(message.message_id));
@@ -8255,13 +9596,13 @@ mod tests {
         fn a_preview_rendering_within_the_pre_submit_window_is_submitted_and_notified() {
             let mut run = DirectorRun::new();
             let message = run.report("renders after the settle");
-            run.pane.state().render_delay = 4;
+            run.pane.state().render_delay = 12;
             let mut sweep = run.sweep(delivering());
             run.tick(&mut sweep);
             assert_eq!(run.pane.typed_literals(), line(&message));
             assert_eq!(
                 pre_submit_captures(&run.pane),
-                5,
+                13,
                 "the composer is re-observed until the literal renders"
             );
             assert_eq!(run.pane.submits(), 1, "the submit key follows the render");
@@ -8286,7 +9627,7 @@ mod tests {
             let waited = run.clock.elapsed() - started;
             assert!(
                 waited
-                    >= super::super::DIRECTOR_SETTLE + crate::runtime::input::PRE_SUBMIT_WINDOW
+                    >= super::super::DIRECTOR_SETTLE + super::super::DIRECTOR_PRE_SUBMIT_WINDOW
                         - super::super::DIRECTOR_VERIFICATION_POLL,
                 "the mismatch waits for the window to close: {waited:?}"
             );
@@ -8310,7 +9651,725 @@ mod tests {
         }
 
         #[test]
-        fn a_key_typed_during_the_settle_leaves_the_preview_unnotified_and_it_is_typed_again() {
+        fn a_whole_composer_missing_the_preview_tail_records_literal_mismatch_without_parking() {
+            let mut run = DirectorRun::new();
+            let message = run.report("a preview the pane never shows whole");
+            run.pane.state().visible_prefix = Some(20);
+            let mut sweep = run.sweep(delivering());
+            run.tick(&mut sweep);
+            assert_eq!(run.pane.submits(), 0, "no submit key");
+            assert!(!run.notified(message.message_id));
+            assert_eq!(run.parked_until(message.message_id), None, "no park");
+            assert!(
+                run.director_diagnostics().contains(&(
+                    format!(
+                        "director delivery: message {} uncertain: literal_mismatch",
+                        message.message_id
+                    ),
+                    1
+                )),
+                "{:?}",
+                run.director_diagnostics()
+            );
+        }
+
+        mod director_fit {
+            use super::*;
+            use crate::runtime::preview::canonical_preview_line;
+            use crate::runtime::preview::compact_preview_line;
+            use crate::runtime::preview::cue_preview_line;
+            use crate::runtime::preview::minimal_preview_line;
+            use crate::runtime::preview::pointer_preview_line;
+
+            /// Full-width char-wrapped text rows above one reserved row, with no headroom.
+            fn fitted() -> ProfileCatalog {
+                delivering_with(|composer| {
+                    composer["geometry"] = json!({
+                        "margin_columns":0,"first_row_margin_columns":0,"text_window":null,
+                        "reserved_rows":1,"transient_rows":0,"wrap_slack_rows":0,"carried_space":false,"fit_wrap":"char",
+                        "collapsed_paste":null,"min_rows":2,"min_columns":10
+                    });
+                })
+            }
+
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            enum Rung {
+                Full,
+                Compact,
+                Pointer,
+                Cue,
+                Minimal,
+                Hold,
+            }
+
+            /// The §4 rung an ASCII preview of `message` takes at `rows` x `cols` under
+            /// [`fitted`].
+            fn expected(message: &crate::broker::MessageRecord, rows: u16, cols: u16) -> Rung {
+                let visible = usize::from(rows).saturating_sub(1);
+                let fits =
+                    |literal: &str| literal.chars().count().div_ceil(usize::from(cols)) <= visible;
+                [
+                    (Rung::Full, canonical_preview_line(message)),
+                    (Rung::Compact, compact_preview_line(message, 1)),
+                    (Rung::Pointer, pointer_preview_line(message)),
+                    (Rung::Cue, cue_preview_line(message)),
+                    (Rung::Minimal, minimal_preview_line(message)),
+                ]
+                .into_iter()
+                .find(|(_, literal)| fits(literal))
+                .map_or(Rung::Hold, |(rung, _)| rung)
+            }
+
+            /// The rung of the literal the pane received for `message`.
+            fn typed_rung(typed: &str, message: &crate::broker::MessageRecord) -> Rung {
+                if typed.is_empty() {
+                    Rung::Hold
+                } else if typed == canonical_preview_line(message) {
+                    Rung::Full
+                } else if typed == pointer_preview_line(message) {
+                    Rung::Pointer
+                } else if typed == cue_preview_line(message) {
+                    Rung::Cue
+                } else if typed == minimal_preview_line(message) {
+                    Rung::Minimal
+                } else if typed.contains(" more characters; run cafleet message poll ") {
+                    Rung::Compact
+                } else {
+                    panic!("an unknown rung: {typed:?}")
+                }
+            }
+
+            fn body() -> String {
+                (1..=150)
+                    .map(|n| format!("w{n:03}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+
+            #[test]
+            fn a_tmux_director_capture_at_every_size_chooses_the_rung_that_fits() {
+                let mut seen = std::collections::BTreeSet::new();
+                for (rows, cols) in [
+                    (9, 80),
+                    (9, 120),
+                    (12, 80),
+                    (12, 120),
+                    (3, 20),
+                    (5, 40),
+                    (2, 10),
+                ] {
+                    let mut run = DirectorRun::new();
+                    {
+                        let mut state = run.pane.state();
+                        state.height = rows;
+                        state.cols = cols;
+                    }
+                    let message = run.report(&body());
+                    let mut sweep = run.sweep(fitted());
+                    run.tick(&mut sweep);
+                    let want = expected(&message, rows, cols);
+                    assert_eq!(
+                        typed_rung(&run.pane.typed_literals(), &message),
+                        want,
+                        "{rows}x{cols}"
+                    );
+                    seen.insert(format!("{want:?}"));
+                }
+                assert!(
+                    seen.len() >= 4,
+                    "the sizes exercise several rungs: {seen:?}"
+                );
+            }
+
+            #[test]
+            fn a_herdr_director_capture_fits_the_narrower_of_its_rect_and_its_widest_row() {
+                for (name, pty_cols, rect_width, effective) in [
+                    ("a PTY narrower than its rect", 80, 122, 80),
+                    ("a PTY wider than its rect", 120, 82, 80),
+                ] {
+                    let mut run = DirectorRun::new();
+                    run.on_herdr(9, pty_cols, rect_width);
+                    let message = run.report(&body());
+                    let mut sweep = run.sweep(fitted());
+                    run.tick(&mut sweep);
+                    assert_eq!(
+                        typed_rung(&run.pane.typed_literals(), &message),
+                        expected(&message, 9, effective),
+                        "{name}: fitted to {effective} columns"
+                    );
+                    assert_ne!(
+                        expected(&message, 9, effective),
+                        expected(&message, 9, pty_cols.max(rect_width - 2)),
+                        "{name}: the wider reading would choose another rung"
+                    );
+                }
+            }
+        }
+
+        mod pointer_retry {
+            use super::*;
+            use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+
+            #[test]
+            fn a_director_literal_that_never_starts_preserves_the_original_rung() {
+                for prior in [0, 1] {
+                    let mut run = DirectorRun::new();
+                    let message = run.report("a preview after a failed process spawn");
+                    run.set_typings(message.message_id, prior);
+                    run.pane.state().type_not_started = true;
+                    let mut sweep = run.sweep(delivering());
+                    for _ in 0..2 {
+                        run.tick(&mut sweep);
+                        run.clock.advance(Duration::from_secs(10));
+                        assert_eq!(run.typings(message.message_id), prior);
+                        assert!(!run.notified(message.message_id));
+                    }
+                    assert!(run.pane.typed_literals().is_empty());
+                    assert_eq!(run.pane.submits(), 0);
+
+                    run.pane.state().type_not_started = false;
+                    run.tick(&mut sweep);
+                    assert_eq!(run.typings(message.message_id), prior + 1);
+                    assert!(run.notified(message.message_id));
+                    let expected = if prior == 0 {
+                        line(&message)
+                    } else {
+                        crate::runtime::preview::pointer_preview_line(&message)
+                    };
+                    assert_eq!(run.pane.typed_literals(), expected);
+                    assert_eq!(run.pane.submits(), 1);
+                }
+            }
+
+            #[test]
+            fn a_director_poll_during_capture_prevents_the_typing_reservation() {
+                let mut run = DirectorRun::new();
+                let message = run.report("polled before the first byte");
+                let path = run.fixture.conn.path().unwrap().to_owned();
+                run.pane.state().poll_on_capture = Some((path, message.to_member_id));
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+
+                let polled =
+                    crate::broker::messaging::get_message(&run.fixture.conn, message.message_id)
+                        .unwrap();
+                assert_eq!(polled.status, crate::broker::MessageStatus::Completed);
+                assert_eq!(run.typings(message.message_id), 0);
+                assert!(!run.notified(message.message_id));
+                assert!(run.pane.typed_literals().is_empty());
+                assert_eq!(run.pane.submits(), 0);
+            }
+
+            fn abandoned(message: &crate::broker::MessageRecord, cause: &str) -> (String, i64) {
+                (
+                    format!(
+                        "director delivery: message {} abandoned after pointer retry: {cause}",
+                        message.message_id
+                    ),
+                    1,
+                )
+            }
+
+            #[test]
+            fn a_delivered_preview_counts_its_one_typing() {
+                let mut run = DirectorRun::new();
+                let message = run.report("delivered on the first typing");
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                assert!(run.notified(message.message_id));
+                assert_eq!(run.typings(message.message_id), 1);
+            }
+
+            #[test]
+            fn a_director_retry_reads_preview_state_under_the_pane_lock() {
+                let mut run = DirectorRun::new();
+                let message = run.report("retry after another runner typed");
+                run.set_typings(message.message_id, 1);
+                let url = run.url();
+                let placement = run.director_placement();
+                run.fixture
+                    .conn
+                    .authorizer(Some(move |context: AuthContext<'_>| {
+                        if matches!(
+                            context.action,
+                            AuthAction::Read {
+                                table_name: "messages",
+                                column_name: "preview_typings" | "preview_parked_until",
+                            }
+                        ) && !matches!(
+                            crate::pane_lock::PaneLock::try_acquire(&url, &placement),
+                            Ok(None)
+                        ) {
+                            return Authorization::Deny;
+                        }
+                        Authorization::Allow
+                    }))
+                    .unwrap();
+                run.pane.state().human_key_after_type = Some("x");
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                run.fixture
+                    .conn
+                    .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                    .unwrap();
+
+                assert_eq!(
+                    run.pane.typed_literals(),
+                    crate::runtime::preview::pointer_preview_line(&message)
+                );
+                assert_eq!(run.typings(message.message_id), 2);
+                assert!(run.notified(message.message_id));
+                assert!(
+                    run.director_diagnostics()
+                        .contains(&abandoned(&message, "literal_mismatch"))
+                );
+            }
+
+            #[test]
+            fn two_runners_type_a_message_at_most_twice_and_the_second_outcome_stamps_it() {
+                let mut run = DirectorRun::new();
+                let message = run.report("typed at most twice");
+                let mut first = run.sweep(delivering());
+                let mut second = run.sweep(delivering());
+                run.pane.state().human_key_after_type = Some("x");
+                run.tick(&mut first);
+                assert_eq!(run.typings(message.message_id), 1, "the first typing");
+                assert!(!run.notified(message.message_id), "one uncertain outcome");
+                {
+                    let mut state = run.pane.state();
+                    state.typed.clear();
+                    state.human_key_after_type = Some("x");
+                }
+                run.clock.advance(Duration::from_secs(1));
+                run.tick(&mut second);
+                assert_eq!(run.typings(message.message_id), 2, "the second typing");
+                assert_eq!(
+                    run.pane.typed_literals(),
+                    format!(
+                        "{}{}",
+                        line(&message),
+                        crate::runtime::preview::pointer_preview_line(&message)
+                    ),
+                    "the second runner types the pointer rung"
+                );
+                assert!(
+                    run.notified(message.message_id),
+                    "the second uncertain outcome stamps the message"
+                );
+                assert!(
+                    run.director_diagnostics()
+                        .contains(&abandoned(&message, "literal_mismatch")),
+                    "{:?}",
+                    run.director_diagnostics()
+                );
+                run.pane.state().typed.clear();
+                let typed = run.pane.typed_literals();
+                for _ in 0..3 {
+                    run.clock.advance(Duration::from_secs(1));
+                    run.tick(&mut first);
+                    run.tick(&mut second);
+                }
+                assert_eq!(run.pane.typed_literals(), typed, "no third typing");
+                assert_eq!(run.typings(message.message_id), 2);
+            }
+
+            #[test]
+            fn zero_byte_director_ticks_leave_the_typing_count_unchanged() {
+                type Setup = fn(&mut DirectorRun, &crate::broker::MessageRecord);
+                type Case = (&'static str, fn() -> ProfileCatalog, Setup);
+                let cases: [Case; 3] = [
+                    ("a draft in the composer", delivering, |run, _| {
+                        run.pane.state().typed = "draft".into()
+                    }),
+                    ("a composer that fits no rung", narrow, |_, _| {}),
+                    (
+                        "a head parked by another runner",
+                        delivering,
+                        |run, message| {
+                            run.fixture
+                            .conn
+                            .execute(
+                                "UPDATE messages SET preview_parked_until=?2 WHERE message_id=?1",
+                                rusqlite::params![
+                                    message.message_id,
+                                    crate::time::format_utc(
+                                        run.clock.wall_now() + chrono::Duration::seconds(60)
+                                    )
+                                ],
+                            )
+                            .unwrap();
+                        },
+                    ),
+                ];
+                for (name, catalog, setup) in cases {
+                    let mut run = DirectorRun::new();
+                    let message = run.report(name);
+                    setup(&mut run, &message);
+                    let mut sweep = run.sweep(catalog());
+                    run.tick_for(&mut sweep, 5);
+                    assert!(run.pane.typed_literals().is_empty(), "{name}: zero bytes");
+                    assert_eq!(run.typings(message.message_id), 0, "{name}");
+                }
+            }
+
+            #[test]
+            fn an_exhausted_head_is_stamped_and_the_next_message_is_delivered() {
+                let mut run = DirectorRun::new();
+                let head = run.report("typed twice by earlier runners");
+                let next = run.report("delivered after the exhausted head");
+                run.set_typings(head.message_id, 2);
+                let mut sweep = run.sweep(delivering());
+                run.tick_for(&mut sweep, 3);
+                assert!(
+                    run.notified(head.message_id),
+                    "the exhausted head is stamped"
+                );
+                assert_eq!(run.typings(head.message_id), 2, "it is never typed again");
+                assert!(
+                    run.director_diagnostics()
+                        .contains(&abandoned(&head, "typings_exhausted")),
+                    "{:?}",
+                    run.director_diagnostics()
+                );
+                assert!(
+                    run.notified(next.message_id),
+                    "the next message is delivered"
+                );
+                assert_eq!(run.pane.typed_literals(), line(&next));
+            }
+        }
+
+        mod late_submission {
+            use super::*;
+
+            fn clip(state: &mut PaneState) {
+                state.visible_prefix = Some(20);
+                state.clip_footer = true;
+            }
+
+            fn reveal(state: &mut PaneState) {
+                state.visible_prefix = None;
+                state.clip_footer = false;
+            }
+
+            fn uncertain(message: &crate::broker::MessageRecord, cause: &str) -> (String, i64) {
+                (
+                    format!(
+                        "director delivery: message {} uncertain: {cause}",
+                        message.message_id
+                    ),
+                    1,
+                )
+            }
+
+            fn has_uncertain(run: &DirectorRun, message: &crate::broker::MessageRecord) -> bool {
+                run.director_diagnostics().iter().any(|(text, _)| {
+                    text.starts_with(&format!(
+                        "director delivery: message {} uncertain:",
+                        message.message_id
+                    ))
+                })
+            }
+
+            /// A run whose first tick types `body` into a pane that `setup` prepares, so the
+            /// pre-submit window closes on a clipped or unreadable composer and parks it.
+            fn parked(
+                body: &str,
+                setup: fn(&mut PaneState),
+            ) -> (DirectorRun, DirectorSweep, crate::broker::MessageRecord) {
+                let mut run = DirectorRun::new();
+                let message = run.report(body);
+                setup(&mut run.pane.state());
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.submits(), 0, "{body}: no submit key at the park");
+                assert!(!run.notified(message.message_id), "{body}");
+                assert!(
+                    !has_uncertain(&run, &message),
+                    "{body}: the park is not an outcome"
+                );
+                let until = run
+                    .parked_until(message.message_id)
+                    .unwrap_or_else(|| panic!("{body}: the attempt parks"));
+                assert!(
+                    until > crate::time::format_utc(run.clock.wall_now()),
+                    "{body}: parked into the future: {until}"
+                );
+                (run, sweep, message)
+            }
+
+            #[test]
+            fn a_parked_preview_revealed_whole_is_submitted_without_retyping() {
+                let (mut run, mut sweep, message) = parked("revealed after the park", clip);
+                let typed = run.pane.typed_literals();
+                run.tick_for(&mut sweep, 3);
+                assert_eq!(run.pane.submits(), 0, "a clipped composer stays parked");
+                assert!(run.parked_until(message.message_id).is_some());
+                reveal(&mut run.pane.state());
+                run.tick_for(&mut sweep, 2);
+                assert_eq!(run.pane.submits(), 1, "the whole literal is submitted late");
+                assert!(run.notified(message.message_id));
+                assert_eq!(run.parked_until(message.message_id), None);
+                assert_eq!(run.pane.typed_literals(), typed, "no byte is retyped");
+                assert!(!has_uncertain(&run, &message));
+            }
+
+            #[test]
+            fn a_parked_preview_waits_through_an_unchanged_empty_composer() {
+                let (mut run, mut sweep, message) = parked("slow native render", |state| {
+                    state.render_delay = 40;
+                });
+                let typed = run.pane.typed_literals();
+                assert_eq!(run.typings(message.message_id), 1);
+                run.tick_for(&mut sweep, 2);
+                assert_eq!(run.pane.submits(), 0);
+                assert_eq!(run.pane.typed_literals(), typed);
+                assert!(run.parked_until(message.message_id).is_some());
+                run.pane.state().unrendered = 0;
+                run.tick_for(&mut sweep, 2);
+                assert_eq!(run.pane.submits(), 1);
+                assert_eq!(run.pane.typed_literals(), typed);
+                assert_eq!(run.typings(message.message_id), 1);
+                assert!(run.notified(message.message_id));
+                assert_eq!(run.parked_until(message.message_id), None);
+            }
+
+            #[test]
+            fn a_parked_preview_ends_uncertain_on_contradicting_text_or_an_emptied_composer() {
+                type Change = fn(&mut PaneState);
+                let cases: [(&str, Change, &str); 2] = [
+                    (
+                        "contradicting text",
+                        |state| {
+                            reveal(state);
+                            state.typed = "an unrelated draft".into();
+                        },
+                        "literal_mismatch",
+                    ),
+                    (
+                        "an emptied composer",
+                        |state| {
+                            reveal(state);
+                            state.typed.clear();
+                        },
+                        "composer_clipped",
+                    ),
+                ];
+                for (name, change, cause) in cases {
+                    let (mut run, mut sweep, message) = parked(name, clip);
+                    change(&mut run.pane.state());
+                    for _ in 0..3 {
+                        if has_uncertain(&run, &message) {
+                            break;
+                        }
+                        run.clock.advance(Duration::from_secs(1));
+                        run.tick(&mut sweep);
+                    }
+                    assert!(
+                        run.director_diagnostics()
+                            .contains(&uncertain(&message, cause)),
+                        "{name}: {:?}",
+                        run.director_diagnostics()
+                    );
+                    assert_eq!(
+                        run.pane.submits(),
+                        0,
+                        "{name}: no submit key up to the park's outcome"
+                    );
+                    assert!(!run.notified(message.message_id), "{name}");
+                    assert_eq!(run.parked_until(message.message_id), None, "{name}");
+                }
+            }
+
+            #[test]
+            fn a_parked_preview_consumed_by_a_poll_ends_without_an_outcome() {
+                let (mut run, mut sweep, message) = parked("consumed while parked", clip);
+                run.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET status_state='completed' WHERE message_id=?1",
+                        [message.message_id],
+                    )
+                    .unwrap();
+                run.tick_for(&mut sweep, 2);
+                assert_eq!(run.pane.submits(), 0, "no submit key");
+                assert_eq!(run.parked_until(message.message_id), None);
+                assert!(!has_uncertain(&run, &message));
+                assert!(
+                    run.director_diagnostics().contains(&(
+                        format!(
+                            "director delivery: message {} park ended: consumed",
+                            message.message_id
+                        ),
+                        1
+                    )),
+                    "{:?}",
+                    run.director_diagnostics()
+                );
+            }
+
+            #[test]
+            fn a_park_that_outlasts_the_window_ends_uncertain_with_its_cause() {
+                type Setup = fn(&mut PaneState);
+                let cases: [(&str, Setup, &str); 2] = [
+                    ("a clipped composer", clip, "composer_clipped"),
+                    (
+                        "an unreadable composer",
+                        |state| state.plain_after_type = true,
+                        "composer_unreadable",
+                    ),
+                ];
+                for (name, setup, cause) in cases {
+                    let (mut run, mut sweep, message) = parked(name, setup);
+                    run.tick_for(&mut sweep, 110);
+                    assert!(
+                        run.parked_until(message.message_id).is_some(),
+                        "{name}: parked inside the window"
+                    );
+                    assert!(!has_uncertain(&run, &message), "{name}");
+                    run.tick_for(&mut sweep, 15);
+                    assert_eq!(run.parked_until(message.message_id), None, "{name}");
+                    assert_eq!(run.pane.submits(), 0, "{name}: no submit key");
+                    assert!(
+                        run.director_diagnostics()
+                            .contains(&uncertain(&message, cause)),
+                        "{name}: {:?}",
+                        run.director_diagnostics()
+                    );
+                }
+            }
+
+            #[test]
+            fn shutdown_ends_a_park_as_runner_stopped() {
+                let (mut run, mut sweep, message) = parked("parked at shutdown", clip);
+                run.stop.store(true, Ordering::Release);
+                run.tick(&mut sweep);
+                assert_eq!(run.pane.submits(), 0);
+                assert_eq!(run.parked_until(message.message_id), None);
+                assert!(
+                    run.director_diagnostics()
+                        .contains(&uncertain(&message, "runner_stopped")),
+                    "{:?}",
+                    run.director_diagnostics()
+                );
+            }
+
+            /// Parks `message` as another runner would, until `offset` from the run's wall time.
+            fn park_elsewhere(
+                run: &DirectorRun,
+                message: &crate::broker::MessageRecord,
+                offset: chrono::Duration,
+            ) {
+                run.fixture
+                    .conn
+                    .execute(
+                        "UPDATE messages SET preview_parked_until=?2 WHERE message_id=?1",
+                        rusqlite::params![
+                            message.message_id,
+                            crate::time::format_utc(run.clock.wall_now() + offset)
+                        ],
+                    )
+                    .unwrap();
+            }
+
+            #[test]
+            fn a_runner_never_types_a_head_another_runner_has_parked() {
+                let mut run = DirectorRun::new();
+                let head = run.report("parked by another runner");
+                let newer = run.report("queued behind the parked head");
+                park_elsewhere(&run, &head, chrono::Duration::seconds(60));
+                let mut sweep = run.sweep(delivering());
+                run.tick_for(&mut sweep, 10);
+                assert!(
+                    run.pane.typed_literals().is_empty(),
+                    "neither the parked head nor a newer message is typed"
+                );
+                assert!(!run.notified(head.message_id));
+                assert!(!run.notified(newer.message_id));
+                assert!(
+                    run.parked_until(head.message_id).is_some(),
+                    "the park stays"
+                );
+            }
+
+            #[test]
+            fn a_lapsed_park_of_a_lost_runner_is_cleared_before_the_head_is_typed() {
+                let mut run = DirectorRun::new();
+                let head = run.report("parked by a lost runner");
+                park_elsewhere(&run, &head, chrono::Duration::seconds(-1));
+                let mut sweep = run.sweep(delivering());
+                run.tick(&mut sweep);
+                assert_eq!(
+                    run.parked_until(head.message_id),
+                    None,
+                    "the lapsed park clears"
+                );
+                assert!(
+                    run.director_diagnostics()
+                        .contains(&uncertain(&head, "runner_stopped")),
+                    "{:?}",
+                    run.director_diagnostics()
+                );
+                run.clock.advance(Duration::from_secs(1));
+                run.tick_for(&mut sweep, 2);
+                assert!(
+                    run.pane
+                        .typed_literals()
+                        .contains(&format!("[cafleet msg {}", head.message_id)),
+                    "the head is typed after the clear: {:?}",
+                    run.pane.typed_literals()
+                );
+            }
+
+            #[test]
+            fn a_second_typings_park_stays_set_when_the_uncertain_stamp_fails() {
+                for lost_runner in [false, true] {
+                    let mut run = DirectorRun::new();
+                    let message = run.report("parked on the second typing");
+                    let mut sweep = run.sweep(delivering());
+                    if lost_runner {
+                        run.set_typings(message.message_id, 2);
+                        park_elsewhere(&run, &message, chrono::Duration::seconds(-1));
+                    } else {
+                        run.set_typings(message.message_id, 1);
+                        clip(&mut run.pane.state());
+                        run.tick(&mut sweep);
+                        assert_eq!(run.typings(message.message_id), 2);
+                        run.stop.store(true, Ordering::Release);
+                    }
+                    let deadline = run
+                        .parked_until(message.message_id)
+                        .expect("a parked retry");
+                    run.fixture
+                        .conn
+                        .execute_batch(
+                            "CREATE TEMP TRIGGER fail_stamp BEFORE UPDATE OF notified_at ON messages
+                             BEGIN SELECT RAISE(ABORT, 'stamp failed'); END;",
+                        )
+                        .unwrap();
+                    run.tick(&mut sweep);
+                    assert!(!run.notified(message.message_id));
+                    assert_eq!(run.parked_until(message.message_id), Some(deadline));
+
+                    run.fixture
+                        .conn
+                        .execute_batch("DROP TRIGGER fail_stamp")
+                        .unwrap();
+                    run.stop.store(false, Ordering::Release);
+                    run.clock
+                        .advance(crate::runtime::input::LATE_SUBMISSION_WINDOW);
+                    run.tick(&mut sweep);
+                    assert!(run.notified(message.message_id));
+                    assert_eq!(run.parked_until(message.message_id), None);
+                    assert_eq!(run.typings(message.message_id), 2);
+                    assert_eq!(run.pane.submits(), 0);
+                }
+            }
+        }
+
+        #[test]
+        fn a_key_typed_during_the_settle_leaves_the_preview_unnotified_and_its_pointer_is_typed_next()
+         {
             let mut run = DirectorRun::new();
             let message = run.report("races a human key");
             run.pane.state().human_key_after_type = Some("x");
@@ -8341,6 +10400,12 @@ mod tests {
             run.tick(&mut sweep);
             assert_eq!(run.pane.submits(), 1);
             assert!(run.notified(message.message_id));
+            assert!(
+                run.pane
+                    .typed_literals()
+                    .ends_with(&crate::runtime::preview::pointer_preview_line(&message)),
+                "the retry types the pointer rung"
+            );
         }
 
         #[test]

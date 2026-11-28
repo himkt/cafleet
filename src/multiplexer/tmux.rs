@@ -287,7 +287,11 @@ impl Multiplexer for TmuxMultiplexer {
             if index > 0 && stopped() {
                 return Ok(false);
             }
-            let chunk = chunk.iter().collect::<String>();
+            let mut chunk = chunk.iter().collect::<String>();
+            if chunk.ends_with(';') {
+                // tmux parses a trailing semicolon as a command separator, even after `--`.
+                chunk.insert(chunk.len() - 1, '\\');
+            }
             let argv = self
                 .core
                 .argv(&["tmux", "send-keys", "-t", pane, "-l", "--", &chunk]);
@@ -1270,6 +1274,24 @@ mod tests {
                 [literal_call(
                     "[cafleet msg 7 from 3 2026-11-23T10:00:00+00:00] hi"
                 )]
+            );
+        }
+
+        #[test]
+        fn type_literal_preserves_semicolons_at_the_end_of_tmux_arguments() {
+            let first = "a".repeat(255);
+            let literal = format!(r"{first};tail\;;");
+            let runner = FakeRunner::with_binary("tmux");
+            runner.succeed(2);
+            on_server(runner.clone())
+                .type_literal(PANE, &literal)
+                .unwrap();
+            assert_eq!(
+                runner.run_argvs(),
+                [
+                    literal_call(&format!(r"{first}\;")),
+                    literal_call(r"tail\;\;")
+                ]
             );
         }
 

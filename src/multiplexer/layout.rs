@@ -1,12 +1,41 @@
 use crate::broker::stored_enum;
+use crate::coding_agent::CodingAgent;
+use crate::coding_agent::ProfileCatalog;
+use crate::multiplexer::MuxBackend;
 
-pub(crate) const MIN_PANE_HEIGHT: i64 = 15;
+/// The slot floor: a member's pane keeps at least this many rows whatever its profile's
+/// minimum, so delivery degrades only after a resize.
+pub(crate) const DEFAULT_MIN_ROWS: i64 = 14;
 pub(crate) const MAX_PANES_PER_COLUMN: i64 = 8;
 
 stored_enum!(ColumnSide, "member_placements.column_side", { Left => "left", Right => "right" });
 
-pub(crate) fn capacity(height: i64) -> i64 {
-    MAX_PANES_PER_COLUMN.min(height.div_euclid(MIN_PANE_HEIGHT))
+/// The rows a pane's border or separator takes on `multiplexer`.
+fn pane_chrome_rows(multiplexer: MuxBackend) -> i64 {
+    match multiplexer {
+        MuxBackend::Tmux => 1,
+        MuxBackend::Herdr => 2,
+    }
+}
+
+/// The rows a member of `backend` takes in a column: the larger of the floor and its profile's
+/// minimum, plus the pane chrome.
+pub(crate) fn slot_rows(
+    catalog: &ProfileCatalog,
+    backend: CodingAgent,
+    multiplexer: MuxBackend,
+) -> i64 {
+    let minimum = catalog
+        .composer_minimum(backend)
+        .map_or(DEFAULT_MIN_ROWS, |(min_rows, _)| i64::from(min_rows));
+    DEFAULT_MIN_ROWS.max(minimum) + pane_chrome_rows(multiplexer)
+}
+
+/// One concrete member pane of a column and the backend it runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ColumnMember {
+    pub(crate) pane: String,
+    pub(crate) backend: CodingAgent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,8 +44,8 @@ pub(crate) struct WindowOccupancy {
     pub(crate) window_id: String,
     pub(crate) window_name: String,
     pub(crate) height: i64,
-    pub(crate) left: Vec<String>,
-    pub(crate) right: Vec<String>,
+    pub(crate) left: Vec<ColumnMember>,
+    pub(crate) right: Vec<ColumnMember>,
     pub(crate) director_pane: Option<String>,
 }
 
@@ -38,10 +67,32 @@ pub(crate) fn fleet_window_name(fleet_id: i64, ordinal: i64) -> String {
     format!("cafleet-{fleet_id}-{ordinal}")
 }
 
+/// Whether a column `height` rows high holding `members` admits one more member of `creating`:
+/// at most [`MAX_PANES_PER_COLUMN`] panes, each keeping the largest slot among them.
+fn admits(
+    height: i64,
+    members: &[ColumnMember],
+    catalog: &ProfileCatalog,
+    creating: CodingAgent,
+    multiplexer: MuxBackend,
+) -> bool {
+    let count = i64::try_from(members.len()).expect("a column's member count fits i64") + 1;
+    let largest = members
+        .iter()
+        .map(|member| slot_rows(catalog, member.backend, multiplexer))
+        .chain(std::iter::once(slot_rows(catalog, creating, multiplexer)))
+        .max()
+        .expect("the creating member has a slot");
+    count <= MAX_PANES_PER_COLUMN && height.div_euclid(count) >= largest
+}
+
 pub(crate) fn choose_slot(
     fleet_id: i64,
     windows: &[WindowOccupancy],
     last_window_ordinal: i64,
+    catalog: &ProfileCatalog,
+    creating: CodingAgent,
+    multiplexer: MuxBackend,
 ) -> SlotChoice {
     assert_eq!(
         windows.first().map(|window| window.ordinal),
@@ -55,17 +106,17 @@ pub(crate) fn choose_slot(
         "window ordinals are strictly ascending"
     );
     for window in windows {
-        let columns: &[(ColumnSide, &Vec<String>, i64)] = if window.ordinal == 0 {
-            &[(ColumnSide::Right, &window.right, capacity(window.height))]
+        let columns: &[(ColumnSide, &Vec<ColumnMember>)] = if window.ordinal == 0 {
+            &[(ColumnSide::Right, &window.right)]
         } else {
-            let overflow = capacity(window.height).max(1);
             &[
-                (ColumnSide::Left, &window.left, overflow),
-                (ColumnSide::Right, &window.right, overflow),
+                (ColumnSide::Left, &window.left),
+                (ColumnSide::Right, &window.right),
             ]
         };
-        for (side, members, limit) in columns {
-            if i64::try_from(members.len()).expect("a column's member count fits i64") < *limit {
+        for (side, members) in columns {
+            let first_overflow = window.ordinal > 0 && members.is_empty();
+            if first_overflow || admits(window.height, members, catalog, creating, multiplexer) {
                 return SlotChoice::Existing {
                     ordinal: window.ordinal,
                     window_id: window.window_id.clone(),
@@ -84,9 +135,84 @@ pub(crate) fn choose_slot(
 
 #[cfg(test)]
 mod tests {
+    use crate::coding_agent::CodingAgent;
+    use crate::coding_agent::ProfileCatalog;
+    use crate::multiplexer::MuxBackend;
     use crate::multiplexer::layout::*;
+    use serde_json::json;
 
     const FLEET: i64 = 3;
+
+    /// A catalog whose codex profile declares `min_rows`; every other backend has no profile.
+    fn codex_minimum(min_rows: u64) -> ProfileCatalog {
+        let mut value =
+            crate::coding_agent::catalog::test_support::definition(Some("0d"), Some("0d"));
+        value["codex"]["profile"]["capabilities"]["composer"]["geometry"]["min_rows"] =
+            json!(min_rows);
+        crate::coding_agent::catalog::test_support::load(&value).unwrap()
+    }
+
+    #[test]
+    fn a_slot_is_the_larger_of_the_floor_and_the_profile_minimum_plus_the_pane_chrome() {
+        assert_eq!(DEFAULT_MIN_ROWS, 14);
+        for (name, min_rows, backend, multiplexer, expected) in [
+            (
+                "a backend without a profile on tmux",
+                9,
+                CodingAgent::Claude,
+                MuxBackend::Tmux,
+                15,
+            ),
+            (
+                "a backend without a profile on herdr",
+                9,
+                CodingAgent::Claude,
+                MuxBackend::Herdr,
+                16,
+            ),
+            (
+                "a minimum below the floor on tmux",
+                9,
+                CodingAgent::Codex,
+                MuxBackend::Tmux,
+                15,
+            ),
+            (
+                "a minimum below the floor on herdr",
+                9,
+                CodingAgent::Codex,
+                MuxBackend::Herdr,
+                16,
+            ),
+            (
+                "a minimum at the floor",
+                14,
+                CodingAgent::Codex,
+                MuxBackend::Tmux,
+                15,
+            ),
+            (
+                "a minimum above the floor on tmux",
+                20,
+                CodingAgent::Codex,
+                MuxBackend::Tmux,
+                21,
+            ),
+            (
+                "a minimum above the floor on herdr",
+                20,
+                CodingAgent::Codex,
+                MuxBackend::Herdr,
+                22,
+            ),
+        ] {
+            assert_eq!(
+                slot_rows(&codex_minimum(min_rows), backend, multiplexer),
+                expected,
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn fleet_window_names_cover_the_director_and_overflow_ordinals() {
@@ -104,10 +230,19 @@ mod tests {
         }
     }
 
-    fn panes(prefix: &str, count: usize) -> Vec<String> {
-        (0..count)
-            .map(|index| format!("%{prefix}{index}"))
+    fn members_of(prefix: &str, backends: &[CodingAgent]) -> Vec<ColumnMember> {
+        backends
+            .iter()
+            .enumerate()
+            .map(|(index, backend)| ColumnMember {
+                pane: format!("%{prefix}{index}"),
+                backend: *backend,
+            })
             .collect()
+    }
+
+    fn panes(prefix: &str, count: usize) -> Vec<ColumnMember> {
+        members_of(prefix, &vec![CodingAgent::Codex; count])
     }
 
     fn director_window(height: i64, members: usize) -> WindowOccupancy {
@@ -158,28 +293,175 @@ mod tests {
         }
     }
 
-    #[test]
-    fn layout_constants_are_fifteen_rows_and_eight_panes() {
-        assert_eq!(MIN_PANE_HEIGHT, 15);
-        assert_eq!(MAX_PANES_PER_COLUMN, 8);
+    /// The slot choice for a codex member on tmux under a catalog whose codex minimum is below
+    /// the floor, so every slot is the 15-row default.
+    fn tmux_slot(
+        fleet_id: i64,
+        windows: &[WindowOccupancy],
+        last_window_ordinal: i64,
+    ) -> SlotChoice {
+        choose_slot(
+            fleet_id,
+            windows,
+            last_window_ordinal,
+            &codex_minimum(9),
+            CodingAgent::Codex,
+            MuxBackend::Tmux,
+        )
     }
 
     #[test]
-    fn capacity_is_the_window_height_over_fifteen_rows_capped_at_eight() {
-        for (height, expected) in [
-            (0, 0),
-            (14, 0),
-            (15, 1),
-            (25, 1),
-            (29, 1),
-            (30, 2),
-            (50, 3),
-            (60, 4),
-            (119, 7),
-            (120, 8),
-            (1000, 8),
+    fn a_column_holds_at_most_eight_members() {
+        assert_eq!(MAX_PANES_PER_COLUMN, 8);
+        for (members, expected) in [(7, existing(0, ColumnSide::Right)), (8, new_window(1))] {
+            assert_eq!(
+                tmux_slot(FLEET, &[director_window(1000, members)], 0),
+                expected,
+                "{members} members in a 1000-row column"
+            );
+        }
+    }
+
+    #[test]
+    fn a_herdr_column_admits_a_member_only_with_room_for_its_wider_chrome() {
+        let catalog = codex_minimum(9);
+        for (name, height, members, multiplexer, expected) in [
+            (
+                "tmux at 15 rows each",
+                30,
+                1,
+                MuxBackend::Tmux,
+                existing(0, ColumnSide::Right),
+            ),
+            (
+                "herdr below 16 rows each",
+                30,
+                1,
+                MuxBackend::Herdr,
+                new_window(1),
+            ),
+            (
+                "herdr at 16 rows each",
+                32,
+                1,
+                MuxBackend::Herdr,
+                existing(0, ColumnSide::Right),
+            ),
+            (
+                "herdr with one slot",
+                16,
+                0,
+                MuxBackend::Herdr,
+                existing(0, ColumnSide::Right),
+            ),
+            (
+                "herdr below one slot",
+                15,
+                0,
+                MuxBackend::Herdr,
+                new_window(1),
+            ),
         ] {
-            assert_eq!(capacity(height), expected, "height {height}");
+            assert_eq!(
+                choose_slot(
+                    FLEET,
+                    &[director_window(height, members)],
+                    0,
+                    &catalog,
+                    CodingAgent::Codex,
+                    multiplexer
+                ),
+                expected,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_mixed_column_admits_a_member_only_with_room_for_the_largest_slot() {
+        let catalog = codex_minimum(20);
+        for (name, height, column, creating, expected) in [
+            (
+                "a codex member joining a claude member with room for 21 rows",
+                42,
+                vec![CodingAgent::Claude],
+                CodingAgent::Codex,
+                existing(0, ColumnSide::Right),
+            ),
+            (
+                "a codex member joining a claude member without room for 21 rows",
+                40,
+                vec![CodingAgent::Claude],
+                CodingAgent::Codex,
+                new_window(1),
+            ),
+            (
+                "a claude member joining a codex member without room for its 21 rows",
+                40,
+                vec![CodingAgent::Codex],
+                CodingAgent::Claude,
+                new_window(1),
+            ),
+            (
+                "a claude member joining a claude member at 20 rows each",
+                40,
+                vec![CodingAgent::Claude],
+                CodingAgent::Claude,
+                existing(0, ColumnSide::Right),
+            ),
+            (
+                "a codex member alone in a 21-row column",
+                21,
+                Vec::new(),
+                CodingAgent::Codex,
+                existing(0, ColumnSide::Right),
+            ),
+            (
+                "a codex member alone in a 20-row column",
+                20,
+                Vec::new(),
+                CodingAgent::Codex,
+                new_window(1),
+            ),
+        ] {
+            let mut window = director_window(height, 0);
+            window.right = members_of("1", &column);
+            assert_eq!(
+                choose_slot(FLEET, &[window], 0, &catalog, creating, MuxBackend::Tmux),
+                expected,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_overflow_column_always_admits_its_first_member() {
+        let catalog = codex_minimum(20);
+        for multiplexer in [MuxBackend::Tmux, MuxBackend::Herdr] {
+            assert_eq!(
+                choose_slot(
+                    FLEET,
+                    &[director_window(10, 0), overflow_window(1, 10, 0, 0)],
+                    1,
+                    &catalog,
+                    CodingAgent::Codex,
+                    multiplexer
+                ),
+                existing(1, ColumnSide::Left),
+                "{multiplexer:?}: an empty overflow column below one slot"
+            );
+            assert_eq!(
+                choose_slot(
+                    FLEET,
+                    &[director_window(10, 0), overflow_window(1, 10, 1, 1)],
+                    1,
+                    &catalog,
+                    CodingAgent::Codex,
+                    multiplexer
+                ),
+                new_window(2),
+                "{multiplexer:?}: a second member needs the slot budget"
+            );
         }
     }
 
@@ -323,7 +605,7 @@ mod tests {
             ]);
         for case in cases {
             assert_eq!(
-                choose_slot(case.fleet_id, &case.windows, case.last_window_ordinal),
+                tmux_slot(case.fleet_id, &case.windows, case.last_window_ordinal),
                 case.expected,
                 "{}",
                 case.name
@@ -360,7 +642,7 @@ mod tests {
             ),
         ] {
             let refused = std::panic::catch_unwind(|| {
-                choose_slot(FLEET, &windows, last_window_ordinal);
+                tmux_slot(FLEET, &windows, last_window_ordinal);
             });
             assert!(refused.is_err(), "{name}");
         }

@@ -51,7 +51,9 @@ CREATE TABLE messages (
     status_state TEXT NOT NULL,
     status_timestamp TEXT NOT NULL,
     text TEXT NOT NULL,
-    notified_at TEXT
+    notified_at TEXT,
+    preview_typings INTEGER NOT NULL DEFAULT 0 CHECK(preview_typings IN (0, 1, 2)),
+    preview_parked_until TEXT
 );
 CREATE INDEX idx_messages_to_member_status_ts ON messages (to_member_id, status_timestamp);
 CREATE INDEX idx_messages_from_member_created_at ON messages (from_member_id, created_at);
@@ -155,6 +157,7 @@ CREATE TABLE member_input_operations (
             AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
         OR (stop_cause IN ('interaction_open','interaction_candidate','literal_mismatch',
+                          'composer_clipped','composer_unreadable',
                           'submit_unconfirmed','deadline_expired','short_write','write_failed',
                           'runner_stopped')
             AND state IN ('uncertain','settled'))),
@@ -1797,26 +1800,34 @@ mod tests {
         }
 
         #[test]
-        fn input_stop_causes_accept_literal_mismatch_on_an_uncertain_input() {
+        fn input_stop_causes_accept_each_pre_submit_class_on_an_uncertain_input() {
+            use crate::broker::runtime::StopCause;
             let fixture = Fixture::new();
             let run = fixture.run("running").unwrap();
             let input = fixture.input(run, "prompt:mismatch").unwrap();
-            fixture
-                .conn
-                .execute(
-                    "UPDATE member_input_operations SET state='uncertain',stop_cause='literal_mismatch' WHERE input_id=?1",
-                    [input],
-                )
-                .unwrap();
-            let cause: String = fixture
-                .conn
-                .query_row(
-                    "SELECT stop_cause FROM member_input_operations WHERE input_id=?1",
-                    [input],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(cause, "literal_mismatch");
+            for (stored, cause) in [
+                ("literal_mismatch", StopCause::LiteralMismatch),
+                ("composer_clipped", StopCause::ComposerClipped),
+                ("composer_unreadable", StopCause::ComposerUnreadable),
+            ] {
+                fixture
+                    .conn
+                    .execute(
+                        "UPDATE member_input_operations SET state='uncertain',stop_cause=?2 WHERE input_id=?1",
+                        rusqlite::params![input, stored],
+                    )
+                    .unwrap_or_else(|error| panic!("{stored}: {error}"));
+                let read: StopCause = fixture
+                    .conn
+                    .query_row(
+                        "SELECT stop_cause FROM member_input_operations WHERE input_id=?1",
+                        [input],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(read, cause, "{stored}");
+                assert_eq!(cause.as_str(), stored, "{stored}");
+            }
             assert!(
                 fixture
                     .conn
@@ -1827,6 +1838,81 @@ mod tests {
                     .is_err(),
                 "an unknown stop cause is refused"
             );
+        }
+
+        #[test]
+        fn a_message_starts_unparked_and_records_its_late_submission_deadline() {
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            fixture
+                .conn
+                .execute(
+                    "INSERT INTO messages(from_member_id,to_member_id,text,created_at,status_state,status_timestamp) SELECT member_id,member_id,'parked','2026-11-27T00:00:00.000000+00:00','input_required','2026-11-27T00:00:00.000000+00:00' FROM member_runs WHERE run_id=?1",
+                    [run],
+                )
+                .unwrap();
+            let id = fixture.conn.last_insert_rowid();
+            let parked = |conn: &rusqlite::Connection| -> Option<String> {
+                conn.query_row(
+                    "SELECT preview_parked_until FROM messages WHERE message_id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(parked(&fixture.conn), None, "a new message is unparked");
+            fixture
+                .conn
+                .execute(
+                    "UPDATE messages SET preview_parked_until='2026-11-27T00:02:00.000000+00:00' WHERE message_id=?1",
+                    [id],
+                )
+                .unwrap();
+            assert_eq!(
+                parked(&fixture.conn).as_deref(),
+                Some("2026-11-27T00:02:00.000000+00:00")
+            );
+        }
+
+        #[test]
+        fn a_message_counts_at_most_two_preview_typings() {
+            let fixture = Fixture::new();
+            let run = fixture.run("running").unwrap();
+            fixture
+                .conn
+                .execute(
+                    "INSERT INTO messages(from_member_id,to_member_id,text,created_at,status_state,status_timestamp) SELECT member_id,member_id,'typed','2026-11-27T00:00:00.000000+00:00','input_required','2026-11-27T00:00:00.000000+00:00' FROM member_runs WHERE run_id=?1",
+                    [run],
+                )
+                .unwrap();
+            let id = fixture.conn.last_insert_rowid();
+            let typings = |conn: &rusqlite::Connection| -> i64 {
+                conn.query_row(
+                    "SELECT preview_typings FROM messages WHERE message_id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(typings(&fixture.conn), 0, "a new message has no typing");
+            let set = |value: rusqlite::types::Value| {
+                fixture.conn.execute(
+                    "UPDATE messages SET preview_typings=?2 WHERE message_id=?1",
+                    rusqlite::params![id, value],
+                )
+            };
+            for count in [1, 2] {
+                set(rusqlite::types::Value::Integer(count))
+                    .unwrap_or_else(|error| panic!("{count} typings: {error}"));
+                assert_eq!(typings(&fixture.conn), count);
+            }
+            for (name, value) in [
+                ("three typings", rusqlite::types::Value::Integer(3)),
+                ("a negative count", rusqlite::types::Value::Integer(-1)),
+                ("a null count", rusqlite::types::Value::Null),
+            ] {
+                assert!(set(value).is_err(), "{name} is refused");
+            }
         }
 
         #[test]

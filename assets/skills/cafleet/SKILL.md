@@ -68,7 +68,7 @@ On `Operation not permitted` / `Permission denied`, retry a combined invocation 
 cafleet message send --from-member-id <my-member-id> --to-member-id <target-member-id> "Assignment or reply"
 ```
 
-Use `--file PATH` (`--file -` for stdin) for long or multiline text; text output truncates bodies at 200 codepoints and `--json` returns them complete. A send stores the message and returns; the recipient's runner types and retries a `[cafleet msg ID from SENDER TIMESTAMP]` preview carrying the body or a `poll` pointer ([wrapped delivery methods](reference/cli.md#wrapped-delivery-methods)). The root Director receives previews the same way, typed into its pane by the fleet's live member runners ([Director previews](reference/cli.md#director-previews)).
+Use `--file PATH` (`--file -` for stdin) for long or multiline text; text output truncates bodies at 200 codepoints and `--json` returns them complete. A send stores the message and returns; the recipient's runner types and retries a preview fitted to the recipient's pane, from a `[cafleet msg ID from SENDER TIMESTAMP]` line carrying the body down to a bare `[cafleet msg ID]` ([push notifications](reference/cli.md#push-notifications)); every form is a wake that calls for one `message poll`. The root Director receives previews the same way, typed into its pane by the fleet's live member runners ([Director previews](reference/cli.md#director-previews)).
 
 Send each body once, one send per recipient, retaining each message ID and reporting each failed recipient ([send outcomes](reference/cli.md#message-send)).
 

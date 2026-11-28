@@ -622,6 +622,8 @@ Each check has a stable `name`, a `status` and a one-line `detail`. Checks run i
 | `multiplexer.caller_pane` | `<VAR>=<pane_id> session=<session> window=<window_id>` | `unavailable: the multiplexer is unavailable` | A refusal body (§ Caller pane verification) | A propagated verification error, or the context read of a verified pane |
 | `database` | `cafleet <VERSION> at <path>` | — | — | The schema-version guard error for an empty or incompatible database, or the open/inspection cause |
 | `member.<member_id>.runtime` | § Member runtime checks | § Member runtime checks | § Member runtime checks | § Member runtime checks |
+| `member.<member_id>.geometry` | § Member runtime checks | § Member runtime checks | § Member runtime checks | — |
+| `fleet.<fleet_id>.director.geometry` | § Director pane geometry checks | § Director pane geometry checks | § Director pane geometry checks | — |
 | `<agent>.configuration` | The resolved config path (§ Config-dir resolution) | — | — | The config-path validation error, or `HOME is not set` |
 | `<agent>.executable` | `<binary> is on PATH` | `<binary> is optional and absent from PATH` | — | — |
 | `opencode.preset[.<mode>]` | § OpenCode preset checks | § OpenCode preset checks | — | § OpenCode preset checks |
@@ -653,6 +655,24 @@ When the `database` row is `ok`, doctor adds one `member.<member_id>.runtime` ro
 | Otherwise | `ok` | `run=<run_id> observation=<eligibility>` |
 
 `<hint>` is exactly `inspect with 'cafleet member show <member_id> --json'; if it does not recover, run 'cafleet member delete <member_id>' and create a replacement member`, with ` --database-url URL` appended to each quoted command for a non-default database. An `error` member row makes doctor exit 1 with `Error: doctor found errors`, like every other `error` row.
+
+One `member.<member_id>.geometry` row follows each `member.<member_id>.runtime` row and reads the same health probe's `observation.geometry` (§6.3 Runtime presentation). `<backend>` is the member's coding agent. The first matching row applies:
+
+| Situation | Status | Detail |
+|---|---|---|
+| Runtime row not probed, probe failed, or `geometry` null | `info` | `run=<run_id> geometry=unavailable` |
+| `below_minimum` | `warn` | `run=<run_id> rows=<r> columns=<c> below the <backend> minimum <min_rows>x<min_columns>; previews shorten or hold until the pane grows` |
+| Otherwise | `ok` | `run=<run_id> rows=<r> columns=<c>` |
+
+###### Director pane geometry checks
+
+When the `database` row is `ok`, one `fleet.<fleet_id>.director.geometry` row follows the member rows, in fleet-ID order, for each fleet whose root Director is active with a concrete placement, whose Director backend's bundled profile declares `director_delivery` listing the placement's multiplexer, and whose profile declares `composer.geometry` (§6.9 Bundled profiles and native screen fixtures). doctor takes one read-only capture of the Director pane (§6.5 Backend operations) under the same one-second deadline as the member probes and derives its size as the Director delivery sweep does (§6.9 Director delivery sweep). `<backend>` is the Director's coding agent. The first matching row applies:
+
+| Situation | Status | Detail |
+|---|---|---|
+| Capture failed | `info` | `director=<member_id> geometry=unavailable: <cause>` |
+| Below the Director profile's `min_rows`/`min_columns` | `warn` | `director=<member_id> rows=<r> columns=<c> below the <backend> minimum <min_rows>x<min_columns>; Director previews shorten or hold until the pane grows` |
+| Otherwise | `ok` | `director=<member_id> rows=<r> columns=<c>` |
 
 ###### OpenCode preset checks
 
@@ -824,7 +844,7 @@ A submitted prompt prints `Sent prompt TEXT_REPR to member NAME (PANE).`; a queu
 
 A runner refusal before any byte (`rejected` at stage `zero_bytes`) prints `prompt was not dispatched to member ID: CAUSE`. Every other refusal prints `prompt delivery to member ID is STATUS`, where STATUS is `held`, `rejected` or `uncertain`, followed by `: REASON` when the runner reported a reason and ` (method=METHOD)` when a delivery method was selected, as in `prompt delivery to member 7 is held: input requires live proven-zero revalidation`. These exit 1 without a success record, followed by their context line (§6.3 Error Messages).
 
-A prompt whose staged write stops or whose submission is not confirmed records `uncertain` and exits 1 with its recorded cause, method and input ID (§6.3 Runtime presentation). Prompt input requires a deliberate retry. Oversized input without safe framing is refused before reservation or bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` and publishes its result (§6.9 Measured submission plans and settle intervals). Insufficient immediate-attempt budget accepts a zero-byte queue entry with reason `delivery_budget_exhausted`.
+A prompt whose staged write stops or whose submission is not confirmed records `uncertain` and exits 1 with its recorded cause, method and input ID (§6.3 Runtime presentation). Prompt input requires a deliberate retry. Oversized input without safe framing is refused before reservation or bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` and publishes its result (§6.9 Measured submission plans and settle intervals). Insufficient immediate-attempt budget accepts a zero-byte queue entry with reason `delivery_budget_exhausted`. On a verified-composer run, a literal that does not fit the live composer with headroom queues with zero bytes and reason `composer_too_small`, and one whose screen selects no single composer rule queues with `composer_geometry_unavailable`; the runner drains either once the literal fits (§6.9 Composer geometry and fit).
 
 ##### `member exec`
 
@@ -848,7 +868,7 @@ Ordered JSON is:
 | Runner refusal before any byte (`rejected` at stage `zero_bytes`) | `native command was not dispatched to member ID: CAUSE` |
 | Every other refusal: held, rejected after typing began, or uncertain | `native command delivery to member ID is STATUS`, with `: REASON` and ` (method=METHOD)` as for `member prompt` |
 
-An exec whose staged write stops or whose submission is not confirmed records `uncertain`, exits 1 and requires a deliberate retry. An immediate oversized command with no safe framing is refused with zero bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` with a result event. Insufficient immediate budget queues with reason `delivery_budget_exhausted` (§6.9 Measured submission plans and settle intervals).
+An exec whose staged write stops or whose submission is not confirmed records `uncertain`, exits 1 and requires a deliberate retry. An immediate oversized command with no safe framing is refused with zero bytes; a queued refusal settles `not_submitted/plain_limit_exceeded` with a result event. Insufficient immediate budget queues with reason `delivery_budget_exhausted` (§6.9 Measured submission plans and settle intervals). A literal that does not fit the live composer queues with `composer_too_small` or `composer_geometry_unavailable`, as for `member prompt`.
 
 The first text-writing call can partially type even if it fails. Failure after Enter may mean execution began. A wrapped operation durably records its operation key, payload digest and submission state; the receipt contains no command text. The Director authorizes native input under its host rules; visibility establishes no second member-tool permission check.
 
@@ -912,11 +932,11 @@ Member show alone appends four keys to the runtime object, after `child_start_id
 | Key | Value |
 |---|---|
 | `observation_probe` | `skipped` (the run's status is neither `running` nor `degraded`), `answered` or `failed` |
-| `observation` | The runner's observation health with ordered keys `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since`; null when skipped, failed, or answered by a runner whose child has not started |
+| `observation` | The runner's observation health with ordered keys `visibility,eligibility,degraded,diagnostic,writer_diagnostic,pending_count,gap_count,gap_open_since,geometry`; null when skipped, failed, or answered by a runner whose child has not started |
 | `observation_error` | The probe failure's message when `failed`, otherwise null: `member runtime: <cause>` when the runner's runtime path is missing; every other probe failure's text is implementation-defined |
 | `diagnostics` | The run's latest 5 `member_runner_diagnostics` rows (§6.9 Storage pressure and durability boundary), newest `last_at` then `diagnostic_id` first, each ordered `source,message,first_at,last_at,count` |
 
-`visibility` is `visible`, `obscured`, `not_visible` or `unknown`. `eligibility` is the string `composer_empty` or `hold:<reason>`, where `<reason>` is `candidate`, `interaction`, `unknown`, `observer_unavailable` or `gap`; doctor member rows use the same rendering. `degraded` is a boolean, and `diagnostic` is the observation failure code, `sink_unavailable` while the event writer is degraded, or null; it is non-null whenever `degraded`, and a health reply that is `degraded` without it is a failed probe. `writer_diagnostic` is the event writer's sanitized failure text, non-null only when `degraded`, and `gap_open_since` is the RFC 3339 start of a pending observation gap, non-null only with `hold:gap` and `degraded`. A gap recorded after the native child exits has no pending start, so it reports `hold:gap`, `degraded` and a null `gap_open_since`. `pending_count` and `gap_count` are the runner's uncommitted-transition and observation-gap counters.
+`visibility` is `visible`, `obscured`, `not_visible` or `unknown`. `eligibility` is the string `composer_empty` or `hold:<reason>`, where `<reason>` is `candidate`, `interaction`, `unknown`, `geometry`, `observer_unavailable` or `gap`; doctor member rows use the same rendering. `hold:geometry` is an unrecognized screen on a pane below the profile's minimum size (§6.9 Composer geometry and fit). `geometry` is null when the run's profile declares no composer geometry, and otherwise has ordered keys `rows,columns,min_rows,min_columns,below_minimum`: the live PTY size, the profile minimums and `rows < min_rows || columns < min_columns`, a health reply contradicting which is a failed probe. `below_minimum` follows the live size, so it clears when the pane grows. `degraded` is a boolean, and `diagnostic` is the observation failure code, `sink_unavailable` while the event writer is degraded, or null; it is non-null whenever `degraded`, and a health reply that is `degraded` without it is a failed probe. `writer_diagnostic` is the event writer's sanitized failure text, non-null only when `degraded`, and `gap_open_since` is the RFC 3339 start of a pending observation gap, non-null only with `hold:gap` and `degraded`. A gap recorded after the native child exits has no pending start, so it reports `hold:gap`, `degraded` and a null `gap_open_since`. `pending_count` and `gap_count` are the runner's uncommitted-transition and observation-gap counters.
 
 Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STATUS` row and appends `Runtime: run=RUN_ID mode=MODE status=STATUS coverage=COVERAGE`. Member show's line appends ` observation=STATE`, followed by ` degraded` when the observation is degraded:
 
@@ -927,7 +947,7 @@ Wrapped create/show prints its `ID NAME backend=AGENT pane=PANE` or `ID NAME STA
 | `failed` | `unavailable` |
 | `skipped` | `-` |
 
-For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted` and adds, after its `Input:` line, the line `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)` (with no recorded cause, `… is uncertain (method=profile)`), and its context line carries the known receipt identity; run/interaction context accompanies held/rejected input.
+When `geometry.below_minimum` is true, the line then appends ` geometry=ROWSxCOLUMNS below_minimum`. For example, `Runtime: run=37 mode=auto status=running coverage=tested observation=hold:gap degraded` and `Runtime: run=38 mode=auto status=running coverage=tested observation=composer_empty geometry=9x80 below_minimum`. `event show` uses the runtime object and line without the member-show additions. Prompt/exec JSON appends `delivery` after `input_id` (§6.9 Delivery reporting). Their text output appends `Delivery: status=STATUS method=METHOD reason=REASON`, using `-` for a missing method or reason, then `Input: INPUT_ID` when a durable ID exists. The `Sent prompt …` and `Dispatched native command …` lines print only for actual submissions; a fallback submission always prints `method=fallback` with reason `submission_plan_unavailable`, and a queued result names `interaction_open`, `interaction_candidate`, `composer_busy`, `composer_too_small`, `composer_geometry_unavailable`, `earlier_input` or `delivery_budget_exhausted` and adds, after its `Input:` line, the line `The member's runner will retry it after the blocking work ends; run cafleet input show INPUT_ID --json for its result.` A prompt/exec uncertain error exits 1, names the receipt's recorded `stop_cause` and the selected method, as in `native command delivery to member 110 is uncertain: write_failed (method=profile)` (with no recorded cause, `… is uncertain (method=profile)`), and its context line carries the known receipt identity; run/interaction context accompanies held/rejected input.
 
 #### Runtime event and input commands
 
@@ -1125,7 +1145,7 @@ A message is a durable point-to-point delivery. The recipient owns its inbox, an
 
 #### Persisted shape
 
-The messages table stores typed routing/status columns, exact body text and internal `notified_at` state. Required values decode with typed errors.
+The messages table stores typed routing/status columns, exact body text and internal `notified_at`, `preview_typings` and `preview_parked_until` state. Required values decode with typed errors.
 
 The ordered public record is:
 
@@ -1379,17 +1399,31 @@ Delivery fallback (§6.9 Delivery method and interaction priority), whose submis
 [cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] BODY [cafleet] Resume your work if something was still running. [cafleet] If this delivery's Escape dismissed a pending prompt in your pane, that rejection did not come from the user; re-issue the tool call if you still need it.
 ```
 
-Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, where N counts stored text and `RECIPIENT_ID` is the message's `to_member_id`. The pointer is identical for every database and never carries `--database-url`. A preview above its run's profile's measured plain-input limit uses bracketed paste when declared and enabled, otherwise this same pointer form (§6.9 Measured submission plans and settle intervals). A Director preview above its profile's `director_delivery.plain_limit` uses the pointer form (§6.9 Director delivery sweep). This limit is independent of the 200-codepoint text-output limit (§6.4 Text-mode projection). The runner renders the form from the selected delivery method before its first byte.
+Stored text remains exact. Both forms fold CRLF/LF/CR to `⏎`, tabs to `␉`, and other C0/DEL controls to visible hexadecimal escapes (`\xNN`). A folded body of at most 4000 Unicode scalar values appears inline; a longer body becomes `Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it.`, where N counts stored text and `RECIPIENT_ID` is the message's `to_member_id`. The pointer is identical for every database and never carries `--database-url`. The profile's plain-input limit applies when the member uses plain framing. A member can also use bracketed paste when declared and enabled (§6.9 Measured submission plans and settle intervals). The Director uses plain framing with its own profile limit (§6.9 Director delivery sweep). This limit is independent of the 200-codepoint text-output limit (§6.4 Text-mode projection). The runner renders the form from the selected delivery method before its first byte.
 
-The runner stamps `notified_at` once a preview is submitted: confirmed by post-submit verification on a verified-composer run, or with every stage written on a run without composer verification, where an uncertain preview is also stamped before its result is published (§6.9 Runner pending-preview sweep). A Director preview is stamped only after confirmed post-submit verification, while the Director pane lock is still held (§6.9 Director delivery sweep).
+Profile delivery on a verified-composer run and Director delivery choose the preview's *rung* from the live pane geometry. Selection walks the rungs in order and takes the first whose literal fits the live composer (§6.9 Composer geometry and fit) and that the limits above allow:
+
+| Rung | Literal | Eligible when |
+|---|---|---|
+| `full` | The canonical line above, including its pointer form for a folded body above 4000 scalars | The message has not been typed before |
+| `compact` | `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] EXCERPT… (N more characters; run cafleet message poll RECIPIENT_ID --json) [cafleet] Resume your work if something was still running.` | The message has not been typed before, its folded body is inline and an `EXCERPT` of at least one scalar fits |
+| `pointer` | `[cafleet msg MESSAGE_ID from SENDER_ID TIMESTAMP] Body is N characters; run cafleet message poll RECIPIENT_ID --json to read it. [cafleet] Resume your work if something was still running.` | Always |
+| `cue` | `[cafleet msg MESSAGE_ID] run cafleet message poll RECIPIENT_ID --json` | Always |
+| `minimal` | `[cafleet msg MESSAGE_ID]` | Always |
+
+`EXCERPT` is the fold of the longest prefix of the stored body, ending on a stored scalar boundary, for which the compact literal fits; a fold unit lies wholly inside or wholly outside it. The compact `N` is the stored body's scalar count minus the stored scalars of that prefix, counted like the pointer's `N`. A message's second typing (§6.9 Runner pending-preview sweep) is limited to the `pointer`, `cue` and `minimal` rungs. Every rung is a wake that calls for one `message poll`. The rung is pinned at the first byte; a reselection while no byte is written reruns the ladder against fresh geometry. A run without composer verification keeps the selection above: the plain limit, then the pointer form. When no rung fits, the preview holds with zero bytes (§ Held delivery).
+
+The runner stamps `notified_at` once a preview is submitted: confirmed by post-submit verification on a verified-composer run, or with every stage written on a run without composer verification, where an uncertain preview is also stamped before its result is published (§6.9 Runner pending-preview sweep). A Director preview is stamped only after confirmed post-submit verification, while the Director pane lock is still held (§6.9 Director delivery sweep). A message is typed at most twice: a verified-composer run or a Director sweep whose second typing of a message ends uncertain stamps `notified_at` and records an abandonment diagnostic, so the message stays `input_required` and reaches its recipient through any later `message poll` (§6.9 Runner pending-preview sweep).
 
 Delivery leaves `status_state` unchanged: an inline or pointer preview stays `input_required` until its recipient polls, and the consuming poll identifies consumption independently of input delivery.
 
 ##### Held delivery
 
-A preview stays pending, with `notified_at` unset, while the recipient's composer is not verified empty on a verified-composer run, an interaction is open, the runner's FIFO holds prompt or exec input or is stopped, the observer is degraded, ownership or storage is unavailable, the pane is not yet placed or the pane input lock is busy; the runner's sweep retries it with no caller command. Pending delivery creates no permission event and grants no native answer.
+A preview stays pending, with `notified_at` unset, while the recipient's composer is not verified empty on a verified-composer run, no rung fits the live composer, an interaction is open, the runner's FIFO holds prompt or exec input or is stopped, the observer is degraded, ownership or storage is unavailable, the pane is not yet placed, the pane input lock is busy or an earlier typing of the message is parked for late submission; the runner's sweep retries it with no caller command. Pending delivery creates no permission event and grants no native answer.
 
-A Director preview stays pending while the Director composer is not verified empty (a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min`), an interaction is open, the Director pane capture or its multiplexer fails, storage is unavailable, the Director pane input lock is busy, an older Director message is held, or no member runner of the fleet is live. It publishes no runtime event; the delivering runner records a `director_delivery` diagnostic (§6.9 Director delivery sweep).
+A *geometry hold* writes zero bytes and needs no Director action. It holds a preview when the composer is verified empty but no rung fits (`composer_too_small`), or when no composer or interaction rule matches a pane below the profile's minimum size (`hold:geometry`). While a pane is below its profile's minimum, or a hold is `composer_too_small`, no `input_delivery_stalled` wait runs; a hold that persists once the pane reaches the minimum starts a fresh wait. A grow that lets a rung fit delivers the preview at the next sweep interval (§6.9 Composer geometry and fit).
+
+A Director preview stays pending while the Director composer is not verified empty (a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min`), no rung fits the Director composer, the capture is below the Director profile's minimum size with no Director composer or interaction rule matching, an interaction is open, the Director pane capture or its multiplexer fails, storage is unavailable, the Director pane input lock is busy, an older Director message is held, or no member runner of the fleet is live. It publishes no runtime event; the delivering runner records a `director_delivery` diagnostic (§6.9 Director delivery sweep).
 
 ##### Accepted trade-offs
 
@@ -1405,7 +1439,10 @@ These trade-offs apply to delivery fallback, which leads with Escape. A single E
 
 Verified-composer delivery additionally accepts these trade-offs (§6.9 Durable input receipts and settlement):
 
-- A preview whose submission is uncertain is typed again once the composer is verified empty, so a recipient can see it twice, for example after a human or Director Enter submitted the typed line; recipients deduplicate by message ID.
+- A preview whose first typing is uncertain is typed once more, as the `pointer`, `cue` or `minimal` rung, once the composer is verified empty, so a recipient can see it twice, for example after a human or Director Enter submitted or queued the typed line; recipients deduplicate by message ID. A second uncertain outcome stamps the message without a third typing, and the message reaches its recipient through the next `message poll`.
+- A resize, or chrome such as a spinner or tip row appearing between the literal and the submit key, can clip or scroll a literal that fitted when typed. Pre-submit verification then records `composer_clipped` or `composer_unreadable` and writes no submit key; a preview parks for late submission for up to 120 seconds, while a prompt or exec records `uncertain` (§6.9 Measured submission plans and settle intervals). The `full` and `compact` rungs and prompt/exec keep the profile's transient-chrome headroom; the `pointer`, `cue` and `minimal` rungs keep none, so the shortest rungs stay available in small panes and that race falls to late submission and the single retry.
+- Fit estimates word wrap greedily plus the profile's measured slack. A native wrap that wastes more rows than that estimate scrolls or clips the literal with the same outcome as a resize.
+- Below a profile's minimum size an interaction may render outside every rule and go undetected, a recorded layout limit (§6.7 Role requirements); ordinary input still writes nothing, because the composer does not verify empty.
 - A human draft blocks previews until it is cleared or submitted.
 - After a prompt or exec records `uncertain`, no preview and no queued input reaches the member until `input reconcile` settles it (§6.9 Runner-owned deferred delivery).
 - A composer rule that never verifies empty after clearing keeps previews and queued input waiting. `input_delivery_stalled` signals the Director after 3 minutes; recovery inspects the whole literal and presses Enter when appropriate, sends other keys the capture shows are needed, or asks the user to clear or submit the composer, and reconciles uncertain input from that evidence. A composer that never verifies empty after clearing is a profile defect reported for correction.
@@ -1417,11 +1454,7 @@ Director delivery additionally accepts these trade-offs (§6.9 Director delivery
 - Delivery is strictly oldest first across senders, so a held head blocks every newer Director message.
 - While a draft or dialog holds the Director composer, each live member runner captures the Director pane up to once per second.
 - CAFleet does not launch the Director, so it probes no Director native version and selects no rule or fixture by version.
-- herdr reports no terminal column count, so a herdr capture takes the layout width, which can exceed the terminal width by a few columns; a herdr Director pane a few columns narrower than a profile's `W_min` can pass the width check.
-- A Claude composer, member or Director, shows a seven-row window of the pane width minus four columns and scrolls a longer literal. Its 456-scalar limit fills six rows at 80 columns and leaves one row of slack. On a pane narrower than 80 columns, a literal at the limit scrolls inside the composer, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
-- An opencode composer, member or Director, shows six rows of the pane width minus four columns and scrolls a longer literal, and it wraps by word. Its 380-scalar limit fills five rows at 80 columns and leaves one row for word-wrap waste. A literal at the limit whose words waste more than that row, or one on a pane narrower than 80 columns, scrolls inside the composer, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
-- A pi editor, member or Director, shows `floor(0.3 × rows)` rows of the pane width minus one column and scrolls a longer literal, and it wraps by word. Its 474-scalar limit fills six rows at 80 columns, one row fewer than an 80×24 pane's seven, leaving that row for word-wrap waste. A literal at the limit whose words waste more than that row, or one on a pane narrower than 80 columns or shorter than 24 rows, scrolls inside the editor, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
-- A Hermes TUI Director composer shows rows of the pane width minus six columns up to its height and clips a longer literal silently. Its 1480-scalar Director limit fills twenty of the twenty-one rows an 80×24 pane shows, leaving one row of slack. On a pane narrower than 80 columns or shorter than 24 rows, a literal at the limit is clipped, fails the pre-submit comparison and records `literal_mismatch` without a submit key.
+- herdr reports no terminal column count and resizes a pane's PTY only while a client renders its tab, so the Director sweep derives a herdr capture's size conservatively (§6.9 Director delivery sweep). A background Director tab last rendered at another size can therefore receive a shorter rung, or hold, until its tab renders again.
 - Director messages committed while no member runner of the fleet is live stay pending until a runner starts or recovers; the Director polls manually after the commands that leave the fleet without one.
 - An unexpected exit of the last member runner is noticed only at the next Director turn, which the user or the Director's own ongoing work starts; an idle Director stays idle with no signal.
 
@@ -1459,35 +1492,29 @@ A fleet spreads its member panes across several windows. Every `member create` t
 
 | Constant | Value |
 |---|---|
-| Minimum pane height | 15 rows |
+| Slot floor | 14 rows |
+| Pane chrome | 1 row on tmux, 2 rows on herdr |
 | Maximum panes per column | 8 |
 | Layout lock wait | 60 seconds |
 
-The constants are fixed; no flag or configuration changes them. A column in a window whose live height is `H` rows has capacity `capacity(H) = min(8, floor(H / 15))`. `H` is the tmux `#{window_height}`, which excludes the status line, or the herdr `layout.area.height`; the 15-row minimum is a per-slot budget that includes the tmux pane separator. The Director window's right column holds `capacity(H)` members and is skipped when that is 0. An overflow column holds `max(1, capacity(H))` members, so a new overflow window always makes progress.
+The constants are fixed; no flag or configuration changes them. A member of backend `b` takes a slot of `slot_rows(b) = max(14, min_rows(b)) + chrome` rows, where `min_rows(b)` is its bundled profile's `composer.geometry.min_rows` (§6.9 Composer geometry and fit), 14 for a backend whose profile declares no composer geometry, and `chrome` is the multiplexer's pane chrome: the tmux pane separator or the herdr pane border. The profile minimum makes delivery degrade safely and is not a placement target, so a slot exceeds the floor only for a profile whose own minimum exceeds it.
 
-| Window height `H` | Capacity per column | Director window members | Overflow window members |
-|---|---|---|---|
-| < 15 | 0 | 0 (skipped) | 2 (one per column, by the overflow minimum) |
-| 15 | 1 | 1 | 2 |
-| 30 | 2 | 2 | 4 |
-| 50 | 3 | 3 | 6 |
-| 60 | 4 | 4 | 8 |
-| ≥ 120 | 8 | 8 | 16 |
+A column of a window whose live height is `H` rows, holding members of backends `B`, admits a member of backend `b` when `count(B) + 1 ≤ 8` and `floor(H / (count(B) + 1)) ≥ max(slot_rows(b), max over B of slot_rows)`. `H` is the tmux `#{window_height}`, which excludes the status line, or the herdr `layout.area.height`. A herdr tab's layout height is the size every pane takes once the tab renders, even while a background tab keeps the PTY size it was last rendered at; delivery reads each pane's live PTY size (§6.9 Composer geometry and fit), so a stale background PTY never affects admission. The Director window's right column is skipped when it admits none. An overflow column always admits its first member, so a new overflow window always makes progress. With every slot at the floor, a tmux window of 60 rows admits 4 members per column.
 
 ##### Slot selection
 
 1. Scan the fleet's windows by ascending ordinal. For ordinal 0, consider only the right column. For each overflow window, consider the left column, then the right column.
-2. Choose the first column whose member count is below its capacity.
+2. Choose the first column that admits the creating member's backend.
 3. Otherwise open a new overflow window with ordinal `fleets.last_window_ordinal + 1`, named `cafleet-<fleet_id>-<ordinal>`; its first member takes the left column, which the overflow minimum always makes available, so a new window needs no height read.
 
-Occupancy comes from the registry: the fleet's active members whose placement is concrete, grouped by `window_ordinal` and `column_side`, excluding the Director's own row (ordinal 0, `left`). A pending placement holds no slot: every creation holds the fleet layout lock until it completes or compensates, so a pending row seen under the lock belongs to a killed creation (§ Termination during pane input), which `member delete` removes. An overflow ordinal with no concrete member is a closed window and is not scanned.
+Occupancy comes from the registry: the fleet's active members whose placement is concrete, grouped by `window_ordinal` and `column_side` with each member's `coding_agent`, excluding the Director's own row (ordinal 0, `left`). A pending placement holds no slot: every creation holds the fleet layout lock until it completes or compensates, so a pending row seen under the lock belongs to a killed creation (§ Termination during pane input), which `member delete` removes. An overflow ordinal with no concrete member is a closed window and is not scanned.
 
 Each scanned window's height is read live before registration (§ Backend operations Window height). The anchors are the Director pane for ordinal 0 and every concrete member pane of the window, in registry order, for an overflow window, so one member whose pane died does not make a live herdr tab unreadable. A failed Director-window read propagates the multiplexer error unchanged. A failed or unparsable overflow-window read (the user closed the window, or every member pane in it died while the members stayed registered) fails `member create` with the unreadable-window error (§6.3 Error Messages), whose `<member-ids>` lists the window's active member IDs ascending, separated by `, `. Neither failure registers anything. Slot selection runs after the backend availability check and before the Hermes preflight (§6.3 Validation order).
 
 ##### Placement policy
 
 - **First free slot.** A slot freed by `member delete` is reused by the next creation, so a newer member can land in the Director window while overflow windows hold older members.
-- **No migration.** Existing members never change window or column; capacity changes from a resized terminal affect only later placements. herdr re-parenting (§ herdr re-parenting) moves a pane only visually inside its own window, keeping its pane ID, window and column.
+- **No migration.** Existing members never change window or column; capacity changes from a resized terminal affect only later placements. A resize after creation is reported through the member's observation geometry, `doctor` and the runner's below-minimum diagnostic (§6.3 Runtime presentation), never re-planned. herdr re-parenting (§ herdr re-parenting) moves a pane only visually inside its own window, keeping its pane ID, window and column.
 - **Ordinals only increase.** `fleets.last_window_ordinal` advances in the registration transaction of every new-window choice and never decreases, even when that creation later fails, so a fleet's overflow windows can skip a number.
 - **Emptied overflow windows close.** When the last member of an overflow window is deleted, the window closes natively on both backends. The Director window always stays open.
 
@@ -1547,7 +1574,7 @@ Director delivery sweep (§6.9 Director delivery sweep).
 | Window height (`member create`) | `tmux display-message -p -t <window_id> "#{window_height}"`; the anchors are ignored | `herdr pane layout --pane <anchor>` for each anchor in order; the first successful `result.layout.area.height` is the height | tmux: output that is not a positive integer, including the empty line of a missing window, fails with `unexpected tmux display-message output: <quoted>`; herdr: a reply without the area fails with `herdr pane layout missing 'area' field`, any failure moves to the next anchor, and the read fails with the last anchor's error only when no anchor answers |
 | Spawn member pane | Per pane target, § Member pane creation | Per pane target, § Member pane creation | A failed or malformed creation response is an unknown pane-cleanup outcome (§ Pane ownership during creation); naming, equalization and re-parenting failures never fail the spawn |
 | Capture | `tmux capture-pane -p -e -t <pane> -S -<lines + 1000>` | `herdr pane read <pane> --format ansi --source recent-unwrapped --lines <lines + 1000>` | `lines <= 0` rejection (§ Capture windowing) |
-| Director screen capture | `tmux display-message -p -t <pane> '#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}'`, `tmux capture-pane -p -e -N -t <pane>`, then the same `display-message` again; a changed metadata line retries every 50 ms within the attempt deadline | `herdr api snapshot` for the pane's `rect.width` in `snapshot.layouts[].panes[]` and its `scroll.viewport_rows` in `snapshot.panes[]`, joined by `pane_id`, then `herdr pane read <pane> --source visible --format ansi`; the row count is `scroll.viewport_rows`, and the body lines fill the screen from the top because the read keeps leading and interior blank rows and drops only trailing blank rows; a body with more lines than the row count fails with `herdr pane read of <pane> printed <lines> rows for a <rows>-row viewport` | A malformed metadata line or a pane absent from the snapshot is a capture failure. tmux captures carry the cursor and alternate-screen state; herdr captures carry neither, and their columns are the layout width, an upper bound of the terminal width |
+| Director screen capture | `tmux display-message -p -t <pane> '#{pane_height} #{pane_width} #{cursor_y} #{cursor_x} #{alternate_on}'`, `tmux capture-pane -p -e -N -t <pane>`, then the same `display-message` again; a changed metadata line retries every 50 ms within the attempt deadline | `herdr api snapshot` for the pane's `rect.width` in `snapshot.layouts[].panes[]` and its `scroll.viewport_rows` in `snapshot.panes[]`, joined by `pane_id`, then `herdr pane read <pane> --source visible --format ansi`; the row count is `scroll.viewport_rows`, and the body lines fill the screen from the top because the read keeps leading and interior blank rows and drops only trailing blank rows; a body with more lines than the row count fails with `herdr pane read of <pane> printed <lines> rows for a <rows>-row viewport` | A malformed metadata line or a pane absent from the snapshot is a capture failure. tmux captures carry the cursor and alternate-screen state; herdr captures carry neither, and their columns are the layout width, which can differ from the terminal width while zoomed or off screen |
 | Director literal write | `tmux send-keys -t <pane> -l -- <chunk>` for each chunk of at most 256 Unicode scalars, in order | `herdr pane send-text <pane> <literal>` | Acknowledged like § Explicit key dispatch; a failure after the first process started has possibly partial effects (§6.9 Director delivery sweep) |
 | Director submit key | `tmux send-keys -t <pane> -H <hex bytes>`, one argument per byte written as two lowercase hex digits | `herdr pane send-keys <pane> <key>...`, one explicit key per byte, written as its herdr argument (§ Explicit key dispatch): U+0021–U+007E as its character key, `20` → `Space`, `1b` → `Escape`, `0d` → `Enter`, `09` → `Tab`, `7f` → `Backspace`, other `01`–`1a` → `Ctrl+<letter>`; a byte without a key fails before any process with `herdr has no key mapping for the submit bytes <hex>`, `<hex>` being every submit byte as two lowercase hex digits with no separator | Acknowledged like § Explicit key dispatch; a failure after its process started is possibly submitted (§6.9 Director delivery sweep) |
 | Close | `tmux kill-pane -t <pane>`, then the restoration of the caller-supplied window | `herdr pane close <pane>`, then the delete-time restoration of the caller-supplied tab | Close tolerates only a recognized pane-gone cause (tmux stderr `can't find pane` / `no such pane`, herdr error code `pane_not_found`); restoration is best effort (§ Delete-time pane layout) |
@@ -1661,7 +1688,7 @@ Every member pane runs a coding-agent binary selected from the backend registry 
 | Member | Eligible | A runner-compatible PTY lifecycle, an explicit detection-coverage declaration and a classified default launch mode, `auto` or `manual`, with approval-prompt coverage: the backend's bundled profile detects every approval form the default mode renders and declares request-bound allow and deny answers for it, at every pane geometry outside its recorded layout limits. A default mode that renders no approval form meets this without request rules. |
 | Member | Bundled support | The backend's bundled profile, which declares detection, composer plans and request-bound answers independently from native evidence. Capabilities beyond approval-prompt coverage are optional, and an undeclared one is `unknown` coverage or unsupported. |
 
-An *approval form* is a native permission request that blocks the member until answered. Question and startup dialogs are separate interactions outside approval-prompt coverage, with or without answer plans. A *recorded layout limit* is a profile-documented rendering that no request rule matches, such as a pane narrower than the profile's `W_min`, a wrapped or clipped operation, or an uncaptured geometry; a form rendered inside one produces no `interaction_opened` event and is answered manually on the native surface.
+An *approval form* is a native permission request that blocks the member until answered. Question and startup dialogs are separate interactions outside approval-prompt coverage, with or without answer plans. A *recorded layout limit* is a profile-documented rendering that no request rule matches, such as a pane narrower than the profile's `W_min`, a pane below the profile's composer-geometry minimum (§6.9 Composer geometry and fit), a wrapped or clipped operation, or an uncaptured geometry; a form rendered inside one produces no `interaction_opened` event and is answered manually on the native surface.
 
 Evaluate each role independently; a backend ships for the roles it meets. A verdict is `yes` only when recorded evidence establishes every Eligible-tier requirement of that role; otherwise it is `no` with "not established" or the observed failure as evidence, and a Director `no` names each unmet requirement. Default-mode approval-prompt coverage counts toward the Member verdict; other bundled-support capabilities never change a verdict. Each requirement group's evidence holds for its own recorded native version; a newer installed version carries the verdict forward until the next re-check, which follows any change to the backend's bundled profile or recorded evidence. A Member-eligible backend with no bundled profile still launches: it records `coverage=unknown`, and any approval form it shows is answered manually on the native surface. A backend with unknown detector/composer coverage, including such a run, permits manual terminal work and delivers ordinary generated input through delivery fallback. § Role eligibility records each backend's verdicts.
 
@@ -1682,7 +1709,7 @@ A backend meets the pane delivery requirement when its bundled profile declares 
 | Draft hold | Type a draft into the Director composer, send one message, wait 10 s, then clear the draft | Nothing is typed while the draft exists and the draft stays intact; after clearing, the preview is delivered |
 | Interaction hold | Open a native approval dialog with the setup below, send one message, then answer the dialog | Nothing is typed into the dialog; the preview is delivered after it closes |
 | Burst | During a foreground command, send 10 messages | Every preview is accepted, and polls return every ID |
-| Long preview | Send a body whose preview reaches `director_delivery.plain_limit` (the 4000-scalar inline limit when null) and one above it | Inline preview intact; above the limit, the pointer form arrives |
+| Long preview | Send a body that fits the full rung and a longer inline body that exceeds the plain limit or available rows. Size the pane to fit the compact rung for the longer body | The first preview arrives intact as full. The second arrives as compact with the excerpt and remaining character count |
 | Settle race | Type a key during the settle window of a delivery | The attempt records `literal_mismatch` and no submit key is written; after the composer is cleared, the preview is delivered |
 
 | Backend | Interaction-hold setup that opens a native approval dialog |
@@ -1716,23 +1743,23 @@ Native outranks extension. **Extension-goal minimum bar**, each item verified li
 | Backend | Role | Requirement | Source | Eligible | Evidence |
 |---|---|---|---|---|---|
 | `claude` | Director | `goal` | `native` | `yes` | [Claude Code goal](https://code.claude.com/docs/en/goal), 2.1.296, checked 2026-10-22. |
-| `claude` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–18, 2.1.325, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `claude` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 2f5104f1 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 and herdr 0.9.5 (120×38, messages 1–19 in each database), Claude Code 2.1.327, checked 2026-11-28. The profile declares `director_delivery` `tested` on both multiplexers. |
 | `claude` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `claude` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `auto` automatic review: live runner acceptance on tmux and herdr (omitted-default launch, auto-approved and auto-refused cases), 2.1.302, checked 2026-10-29. Bundled support: the bundled Claude profile. |
 | `codex` | Director | `goal` | `native` | `yes` | [Codex goals](https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex), 0.162.1, checked 2026-10-22. Native `/goal` stayed active through a 200-message burst, idle and forced-failure steps, 0.165.0, checked 2026-11-06. |
-| `codex` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–18, 0.169.0, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `codex` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 18adc4ad passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (120×38, messages 1–4, 6–18 and 25) and herdr 0.9.5 (120×38, messages 1–4, 6–7 and 31–42), Codex CLI 0.170.0, checked 2026-11-28. The profile declares `director_delivery` `tested` on both multiplexers. |
 | `codex` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `codex` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and omitted `--approve-for-me` automatic review: live runner acceptance on tmux and herdr (omitted-default launch and auto-refused cases, host-limited cases recorded as limits), 0.163.0, checked 2026-10-29. Bundled support: the bundled Codex profile. |
 | `opencode` | Director | `goal` | `extension` | `yes` | `cafleet` plugin goal extension under `opencode mini --standalone`: set, status, pause, resume, clear, complete, compaction, restart on the same session and the no-progress stop, 2.2.0 (minimum), checked 2026-11-06. A continuation in flight at pause was not separately observed. |
-| `opencode` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–18, 2.3.0, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `opencode` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b1db8c6 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (160×38, messages 1–18) and herdr 0.9.5 (131×37 and 271×37, messages 1–3 and 5–19), OpenCode Mini 2.3.2, checked 2026-11-28. The profile declares `director_delivery` `tested` on both multiplexers. |
 | `opencode` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `opencode` | Member | — | — | `yes` | PTY lifecycle and coverage declaration: live runner acceptance on herdr only (`coverage=tested`), 2.1.4, checked 2026-10-29. Default-mode approval-prompt coverage: the omitted `cafleet-ask` preset's shell permission form, whose detection and allow and deny answers the bundled OpenCode profile declares `tested` (§6.9 Bundled profiles and native screen fixtures). Bundled support: the bundled OpenCode profile. |
 | `hermes` | Director | `goal` | `native` | `yes` | Native `/goal` set, status, pause, resume and clear on the TUI client, 2026.9.24, checked 2026-11-06. |
-| `hermes` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, interaction hold, burst, long preview and settle race on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–17 and 19, 2026.9.24, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `hermes` | Director | `pane delivery` | — | `yes` | Hermes TUI 2026.9.24 passed idle, busy, draft hold, burst, long preview and settle race on tmux 3.8 (150×40) and herdr 0.9.5 (144×43), messages 1–17 on each multiplexer. Manual interaction hold and recovery passed in isolated fixtures on build 3e473383 at 150×40 and 130×41, message 1 in each fixture, checked 2026-11-28. The profile declares `director_delivery` `tested` on both multiplexers. |
 | `hermes` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `hermes` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and default `smart` approval-prompt coverage (ESCALATE and override, allow-once and deny): live runner acceptance on tmux and herdr, 2026.9.24, checked 2026-11-02. Bundled support: the bundled Hermes profile. |
 | `pi` | Director | `goal` | `extension` | `yes` | CAFleet pi extension `/cafleet-goal` and goal tools under plain `pi`: set, status, pause, resume, clear, complete, automatic continuation, the no-progress stop, an interrupt pausing, manual `/compact` and `/quit` then `pi --continue` on the same session, 1.5.0 (minimum), checked 2026-11-08. A threshold compaction inside a continuation chain and a continuation by the first turn after restart were not separately observed. |
-| `pi` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b90d851 passed idle, busy, draft hold, burst, long preview and settle race (interaction hold `—`, no native approval dialog) on tmux 3.8 (Director 120x39) and herdr 0.9.5 (Director 120x41), messages 1–17, 1.5.2, checked 2026-11-23. The profile declares `director_delivery` `tested` on both multiplexers. |
+| `pi` | Director | `pane delivery` | — | `yes` | Director delivery probe on build 9b1db8c6 passed idle, busy, draft hold, burst, long preview and settle race (interaction hold `—`, no native approval dialog) on tmux 3.8 (160×38) and herdr 0.9.5 (132×37), messages 1–2, 5–18 and 20 on each multiplexer, 1.5.2, checked 2026-11-28. The profile declares `director_delivery` `tested` on both multiplexers. |
 | `pi` | Director | `verdict` | — | `yes` | `goal and pane delivery rows` |
 | `pi` | Member | — | — | `yes` | PTY lifecycle, coverage declaration and the omitted `cafleet-ask` gate mode's approval form: live runner acceptance on tmux and herdr (protected directories, routed command and `member exec`, busy delivery, and `cafleet-ask` allow and deny answers), 1.5.0, checked 2026-11-08. Bundled support: the bundled pi profile. |
 
@@ -2359,6 +2386,19 @@ Every catalog pattern this section quotes uses § Pattern syntax. Each screen ke
 | `plain_limit` | `plain_literal_limit`, including explicit `null` | The measured plain boundary, conservative tested cap or maximum plain success |
 | `post_submit` | None | A verified empty composer after submission |
 | `unsubmitted_literal` | `expected_literal` | A retained literal distinguishable from an empty composer |
+| `geometry` | `text_columns`, `visible_text_rows`, `text_rows` | The composer's text columns `T`, native window `V₀` and text rows at the screen's size (§ Composer geometry and fit) |
+| `geometry_hold` | `expected_eligibility`, `hold:geometry` or `composer_empty` | A screen at a size where no rung fits |
+
+Provenance validation recomputes a `geometry` record's `T` and `V₀` from the effective geometry of the screen's selected `composer.text` rule and the screen's `rows` and `cols`, and requires equality. On a pre-submit screen, `text_rows` equals the extracted text rows; when the literal fits it lies in `R(expected_literal) − wrap_slack_rows ..= R(expected_literal)`, and when the region is scrolled and not clipped it equals `V₀`; a scrolled screen of a rule with `scroll_marker` shows the marker. A `geometry_hold` screen classifies with its `expected_eligibility`; for `composer_empty`, rung selection yields `composer_too_small` for every message. A `geometry_hold` screen carries no `geometry` or `unsubmitted_literal` record. An unreadable partial screen shows a typed literal whose region the selected rule cannot extract; its `geometry` record also carries `rule_id`, the `composer.text` rule it is fitted against, and `typed_literal`, the typed literal, and the screen carries no `unsubmitted_literal` record. Provenance requires `R(typed_literal) > V₀`, `text_rows` equal to `V₀`, and a comparison of `typed_literal` against the screen that extracts no text. Every fixture that observation verifies empty selects exactly one `composer.text` rule.
+
+A *typeable* cell is a captured size and state at which the empty composer verifies and at least the `minimal` rung fits, below `min_rows`×`min_columns` included. The prompt plan cites, on each multiplexer, fixtures at that multiplexer's sizes, idle and working; the exec plan types into the same composer and cites no matrix:
+
+| Multiplexer | Sizes |
+|---|---|
+| tmux | 9×80, 9×120, 12×80, 12×120, `min_rows`×`min_columns`, 5×40 and 2×10 |
+| herdr | 9×80, 9×120, 12×80, 12×120 and the smallest size a rendered client split reaches |
+
+At a typeable cell the fixtures are an `empty` screen with `geometry`, and pre-submit screens with `geometry` and `unsubmitted_literal`: `one`, a one-row literal; `v0`, a wrapped literal of exactly `V₀` rows, required only when `V₀` exceeds 1; and `partial`, a literal of `V₀ + 1` or more rows, or an unreadable partial screen. Every other cell has one empty `hold` screen with `geometry_hold`. A missing citation fails with `composer geometry for <backend> requires measured fixtures on <multiplexer>`. A herdr fixture records the pane's PTY size, so a herdr cell of a backend that draws on the primary screen (opencode and the Hermes classic CLI) is one column narrower than its axis size, such as 9×79 for 9×80, and that narrowing satisfies the axis. The matrix exempts exactly one composer and state, the `hermes-tui-composer-text` composer working: no native working-state capture of it exists, because every turn submitted to it on 2026-11-28 ended with a gateway error, so its `transient_rows` of 4 is unmeasured. Geometry fixtures use `<backend>-<version>-composer-geometry-[<composer>-]<state>-<kind>-<mux>-<rows>x<cols>-<n>`, where `<composer>` is empty for the member composer and `tui` for the Hermes TUI composer, `<state>` is `idle` or `working`, and `<kind>` names the screen.
 
 A *pre-submit fixture* is a screen with an `unsubmitted_literal` record: the literal is typed and the submit key is not. `expected_literal` is the exact literal written before the screen was captured, including the operation prefix such as `! `, as a JSON string; fixture literals are synthetic measurement text. The object `{"repeat": "<unit>", "count": N, "prefix": "<text>"}` stands for a long literal: `prefix` followed by `unit` repeated `count` times. Provenance validation rejects an `unsubmitted_literal` record without `expected_literal`, an `expected_literal` on a `framing`, `plain_limit` or `post_submit` record, a malformed repeat object, and a pre-submit fixture whose composer region (the rows its `composer.text` rule bounds, § Composer-text extraction) overlaps a masked row. Every pre-submit fixture's extracted composer text matches its `expected_literal` under § Composer-text extraction.
 
@@ -2378,7 +2418,7 @@ Each bundled profile's measured plans use these declarations. The native evidenc
 | `pi` | `1.5.0` | `plain` | `plain` | `{"unit":"scalars","max":474}` | `{"unit":"scalars","max":474}` |
 | `hermes` | `2026.9.24` | `bracketed_paste` | `plain` | `{"unit":"scalars","max":558}` | `{"unit":"scalars","max":558}` |
 
-Claude's 456-scalar limit is six rows of the composer's seven-row window at 80 columns (`cols` − 4 scalars per row), leaving one row of slack; above 800 characters Claude Code 2.1.322 also collapses a single burst, prompt or exec on tmux and herdr, into a count-less `[Pasted text #N]` placeholder that pre-submit verification cannot match, so a longer preview takes the pointer form; the exec limit counts the `! ` prefix. The Hermes classic CLI shows at most eight input rows and fails extraction for a longer literal; its 558-scalar limit leaves one row of slack at 80 columns, and a longer prompt keeps its bracketed-paste plan. pi 1.5.2 draws its editor with `floor(0.3 × rows)` rows of `cols` − 1 columns that wraps by word; its 474-scalar limit is six such rows at 80 columns, so word-wrap waste up to one row stays visible on an 80×24 pane. opencode 2.3.0 draws its composer as a six-row scrolling viewport of `cols` − 4 columns that wraps by word and consumes the leading `!` of an exec literal as a mode switch; its 380-scalar limit is five such rows at 80 columns, so word-wrap waste up to one row stays visible. Codex keeps 1024: near that length a single burst sometimes renders as `[Pasted Content N chars]`, which its scalars placeholder matches as well as the literal rendering. Codex's plain prompt boundary is 1024 submitting bytes and 1025 retained bytes on both multiplexers. Its faithful plain native-exec boundary is 1000 bytes: 1001 bytes enters chat instead of executing the command, while the selected bracketed exec remains faithful through the maximum preview. Hermes's 558-scalar limit is also a conservative tested cap: its Enter guard depends on the 50 ms since the last processed text change, so larger inputs can submit and size alone establishes no adjacent deterministic boundary. Maximum plain Japanese input remains retained or unverified, which rules out a null limit. Bracketed Hermes prompts submit, while large bracketed exec input collapses to a paste placeholder that is dispatched instead of the original command; its exec plan therefore uses plain input within the tested cap. Native command output or independently checked output artifacts establish original-literal execution separately from an empty composer.
+Each composer's window, text width and wrap are its measured geometry (§ Composer geometry and fit), and a plain limit bounds a literal only on a pane tall and wide enough to show it. Claude's 456-scalar limit is six rows at 80 columns; above 800 characters Claude Code 2.1.322 also collapses a single burst, prompt or exec on tmux and herdr, into a count-less `[Pasted text #N]` placeholder that pre-submit verification cannot match, so a longer preview takes the pointer form; the exec limit counts the `! ` prefix. The Hermes classic CLI's 558-scalar limit is seven of its eight window rows at 80 columns, and a longer prompt keeps its bracketed-paste plan. pi's 474-scalar limit is six rows at 80 columns. opencode consumes the leading `!` of an exec literal as a mode switch; its 380-scalar limit is five of its six window rows at 80 columns. Codex keeps 1024: near that length a single burst sometimes renders as `[Pasted Content N chars]`, which its scalars placeholder matches as well as the literal rendering. Codex's plain prompt boundary is 1024 submitting bytes and 1025 retained bytes on both multiplexers. Its faithful plain native-exec boundary is 1000 bytes: 1001 bytes enters chat instead of executing the command, while the selected bracketed exec remains faithful through the maximum preview. Hermes's 558-scalar limit is also a conservative tested cap: its Enter guard depends on the 50 ms since the last processed text change, so larger inputs can submit and size alone establishes no adjacent deterministic boundary. Maximum plain Japanese input remains retained or unverified, which rules out a null limit. Bracketed Hermes prompts submit, while large bracketed exec input collapses to a paste placeholder that is dispatched instead of the original command; its exec plan therefore uses plain input within the tested cap. Native command output or independently checked output artifacts establish original-literal execution separately from an empty composer.
 
 | Composer evidence | Required observation on each multiplexer and operation |
 |---|---|
@@ -2714,7 +2754,7 @@ A digit selects and confirms its choice whatever the focus, so the answer stages
 
 The idle rule keeps its classic REPL prefix and rotating placeholder. The working rule has priority 50, uses a primary-screen single-row region with `cursor=at_end`, starts at `^☤ ❯ type to redirect this turn · Tab queues it for after *$` and ends at the prefix pattern `^☤ ❯ `; its line matcher `prompt` requires the same full placeholder as the start pattern. This binds the cursor to prefix column 4 while requiring the measured working placeholder, independently of submitted `❯ ...` history above it. A typed suffix, paste token, arbitrary working literal, cursor away from the prefix or multi-row retained draft supplies no empty-composer observation. Both operations cite native working/idle post-submit and unsubmitted-literal fixtures under § Bundled profiles and native screen fixtures.
 
-The classic-CLI composer-text rule `hermes-composer-text` reads from the `❯ ` row to the next row that begins with the `─` separator or with the ` ☤ ` status line; a narrow pane, such as 30 columns, draws the status line directly below the composer without a closing separator. Its text wraps by `word`: the classic CLI wraps by character, and a space it writes into a row's last column is removed with that row's trailing blanks.
+The classic-CLI composer-text rule `hermes-composer-text` reads from the `❯ ` row to the next row that begins with the `─` separator or with the ` ☤ ` status line; a narrow pane, such as 30 columns, draws the status line directly below the composer without a closing separator. Its text wraps by `word`: the classic CLI wraps by character, and a space it writes into a row's last column is removed with that row's trailing blanks, while a `word` row break also matches a word split across rows. Its fit uses `fit_wrap` `char` with `first_row_margin_columns` 4, the working `☤ ❯ ` first row.
 
 The Director answers single-request choices only: allow once or deny, on both the ESCALATE and the override prompt. The session and always choices have no choice entry. When the guardian model is unavailable, Hermes shows the same human prompt, detected by the same rule. An unanswered prompt fails closed after `approvals.timeout` (default 300 seconds): Hermes prints its timeout notice and returns a BLOCKED result to the model, the form disappears, and the runner closes the episode with the `not_visible` close reason. A later bound response then fails request-token revalidation.
 
@@ -2858,12 +2898,16 @@ A rule's cursor condition treats a pending-wrap cursor (§6.9 Screen model facts
 | `continuation_prefix` | Pattern stripped from each later composer row, such as a continuation margin; a row that does not match it ends the composer text |
 | `mode_prefix` | Optional. A written literal that begins with it matches with or without it, because the native CLI may consume it as a mode switch, drawing its own mode prompt or none, or keep it as text |
 | `framed` | Optional, default `false`. The region's start row is a frame row, such as an editor border, and composer text begins on the next row |
-| `wrap` | `char`: rows join with nothing. `word`: a row break matches either nothing or exactly one literal space |
+| `wrap` | `char`: rows join with nothing. `word`: a row break can consume consecutive literal spaces hidden at that join. Spaces visible within a row match exactly |
 | `placeholders` | Collapsed-paste renderings, each with a named `count` group and a `unit` of `scalars` or `lines` |
 
-A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, `text_wrap` and `text_framed`, which replace the `composer.text` prefixes, `wrap` and `framed` for the regions that rule bounds, so one profile reads composers that differ in margin, wrapping or framing; only `composer_text` rules declare them.
+A `composer_text` rule may carry `text_prefixes: {first_prefix, continuation_prefix}`, `text_wrap` and `text_framed`, which replace the `composer.text` prefixes, `wrap` and `framed` for the regions that rule bounds, so one profile reads composers that differ in margin, wrapping or framing; only `composer_text` rules declare them. A `composer_text` rule may also carry `text_geometry` (§ Composer geometry and fit) and `scroll_marker`, a pattern matching the indicator the native draws while its composer window hides earlier text rows; the rule's `start_pattern` and region matchers accept the marker row, so a scrolled composer still opens a region.
 
 Cells drawn in the profile's suggestion style (§6.7 Native suggestions) are excluded before extraction, and trailing blanks are trimmed from each row. A `composer_text` rule's region runs from its start row to the first later row that matches `end_pattern`, so each start row yields one candidate, and that end row is never composer text. A start row with no later `end_pattern` row is closed by the screen's bottom edge when it is itself on the last logical line, whatever its row span, or when the screen's last row lies within `max_rows` rows of the start row, as a composer drawn on the screen's last rows is, and every row of that region is composer text; a start row whose search reaches `max_rows` first yields no candidate. Native transcripts echo submitted prompts in the composer's own shape, and the live composer is always below the transcript, so a `composer_text` rule takes the bottom-most candidate that satisfies its matchers instead of requiring a unique one. A wrong pick can only fail the literal comparison, which withholds the submit. `composer_text` rules rank below the empty-composer rules, so a composer that both match classifies empty. No matching rule, several matching rules or a first row that does not match `first_prefix` leave the composer text unextractable.
+
+A region is *clipped* when the screen's bottom edge closed it. It is *scrolled* when its rule declares `scroll_marker` and the region shows the native marker. Codex uses the faint up or down arrow in the right gutter. For a rule without `scroll_marker`, the region is scrolled when its extracted text rows equal the native window `V₀` of the live screen (§ Composer geometry and fit). Extraction removes each recognized marker before the prefixes are read. A row the removal leaves empty counts as the frame row when it opens a framed rule's region and is dropped otherwise, and the first text row of a scrolled region reads with `first_prefix` when that matches, else with `continuation_prefix`.
+
+A cursorless multiplexer capture locates the Codex gutter at the edge of its widest painted row. The layout rectangle can be wider than the PTY that produced those rows.
 
 The extracted text is split left to right into segments: each placeholder match is a placeholder segment, and the text between matches is a text segment. The match walks the written literal, prefix plus rendered preview, prompt or command, in order:
 
@@ -2873,13 +2917,113 @@ The extracted text is split left to right into segments: each placeholder match 
 | Placeholder, unit `scalars` | Exactly `count` Unicode scalar values |
 | Placeholder, unit `lines` | Exactly one whole written literal chunk, whose line count (its `\n` count plus one) equals `count`; the chunks are the operation prefix, when non-empty, and the body without paste markers |
 
-The match succeeds only when every segment matches and both the segments and the literal are fully consumed. Examples from the bundled native screens:
+The comparison classifies the screen against the written literal:
+
+| Class | Condition | Submit key |
+|---|---|---|
+| Complete | Every segment matches, both the segments and the literal are fully consumed, and there is no explicit native scroll marker | Allowed |
+| Partial | The region is clipped or scrolled, and the segments consume a contiguous run of the literal: starting at its first scalar for a region that is only clipped, at any offset for a scrolled region | Withheld |
+| Contradicting | Any other extracted text, including text that extends beyond the literal | Withheld |
+| Unreadable | The composer text is unextractable | Withheld |
+
+A region that is both clipped and scrolled is classified as scrolled. Only a complete comparison authorizes a submit key; the other classes select the stop cause (§ Measured submission plans and settle intervals). A pi editor that overflows its window without its scroll marker draws no bottom border and runs into its status rows, so its region does not close and the comparison is contradicting, or, when no pi region remains on screen, the composer text is unreadable; Fit uses the observed pane. A resize or a native queue that takes additional rows can expose either outcome during a delivery. Examples from the bundled native screens:
 
 | Native screen | Segments | Literal |
 |---|---|---|
 | codex `› [Pasted Content 1024 chars]a` | placeholder (1024 scalars), text `a` | 1025 scalars |
 | codex `!  true aaaa…` followed by `  aaaa…` continuation rows, with `mode_prefix` `!` | text ` true aaaa…aaaa…` (mode prompt `! ` and margin stripped, word wrap) | `! ` followed by the command, matched without its `!` |
 | Hermes classic CLI `❯ [Pasted text #5: 1 lines → /root/.hermes/pastes/…]` with `first_prefix` `^(?:☤ )?❯ `, whose `☤ ` is drawn only during a working turn | placeholder (1 line) | One one-line paste write |
+
+###### Composer geometry and fit
+
+`capabilities.composer.geometry` is required whenever the composer object declares an executable submission plan. It describes how much text the native composer shows at a pane size, so delivery types only a literal the pre-submit comparison can see whole. Every composer is fitted as bottom-bounded: once the transcript fills the screen, each native keeps a measured set of rows between its composer and the screen bottom and grows the composer upward.
+
+```json
+{
+  "margin_columns": 4,
+  "first_row_margin_columns": 0,
+  "text_window": {"fraction": 0.5, "offset": 5, "min": 3},
+  "reserved_rows": {"steps": [[9, 8], [12, 4]]},
+  "transient_rows": 4,
+  "wrap_slack_rows": 0,
+  "carried_space": false,
+  "fit_wrap": "word",
+  "collapsed_paste": null,
+  "min_rows": 9,
+  "min_columns": 80
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `margin_columns` | integer ≥ 0 | Cells per composer row unavailable to text: prefix, margin and borders. Text columns `T = cols − margin_columns` |
+| `first_row_margin_columns` | integer ≥ 0 | Further cells the first text row loses when the native's first-row prefix is wider than its continuation prefix; the first row holds `T − first_row_margin_columns` cells |
+| `text_window` | `null`, a fraction object or a step object | The composer's internal window `W(rows)`, past which the native scrolls its text |
+| `reserved_rows` | integer ≥ 0 or a step object | Non-text rows extraction needs on screen at a size: the frame, the prompt row and the rows the native keeps between the last text row and the screen bottom |
+| `transient_rows` | integer ≥ 0 | The largest number of chrome rows, such as a spinner, a tip, an update notice or queued-input rows, that can appear while a literal is typed and displace the composer |
+| `wrap_slack_rows` | 0 or 1 | Rows added to the greedy word-wrap estimate when the native wrap can waste a row against greedy wrapping |
+| `carried_space` | boolean | For `word` wrap: when a word ends exactly at a row's last text column, the separating space starts the next row and takes one of its cells; `false` when the native drops that space |
+| `fit_wrap` | `char` or `word` | The wrap `R` is computed with; it equals the rule's text wrap unless the native wraps differently from how extraction reads it |
+| `collapsed_paste` | `{"min_scalars": N, "rows": 1}` or `null` | For a `bracketed_paste` plan: a bracketed literal of at least `N` scalars renders as a one-row placeholder |
+| `min_rows`, `min_columns` | integers ≥ 1; profile level only | The smallest captured size at which every composer the profile reads verifies empty and the `minimal` rung fits on one row. They select `below_minimum`, `hold:geometry`, the Director below-minimum hold and the slot budget (§6.5 Fleet window layout); fit never depends on them |
+
+| `text_window` form | `W(rows)` |
+|---|---|
+| `null` | Unbounded |
+| `{"fraction": f, "offset": o, "min": m}`, `0 ≤ f ≤ 1`, `o ≥ 0`, `m ≥ 1` | `max(m, floor(f × rows) − o)`; `f = 0` is a fixed window of `m` rows |
+| `{"steps": [[min_rows, W], …], "uncapped_from": N}` | The `W` of the last step whose `min_rows ≤ rows`, unbounded at `rows ≥ N`; `N` is `null` when the last step holds at every larger size |
+
+`reserved_rows` takes the step form `{"steps": [[min_rows, r], …]}` when the measured value depends on the size, giving the `r` of the last step whose `min_rows ≤ rows`. Below the first step of either step list nothing fits. A step list is non-empty, its `min_rows` strictly increase from at least 1, every window `W` is at least 1, and `uncapped_from` exceeds the last step's `min_rows`. A `composer_text` rule's `text_geometry` holds any field except `min_rows` and `min_columns` and replaces the profile-level value for the regions that rule bounds.
+
+Catalog loading rejects a profile file that:
+
+| Condition | Rejection |
+|---|---|
+| Has an executable composer plan and no `composer.geometry` | `composer plan for <backend> requires composer geometry` |
+| Has a geometry field outside its type or form, or `min_rows` or `min_columns` inside a `text_geometry` | `composer geometry of <backend> is invalid: <field>`, where `<field>` is the field's path inside the geometry object, such as `text_window.steps` |
+
+**Fit.** Delivery reads the live size: a member runner from its PTY screen model, the Director sweep from its capture (§ Director delivery sweep). The fit fields are the effective geometry of the one `composer.text` rule that extraction selects on the verified empty screen. When no rule, or more than one, matches a screen that observation verifies empty, delivery holds with zero bytes under `composer_geometry_unavailable`, an ordinary hold with the stall wait, because only a profile correction resolves it.
+
+- Text columns: `T = cols − margin_columns`, and the first text row holds `T − first_row_margin_columns` cells; nothing fits when either is below 1.
+- Visible text rows with headroom `h`: `V = min(W(rows), rows − reserved_rows(rows) − h)`; nothing fits when `V < 1`. `V₀` is `V` with `h = 0`.
+- Required rows `R(literal)` for the rendered literal, the operation prefix included, wrapped by the effective `fit_wrap`. A bracketed literal at or above `collapsed_paste.min_scalars` takes `collapsed_paste.rows`. `char` wrap fills cells greedily, each scalar taking its display width and a wide scalar that does not fit starting the next row. `word` wrap breaks greedily at the last space that fits, hard-breaks a word longer than its row, and adds `wrap_slack_rows`; with `carried_space`, a row that follows a word ending exactly at the last text column starts with the separating space and holds one cell less.
+- A literal fits when `R ≤ V`.
+
+Headroom `h` is `transient_rows` for the `full` and `compact` rungs (§6.5 Push notifications) and for prompt/exec input, and 0 for the `pointer`, `cue` and `minimal` rungs. It guards against chrome appearing between the literal and the submit key. On the short rungs that race falls to late submission and the single retry (§ Runner pending-preview sweep).
+
+When the Claude composer shows its closing border, delivery counts through the last visible nonblank row below that border and adds both border rows. The portion of that total above the profile's reserved rows reduces the visible fit budget. This lets visible custom status rows shorten a preview before typing. A closing border outside the capture leaves the measured profile budget in effect. The pre-submit check still verifies the whole literal against the current screen.
+
+**Geometry hold.**
+
+| Condition | Observation eligibility | Delivery |
+|---|---|---|
+| Composer verified empty, but no rung (preview) or the literal (prompt/exec) fits | `composer_empty` | Zero bytes; a preview stays pending and a prompt or exec queues with `defer_reason` `composer_too_small` |
+| No composer or interaction rule matches, and `rows < min_rows` or `cols < min_columns` | `hold:geometry` | Zero bytes, as above |
+| No rule matches at or above the minimum | `hold:unknown` | Ordinary composer hold with its stall wait |
+| Any other hold while the pane is below the minimum | Unchanged | Ordinary composer hold, with the stall wait suspended |
+
+A held preview or queued head on a pane below the minimum starts no `input_delivery_stalled` wait, and an open wait is cleared; a `composer_too_small` hold suspends the wait at any size. The wait starts fresh once the pane reaches the minimum and the hold persists. A geometry hold never retypes, never stamps `notified_at` and needs no Director action; the sweep re-evaluates fit at every interval without backoff. A member runner records `preview delivery: message <id> held: composer_too_small` (source `preview_sweep`) once per continuous hold, and `preview delivery: message <id> held: composer_geometry_unavailable` likewise. When its pane turns below the minimum, the runner records `observation: pane <rows>x<columns> below the <backend> minimum <min_rows>x<min_columns>` (source `observation`).
+
+Each bundled profile declares these measured values, multiplexer-independent because every backend's herdr capture shows the same visible rows, scroll marker and closing row as its tmux capture at a matching PTY size:
+
+| Rule | `margin_columns` | `text_window` | `reserved_rows` | `transient_rows` | `scroll_marker` |
+|---|---|---|---|---|---|
+| `claude-composer-text` | 4 | `{"fraction": 0.5, "offset": 5, "min": 3}` | `{"steps": [[9, 8], [12, 4]]}` | 4 | The `─── ↑ N more ───` top border |
+| `codex-composer-text` | 3 | `{"steps": [[5, 3], [6, 4], [7, 5], [8, 6], [14, 7], [15, 8], [18, 10]], "uncapped_from": 21}` | 2 | 2 | The `↑` at the end of the first visible row |
+| `opencode-composer-text` | 4 | `{"fraction": 0, "offset": 0, "min": 6}` | 2 | 0 | — |
+| `pi-composer-text` | 1 | `{"fraction": 0.3, "offset": 0, "min": 5}` | `{"steps": [[5, 3], [6, 4], [7, 6]]}` | 0 | The `─── ↑ N more ───` top border, after the working label while working |
+| `hermes-composer-text` | 0, with `first_row_margin_columns` 4 | `{"fraction": 0, "offset": 0, "min": 8}` | `{"steps": [[5, 2]]}` | 0 | — |
+| `hermes-tui-composer-text` | 6 | `null` | 3 | 4 | — |
+
+| Profile | `min_rows` | `min_columns` |
+|---|---|---|
+| `claude` | 9 | 80 |
+| `codex` | 5 | 40 |
+| `opencode` | 4 | 40 |
+| `pi` | 5 | 40 |
+| `hermes` | 5 | 64 |
+
+The pi `wrap_slack_rows` is 1 and every other profile's is 0. `carried_space` is true on `hermes-tui-composer-text` and false on every other rule. `fit_wrap` is `char` on `hermes-composer-text` and equals the text wrap on every other rule. Every profile's `collapsed_paste` is `null`. The `hermes-tui-composer-text` `transient_rows` of 4 is the largest measured chrome, Claude's four rows of spinner, tip and blank row; no Hermes TUI working screen is bundled.
 
 ###### Director delivery capability
 
@@ -3160,6 +3304,9 @@ Before the first byte and on each zero-byte reselection, render the selected del
 | Plan declares `bracketed_paste` and the child has enabled mode 2004 | Bracketed literal |
 | Plain limit is null, or rendered prefix plus literal is within it | Plain literal |
 | Preview exceeds the plain limit | Re-render the body as the pointer form of §6.5 Push notifications and write plainly |
+| Verified-composer preview | The first rung of §6.5 Push notifications whose literal fits the live composer and that the rows above allow; no rung fits: hold with zero bytes under `composer_too_small` (§ Composer geometry and fit) |
+| Verified-composer prompt/exec whose literal does not fit the live composer with headroom | Queue with zero bytes and `defer_reason=composer_too_small` |
+| Verified-composer delivery whose empty screen selects no single `composer.text` rule | Hold or queue with zero bytes under `composer_geometry_unavailable` |
 | Immediate prompt/exec exceeds the plain limit | Zero-byte refusal before receipt reservation (§6.3 Error Messages) |
 | Queued prompt/exec exceeds the plain limit | Settle `not_submitted` with outcome reason `plain_limit_exceeded`, publish the result and advance the FIFO |
 
@@ -3171,9 +3318,9 @@ A verified-composer run is one whose recorded backend's bundled profile supplies
 2. Write the selected literal stage. A positive short write retains the unwritten suffix and cumulative count, stays `partial` and returns to the pre-write wait without settling; each further chunk needs a fresh write authorization after fresh ordinary draining and an interaction check.
 3. Start the 500 ms settle only after the last literal chunk, including any closing paste marker. Service child output, outer input and control traffic throughout it.
 4. Revalidate identity and interaction state; keyboard and pointer input and terminal replies during this settle preserve the submit stage. On a verified-composer run, reserve the full 2 s verification window plus the stage write margin (250 ms) before writing the submit key; insufficient budget records `uncertain/deadline_expired`, stage `partial`.
-5. On a run whose profile declares `composer.text`, observe the composer, extract its text and match it against the written literal (§ Composer-text extraction). A complete match continues to the submit key. Without a match, the composer is observed again, on every runner loop pass at an implementation-defined cadence, until it matches or a 1-second pre-submit window after the settle ends, whichever comes first; the attempt deadline ends the window earlier, and the stop signal ends the attempt with its own cause. A window that closes without a match, or a composer whose text cannot be extracted, writes no submit key, erases nothing and records `uncertain/literal_mismatch`, stage `partial`; a text extending beyond the literal, such as an appended human key, still mismatches at window close.
+5. On a run whose profile declares `composer.text`, observe the composer, extract its text and match it against the written literal (§ Composer-text extraction). A complete comparison continues to the submit key. Otherwise the composer is observed again, on every runner loop pass at an implementation-defined cadence, until the comparison is complete or a 1-second pre-submit window after the settle ends, whichever comes first; the attempt deadline ends the window earlier, and the stop signal ends the attempt with its own cause. A window that closes without a complete comparison writes no submit key and erases nothing, with stage `partial` and the cause of its last class: `composer_clipped` for a partial comparison, `literal_mismatch` for a contradicting one, including a text extending beyond the literal such as an appended human key, and `composer_unreadable` for unextractable text. A preview whose window closes with `composer_clipped` or `composer_unreadable` parks for late submission (§ Runner pending-preview sweep); every other attempt records `uncertain` with that cause.
 6. Write the submit-key stage once. A positive short submit key records `uncertain/write_failed`.
-7. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission; then record `accepted` and settle normally. Expiry records `uncertain/submit_unconfirmed`, stage `submitted`.
+7. On a verified-composer run, retain the active input and pane lock for post-submit verification. A fresh verified empty composer (not visible, no retained draft/evidence/diagnostic) or a newly opened detected interaction whose episode began after the key confirms submission. For a Claude sweep preview, fresh native output also confirms submission when the complete literal appears in the native queue with its adjacent send-now notice and the pair was absent before the submit key. Then record `accepted` and settle normally. Expiry records `uncertain/submit_unconfirmed`, stage `submitted`.
 
 A key typed before the pre-submit observation fails the comparison; a key typed between that observation and the submit key joins the submission (§6.5 Accepted trade-offs). Keyboard input during verification reaches the child; a resulting nonempty composer can cause `submit_unconfirmed` and duplicate preview delivery (§6.5 Accepted trade-offs). A run without composer verification records `accepted` after the complete submit key, records every staged stop as `uncertain`, automatically re-delivers nothing and keeps the FIFO stopped until reconciliation. Chunk continuation and zero-byte selection still apply.
 
@@ -3617,7 +3764,7 @@ The runner emits one `input_delivery_result` event to the run's Director for a d
 
 For prompt and exec, the terminal receipt is the durable source: publication follows commit, recovery publishes missing first results, and run/input identity deduplicates through shutdown and recovery. Shutdown publishes pending results before `runner_exited`; result events reach the Director through its inbox and the Director delivery sweep (§ Director delivery sweep).
 
-**Uncertain preview.** A sweep preview attempt that stops, or whose submission is not confirmed, is uncertain. The runner keeps its stage and cause in memory and publishes one event with `input_id` null, `message_id` the message, `delivery` `{"status":"uncertain","method":METHOD,"reason":null}`, `stage` the written stage, `cause` its stop cause and `director_action` null, deduplicated by run plus `message_id`. On a verified-composer run the message stays unnotified and the sweep types it again once the composer is verified empty; on a run without composer verification the runner stamps `notified_at` first and then publishes the event, so the preview is not typed again. The live runner is the event's only publisher: recovery publishes no preview result, so an event lost to a runner crash between stamp and publication is covered by the run's `runner_lost` event, and the message itself stays in the recipient's inbox for `message poll`, since a preview only notifies. An uncertain preview never stops the FIFO; the FIFO stop (§ Runner-owned deferred delivery) covers only prompt and exec.
+**Uncertain preview.** A sweep preview attempt that stops, or whose submission is not confirmed, is uncertain. The runner keeps its stage and cause in memory and publishes one event with `input_id` null, `message_id` the message, `delivery` `{"status":"uncertain","method":METHOD,"reason":null}`, `stage` the written stage, `cause` its stop cause and `director_action` null, deduplicated by run plus `message_id`. On a verified-composer run the first uncertain outcome leaves the message unnotified, and the sweep types it once more, in a short rung, once the composer is verified empty; the second stamps `notified_at` and adds only an abandonment diagnostic, the event staying deduplicated (§ Runner pending-preview sweep). A preview whose pre-submit window closes clipped or unreadable is uncertain only when its late-submission park ends uncertain. On a run without composer verification the runner stamps `notified_at` first and then publishes the event, so the preview is not typed again. The live runner is the event's only publisher: recovery publishes no preview result, so an event lost to a runner crash between stamp and publication is covered by the run's `runner_lost` event, and the message itself stays in the recipient's inbox for `message poll`, since a preview only notifies. An uncertain preview never stops the FIFO; the FIFO stop (§ Runner-owned deferred delivery) covers only prompt and exec.
 
 ##### Input delivery stalled event
 
@@ -3629,7 +3776,7 @@ The runner publishes one `input_delivery_stalled` event when input has waited th
 | The sweep's selected unnotified preview, held because the composer is not verified empty on a verified-composer run | When the sweep first holds that preview on the composer; an interaction that blocks it clears the wait and its closure restarts it | Run plus `message_id` |
 | A queued head or a pending preview held behind the run's lowest-ID `uncertain` prompt or exec (the blocker) | When queue housekeeping first sees that blocker with a waiter; it clears when no waiter remains or the blocker settles | Run plus `blocked_by_input_id` |
 
-Time an open interaction blocks the input never counts: the `interaction_opened` event already notifies the Director with its own action. Queue housekeeping (§ Queue housekeeping) publishes the head and blocked events and the sweep (§ Runner pending-preview sweep) publishes the preview event. A restarted wait can stall again for the same input, preview or blocker; that repeat commits as a silent `duplicate_delivery` archived row (§ Persistence, notification and read interfaces), so the Director receives one event per key. The event creates no interaction and stores no literal:
+Time an open interaction blocks the input never counts: the `interaction_opened` event already notifies the Director with its own action. A geometry hold runs no wait: while the pane is below its profile's minimum, or the hold is `composer_too_small`, an open wait clears and none starts, and a hold that persists once the pane reaches the minimum starts a fresh wait (§ Composer geometry and fit). A preview parked for late submission runs no wait either (§ Runner pending-preview sweep). Queue housekeeping (§ Queue housekeeping) publishes the head and blocked events and the sweep (§ Runner pending-preview sweep) publishes the preview event. A restarted wait can stall again for the same input, preview or blocker; that repeat commits as a silent `duplicate_delivery` archived row (§ Persistence, notification and read interfaces), so the Director receives one event per key. The event creates no interaction and stores no literal:
 
 | Field | Value |
 |---|---|
@@ -3702,11 +3849,11 @@ Durability begins at a successful SQLite commit, and notification is claimed onl
 | `source` | Stored `message` |
 |---|---|
 | `event_writer` | `event writer: <text>` for a writer failure text that differs from the current one, `event writer rejected <kind> event <event_seq>: <text>`, `event writer fenced: <cause>` and `diagnostic buffer overflow: N entries dropped` |
-| `observation` | `observation gap opened: <code>` with the observation failure code |
+| `observation` | `observation gap opened: <code>` with the observation failure code, and `observation: pane <rows>x<columns> below the <backend> minimum <min_rows>x<min_columns>` when the pane turns below its profile's minimum (§ Composer geometry and fit) |
 | `deferred_input` | `deferred input: …` |
 | `queue_housekeeping` | `queue housekeeping: …` |
-| `preview_sweep` | `preview sweep: …` |
-| `director_delivery` | `director delivery: message <id> held: <reason>`, `director delivery: message <id> uncertain: <cause>`, `director delivery: pane <pane-id> unavailable: <cause>` and `director delivery: storage unavailable: <cause>` (§ Director delivery sweep) |
+| `preview_sweep` | `preview sweep: …`, and `preview delivery: message <id> held: <reason>`, `preview delivery: message <id> park ended: consumed` and `preview delivery: message <id> abandoned after pointer retry: <cause>` (§ Runner pending-preview sweep) |
+| `director_delivery` | `director delivery: message <id> held: <reason>`, `director delivery: message <id> uncertain: <cause>`, `director delivery: message <id> park ended: consumed`, `director delivery: message <id> abandoned after pointer retry: <cause>`, `director delivery: pane <pane-id> unavailable: <cause>` and `director delivery: storage unavailable: <cause>` (§ Director delivery sweep) |
 | `input_result` | `input <input_id> result is pending storage: …` and `input <input_id> result is pending recovery: …` |
 | `permission_answer` | `permission answer for interaction <interaction_id> is uncertain: …` |
 | `shutdown` | Each shutdown outcome diagnostic |
@@ -3839,13 +3986,13 @@ These ordered rules select the delivery of every sweep preview, `member prompt` 
 
 1. Validate target/run identity, reachability, writer ownership, storage and receipt history. An uncertain prior attempt under this operation's own key is an operational failure; while another prompt or exec of this run is uncertain, the FIFO is stopped (§ Runner-owned deferred delivery). Unknown detection coverage is valid capability absence.
 2. A candidate or open detected interaction queues ordinary input with zero bytes. An obscured interaction remains preserved, and `permission_request`, `question` and `unknown_interaction` are all blocking interactions.
-3. A verified empty composer with the operation's executable plan uses profile delivery without Escape (§ Measured submission plans and settle intervals). This includes a working member whose composer row is empty: the native CLI queues the submitted input behind its current turn without interrupting it.
+3. A verified empty composer with the operation's executable plan uses profile delivery without Escape (§ Measured submission plans and settle intervals). The literal must fit the live composer: a preview takes the first rung that fits or holds, and a prompt or exec queues with zero bytes under `composer_too_small`, or `composer_geometry_unavailable` when the screen selects no single `composer.text` rule, until it fits (§ Composer geometry and fit). This includes a working member whose composer row is empty: the native CLI queues the submitted input behind its current turn without interrupting it.
 4. With an executable plan and a busy composer, queue with zero bytes under `composer_busy` and drain by profile delivery when verified empty. On a verified-composer run every preview and queued input waits for a verified empty composer.
 5. Otherwise use delivery fallback: Escape, settle 500 ms, literal prefix and text, settle 500 ms, Enter (`0d`). This covers missing operation plans and missing profile coverage.
 
 | Selection | Bytes | `delivery.method` | Selection reason |
 |---|---|---|---|
-| Queued behind an interaction, composer, earlier input or insufficient attempt budget | Zero | `null` until a later attempt selects one | `interaction_open`, `interaction_candidate`, `composer_busy`, `earlier_input` or `delivery_budget_exhausted` |
+| Queued behind an interaction, composer, composer fit, earlier input or insufficient attempt budget | Zero | `null` until a later attempt selects one | `interaction_open`, `interaction_candidate`, `composer_busy`, `composer_too_small`, `composer_geometry_unavailable`, `earlier_input` or `delivery_budget_exhausted` |
 | Profile delivery | Literal stage, 500 ms settle, measured submit key | `profile` | `null` |
 | Fallback | Escape, settle, literal stage, settle, `0d` | `fallback` | `submission_plan_unavailable` (rule 5) |
 
@@ -3868,7 +4015,7 @@ Only one ordinary request writes at a time, in enqueue order, and a request queu
 | The active input completes | Retry the queued head after rechecking the current interaction state |
 | A temporary zero-byte obstacle during an active attempt | Retry on a 100-millisecond timer within the same five-second attempt deadline |
 
-No external send or Director wake is required to resume the accepted queue. Queue housekeeping (§ Queue housekeeping) cancels the head whose target is removed, independently of the queue turn, and each attempt also rechecks the head's target immediately before its first byte.
+A head queued under `composer_too_small` or `composer_geometry_unavailable` waits like one queued under `composer_busy`, consuming no attempt budget, and the runner re-evaluates its fit at every housekeeping interval against the live size. No external send or Director wake is required to resume the accepted queue. Queue housekeeping (§ Queue housekeeping) cancels the head whose target is removed, independently of the queue turn, and each attempt also rechecks the head's target immediately before its first byte.
 
 A queued request outlives the originating CLI connection and command deadline. Each actual drain attempt has its own five-second budget, and waiting for an interaction consumes none of it. A client timeout after queue acceptance reports the known input ID and directs the caller to inspect the receipt instead of generating a new operation key. The timer retry runs even without child output or broker commands, preserving the input ID, FIFO position and `ready` receipt without renewing the deadline. A reappearing candidate or open interaction pauses dispatch and ends the zero-byte attempt; the next closure or clearance starts another bounded attempt.
 
@@ -3930,13 +4077,34 @@ Each ordinary member's runner delivers that member's own unnotified pending mess
 | Property | Contract |
 |---|---|
 | Cadence | From the runner event loop, at most once per preview sweep interval (1 s), and not before the run-wide backoff expires |
-| Preconditions | The run is live and its native child is running; no ordinary attempt is active and no sweep attempt awaits its result; the runner FIFO is empty and not stopped |
+| Preconditions | The run is live and its native child is running; no ordinary attempt is active, no sweep attempt awaits its result and no preview of the run is parked; the runner FIFO is empty and not stopped |
 | Selection | One short read snapshot confirms that the run's member is an active ordinary member whose recorded run is this run with a concrete placement, then takes the oldest `to_member_id=<member> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
-| Order | Strict oldest first: the sweep types only the selected message and waits for its outcome before it selects again |
+| Order | Strict oldest first: the sweep types only the selected message and waits for its outcome before it selects again; a head parked into the future is held |
 
 Stamped self-sends are excluded by `notified_at`, and a consumed message is never selected. A selected preview held on the composer for the stall bound publishes one `input_delivery_stalled` event (§ Input delivery stalled event). A pending preview held behind an `uncertain` prompt or exec counts as a waiter for queue housekeeping's blocked-input watch, which publishes the blocked event (§ Queue housekeeping). Because the sweep starts a preview only when the FIFO is empty and not stopped and no ordinary attempt is active, a queued prompt or exec always precedes a sweep-selected preview.
 
-**Delivery state.** A preview's delivery state is `messages.notified_at` plus the runner's in-memory record of a preview typed and awaiting verification; it holds no durable input receipt. On a verified-composer run the sweep types a preview only into a verified empty composer and stamps `notified_at` after confirmed submission; a preview whose submission is not confirmed is uncertain (§ Input delivery result event), stays unnotified and is typed again once the composer is verified empty. On a run without composer verification the sweep types by § Delivery method and interaction priority and stamps `notified_at` after its complete stages; an uncertain preview is stamped first and then published, so it is not typed again.
+**Delivery state.** A preview's delivery state is `messages.notified_at`, `messages.preview_typings`, `messages.preview_parked_until` and the runner's in-memory record of a preview typed and awaiting verification; it holds no durable input receipt. On a verified-composer run the sweep types a preview only into a verified empty composer, in the first rung that fits (§6.5 Push notifications), and stamps `notified_at` after confirmed submission; a preview that no rung fits holds with zero bytes (§ Composer geometry and fit). On a run without composer verification the sweep types by § Delivery method and interaction priority and stamps `notified_at` after its complete stages; an uncertain preview is stamped first and then published, so it is not typed again.
+
+**Typing count.** `preview_typings` counts a message's typings across every runner that delivers it. A typing is counted in a write transaction immediately before its first literal byte, while the delivering runner holds the pane input lock, after the composer verified empty and the rung was pinned. The member sweep counts after its reservation passes its fresh drain and interaction check, so a reservation that returns to `ready` with zero bytes has not counted; the Director sweep counts after its classifying capture (§ Director delivery sweep). The transaction refuses the typing, and the attempt ends with zero bytes, when `preview_typings` is 2, `notified_at` is set or `preview_parked_until` is in the future. A crash between the count and the first byte overcounts by one typing.
+
+| `preview_typings` before the typing | Rungs allowed | An uncertain outcome of this typing on a verified-composer run or a Director sweep |
+|---|---|---|
+| 0 | Any | `notified_at` stays null; the next typing waits for a verified empty composer |
+| 1 | `pointer`, `cue` or `minimal` | Stamp `notified_at` and record `preview delivery: message <id> abandoned after pointer retry: <cause>` (source `preview_sweep`), or `director delivery: message <id> abandoned after pointer retry: <cause>` from a Director sweep |
+
+A selected head with `preview_typings` 2, `notified_at` null and no future `preview_parked_until` is exhausted, after an overcount or an uncertain second typing whose stamp failed. The selecting runner stamps it and records the abandonment diagnostic with cause `typings_exhausted`, so the head advances. The message stays `input_required` and reaches its recipient through any later `message poll`, which consumes every pending message, newer ones queued behind it included. A run without composer verification counts its typings, and the count never restricts its selection.
+
+**Late submission.** A preview attempt whose pre-submit window closes with `composer_clipped` or `composer_unreadable` (§ Measured submission plans and settle intervals) parks instead of ending. In one write transaction, still holding the pane input lock, the runner sets `preview_parked_until` to now plus the late-submission window (120 s), only while `notified_at` is null and the message is `input_required`, then releases the lock and keeps the written literal, rung and stage `partial` in memory. At every sweep interval the parking runner re-reads the message, observes the composer and compares again:
+
+| Observation | Park outcome |
+|---|---|
+| The message is no longer `input_required`, because a `message poll` consumed it | Ends with no submit key and no uncertain outcome; clears `preview_parked_until` and records `preview delivery: message <id> park ended: consumed`. A literal left in the composer is then an ordinary non-empty composer |
+| A complete comparison | Acquires the pane input lock nonblockingly, starts a fresh 5 s attempt deadline, re-observes, requires a complete comparison again, writes the submit key and runs the 2 s post-submit verification; confirmed submission stamps `notified_at` and clears `preview_parked_until` |
+| A contradicting comparison | Ends as uncertain `literal_mismatch` |
+| A verified empty composer, because someone submitted or cleared it | Ends as uncertain with the park cause |
+| A partial comparison or unreadable text | Stays parked |
+
+When `preview_parked_until` passes, the park ends as uncertain with the park cause. An uncertain park end clears `preview_parked_until` in the transaction that applies the typing table. While a message's `preview_parked_until` is in the future, no runner types it: every member sweep and every runner's Director sweep treats such a head as held, keeping strict oldest-first order, and the parking member runner's own sweep starts nothing else. Its stall wait does not run, and `member press` stays available to the Director. Orderly shutdown ends a park as uncertain `runner_stopped`. A parker lost without shutdown leaves the column set; once it has passed, any runner that selects the head clears it and applies the typing table as an uncertain outcome with cause `runner_stopped` before typing.
 
 **Submission.** The sweep acquires no lock beforehand. It hands the canonical preview to the runner-internal input entry point that serves `member prompt`, built with the run's own control identity, which applies § Delivery method and interaction priority; a preview that cannot be written now stays pending for a later tick. For actual stages the runner acquires the pane input lock nonblockingly from its event loop (§6.5 Pane input lock).
 
@@ -3963,22 +4131,36 @@ Every member runner also delivers the root Director's unnotified pending message
 | Selection | In the same transaction, the oldest `to_member_id=<director> AND status_state='input_required' AND notified_at IS NULL` row by `(created_at, message_id)` |
 | Lock | The Director pane's input lock (§6.5 Pane input lock), acquired nonblockingly; a busy lock ends the tick with no backoff, because another runner is delivering |
 | Re-check | Under the lock, re-read the selected message and the Director placement; a stamped, consumed or missing message, or a changed placement, releases the lock and ends the tick |
-| Attempt | Capture, classify, write the plain literal, settle 500 ms, pre-submit verification re-captured every 100 ms within its 1 s window, submit key and post-submit verification (2 s), all under the lock, within a 5 s attempt deadline that starts when the lock is acquired |
+| Attempt | Capture, classify, select the rung, count the typing, write the plain literal, settle 500 ms, pre-submit verification re-captured every 100 ms for up to 2 s, submit key and post-submit verification (2 s), all under the lock, within a 5 s attempt deadline that starts when the lock is acquired |
 | Stamp | `notified_at` is set in one write transaction after confirmed post-submit verification, while the lock is still held, and only while that column is still null |
-| Order | Strictly oldest first across every sender; a held head blocks newer Director messages |
+| Order | Strictly oldest first across every sender; a held or parked head blocks newer Director messages |
 
-Every runner selects the same head and only the lock holder types, so each message is typed at most once per confirmed submission. Captures continue while delivery is held: up to one per live runner per second while a draft or dialog holds the composer.
+Every runner selects the same head and only the lock holder types, and the shared typing count (§ Runner pending-preview sweep) limits each message to two typings across every runner. The typing reservation requires the message to be `input_required` at the write transaction. Release the reserved count under the pane lock when the outcome proves zero bytes were written. Captures continue while delivery is held: up to one per live runner per second while a draft or dialog holds the composer.
 
-**Literal.** The literal is the canonical profile-delivery preview of §6.5 Push notifications, written with the profile's `prompt` plan prefix and submit bytes. The plan's `bracketed_paste` framing and its `plain_literal_limit` do not apply: a capture cannot observe whether the Director's application enabled mode 2004, so the Director path writes no bracketed paste and measures its limit on Director screens. A preview whose rendered line exceeds `director_delivery.plain_limit` is rendered in the pointer form.
+**Literal.** The literal is the canonical profile-delivery preview of §6.5 Push notifications, written with the profile's `prompt` plan prefix and submit bytes. The plan's `bracketed_paste` framing and its `plain_literal_limit` do not apply: a capture cannot observe whether the Director's application enabled mode 2004, so the Director path writes no bracketed paste and measures its limit on Director screens. The sweep selects the first rung permitted by `director_delivery.plain_limit` (§6.5 Push notifications) against the capture's size and the effective geometry of the Director `composer.text` rule the classification selects:
 
-**Capture replay.** A capture (§6.5 Backend operations) replays into a fresh terminal state of the capture's size: replay feeds a fresh model `ESC [ ? 1049 h` when the capture reports the alternate screen, then, after removing one trailing `\n` from the body and splitting it on `\n`, for each of at most `rows` lines in order `ESC [ <row+1> ; 1 H`, the line without one trailing `\r`, and `ESC [ 0 m`, blank lines included; finally `ESC [ <row+1> ; <col+1> H` when the capture reports a cursor. Classification follows § Cursor-free classification for a capture without cursor or alternate-screen data. A malformed metadata line or a pane absent from the herdr snapshot is a capture failure. CAFleet does not launch the Director, so it probes no Director native version: profile and rule selection depend only on the backend, and each Director observation's `raw_evidence.native_version` is null.
+| Multiplexer | `rows` | `cols` |
+|---|---|---|
+| tmux | `#{pane_height}` | `#{pane_width}` |
+| herdr | `scroll.viewport_rows` | The smaller of the layout `rect.width` less the 2-column pane chrome and the capture's widest row in display cells |
+
+herdr resizes a pane's PTY only while a client renders its tab, so a background tab keeps the size it was last rendered at while its `rect` follows the current splits; `scroll.viewport_rows` tracks the PTY. The rect term bounds a tab last rendered wider than its rect, and the widest-row term one last rendered narrower, because no captured row is wider than the PTY. Both only under-count, so the fit stays conservative. With herdr's default `pane_scrollbars`, a pane whose program draws on the primary screen with scrollback gives one column to the scrollbar, so its PTY is one column narrower than the pane area; the capture omits that column, so the widest-row term covers it.
+
+The Director sweep counts typings, parks for late submission and stamps exhausted heads by the rules of § Runner pending-preview sweep. Its park observation is one capture per sweep interval, and the parking runner holds the Director pane input lock only while it writes.
+
+After the literal write, the Director treats a verified empty composer that still shows its native placeholder as unreadable. If the pre-submit window closes before the draft appears, the preview stays parked across empty captures until the draft renders or the park expires. A verified empty composer after a draft has rendered ends the park with its original cause.
+
+**Capture replay.** A capture (§6.5 Backend operations) replays into a fresh terminal state at the captured row count. Replay uses the tmux PTY width or, for herdr, the greater of the layout width and the widest captured row in display cells. This preserves the original rows when the PTY rendered wider than the layout rectangle. The delivery fit still uses the conservative width above. Replay feeds the terminal state `ESC [ ? 1049 h` when the capture reports the alternate screen, then, after removing one trailing `\n` from the body and splitting it on `\n`, for each of at most `rows` lines in order `ESC [ <row+1> ; 1 H`, the line without one trailing `\r`, and `ESC [ 0 m`, blank lines included; finally `ESC [ <row+1> ; <col+1> H` when the capture reports a cursor. Classification follows § Cursor-free classification for a capture without cursor or alternate-screen data. A malformed metadata line or a pane absent from the herdr snapshot is a capture failure. CAFleet does not launch the Director, so it probes no Director native version: profile and rule selection depend only on the backend, and each Director observation's `raw_evidence.native_version` is null.
 
 **Classification and hold.** The sweep classifies the capture with the Director placement's bundled profile over the rules its `director_delivery` names plus every interaction rule. A hold leaves the message unnotified for a later tick:
 
 | Classification | Action | Backoff |
 |---|---|---|
 | Composer verified empty, no open interaction | Deliver | Reset on confirmed submission |
-| Composer not verified empty: a draft, a leftover literal, an unrecognized screen or a pane narrower than the profile's `W_min` | Hold | None (retry next interval) |
+| Composer verified empty, but no rung fits | Hold `composer_too_small` | None (retry next interval) |
+| Composer verified empty on a screen that selects no single `composer.text` rule | Hold `composer_geometry_unavailable` | None (retry next interval) |
+| No Director composer or interaction rule matches, and the capture is below the Director profile's `min_rows` or `min_columns` | Hold `composer_too_small` | None (retry next interval) |
+| Composer not verified empty: a draft, a leftover literal, an unrecognized screen at or above the minimum, or a pane narrower than the profile's `W_min` | Hold `composer_busy` | None (retry next interval) |
 | Open interaction: a permission request, a question or an unknown interaction | Hold | None |
 | Capture failure, missing pane, multiplexer server error or geometry still changing after retries | Hold | 1 s doubling, capped at 30 s |
 | Storage busy or unavailable | Hold | 1 s doubling, capped at 30 s |
@@ -3991,7 +4173,7 @@ Every runner selects the same head and only the lock holder types, so each messa
 | Any literal-write failure after its first process started, or an unreadable acknowledgment | Possibly partial | Uncertain `write_failed`, stage `partial` |
 | A submit-key failure after its process started | Possibly submitted | Uncertain `write_failed`, stage `submitted` |
 
-herdr `pane send-text` takes literal text with no paste option; § Composer-text extraction matches the literal whether the Director screen renders it as typed text or as a collapsed paste placeholder.
+herdr `pane send-text` takes literal text with no paste option; § Composer-text extraction matches the literal whether the Director screen renders it as typed text or as a collapsed paste placeholder. A Claude Director can also confirm a preview through the same complete, word-wrapped native queue echo and adjacent send-now notice (§ Measured submission plans and settle intervals), when the pair appears after the submit key.
 
 **Stop and deadlines.** The attempt deadline is the earlier of the 5 s attempt deadline and the run's shutdown deadline, which the runner hands the thread before it sets the stop signal. The snapshot, the re-check under the lock and the `notified_at` stamp each run under a storage deadline clipped to the attempt deadline. The thread checks its stop signal before each stage: capture, literal chunk, settle end, each pre-submit capture, submit key and each verification capture. A stopped thread starts no new writing stage and releases the lock. A stop after the first literal byte and before confirmed submission is an uncertain Director preview: the text stays in the Director composer and the message stays unnotified. Every subprocess runs through the bounded subprocess runner (§6.5 Subprocess output and deadlines) under the remaining clipped deadline, so the join completes within the shutdown deadline.
 
@@ -4001,14 +4183,17 @@ herdr `pane send-text` takes literal text with no paste option; § Composer-text
 |---|---|---|---|
 | Confirmed submission | `notified_at` stamped | — | — |
 | Held for 3 minutes | Unnotified | `director delivery: message <id> held: <reason>` | Once per runner when its continuous hold of that message reaches 3 minutes |
-| `literal_mismatch`, `submit_unconfirmed`, `write_failed`, or `runner_stopped` after the first byte | Unnotified; typed again once the composer verifies empty | `director delivery: message <id> uncertain: <cause>` | Each occurrence |
+| Held under `composer_too_small` | Unnotified | `director delivery: message <id> held: <reason>` | Once per runner per continuous hold, immediately |
+| Park ended by consumption | Unnotified and consumed | `director delivery: message <id> park ended: consumed` | Each occurrence |
+| `literal_mismatch`, `composer_clipped`, `composer_unreadable`, `submit_unconfirmed`, `write_failed`, or `runner_stopped` after the first byte, on a first typing | Unnotified; typed once more, in a short rung, once the composer verifies empty | `director delivery: message <id> uncertain: <cause>` | Each occurrence |
+| The same causes on a second typing, or an exhausted head | `notified_at` stamped | `director delivery: message <id> abandoned after pointer retry: <cause>` | Each occurrence |
 | Capture or multiplexer failure | Unnotified | `director delivery: pane <pane-id> unavailable: <cause>` | Each occurrence |
-| Storage failure after a confirmed submission | Unnotified; typed again once the composer verifies empty | `director delivery: message <id> uncertain: storage_unavailable` | Each occurrence |
+| Storage failure after a confirmed submission | Unnotified; a first typing is typed once more, in a short rung, once the composer verifies empty, and a second leaves an exhausted head | `director delivery: message <id> uncertain: storage_unavailable` | Each occurrence |
 | Storage failure before a message is selected, including the sweep connection | Unnotified | `director delivery: storage unavailable: <cause>` | Each failure, retried under the storage backoff |
 
-`<reason>` is `composer_busy`, `interaction_open`, `pane_unavailable` or `storage_unavailable`; one capture classifies the Director screen, so it has no candidate interaction state. `<cause>` is the stop cause, or the multiplexer or storage error text, truncated at a scalar boundary so the stored message stays within the 512-byte bound.
+`<reason>` is `composer_busy`, `composer_too_small`, `composer_geometry_unavailable`, `interaction_open`, `pane_unavailable` or `storage_unavailable`; one capture classifies the Director screen, so it has no candidate interaction state. `<cause>` is the stop cause, or the multiplexer or storage error text, truncated at a scalar boundary so the stored message stays within the 512-byte bound.
 
-A mismatch leaves the written literal, plus whatever else was typed, in the Director composer, which then holds every later Director preview until the user clears or submits it. A submitted leftover literal leaves the message unnotified, so the sweep later types its preview again, and the Director deduplicates by message ID.
+A mismatch leaves the written literal, plus whatever else was typed, in the Director composer, which then holds every later Director preview until the user clears or submits it. A submitted leftover literal leaves a first typing unnotified, so the sweep later types the message once more in a short rung, and the Director deduplicates by message ID.
 
 **No live runner.** Delivery needs at least one live member runner in the fleet. Messages committed while none is live stay pending and unnotified, and the first runner to start or recover delivers them oldest first. An exiting runner makes no final Director sweep: its shutdown deadline is reserved for its own cleanup, and a sweep could hold the Director lock for its full attempt deadline. The Director runs a manual `cafleet message poll <director-id> --json` at these points:
 
@@ -4058,7 +4243,7 @@ Every result consumer projects these durable fields rather than recomputing a re
 
 `submission.status` is the runner's outcome vocabulary for the attempt (§ Durable input receipts and settlement); `delivery.status` is the separate delivery projection. Every attempted ordinary receipt records its delivery method, and a stored attempted receipt without one fails as an invalid stored value. A not-submitted receipt whose method and reason were never recorded reports a null method and reason `method_unrecorded`; no method or cancellation reason is invented. Permission-response receipts expose `delivery:null` and null deferred metadata; their semantic decision/submission/settlement projection remains authoritative. Unknown stored combinations fail validation.
 
-The stage vocabulary is `zero_bytes,partial,submitted,unknown`. A stopped or in-progress attempt reports `partial` for every written prefix short of the submit key, a complete literal and a lone fallback Escape included, and `submitted` once the submit key is written. Asynchronous completion leaves originating CLI output unchanged; `input show` and § Input delivery result event expose the outcome. Queue reasons include `delivery_budget_exhausted`, and terminal zero-byte reasons include `plain_limit_exceeded`.
+The stage vocabulary is `zero_bytes,partial,submitted,unknown`. A stopped or in-progress attempt reports `partial` for every written prefix short of the submit key, a complete literal and a lone fallback Escape included, and `submitted` once the submit key is written. Asynchronous completion leaves originating CLI output unchanged; `input show` and § Input delivery result event expose the outcome. Queue reasons include `delivery_budget_exhausted`, `composer_too_small` and `composer_geometry_unavailable`, and terminal zero-byte reasons include `plain_limit_exceeded`.
 
 ###### Stop cause
 
@@ -4070,7 +4255,9 @@ An attempt that ends after its first byte without confirmed submission records `
 |---|---|
 | `interaction_open` | A visible or obscured interaction, an interaction hold or a retained transition appears during the write |
 | `interaction_candidate` | An interaction whose eligibility is held as a candidate appears during the write |
-| `literal_mismatch` | The pre-submit composer text does not match the written literal or cannot be extracted; no submit key is written, stage `partial` |
+| `literal_mismatch` | The pre-submit composer text contradicts the written literal, including text extending beyond it; no submit key is written, stage `partial` |
+| `composer_clipped` | The pre-submit composer region is clipped or scrolled and shows only part of the written literal; no submit key is written, stage `partial` |
+| `composer_unreadable` | The pre-submit composer text cannot be extracted; no submit key is written, stage `partial` |
 | `submit_unconfirmed` | The 2 s post-submit verification window ends without confirmation; stage `submitted` |
 | `deadline_expired` | The chunk bound is reached, or too little budget remains for the full verification window plus the stage write margin (250 ms) before the submit key |
 | `short_write` | A stop leaves a prefix inside a UTF-8 scalar or paste marker, or a permission answer stage writes short |
@@ -4266,7 +4453,9 @@ CREATE TABLE messages (
     status_state TEXT NOT NULL,
     status_timestamp TEXT NOT NULL,
     text TEXT NOT NULL,
-    notified_at TEXT
+    notified_at TEXT,
+    preview_typings INTEGER NOT NULL DEFAULT 0 CHECK(preview_typings IN (0, 1, 2)),
+    preview_parked_until TEXT
 );
 CREATE INDEX idx_messages_to_member_status_ts ON messages (to_member_id, status_timestamp);
 CREATE INDEX idx_messages_from_member_created_at ON messages (from_member_id, created_at);
@@ -4370,6 +4559,7 @@ CREATE TABLE member_input_operations (
             AND kind IN ('prompt','exec'))),
     stop_cause TEXT CHECK(stop_cause IS NULL
         OR (stop_cause IN ('interaction_open','interaction_candidate','literal_mismatch',
+                          'composer_clipped','composer_unreadable',
                           'submit_unconfirmed','deadline_expired','short_write','write_failed',
                           'runner_stopped')
             AND state IN ('uncertain','settled'))),
@@ -4397,7 +4587,7 @@ Column semantics:
 | `fleets` | `director_member_id` is backfilled inside the bootstrap transaction. A live fleet has null `deleted_at` and an active valid Director with placement |
 | `members` | `status` decodes as `active` or `deregistered`; unknown values fail. Deregistration is soft and keeps the row |
 | `member_placements` | `mux_pane_id`, `mux_window_id` and `mux_window_name` are null exactly while member creation is pending. `mux_server` is the server every invocation for the fleet targets (§6.5 Multiplexer context); member placements copy the Director's |
-| `messages` | `status_state` decodes as `input_required` or `completed`; the recipient's consuming poll sets `completed`. `notified_at` is internal preview state that the public message record omits; a self-send stamps it on insertion and stays pending until a poll consumes it |
+| `messages` | `status_state` decodes as `input_required` or `completed`; the recipient's consuming poll sets `completed`. `notified_at`, `preview_typings` and `preview_parked_until` are internal preview state that the public message record omits; a self-send stamps `notified_at` on insertion and stays pending until a poll consumes it |
 
 Window layout columns follow §6.5 Fleet window layout:
 
@@ -4408,7 +4598,7 @@ Window layout columns follow §6.5 Fleet window layout:
 | `member_placements.window_ordinal` | Chosen at registration; `0` for the Director and Director-window members |
 | `member_placements.column_side` | Chosen at registration; `left` for the Director row and `right` for every Director-window member. A stored value outside `left` / `right` fails decoding |
 
-A concrete placement selects the shared pane input lock, and duplicate entries targeting the same backend/session/pane share it. `messages.notified_at` is the preview stamp for ordinary members and the root Director alike (§6.5 Push notifications), and consumption is recorded only by `status_state`.
+A concrete placement selects the shared pane input lock, and duplicate entries targeting the same backend/session/pane share it. `messages.notified_at` is the preview stamp, `messages.preview_typings` the typing count and `messages.preview_parked_until` the late-submission park for ordinary members and the root Director alike (§6.5 Push notifications; §6.9 Runner pending-preview sweep), and consumption is recorded only by `status_state`.
 
 Runtime records keep their run/member/fleet/Director references after soft deregistration, so history survives member and fleet closure.
 
