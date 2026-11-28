@@ -1,8 +1,8 @@
 # Geometry-robust preview and composer delivery
 
-**Status**: Approved
-**Progress**: 0/55 tasks complete
-**Last Updated**: 2026-11-27
+**Status**: Complete
+**Progress**: 61/61 tasks complete
+**Last Updated**: 2026-11-28
 
 ## Overview
 
@@ -10,18 +10,18 @@ Previews, `member prompt`/`member exec` input and Director previews fail as `lit
 
 ## Success Criteria
 
-- [ ] Every bundled profile (each file under `assets/profiles/`) declares a measured `composer.geometry`. Catalog loading rejects a profile whose executable composer plan lacks it.
-- [ ] On every bundled backend, tmux and herdr, a 9-row and a 12-row pane at 80 and 120 columns, idle or working, deliver a preview of 90–430 body characters whenever a rung fits. It arrives as the rung §4 selects for the live geometry, with stage `submitted`, never as `literal_mismatch`.
-- [ ] At and above the per-profile full and compact sizes that Step 1 records in §2 § Rung sizes, on tmux and herdr, idle or working, a preview whose body is `B_full(profile)` characters arrives as the `full` rung, to a member and to the Director. At and above the compact size, a preview whose body exceeds `B_full` but is at most 4000 characters arrives as the `compact` rung.
-- [ ] Below each profile's `min_rows`/`min_columns`, down to 2 rows × 10 columns, no delivery writes a byte into a composer where the chosen rung does not fit. The preview holds with `composer_too_small`, publishes no `input_delivery_stalled` event, and is delivered automatically once the pane grows enough for a rung.
-- [ ] A literal clipped or scrolled at pre-submit verification records `composer_clipped` or `composer_unreadable`, never `literal_mismatch`. Only visible text that contradicts the literal records `literal_mismatch`.
-- [ ] A clipped or unreadable preview, whether to a member or to the Director, is submitted late without retyping when its full literal becomes visible within the late-submission window (120 s).
-- [ ] A message is typed at most twice: once in any rung and, after an uncertain outcome, once as the pointer, cue or minimal rung. A second uncertain outcome stamps `notified_at` and records a diagnostic. This holds for member and Director delivery.
-- [ ] `member prompt`/`member exec` whose literal does not fit the live composer queue with zero bytes under `composer_too_small` and drain automatically when it fits.
-- [ ] `member show` reports live `observation.geometry`. Its `below_minimum` clears without operator action when the pane grows back. `doctor` prints a `member.<id>.geometry` row per probed member and a `fleet.<fleet_id>.director.geometry` row per fleet whose Director pane receives Director delivery. A below-minimum Director pane holds under `composer_too_small` immediately, not after 3 minutes as `composer_busy`.
-- [ ] `member create` admits a member to a column only when every pane in it keeps at least its backend's slot budget. A resize after creation is reported and never re-plans the layout.
-- [ ] Step 1 reproduces both unexplained behaviors in issue #660 with recorded fixtures and records their root cause in this document.
-- [ ] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
+- [x] Every bundled profile (each file under `assets/profiles/`) declares a measured `composer.geometry`. Catalog loading rejects a profile whose executable composer plan lacks it.
+- [x] On every bundled backend, tmux and herdr, a 9-row and a 12-row pane at 80 and 120 columns, idle or working, deliver a preview of 90–430 body characters whenever a rung fits. It arrives as the rung §4 selects for the live geometry, with stage `submitted`, never as `literal_mismatch`.
+- [x] At and above the per-profile full and compact sizes that Step 1 records in §2 § Rung sizes, on tmux and herdr, idle or working, a preview whose body is `B_full(profile)` characters arrives as the `full` rung, to a member and to the Director. At and above the compact size, a preview whose body exceeds `B_full` but is at most 4000 characters arrives as the `compact` rung.
+- [x] Below each profile's `min_rows`/`min_columns`, down to 2 rows × 10 columns, no delivery writes a byte into a composer where the chosen rung does not fit. The preview holds with `composer_too_small`, publishes no `input_delivery_stalled` event, and is delivered automatically once the pane grows enough for a rung.
+- [x] A literal clipped or scrolled at pre-submit verification records `composer_clipped` or `composer_unreadable`, never `literal_mismatch`. Only visible text that contradicts the literal records `literal_mismatch`.
+- [x] A clipped or unreadable preview, whether to a member or to the Director, is submitted late without retyping when its full literal becomes visible within the late-submission window (120 s).
+- [x] A message is typed at most twice: once in any rung and, after an uncertain outcome, once as the pointer, cue or minimal rung. A second uncertain outcome stamps `notified_at` and records a diagnostic. This holds for member and Director delivery.
+- [x] `member prompt`/`member exec` whose literal does not fit the live composer queue with zero bytes under `composer_too_small` and drain automatically when it fits.
+- [x] `member show` reports live `observation.geometry`. Its `below_minimum` clears without operator action when the pane grows back. `doctor` prints a `member.<id>.geometry` row per probed member and a `fleet.<fleet_id>.director.geometry` row per fleet whose Director pane receives Director delivery. A below-minimum Director pane holds under `composer_too_small` immediately, not after 3 minutes as `composer_busy`.
+- [x] `member create` admits a member to a column only when every pane in it keeps at least its backend's slot budget. A resize after creation is reported and never re-plans the layout.
+- [x] Step 1 reproduces both unexplained behaviors in issue #660 with recorded fixtures and records their root cause in this document.
+- [x] `mise //:test`, `mise //:lint` and `mise //docs:build` pass.
 
 ---
 
@@ -49,7 +49,14 @@ The other profiles fail the same way, through different mechanisms:
 - A preview was typed again while an earlier copy still sat in the composer.
 - `member show` reported `observation.eligibility=composer_empty` during the stall.
 
-Working hypothesis: a Director `member press Enter` on a busy Claude member moves the literal to the native `Queued · ctrl+enter to send now` area and empties the composer. The still-unnotified preview is then retyped into the empty composer, and `composer_empty` describes that state. The alternative is that an empty-composer rule (`claude-idle-composer` or `claude-suggestion-composer`) matches a screen that holds a literal. Step 1 decides between them with captures.
+Root cause, reproduced with Claude 2.1.327 on tmux 3.8 (one member at 9x88 while working) and on herdr 0.9.5 (five members in one column, four of them at 9 rows). No empty-composer rule matches a screen that holds a literal, so no rule correction or negative fixture is needed.
+
+1. **First typing.** A preview's first typing into a 9-row pane records `literal_mismatch`/`partial`. On herdr, four 3-row previews to idle members all failed with the bottom rule and status rows clipped, exactly as in the issue. On tmux, a 205-character body scrolled the composer internally: `─── ↑ 1 more ───` replaced the top border, the `❯ ` row left the screen and the bottom rule was clipped.
+2. **`composer_empty` during the stall.** A Director `member press Enter` on a busy member moves the literal into Claude's native queue: a transcript row followed by `⎿  Queued · <hint> to send now`, where the hint reads `ctrl+x ctrl+s` on tmux and `ctrl+enter` on herdr. The composer then shows `❯ ` with a faint `Press up to edit queued messages`, which `claude-suggestion-composer` correctly classifies as `composer_empty`.
+3. **Retype while a copy sits in the composer.** `record_uncertain` does not stamp `notified_at` on a verified-composer run, so the runner retypes the unnotified preview into the emptied composer. One copy then sits in the native queue and a second in the composer; an idle Enter that submits one literal is followed by the same retype. The second uncertain outcome publishes no new `input_delivery_result`, because results are deduplicated per run and message.
+4. **Third typing.** After the queued copy ran, the member replied from the inline body without `message poll`, so the message stayed `input_required`. When the composer next verified empty, the runner typed it a third time and submitted it, and Claude answered that it was a redelivery. A member left untouched stalled after 3 minutes.
+
+Evidence lives in BASE/.verify/: repro-tmux.md, repro-tmux-part2.md, repro-herdr.md and tmux/claude/repro-*.txt.
 
 ### Geometry changes are normal
 
@@ -74,87 +81,132 @@ Prompt and exec do not park for late submission, for two reasons. Their receipts
 
 `composer.geometry` is required whenever the composer declares an executable submission plan. A `composer_text` rule may carry `text_geometry`, holding any of the fit fields (every field below except `min_rows` and `min_columns`). Those fields replace the profile-level values for the regions that rule bounds (Hermes has a classic and a TUI composer). `min_rows` and `min_columns` are backend-wide and always come from the profile-level object. They must cover every composer the profile reads: the smallest geometry at which each `composer.text` rule's empty composer verifies and the minimal rung fits on one row.
 
+Every composer is fitted as bottom-bounded. Once the transcript fills the screen, each native, Claude and opencode included, keeps a measured set of rows between its composer and the screen bottom and grows the composer upward.
+
 ```json
 {
-  "anchor": "composer_row",
   "margin_columns": 4,
-  "max_text_rows": 7,
-  "pane_fraction": null,
-  "rows_below_text": 2,
-  "reserved_rows": null,
-  "transient_rows": 3,
+  "first_row_margin_columns": 0,
+  "text_window": {"fraction": 0.5, "offset": 5, "min": 3},
+  "reserved_rows": {"steps": [[9, 8], [12, 4]]},
+  "transient_rows": 4,
   "wrap_slack_rows": 0,
+  "carried_space": false,
+  "fit_wrap": "word",
   "collapsed_paste": null,
-  "min_rows": 12,
-  "min_columns": 40
+  "min_rows": 9,
+  "min_columns": 80
 }
 ```
 
+The object is Claude's measured geometry (§ Measured values).
+
 | Field | Type | Meaning |
 |---|---|---|
-| `anchor` | `"composer_row"` or `"screen_bottom"` | `composer_row`: the composer starts at its live row and grows downward, so rows below it bound the text (Claude). `screen_bottom`: the composer is pinned to the bottom and grows upward (codex, opencode, pi, Hermes TUI) |
 | `margin_columns` | integer ≥ 0 | Cells per composer row unavailable to text: prefix, margin and borders. Text columns `T = cols − margin_columns` |
-| `max_text_rows` | integer ≥ 1 or `null` | The composer's internal window cap; `null` when it has none |
-| `pane_fraction` | number in (0, 1] or `null` | A window of `floor(pane_fraction × rows)` rows, as pi draws; `null` when absent |
-| `rows_below_text` | integer ≥ 0; required for `composer_row`, `null` otherwise | Rows the native draws below the last text row (bottom border, status lines), all of which must stay visible for extraction |
-| `reserved_rows` | integer ≥ 0; required for `screen_bottom`, `null` otherwise | Non-text rows the native keeps on screen (header, frame, footer) at the smallest captured geometry |
+| `first_row_margin_columns` | integer ≥ 0 | Further cells the first text row loses when the native's first-row prefix is wider than its continuation prefix (Hermes classic `☤ ❯ ` while working: 4). The first row holds `T − first_row_margin_columns` cells |
+| `text_window` | `null`, a fraction object or a step object | The composer's internal window `W(rows)`, past which the native scrolls its text (forms below) |
+| `reserved_rows` | integer ≥ 0 or a step object | Non-text rows extraction needs on screen at a size: the frame, the prompt row and the rows the native keeps between the last text row and the screen bottom |
 | `transient_rows` | integer ≥ 0 | The largest number of chrome rows (spinner, `Tip:`, update notice, queued-input rows) that can appear while a literal is being typed and displace the composer |
 | `wrap_slack_rows` | 0 or 1 | Rows added to the greedy word-wrap estimate when the native wrap algorithm can waste a row compared with greedy wrapping |
+| `carried_space` | boolean | For `word` wrap: when a word ends exactly at a row's last text column, the separating space starts the next row and takes one of its cells. `false` when the native drops that space |
+| `fit_wrap` | `char` or `word` | The wrap `R` is computed with. Equal to the rule's text wrap unless the native wraps differently from how extraction reads it |
 | `collapsed_paste` | `{"min_scalars": N, "rows": 1}` or `null` | For a `bracketed_paste` plan: a bracketed literal of at least `N` scalars renders as a one-row placeholder |
 | `min_rows`, `min_columns` | integers ≥ 1; profile level only | The smallest captured geometry at which every composer's empty composer verifies and the minimal rung fits on one row. Used for placement, `below_minimum`, `hold:geometry` and the Director `composer_too_small` hold; correctness never depends on them |
 
-All values are measured from native captures (Step 1, Step 12) and validated by provenance (§12). The expected starting values, which Step 1 confirms or corrects, come from SPEC §6.5 Accepted trade-offs:
+| `text_window` form | `W(rows)` |
+|---|---|
+| `null` | Unbounded: the native has no internal window |
+| `{"fraction": f, "offset": o, "min": m}` with `0 ≤ f ≤ 1`, `o ≥ 0`, `m ≥ 1` | `max(m, floor(f × rows) − o)`; `f = 0` gives a fixed window of `m` rows |
+| `{"steps": [[min_rows, W], …], "uncapped_from": N}` | The `W` of the last step whose `min_rows ≤ rows`, and unbounded at `rows ≥ N`. `N` is `null` when the last step applies at every larger size |
 
-| Profile | `anchor` | `margin_columns` | `max_text_rows` | `pane_fraction` |
-|---|---|---|---|---|
-| `claude` | `composer_row` | 4 | 7 | `null` |
-| `codex` | `screen_bottom` | measured | measured | `null` |
-| `opencode` | `screen_bottom` | 4 | 6 | `null` |
-| `pi` | `screen_bottom` | 1 | `null` | 0.3 |
-| `hermes` TUI rule | `screen_bottom` | 6 | `null` | `null` |
-| `hermes` classic rule | measured | measured | 8 | `null` |
+`reserved_rows` takes the step form `{"steps": [[min_rows, r], …]}` when the measured value depends on the size; it gives the `r` of the last step whose `min_rows ≤ rows`. Below the first step of either step list nothing fits. A step list is non-empty, its `min_rows` strictly increase from at least 1, every window `W` is at least 1, and `uncapped_from` exceeds the last step's `min_rows`.
+
+
+A `composer_text` rule may declare `scroll_marker`, a regex matching the indicator the native draws while its window hides earlier text rows. The rule's `start_pattern` and region matchers accept the marker row, so a scrolled composer still opens a region. Extraction strips the marker and §6 classifies a marked region as scrolled; a rule without `scroll_marker` is classified by the `V₀` equality (§6).
 
 Catalog loading rejects an executable composer plan without `composer.geometry` with `composer plan for <backend> requires composer geometry`. It rejects an invalid field with `composer geometry of <backend> is invalid: <field>`.
 
+#### Measured values
+
+Measured on 2026-11-27 at the installed natives on tmux 3.8 and herdr 0.9.5. At matching PTY sizes, every backend's herdr capture shows the same visible literal rows, first visible row, scroll marker and closing row as its tmux capture, so the values are multiplexer-independent. A step's smaller sizes come from the tmux empty-screen captures, which Step 12's `min_rows`×`min_columns` and 5×40 fixtures confirm.
+
+| Rule | Native | `margin_columns` | `text_window` | `reserved_rows` | `transient_rows` | Smallest verified-empty size | `scroll_marker` |
+|---|---|---|---|---|---|---|---|
+| `claude-composer-text` | 2.1.327 | 4 | `{"fraction": 0.5, "offset": 5, "min": 3}` | `{"steps": [[9, 8], [12, 4]]}` | 4 | 6x80 | Top border `─── ↑ N more ───` |
+| `codex-composer-text` | 0.170.0 | 3 | `{"steps": [[5, 3], [6, 4], [7, 5], [8, 6], [14, 7], [15, 8], [18, 10]], "uncapped_from": 21}` | 2 | 2 | 3x80, 5x40 | `↑` at the end of the first visible row |
+| `opencode-composer-text` | 2.3.2 | 4 | `{"fraction": 0, "offset": 0, "min": 6}` | 2 | 0 | 4x80, 5x40 | — |
+| `pi-composer-text` | 1.5.2 | 1 | `{"fraction": 0.3, "offset": 0, "min": 5}` | `{"steps": [[5, 3], [6, 4], [7, 6]]}` | 0 | 4x80, 5x40 | Top border `─── ↑ N more ───`, after the working label while working |
+| `hermes-composer-text` (classic) | 2026.9.24 | 0, with `first_row_margin_columns` 4 | `{"fraction": 0, "offset": 0, "min": 8}` | `{"steps": [[5, 2]]}` | 0 | 2x10 | — |
+| `hermes-tui-composer-text` | 2026.9.24 | 6 | `null` | 3 | 4, unmeasured | Step 12 | — |
+
+The Step 12 working captures show no chrome taking composer rows on opencode (the status row changes in place), pi (the label sits in the top border) or Hermes classic (the spinner sits in the title border), so their `transient_rows` is 0. No working Hermes TUI screen could be produced, so that rule keeps the largest measured chrome, Claude's 4 rows, as a known gap. pi sets `wrap_slack_rows` to 1: it wraps a word that would end exactly at column `T`, so a literal can take one row more than greedy wrapping. `hermes-tui-composer-text` sets `carried_space` to true: a continuation row after a row filled to its last text column starts with the separating space. Every other rule drops that space, so `carried_space` is false there.
+
+| Profile | `min_rows` | `min_columns` | Smallest typeable size |
+|---|---|---|---|
+| `claude` | 9 | 80 | 9x80: one text row above the bottom rule; no narrower typeable size was captured |
+| `codex` | 5 | 40 | 5x40: a 3-row window |
+| `opencode` | 4 | 40 | 4x80 and 5x40: a 2-row window |
+| `pi` | 5 | 40 | 5x40: a 2-row window |
+| `hermes` | 5 | 64 | 12x64: the classic working row renders its `❯ ` only from 64 columns; the idle composers verify down to 5x40, with 4 classic and 2 TUI text rows |
+
+- **Claude.** `W` is 3 at 9–15 rows and 4, 5, 7, 8 and 10 at 18, 21, 24, 27 and 30 rows. Live fit reserves one more column beyond the measured 4-cell margin. At 12×120, a compact literal with an ellipsis at column 116 of its second predicted row rendered on four rows, hiding its first row. At ≥ 12 rows the bottom rule and normally two status rows stay below the text. At 9 rows the frame overflows the screen bottom: only the bottom rule stays below the `❯ ` row, and a literal of two or more rows loses it. The working chrome is the spinner, a `Tip:` row that wraps to 2 rows at 86 columns, and a blank row: up to 4 rows above the composer.
+- **codex.** The two footer rows hide once the literal needs their space. A scrolled region keeps `› ` on its first visible row. The working chrome is the `• Working (…)` row plus a blank row.
+- **opencode.** At ≤ 16 rows the blank rows above and below the `┃` rows disappear; the bundled rule requires the blank row above, so a fully visible 3-row literal records `literal_mismatch` on tmux and herdr, which Step 6 corrects. The window is 6 rows at every height ≥ 9, and scrolling shows no indicator.
+- **pi.** The bottom border and three status rows stay below the text at ≥ 9 rows, two status rows at 6 rows and one at 5 rows. The bottom border stays drawn for at most 3, 4 and 5 text rows at 9, 10 and 11 rows, so `reserved_rows` is 6 from 9 rows; 7 and 8 rows were not measured and take the larger neighbouring value, 6. At 6x80 and 5x40 a literal of three or more rows shows no border.
+- **Hermes classic.** The composer character-wraps at every width and in every state; `wNNN` words only look word-wrapped at widths divisible by 5. The first row opens with `❯ ` (2 cells) idle and `☤ ❯ ` (4 cells) working, and continuation rows use the full width; `first_row_margin_columns` 4 is exact while working and under-fills the idle first row by 2 cells, which only shortens the fit. The rule keeps `word` extraction, because a row break may match nothing, and sets `fit_wrap` to `char`; every other rule's `fit_wrap` equals its text wrap. The rule and status row stay below the text at every typeable size, 5x64 included; at 5x40, below the Hermes minimum, only the status row stays. The window is 8 rows at every height ≥ 12, and the `❯ ` row scrolls away without an indicator.
+- **Hermes TUI.** The text grows downward from the ` ❯ ` row while the status row moves up. A literal that does not fit loses its tail at the screen bottom without an indicator.
+
 #### Rung sizes
 
-Step 1 derives these from the measured fields with §3, and Success Criterion 3 checks them live.
+Derived from the measured values with §3, and checked live by Success Criterion 3.
 
-- **Full-size body.** `B_full(profile)` is the longest ASCII body whose `full` literal stays within both the profile's prompt `plain_literal_limit` and its `director_delivery.plain_limit`. The reference envelope is a three-digit message ID and sender ID with a canonical 32-scalar timestamp.
+- **Full-size body.** `B_full(profile)` is the longest ASCII body whose `full` literal stays within both the profile's prompt `plain_literal_limit` and its `director_delivery.plain_limit`. The reference envelope is a three-digit message ID and sender ID with a canonical 32-scalar timestamp: a 60-scalar header `[cafleet msg 123 from 456 <TS>] ` and the 59-scalar resume suffix.
 - **Full size.** For each profile and each of 80 and 120 columns, the smallest pane height at or above `min_rows` at which a `B_full` body fits the `full` rung with headroom.
-- **Compact size.** The smallest such height at which the `compact` rung fits with an excerpt of at least 80 scalars.
+- **Compact size.** The smallest such height at which the `compact` rung fits with an excerpt of at least 80 scalars, with a four-digit `N` and a three-digit recipient ID.
 
-| Profile | `B_full` | Full size at 80 / 120 columns | Compact size at 80 / 120 columns |
-|---|---|---|---|
-| `claude` | Step 1 | Step 1 | Step 1 |
-| `codex` | Step 1 | Step 1 | Step 1 |
-| `opencode` | Step 1 | Step 1 | Step 1 |
-| `pi` | Step 1 | Step 1 | Step 1 |
-| `hermes` | Step 1 | Step 1 | Step 1 |
+The bodies are `w001 w002 …` words, as in the live checks. A size marked provisional depends on the unmeasured Hermes TUI `transient_rows`. Hermes members deliver through the classic composer and the Hermes Director through the TUI composer.
+
+| Profile | Prompt / Director plain limit | `B_full` | Full size at 80 / 120 columns | Compact size at 80 / 120 columns |
+|---|---|---|---|---|
+| `claude` | 456 / 456 scalars | 337 | 24 / 18 | 18 / 12 |
+| `codex` | 1024 bytes / 1024 bytes | 905 | 24 / 18 | 8 / 7 |
+| `opencode` | 380 / 380 scalars | 261 | 8 / 6 | 6 / 5 |
+| `pi` | 474 / 474 scalars | 355 | 24 / 11 | 11 / 10 |
+| `hermes` | 558 / 1480 scalars | 439 | Classic 10 / 7, TUI 15 / 12, provisional | Classic 6 / 5, TUI 11 / 10, provisional |
 
 ### 3. Fit computation
 
-Inputs are the live snapshot's `rows` and `cols`, and, for `composer_row`, the first composer text row `text_top`.
-
-`text_top` is read from the verified empty screen: the region top of the one `composer.text` rule that `Detector::composer_text` selects there, plus one when that rule is framed (its `text_framed`, else `composer.text.framed`). The selected rule's `text_geometry` supplies the fit fields. A `screen_bottom` computation uses no `text_top`, but it still takes its fit fields from the selected rule.
+Inputs are the live snapshot's `rows` and `cols` and the effective geometry of the one `composer.text` rule that `Detector::composer_text` selects on the verified empty screen: that rule's `text_geometry` fields over the profile-level values.
 
 When no `composer.text` rule, or more than one, matches a screen that observation verifies empty, the profile does not describe that screen. Delivery then holds with zero bytes under `composer_geometry_unavailable`. That reason is not a geometry hold: it runs the ordinary stall wait and records `preview delivery: message <id> held: composer_geometry_unavailable` (or the `director delivery:` form), because only a profile correction resolves it. Provenance requires every verified-empty fixture to select exactly one `composer.text` rule, so the bundled profiles exhibit this only on uncaptured screens.
 
-The member runner uses its PTY screen model (`transport.snapshot()`). The Director sweep uses the capture. A herdr Director capture reports layout width, so `cols` is reduced by `HERDR_CAPTURE_WIDTH_SLACK = 4`. Step 1 measures the real difference and raises the constant if a capture exceeds it.
+The member runner uses its PTY screen model (`transport.snapshot()`). The Director sweep uses the capture's geometry:
 
-- Text columns: `T = cols − margin_columns`. `T < 1` means nothing fits.
-- Visible text rows, with headroom `h`:
-  - `composer_row`: `V = min(max_text_rows?, rows − text_top − rows_below_text − h)`.
-  - `screen_bottom`: `V = min(max_text_rows?, floor(pane_fraction × rows)?, rows − reserved_rows − h)`, where `?` terms apply only when declared.
-- Required rows `R(literal)` for the rendered literal, including the operation prefix:
+| Multiplexer | `rows` | `cols` |
+|---|---|---|
+| tmux | `#{pane_height}` | `#{pane_width}` |
+| herdr | `scroll.viewport_rows` | `min(rect.width − HERDR_PANE_CHROME_COLUMNS, widest capture row in display cells)`, with `HERDR_PANE_CHROME_COLUMNS = 2` |
+
+herdr resizes a pane's PTY only while a client renders its tab, so a background tab keeps the size it was last rendered at while its `rect` follows the current splits. `scroll.viewport_rows` tracks the PTY. The rect term bounds a tab last rendered wider than its rect, and the widest-row term bounds one last rendered narrower, because no captured row is wider than the PTY. Both terms only under-count, so the fit stays conservative without a rendered-tab check. With herdr's default `pane_scrollbars`, a pane whose native draws on the primary screen with scrollback (opencode, Hermes classic) gives one column to the scrollbar, so its PTY is one column narrower than the pane area; the capture omits that column, so the widest-row term covers it.
+
+Replay uses the greater of the herdr layout width and the longest visible row's display width to preserve the original rows. A zoomed Director pane can retain its split rectangle while its PTY widens, just as a background pane can retain an earlier width. Fit still uses the conservative width above.
+
+- Text columns: `T = cols − margin_columns`, and the first text row holds `T − first_row_margin_columns` cells. Nothing fits when either is below 1.
+- Visible text rows, with headroom `h`: `V = min(W(rows), rows − reserved_rows(rows) − h)`, evaluating `text_window` and `reserved_rows` at the live `rows` (§2). Nothing fits when `V < 1`.
+- Required rows `R(literal)` for the rendered literal, including the operation prefix, wrapped by the effective `fit_wrap`:
   - A bracketed literal at or above `collapsed_paste.min_scalars` takes `collapsed_paste.rows`.
   - `char` wrap: fill cells greedily, where a scalar occupies its `unicode-width` cell count and a wide scalar that does not fit starts the next row.
-  - `word` wrap: break greedily at the last space that fits, hard-break a word longer than `T`, and add `wrap_slack_rows`.
+  - `word` wrap: break greedily at the last space that fits, hard-break a word longer than its row, and add `wrap_slack_rows`. With `carried_space`, a row that follows a word ending exactly at the last text column starts with the separating space, so it holds one cell less.
 - Fit: `R ≤ V`.
 
-Headroom `h` is `transient_rows` for the full and compact rungs and for prompt/exec, and 0 for the pointer, cue and minimal rungs. Chrome already on screen is accounted for by the live `text_top` and `rows`. Headroom guards only against chrome appearing between the literal and the submit key. On the short rungs, that race falls to late submission (§6) and the single retry (§7), so the shortest rungs stay available in small panes. A prompt or exec has no retry, so it waits for headroom.
+Headroom `h` is `transient_rows` for the full and compact rungs and for prompt/exec, and 0 for the pointer, cue and minimal rungs. Headroom guards only against chrome appearing between the literal and the submit key. On the short rungs, that race falls to late submission (§6) and the single retry (§7), so the shortest rungs stay available in small panes. A prompt or exec has no retry, so it waits for headroom.
 
-`unicode-width` (0.2, already in `Cargo.lock` through `vt100`) becomes a direct dependency. The computation lives in a new `src/coding_agent/geometry.rs` (`ComposerGeometry`, `fit_rows`, `visible_text_rows`), and `Detector::composer_geometry(&ScreenSnapshot) -> Result<Option<LiveComposer>>` returns `{rows, cols, text_top, geometry}` from the selected `composer.text` rule, where `geometry` holds the effective fit fields, or `None` when the selection fails.
+For Claude, when the verified composer closing border is visible, measure the extent through the last nonblank footer row and include both borders. Subtract the excess over the profile's reserved rows from the visible fit budget. This accounts for custom status rows that shrink the native window even while the pane size stays fixed. A clipped border uses the profile budget, and every literal still needs a complete pre-submit comparison.
+
+For Codex, bound the live fit by `min(rows, max(8, floor(2 × rows / 3))) − 2`, with subtraction saturating at zero. The owned transcript caps the composer and the textarea insets consume two rows. Keep the measured window for fixture provenance and apply the native bound during planning. The full preview requires 14 rows at 80 columns, first available at a pane height of 24. [Codex composer height limit](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/tui/src/app/side_pane.rs#L410-L415).
+
+`unicode-width` (0.2, already in `Cargo.lock` through `vt100`) becomes a direct dependency. The computation lives in a new `src/coding_agent/geometry.rs` (`ComposerGeometry`, `fit_rows`, `visible_text_rows`), and `Detector::composer_geometry(&ScreenSnapshot) -> Result<Option<LiveComposer>>` returns `{rows, cols, geometry}` from the selected `composer.text` rule, where `geometry` holds the effective fit fields, or `None` when the selection fails.
 
 ### 4. Preview ladder
 
@@ -186,7 +238,7 @@ When no rung fits, the preview holds (§5).
 
 - **Stall clock.** The stall wait is suspended by pane size, whatever the eligibility. A held preview or queued head on a pane whose live `below_minimum` is true starts no `input_delivery_stalled` wait, and an open wait is cleared. The `composer_too_small` holds of row 1 suspend it at any size. The wait starts fresh when the pane is no longer below the minimum and the hold persists, so a draft in a below-minimum pane stalls only after the pane grows to the minimum.
 - **Director pane.** `DirectorHold` gains `ComposerTooSmall` (`composer_too_small`), applied when either condition holds:
-  - The capture (with `cols` reduced by `HERDR_CAPTURE_WIDTH_SLACK` on herdr) is below the Director profile's `min_rows`/`min_columns`, and no Director composer or interaction rule matches.
+  - The capture geometry (§3) is below the Director profile's `min_rows`/`min_columns`, and no Director composer or interaction rule matches.
   - The composer is verified empty but no rung fits.
 
   The first condition replaces the `composer_busy` hold the attempt records today for an unmatched screen (`src/runtime/service.rs:1826`), but only for a capture below the minimum and with no Director composer or interaction rule matching. A matched busy or draft composer stays `composer_busy` at any size, and so does an unmatched screen at or above the minimum, mirroring §5 rows 2–4.
@@ -200,14 +252,21 @@ When no rung fits, the preview holds (§5).
 
 | `CompareOutcome` | Condition | Submit key | Stop cause at window close |
 |---|---|---|---|
-| `Complete` | Segments consume the entire literal (current `matches` semantics) | Written | — |
+| `Complete` | Segments consume the entire literal and the region has no explicit native scroll marker | Written | — |
 | `Partial` | The region is clipped or scrolled (below), and the segments consume a contiguous run of the literal: starting at its first scalar for a clipped-only region, at any offset for a scrolled region | Not written | `composer_clipped` |
 | `Contradicts` | Any other extractable text, including text extending beyond the literal | Not written | `literal_mismatch` |
 | (no text) | `Detector::composer_text` returns `None` | Not written | `composer_unreadable` |
 
-A region is **clipped** when the screen's bottom edge closed it (`bottom_closed`). It is **scrolled** when its extracted text rows equal the native window cap `V₀`: §3's `V` with `h = 0`, recomputed from the pre-submit screen's live `rows`, `cols` and, for `composer_row`, that screen's `text_top`. A region that is both clipped and scrolled is classified as scrolled, so the contiguous run may start at any offset.
+A region is **clipped** when the screen's bottom edge closed it (`bottom_closed`). Whether it is **scrolled** depends on its rule:
 
-`Partial` only classifies the failure. It never authorizes a submit key, so tail verification stays unchanged. For pi, the composer matcher accepts a screen-bottom-closed region, so a clipped editor yields `Partial` rather than `None`.
+- A rule with `scroll_marker` (§2): the region is scrolled when it shows the native marker. Codex renders the marker as a faint arrow in the right gutter, so arrows in the editable text remain part of the comparison. Cursorless captures use the widest painted row to locate the gutter independently of the layout rectangle.
+- A rule without `scroll_marker`: the region is scrolled when its extracted text rows equal the native window cap `V₀`, which is §3's `V` with `h = 0`, recomputed from the pre-submit screen's live `rows` and `cols`.
+
+A region that is both clipped and scrolled is classified as scrolled, so the contiguous run may start at any offset.
+
+Extraction removes each marker match from its row before the prefixes are read, so the comparison never sees the marker text. A row the removal leaves empty counts as the frame row when it opens a framed rule's region, and is dropped otherwise. The first text row of a scrolled region reads with `first_prefix` when that matches, else with `continuation_prefix`, because the native's first-prefix row may have scrolled away.
+
+`Partial` only classifies the failure. It never authorizes a submit key, so tail verification stays unchanged. A pi editor that overflows its window without the `↑ N more` marker draws no bottom border, and its text rows run straight into the status rows. Its region does not close, so the comparison records `literal_mismatch`; when no pi region remains on screen, the composer text is unreadable and the window closes as `composer_unreadable`, which parks a preview. Fit-before-type keeps a pi literal inside its measured window, so this arises only from a resize between the literal and the submit key, which the single pointer retry (§7) covers.
 
 **Late submission.** This applies only to member and Director previews. A pre-submit window that closes with `composer_clipped` or `composer_unreadable` parks the attempt instead of ending it:
 
@@ -216,7 +275,7 @@ A region is **clipped** when the screen's bottom edge closed it (`bottom_closed`
    - The message is no longer `input_required`, because a `message poll` consumed it: end the park with no submit key and no uncertain outcome. Clear `preview_parked_until` and record `preview delivery: message <id> park ended: consumed` (or the `director delivery:` form). A literal left in the composer is then an ordinary non-empty composer.
    - `Complete`: acquire the lock nonblockingly, start a fresh 5 s attempt deadline, re-observe, require `Complete` again, write the submit key and run the 2 s post-submit verification. Confirmed submission stamps `notified_at`, clears `preview_parked_until` and ends the park.
    - `Contradicts`: end the park as uncertain `literal_mismatch`.
-   - Verified empty composer (someone submitted or cleared it): end the park as uncertain with the park cause.
+   - Verified empty composer: a Director preview parked while waiting for its first draft render stays parked until a draft renders or the window expires. Otherwise, end the park as uncertain with the park cause.
    - `Partial` or no text: keep parked.
 3. When `preview_parked_until` passes, end the park as uncertain with the park cause.
 
@@ -237,7 +296,7 @@ An uncertain outcome from a park follows §7.
 | Path | Count point |
 |---|---|
 | Member sweep | After the reservation passes its fresh drain and interaction check, and after the rung is pinned. A reservation that returns to `ready` with zero bytes has not counted |
-| Director sweep | Inside `attempt`, after the classifying capture verifies the composer empty and the rung is selected, and before `type_literal_until` |
+| Director sweep | Inside `attempt`, after the classifying capture verifies the composer empty and the rung is selected, and before `type_literal_until`. The atomic reservation requires `input_required` and is released under the pane input lock when the outcome proves zero bytes were written |
 
 The transaction refuses the typing when `preview_typings = 2`, `notified_at` is set or `preview_parked_until` is in the future, and the attempt then ends with zero bytes. A crash between the count and the first byte overcounts by one typing.
 
@@ -258,7 +317,7 @@ The transaction refuses the typing when `preview_typings = 2`, `notified_at` is 
 | Resize moment | Behavior |
 |---|---|
 | Before the first byte | Selection reads the live geometry; a zero-byte reselection reruns the ladder |
-| Between the literal and the submit key | The pre-submit comparison runs against the live screen. `Complete` submits; `Partial` or no text parks (§6, previews) or records `uncertain/composer_clipped` or `uncertain/composer_unreadable` (prompt/exec); `Contradicts` records `literal_mismatch` |
+| Between the literal and the submit key | The pre-submit comparison runs against the live screen, classifying a shrink that clips or scrolls the composer by §6. `Complete` submits; `Partial` or no text parks (§6, previews) or records `uncertain/composer_clipped` or `uncertain/composer_unreadable` (prompt/exec); `Contradicts` records `literal_mismatch` |
 | During post-submit verification | Unchanged: confirmation or `submit_unconfirmed` |
 | While parked | A grow that reveals the whole literal submits it late |
 | While held | A grow that makes a rung fit delivers it at the next sweep interval; `below_minimum` clears in the same health update |
@@ -277,7 +336,7 @@ The transaction refuses the typing when `preview_typings = 2`, `notified_at` is 
 | `below_minimum` | `warn` | `run=<run_id> rows=<r> columns=<c> below the <backend> minimum <min_rows>x<min_columns>; previews shorten or hold until the pane grows` |
 | Otherwise | `ok` | `run=<run_id> rows=<r> columns=<c>` |
 
-**`doctor`, Director pane.** When the `database` row is `ok`, one `fleet.<fleet_id>.director.geometry` row follows the member rows for each fleet that meets three conditions: its root Director is active with a concrete placement, the Director backend's bundled profile declares `director_delivery` listing the placement's multiplexer, and that profile declares `composer.geometry`. Rows appear in fleet-ID order. doctor takes one read-only capture of the Director pane (§6.5 Backend operations), applying `HERDR_CAPTURE_WIDTH_SLACK` on herdr, under the same one-second deadline as the member probes:
+**`doctor`, Director pane.** When the `database` row is `ok`, one `fleet.<fleet_id>.director.geometry` row follows the member rows for each fleet that meets three conditions: its root Director is active with a concrete placement, the Director backend's bundled profile declares `director_delivery` listing the placement's multiplexer, and that profile declares `composer.geometry`. Rows appear in fleet-ID order. doctor takes one read-only capture of the Director pane (§6.5 Backend operations) and derives its geometry as the Director sweep does (§3), under the same one-second deadline as the member probes:
 
 | Situation | Status | Detail |
 |---|---|---|
@@ -291,12 +350,14 @@ The delivering members' `member show` diagnostics carry the Director hold itself
 
 ### 10. Layout planner
 
-`MIN_PANE_HEIGHT` is replaced by a per-backend slot budget: `slot_rows(backend) = composer.geometry.min_rows + 1`, where the extra row is the pane separator or border. A backend with no profile geometry uses the documented default `DEFAULT_SLOT_ROWS = 15`. A column of window height `H` holding members of backends `B` admits backend `b` when both hold:
+`MIN_PANE_HEIGHT` is replaced by a per-backend slot budget, `slot_rows(backend, multiplexer) = max(DEFAULT_MIN_ROWS, min_rows(backend)) + pane_chrome_rows(multiplexer)`, with `DEFAULT_MIN_ROWS = 14`. `min_rows` is the profile's `composer.geometry.min_rows`; a backend with no profile geometry takes `DEFAULT_MIN_ROWS`. `pane_chrome_rows` is the rows a pane's border or separator takes: 1 on tmux and 2 on herdr. `min_rows` exists so delivery degrades safely, not as a placement target: placement keeps today's 15-row tmux slots, and only a profile whose own minimum exceeds the floor raises its slot. A column of window height `H` holding members of backends `B` admits backend `b` when both hold:
 
 - `count(B) + 1 ≤ MAX_PANES_PER_COLUMN` (8);
 - `floor(H / (count(B) + 1)) ≥ max(slot_rows(b), max over B of slot_rows)`.
 
-An overflow column always admits its first member. `choose_slot` receives each column's member backends, from `member_placements.coding_agent`, and the creating backend. Slot order, ordinals and the overflow rule stay unchanged.
+An overflow column always admits its first member. `choose_slot` receives each column's member backends, from `member_placements.coding_agent`, the creating backend and the multiplexer. Slot order, ordinals and the overflow rule stay unchanged.
+
+`H` is the multiplexer's layout height (`layout.area.height` on herdr). It is the size every pane takes once its tab renders, even while a background herdr tab keeps the PTY size it was last rendered at. Delivery reads the live PTY size (§3), so a stale background PTY never affects admission correctness.
 
 The planner only reports a resize and never re-plans. Re-planning after a shrink could only move live members into new windows, which breaks the no-migration guarantee and hides members until a later grow moves them back. Delivery stays correct at any size (§3–§8), so reporting through `observation.geometry`, `doctor` and the runtime diagnostic is enough. Later creations read the live height.
 
@@ -332,21 +393,26 @@ Two new `composer_evidence` kinds:
 
 | Kind | Additional required fields | Provenance check |
 |---|---|---|
-| `geometry` | `text_columns`, `visible_text_rows`, `text_rows` | Recompute `T` and `V₀` (`h = 0`) from the effective geometry of the screen's selected `composer.text` rule, the screen's `rows`/`cols` and that region's `text_top`, and require equality. On a pre-submit screen, `text_rows` must equal the extracted text rows. It must also equal `R(expected_literal)` when the literal fits, or `V₀` when the screen is scrolled |
+| `geometry` | `text_columns`, `visible_text_rows`, `text_rows` | Recompute `T` and `V₀` (`h = 0`) from the effective geometry of the screen's selected `composer.text` rule and the screen's `rows`/`cols`, and require equality. On a pre-submit screen, `text_rows` must equal the extracted text rows. When the literal fits it must lie in `R(expected_literal) − wrap_slack_rows ..= R(expected_literal)`, because `wrap_slack_rows` bounds a row the native may or may not waste; when the region is scrolled and not clipped it must equal `V₀`. A scrolled screen of a rule with `scroll_marker` must show the marker |
 | `geometry_hold` | `expected_eligibility` (`hold:geometry` or `composer_empty`) | The screen classifies with that eligibility. For `composer_empty`, the rung selector returns `composer_too_small` for every message. The screen carries no `geometry` or `unsubmitted_literal` record |
 
-A *typeable size* is a captured size at which the empty composer verifies and at least the `minimal` rung fits. Each executable operation plan cites, on both multiplexers, the fixtures the matrix below names. A missing citation fails with `composer geometry for <backend> requires measured fixtures on <multiplexer>`.
+An *unreadable partial* screen shows a typed literal whose region the selected rule cannot extract, such as a pi region without its bottom border or a Hermes classic region whose `❯ ` row scrolled away. Its `geometry` record also carries `rule_id`, the `composer.text` rule whose geometry it is fitted against, and `typed_literal`, the literal that was typed, and the screen carries no `unsubmitted_literal` record. Provenance requires `R(typed_literal) > V₀`, `text_rows` equal to `V₀`, and a comparison of `typed_literal` against the screen that extracts no text.
+
+A *typeable* cell is a captured size and state at which the empty composer verifies and at least the `minimal` rung fits, below `min_rows`×`min_columns` included, because the runner delivers there. `min_rows` and `min_columns` remain the smallest size at which every state verifies. Geometry values are multiplexer-independent: at matching PTY sizes, every backend's herdr capture shows the same visible literal rows, first visible row, scroll marker and closing row as its tmux capture. The prompt plan cites, on each multiplexer, the fixtures that multiplexer's row of the size axis names. A missing citation fails with `composer geometry for <backend> requires measured fixtures on <multiplexer>`. A herdr fixture records its PTY size read with `stty`, so a herdr cell of a primary-screen native (opencode, Hermes classic) is one column narrower than its axis size, such as 9x79 for 9×80, and that one-column narrowing satisfies the axis. The matrix exempts exactly one composer and state: the Hermes TUI composer working. The initial capture run ended with a gateway error. The later Nous run verified live delivery during work, and the required geometry fixture series remains unmeasured. Its `transient_rows` stays at 4.
 
 | Axis | Values |
 |---|---|
 | Backend | Every bundled profile |
 | Multiplexer | `tmux`, `herdr` |
-| Size | 9×80, 9×120, 12×80, 12×120, `min_rows`×`min_columns`, 5×40 and 2×10 |
+| Size on tmux | 9×80, 9×120, 12×80, 12×120, `min_rows`×`min_columns`, 5×40 and 2×10 |
+| Size on herdr | 9×80, 9×120, 12×80, 12×120 and the smallest size a rendered client split reaches |
 | State | idle, working (spinner and tip rows visible) |
-| Evidence at a typeable size | An empty screen with `geometry`. Pre-submit screens with `geometry` and `unsubmitted_literal` for a one-row literal, a wrapped literal that fits, and each rung's longest form that fits at that size. A clipped or scrolled literal that does not fit, as the `Partial` case |
-| Evidence at any other size | One empty-state screen with `geometry_hold` per state and no literal screens |
+| Evidence at a typeable size, per state | An `empty` screen with `geometry`. Pre-submit screens with `geometry` and `unsubmitted_literal`: `one`, a one-row literal; `v0`, a wrapped literal of exactly `V₀` rows (waived when `V₀` is 1); and `partial`, a literal of `V₀ + 1` or more rows, clipped or scrolled. A `partial` screen whose region compares as unreadable carries `geometry` without `unsubmitted_literal` |
+| Evidence at any other size, per state | One empty `hold` screen with `geometry_hold` and no literal screens |
 
-Captures use the installed native versions with the CLAUDE.md development models. Names follow `<backend>-<version>-composer-geometry-<case>-<mux>-<rows>x<cols>-<n>`. Masks and privacy review follow the existing fixture rules.
+The matrix carries no rung literals: rung selection is covered by the Step 5 and Step 10 tests, and a rung literal renders like any literal of its row count. The matrix applies to the prompt plan, because exec types into the same composer and its `! ` prefix is already part of `R`; the exec plan carries no matrix.
+
+Captures use the installed native versions with the CLAUDE.md development models. Names follow `<backend>-<version>-composer-geometry-[<composer>-]<state>-<kind>-<mux>-<rows>x<cols>-<n>`, where `<composer>` is empty for the member composer and `tui` for the Hermes TUI, `<state>` is `idle` or `working` and `<kind>` is the evidence row's screen name. Masks and privacy review follow the existing fixture rules.
 
 ### 13. Error and diagnostic strings
 
@@ -365,7 +431,7 @@ Captures use the installed native versions with the CLAUDE.md development models
 | `director delivery: message <id> park ended: consumed` | Director diagnostic |
 | `observation: pane <rows>x<columns> below the <backend> minimum <min_rows>x<min_columns>` | Runner diagnostic, `observation` |
 
-The existing `director delivery: message <id> uncertain: <cause>` row gains the causes `composer_clipped` and `composer_unreadable`.
+`<field>` names the offending field's path inside the geometry object, such as `text_window.steps` or `reserved_rows`. The existing `director delivery: message <id> uncertain: <cause>` row gains the causes `composer_clipped` and `composer_unreadable`.
 
 ### 14. Documentation targets
 
@@ -390,97 +456,135 @@ The existing `director delivery: message <id> uncertain: <cause>` row gains the 
 
 ### Step 1: Reproduce and measure (gating)
 
-- [ ] Reproduce "retype while a copy sits in the composer" and "`composer_empty` during the stall" with five Claude members stacked in one herdr column (9 rows each), capturing each state with `member capture` and runner health. <!-- completed: -->
-- [ ] Record the root cause of both under Background § Unexplained behaviors. If an empty-composer rule matches a screen holding a literal, correct that rule and add the capture as a negative fixture. <!-- completed: -->
-- [ ] Measure each profile's geometry fields (§2) at the installed native versions on tmux and herdr, including transient chrome while working, and record the values in §2. <!-- completed: -->
-- [ ] Derive each profile's `B_full`, full size and compact size with §3 from the measured fields and plain limits, and record them in §2 § Rung sizes. <!-- completed: -->
-- [ ] Measure herdr layout width against the terminal width for Director captures, and confirm or raise `HERDR_CAPTURE_WIDTH_SLACK`. <!-- completed: -->
-- [ ] For each finding that contradicts this specification, record a programmer marker at the contradicted section under the coordination protocol and send `blocked (<pointer>)` before Step 2. <!-- completed: -->
+- [x] Reproduce "retype while a copy sits in the composer" and "`composer_empty` during the stall" with five Claude members stacked in one herdr column (9 rows each), capturing each state with `member capture` and runner health. <!-- completed: 2026-11-27T13:39 -->
+- [x] Record the root cause of both under Background § Unexplained behaviors. If an empty-composer rule matches a screen holding a literal, correct that rule and add the capture as a negative fixture. <!-- completed: 2026-11-27T13:39 -->
+- [x] Measure each profile's geometry fields (§2) at the installed native versions on tmux and herdr, including transient chrome while working, and record the values in §2. <!-- completed: 2026-11-27T13:39 -->
+- [x] Derive each profile's `B_full`, full size and compact size with §3 from the measured fields and plain limits, and record them in §2 § Rung sizes. <!-- completed: 2026-11-27T13:39 -->
+- [x] Measure herdr layout width against the PTY width for Director captures, and settle the herdr capture geometry (§3). <!-- completed: 2026-11-27T13:39 -->
+- [x] For each finding that contradicts this specification, record a programmer marker at the contradicted section under the coordination protocol and send `blocked (<pointer>)` before Step 2. <!-- completed: 2026-11-27T13:39 -->
 
 ### Step 2: Documentation
 
-- [ ] Update `SPEC.md` sections listed in §14, preserving section numbering. <!-- completed: -->
-- [ ] Update every `docs/` page that states preview forms, column capacity or per-backend composer windows. <!-- completed: -->
-- [ ] Update `assets/skills/cafleet/reference/cli.md` facts listed in §14. <!-- completed: -->
-- [ ] Update member and Director roles and the cafleet `SKILL.md` for every rung form as a wake. <!-- completed: -->
-- [ ] Update `coding-agents.md` Role eligibility Basis cells that cite a Director pane width. <!-- completed: -->
-- [ ] Run `mise //docs:build` and inspect any changed table cell holding a literal pipe in the rendered HTML. <!-- completed: -->
+- [x] Update `SPEC.md` sections listed in §14, preserving section numbering. <!-- completed: 2026-11-27T13:54 -->
+- [x] Update every `docs/` page that states preview forms, column capacity or per-backend composer windows. <!-- completed: 2026-11-27T13:54 -->
+- [x] Update `assets/skills/cafleet/reference/cli.md` facts listed in §14. <!-- completed: 2026-11-27T13:54 -->
+- [x] Update member and Director roles and the cafleet `SKILL.md` for every rung form as a wake. <!-- completed: 2026-11-27T13:54 -->
+- [x] Update `coding-agents.md` Role eligibility Basis cells that cite a Director pane width. <!-- completed: 2026-11-27T13:54 -->
+- [x] Run `mise //docs:build` and inspect any changed table cell holding a literal pipe in the rendered HTML. <!-- completed: 2026-11-27T13:54 -->
 
 ### Step 3: Profile geometry in the catalog
 
-- [ ] Add `ComposerGeometry` parsing and validation for `composer.geometry` and per-rule `text_geometry` in `src/coding_agent/catalog.rs`, with the two catalog-loading errors. <!-- completed: -->
-- [ ] Add the `geometry` and `geometry_hold` `composer_evidence` kinds and their provenance checks, including the one-rule selection on every verified-empty fixture (§3, §12). <!-- completed: -->
-- [ ] Add the measured `composer.geometry` to every bundled profile. <!-- completed: -->
-- [ ] Table-driven tests: missing and invalid geometry; a per-rule `text_geometry` overriding fit fields, with a minimum in `text_geometry` rejected; provenance accepts the bundled catalog and rejects a mismatched `visible_text_rows`. <!-- completed: -->
+- [x] Add `ComposerGeometry` parsing and validation for `composer.geometry`, per-rule `text_geometry` (every `text_window` and `reserved_rows` form) and per-rule `scroll_marker` in `src/coding_agent/catalog.rs`, with the two catalog-loading errors. <!-- completed: 2026-11-27T14:14 -->
+- [x] Add the `geometry` and `geometry_hold` `composer_evidence` kinds with their parsing and structural provenance checks (§12), the production accessor `ProfileCatalog::composer_geometry(backend, rule_id)` and the selected-rule id on composer text. <!-- completed: 2026-11-27T14:14 -->
+- [x] Add the measured `composer.geometry` to every bundled profile. <!-- completed: 2026-11-27T14:14 -->
+- [x] Table-driven tests: missing and invalid geometry, including unordered or empty step lists and an `uncapped_from` at or below the last step; a per-rule `text_geometry` overriding fit fields, with a minimum in `text_geometry` rejected; provenance accepts the bundled catalog and rejects a mismatched `visible_text_rows`. <!-- completed: 2026-11-27T14:14 -->
 
 ### Step 4: Fit computation
 
-- [ ] Add `unicode-width` as a direct dependency. <!-- completed: -->
-- [ ] Add `src/coding_agent/geometry.rs` with `visible_text_rows`, `fit_rows` (char and word wrap, wide scalars, `wrap_slack_rows`, collapsed paste) and headroom. <!-- completed: -->
-- [ ] Add `Detector::composer_geometry` returning `{rows, cols, text_top, geometry}` from the selected `composer.text` rule, or `None` when no rule or several rules match (§3). <!-- completed: -->
-- [ ] Table-driven tests over generated screens at every §12 size, including `T < 1`, wide scalars at the row edge and words longer than `T`. <!-- completed: -->
+- [x] Add `unicode-width` as a direct dependency. <!-- completed: 2026-11-27T14:14 -->
+- [x] Add `src/coding_agent/geometry.rs` with `visible_text_rows` (each `text_window` form and `reserved_rows` at the live size), `fit_rows` (char and word wrap, `first_row_margin_columns`, wide scalars, `wrap_slack_rows`, collapsed paste) and headroom. <!-- completed: 2026-11-27T14:14 -->
+- [x] Add `Detector::composer_geometry` returning `{rows, cols, geometry}` from the selected `composer.text` rule, or `None` when no rule or several rules match (§3). <!-- completed: 2026-11-27T14:14 -->
+- [x] Add the `geometry` evidence's `V₀` provenance check and the one-rule selection check on every verified-empty fixture (§3, §12). <!-- completed: 2026-11-27T14:14 -->
+- [x] Table-driven tests over generated screens at every §12 size, including `T < 1`, a size below the first step of a step list, wide scalars at the row edge and words longer than their row. <!-- completed: 2026-11-27T14:14 -->
 
 ### Step 5: Preview ladder
 
-- [ ] Add `compact_preview_line`, `cue_preview_line` and `minimal_preview_line` in `src/runtime/preview.rs`, cutting the excerpt in stored text before folding (§4). <!-- completed: -->
-- [ ] Add a rung selector that takes the message, plain limit, live geometry, headroom rule and `preview_typings`, and returns a rung, `composer_too_small` or `composer_geometry_unavailable`. <!-- completed: -->
-- [ ] Use the selector in `select_delivery` for member previews, and rerun it on zero-byte reselection. <!-- completed: -->
-- [ ] Table-driven tests: each rung chosen at its boundary geometry; a second typing skips full and compact; a `\r\n` and a control character on each side of the excerpt cut give the stored-count `N`. <!-- completed: -->
+- [x] Add `compact_preview_line`, `cue_preview_line` and `minimal_preview_line` in `src/runtime/preview.rs`, cutting the excerpt in stored text before folding (§4). <!-- completed: 2026-11-27T14:28 -->
+- [x] Add a rung selector that takes the message, plain limit, live geometry, headroom rule and `preview_typings`, and returns a rung, `composer_too_small` or `composer_geometry_unavailable`. <!-- completed: 2026-11-27T14:28 -->
+- [x] Use the selector in `select_delivery` for member previews, and rerun it on zero-byte reselection. <!-- completed: 2026-11-27T14:28 -->
+- [x] Add the `geometry_hold` evidence's rung-selector provenance check (§12). <!-- completed: 2026-11-27T14:28 -->
+- [x] Table-driven tests: each rung chosen at its boundary geometry; a second typing skips full and compact; a `\r\n` and a control character on each side of the excerpt cut give the stored-count `N`. <!-- completed: 2026-11-27T14:28 -->
 
 ### Step 6: Verification classes and stop causes
 
-- [ ] Replace `ComposerText::matches` with `compare` returning `CompareOutcome`, and update every caller. <!-- completed: -->
-- [ ] Let the pi composer matcher accept a screen-bottom-closed region and add a clipped pi fixture. <!-- completed: -->
-- [ ] Add `composer_clipped` and `composer_unreadable` to `StopCause`, `SCHEMA_SQL` and the stored-enum mapping. <!-- completed: -->
-- [ ] Map window-close outcomes in `arm_pending` and in the Director attempt to the §6 causes. <!-- completed: -->
-- [ ] Tests: clipped-only, scrolled, clipped-and-scrolled, contradicting and unextractable screens for each backend produce the §6 causes, using `V₀` from the pre-submit screen, and never write a submit key. <!-- completed: -->
+- [x] Replace `ComposerText::matches` with `compare` returning `CompareOutcome`, and update every caller. <!-- completed: 2026-11-27T14:52 -->
+- [x] Strip `scroll_marker` matches during extraction and classify a marked region as scrolled (§6). Declare the measured markers on the claude, codex and pi composer-text rules, widen their `start_pattern` and region matchers to open at a marker row. <!-- completed: 2026-11-27T14:52 -->
+- [x] Correct `opencode-composer-text` so that it does not require the blank row above `┃`. <!-- completed: 2026-11-27T14:52 -->
+- [x] Add `composer_clipped` and `composer_unreadable` to `StopCause`, `SCHEMA_SQL` and the stored-enum mapping. <!-- completed: 2026-11-27T14:52 -->
+- [x] Map window-close outcomes in `arm_pending` and in the Director attempt to the §6 causes. <!-- completed: 2026-11-27T14:52 -->
+- [x] Tests: clipped-only, scrolled, clipped-and-scrolled, contradicting and unextractable screens for each backend produce the §6 causes, using the marker or `V₀` from the pre-submit screen, and never write a submit key. <!-- completed: 2026-11-27T14:52 -->
 
 ### Step 7: Geometry hold
 
-- [ ] Add `GateReason::Geometry` (`hold:geometry`) to observation eligibility for unmatched below-minimum screens. <!-- completed: -->
-- [ ] Hold member previews under `composer_too_small` or `composer_geometry_unavailable` with the §3/§5 diagnostics, and queue prompt/exec under the matching `defer_reason`. <!-- completed: -->
-- [ ] Add `DirectorHold::ComposerTooSmall` and `DirectorHold::ComposerGeometryUnavailable` to the Director attempt, replacing `composer_busy` only for below-minimum captures where no Director composer or interaction rule matches (§5). <!-- completed: -->
-- [ ] Suspend the preview and queued-head stall waits while the pane is `below_minimum` or the hold is `composer_too_small`, whatever the eligibility. <!-- completed: -->
-- [ ] Scenario-harness tests: a hold writes zero bytes and publishes no stalled event; a draft in a below-minimum pane starts its stall wait only after a grow; a later grow delivers without Director action. <!-- completed: -->
+- [x] Add `GateReason::Geometry` (`hold:geometry`) to observation eligibility for unmatched below-minimum screens. <!-- completed: 2026-11-27T15:04 -->
+- [x] Hold member previews under `composer_too_small` or `composer_geometry_unavailable` with the §3/§5 diagnostics, and queue prompt/exec under the matching `defer_reason`. <!-- completed: 2026-11-27T15:04 -->
+- [x] Add `DirectorHold::ComposerTooSmall` and `DirectorHold::ComposerGeometryUnavailable` to the Director attempt, replacing `composer_busy` only for below-minimum captures where no Director composer or interaction rule matches (§5). <!-- completed: 2026-11-27T15:04 -->
+- [x] Suspend the preview and queued-head stall waits while the pane is `below_minimum` or the hold is `composer_too_small`, whatever the eligibility. <!-- completed: 2026-11-27T15:04 -->
+- [x] Scenario-harness tests: a hold writes zero bytes and publishes no stalled event; a draft in a below-minimum pane starts its stall wait only after a grow; a later grow delivers without Director action. <!-- completed: 2026-11-27T15:04 -->
 
 ### Step 8: Late submission
 
-- [ ] Add `messages.preview_parked_until` to `SCHEMA_SQL`, and make every member and Director sweep treat a head parked into the future as held. <!-- completed: -->
-- [ ] Add the parked state to the member sweep attempt: set `preview_parked_until` under the lock, release the lock and re-observe every sweep interval under `TestClock`. <!-- completed: -->
-- [ ] Add the same parked state to the Director sweep thread. <!-- completed: -->
-- [ ] Scenario-harness tests for each §6 transition: late `Complete`, `Contradicts`, emptied composer, consumption by poll, window expiry, shutdown, and expiry after parker loss handled by another runner. Include a second runner that never types a parked Director head. <!-- completed: -->
+- [x] Add `messages.preview_parked_until` to `SCHEMA_SQL`, and make every member and Director sweep treat a head parked into the future as held. <!-- completed: 2026-11-27T15:21 -->
+- [x] Add the parked state to the member sweep attempt: set `preview_parked_until` under the lock, release the lock and re-observe every sweep interval under `TestClock`. <!-- completed: 2026-11-27T15:21 -->
+- [x] Add the same parked state to the Director sweep thread. <!-- completed: 2026-11-27T15:21 -->
+- [x] Scenario-harness tests for each §6 transition: late `Complete`, `Contradicts`, emptied composer, consumption by poll, window expiry, shutdown, and expiry after parker loss handled by another runner. Include a second runner that never types a parked Director head. <!-- completed: 2026-11-27T15:21 -->
 
 ### Step 9: Single pointer retry
 
-- [ ] Add `messages.preview_typings` to `SCHEMA_SQL`. Count each typing at the §7 count points, immediately before the first literal byte, refusing at 2, while notified, or while parked. Stamp `notified_at` per §7 in member and Director uncertain handling. <!-- completed: -->
-- [ ] Stamp an exhausted head, and record the abandonment diagnostics including `typings_exhausted`. <!-- completed: -->
-- [ ] Tests: at most two typings per message across two runners delivering to one Director; zero-byte Director ticks and member reservations that return to `ready` leave the count unchanged; an exhausted head is stamped and the next message delivered; newer messages are delivered by the pointer's poll. <!-- completed: -->
+- [x] Add `messages.preview_typings` to `SCHEMA_SQL`. Count each typing at the §7 count points, immediately before the first literal byte, refusing at 2, while notified, or while parked. Stamp `notified_at` per §7 in member and Director uncertain handling. <!-- completed: 2026-11-27T15:30 -->
+- [x] Stamp an exhausted head, and record the abandonment diagnostics including `typings_exhausted`. <!-- completed: 2026-11-27T15:30 -->
+- [x] Tests: at most two typings per message across two runners delivering to one Director; zero-byte Director ticks and member reservations that return to `ready` leave the count unchanged; an exhausted head is stamped and the next message delivered; newer messages are delivered by the pointer's poll. <!-- completed: 2026-11-27T15:30 -->
 
 ### Step 10: Director sweep fit
 
-- [ ] Use the rung selector in the Director attempt with capture geometry and `HERDR_CAPTURE_WIDTH_SLACK`. <!-- completed: -->
-- [ ] Tests: Director captures at every §12 size choose the expected rung or hold. <!-- completed: -->
+- [x] Use the rung selector in the Director attempt with the capture geometry (§3), deriving herdr `cols` from the rect width less `HERDR_PANE_CHROME_COLUMNS` and the widest capture row. <!-- completed: 2026-11-27T15:36 -->
+- [x] Tests: Director captures at every §12 size choose the expected rung or hold, including herdr captures whose PTY is wider and narrower than the rect. <!-- completed: 2026-11-27T15:36 -->
 
 ### Step 11: Reporting and placement
 
-- [ ] Add `geometry` to `ObservationHealth`, its validation, `member show` JSON and text, and the `observation` runtime diagnostic. <!-- completed: -->
-- [ ] Add the `doctor` `member.<id>.geometry` and `fleet.<fleet_id>.director.geometry` rows (§9). <!-- completed: -->
-- [ ] Replace `MIN_PANE_HEIGHT` with the per-backend slot budget in `src/multiplexer/layout.rs` and pass column backends to `choose_slot`. <!-- completed: -->
-- [ ] Tests: health validation, doctor rows for each situation, mixed-backend column admission and the overflow minimum. <!-- completed: -->
+- [x] Add `geometry` to `ObservationHealth`, its validation, `member show` JSON and text, and the `observation` runtime diagnostic. <!-- completed: 2026-11-27T23:32 -->
+- [x] Add the `doctor` `member.<id>.geometry` and `fleet.<fleet_id>.director.geometry` rows (§9), the Director row deriving its geometry as the Director sweep does. <!-- completed: 2026-11-27T23:32 -->
+- [x] Replace `MIN_PANE_HEIGHT` with the per-backend, per-multiplexer slot budget in `src/multiplexer/layout.rs` and pass column backends and the multiplexer to `choose_slot`. <!-- completed: 2026-11-27T23:32 -->
+- [x] Tests: health validation, doctor rows for each situation, mixed-backend column admission on tmux and herdr and the overflow minimum. <!-- completed: 2026-11-27T23:32 -->
 
 ### Step 12: Native fixtures
 
-- [ ] Capture the §12 matrix for every bundled profile on tmux and herdr. <!-- completed: -->
-- [ ] Add the captures to each profile's `screens` with the evidence §12 assigns to their size (`geometry` and `unsubmitted_literal` at typeable sizes, `geometry_hold` otherwise), and cite them from the plans. <!-- completed: -->
-- [ ] Confirm provenance validation passes with the captured fixtures. <!-- completed: -->
+- [x] Capture the §12 matrix for every bundled profile on tmux and herdr: `empty`, `one`, `v0` and `partial` at each typeable cell and one `hold` screen at every other cell, in idle and working state. <!-- completed: 2026-11-28T04:44 -->
+- [x] Capture and cite the native fixtures for the Step 6 rule changes: a scrolled screen per marked rule (claude, codex and pi) and opencode short-pane screens at 9x80 and 12x80 covering the probe-event-5 screen. <!-- completed: 2026-11-28T04:44 -->
+- [x] Capture working-state fixtures for opencode, pi and hermes (both rules) with a probe whose preset allows the working command (answering pi's member gate) and, for Hermes, working provider credentials. Replace the provisional `transient_rows` with the measured values, re-derive every provisional rung size from them with §3, and record a Hermes working state that still cannot be produced as a known gap in the final report. <!-- completed: 2026-11-28T04:44 -->
+- [x] Add the captures to each profile's `screens` with the evidence §12 assigns to their size (`geometry` and `unsubmitted_literal` at typeable sizes, `geometry_hold` otherwise), and cite them from the plans. <!-- completed: 2026-11-28T04:44 -->
+- [x] Add the per-multiplexer fixture-matrix check over the prompt plan's citations, `composer geometry for <backend> requires measured fixtures on <multiplexer>` (§12). <!-- completed: 2026-11-28T04:44 -->
+- [x] Confirm provenance validation passes with the captured fixtures. <!-- completed: 2026-11-28T04:44 -->
 
 ### Step 13: Validation
 
-- [ ] Run `mise //:test`. <!-- completed: -->
-- [ ] Run `mise //:lint`. <!-- completed: -->
-- [ ] Run `mise //docs:build`. <!-- completed: -->
-- [ ] Reinstall the CLI and repeat the issue #660 reproduction, confirming every Success Criterion that a live fleet observes. <!-- completed: -->
-- [ ] Re-run the Director delivery probe on tmux and herdr for each Director-eligible backend and update `SPEC.md` § Role eligibility dates. <!-- completed: -->
+- [x] Run `mise //:test`. <!-- completed: 2026-11-28T04:51 -->
+- [x] Run `mise //:lint`. <!-- completed: 2026-11-28T04:51 -->
+- [x] Run `mise //docs:build`. <!-- completed: 2026-11-28T04:51 -->
+- [x] Build the CLI and repeat the issue #660 reproduction with it, confirming every Success Criterion that a live fleet observes. <!-- completed: 2026-11-28T08:03 -->
+- [x] Re-run the Director delivery probe on tmux and herdr for each Director-eligible backend and update `SPEC.md` § Role eligibility dates. <!-- completed: 2026-11-28T07:38 -->
+
+The live acceptance used workspace release builds and fresh SQLite databases in isolated tmux servers and herdr sessions. The installed CLI remained on its original schema.
+
+#### Resumption evidence
+
+The resumed run used tmux 3.8, herdr 0.9.5 and isolated databases under `/tmp/cf248r` with a workspace release build. `results.jsonl` in that directory records message IDs, measured geometry, delivery stamps, typing counts and diagnostics. Screen captures and SQLite receipts provide the matching evidence.
+
+`mise //:test` finished with 1,583 passed and 11 ignored. `mise //:lint`, `mise //docs:build`, `mise //:build` and `git diff --check` passed on the resumed change.
+
+| Area | Observation |
+|---|---|
+| Wrapped literal | The inherited databases contained `literal_mismatch` for Codex at 9×80 and for Claude and pi at 12×80. These bodies ended with a space that the pre-submit renderer hid at a wrap along with the separator. The comparison now accepts spaces hidden at a word-wrap boundary and preserves visible spaces within a row. |
+| Custom status rows | Claude Code 2.1.327 parked a 337-character preview at 24×80 with either 3 or 8 configured status rows. The adjusted fit sent one compact preview for 3 rows and one cue for 8 rows, both with a submission stamp and without parking. At 12×80 the native rendered two of the configured rows, and at 9×80 it hid the status rows. The 90-character probes submitted at both sizes. |
+| Hold and grow | A Claude member at 2×10 on tmux and 4×40 on herdr held a preview under `composer_too_small` with zero typings, then submitted it after a grow. `doctor` showed member and Director geometry, and `member show` cleared `below_minimum`. A Claude prompt and exec each queued at 9×80 and appeared as submitted in their receipts after growing to 28×120. |
+| Verified late submission | The tmux runner parked a preview after the pane shrank between its first typing and the submit key. Growing the pane produced a submission stamp at a typing count of one. |
+| Retry cap | Two deliberate tmux settle-window edits yielded two typings, an abandonment diagnostic and a message still available to poll. A separate storage test covers the Director's atomic second-outcome stamp and park clear. |
+| Issue #660 replay | In `herdr-claude-660-queue-fixed.db`, five Claude members stayed in one column at 9–10×89 after a resize. Messages 1–5 were sent while idle. Messages 6–10 were accepted by the native queue while the members were running a foreground exec. All ten were submitted once and consumed, with no input delivery events. Before the queue confirmation fix, each working preview reported `submit_unconfirmed` and was typed twice after its native command ended. |
+| Director busy burst | The tmux Claude Director kept a 65-second foreground command running. It received a preview while the command ran and polled all 12 messages after completion. The first two had one typing each and the rest were consumed before their previews were typed. |
+| Zoomed Director capture | A 120-column PTY reported a 60-column herdr layout rectangle. Earlier replay held Claude and recorded `literal_mismatch` on Codex. Replaying at the observed row width allowed both to submit with one typing. Claude also polled its idle preview, held an operator draft for ten seconds and polled the next preview once the draft was cleared. |
+| Idle member samples | Native herdr PTYs submitted 29 of 30 sampled short and long previews across the bundled member backends. One OpenCode sample had no submission stamp. The actual captured dimensions varied with pane borders and toolbars, so these samples cover selected points of the matrix. |
+| Hermes TUI retry | Launching the native TUI with the configured Nous provider recovered from the OpenRouter gateway error without changing the default configuration. Idle, draft hold, full, compact, settle race and a 12-message busy burst passed on tmux and herdr. The probe records are in `/tmp/cf248-hermes/results.jsonl`. |
+| Wrapped Claude queue | A working Director at 120 columns displayed a two-row queue echo immediately before the native queue notice. The runner now verifies the complete echo and still requires a fresh drain and absence of that echo before submit. The tmux replay consumed all 12 messages; the first was submitted once with zero diagnostics. |
+| Codex input limit | The herdr probe rendered exactly 1024 UTF-8 bytes and clipped the final two ASCII characters when an earlier literal included a three-byte ellipsis. Director planning now applies the 1024-byte limit on both multiplexers. |
+| Member matrix | All 160 cases passed across five backends and both multiplexers, including all 32 Claude cases on the margin-adjusted build. At 12×120, Claude submitted its 430- and 4000-character bodies as compact previews with one typing, idle and during a foreground command. The evidence and replay notes are in `/tmp/cf248-mx-evidence.md`. |
+| Director probe rechecks | Claude, Codex, OpenCode and pi passed the standard probe on both multiplexers. The Codex herdr replay at 37×92 passed the 4000-character compact probe with one typing. At 21×80, a full tmux preview sometimes scrolled and parked; growing the pane submitted it at the original typing count. The Claude herdr 24×80 and 18×120 full-threshold probes submitted successfully but used shorter forms in zoomed panes with narrower layout rectangles. Raw results are under `/tmp/cf248-dir` and `/tmp/cf248-rest`. |
+| Hermes approval | Hermes TUI renders the standard composer prefix for a profile named `custom`. A temporary profile with that name and manual approvals held message 1 at zero typings while the dialog was open, then submitted and polled it with one typing after denial, on tmux and herdr. Both disposable markers remained present. |
+| Exact Director thresholds | Claude passed all four sizes on tmux and on unzoomed herdr. Codex passed the 18×120 full and both compact sizes on unzoomed herdr. Build `9f30f4a0` selected compact at 21×80 and full at 24×80, with one typing and native poll completion on both multiplexers. A clean tmux replay also passed full at 18×120. Hermes TUI passed the two full and two compact sizes on both multiplexers, messages 2–5 in each manual interaction fixture. |
+| tmux literal chunks | tmux 3.8 consumed the semicolon at scalar 256 of a compact preview on OpenCode at 5×120. Passing a backslash immediately before the terminal semicolon preserves it, including when the input already contains consecutive semicolons or a backslash. The tmux transport applies this escaping to each literal chunk. |
+| Director render timing | The first sampled frame containing the exact busy Codex draft on tmux arrived 32 ms after the old verification window closed. The Director now observes for up to 2 s after settle, bounded by the same attempt deadline and the reserved post-submit budget. |
+| Director first render | On build `87dcaf43`, Codex on tmux at 38×120 retained its empty placeholder across two captures after typing. The 4,000-character body yielded an 848-character excerpt and a 3,152-character remainder. The preview was typed once, stamped, and consumed by the native poll with zero diagnostics. The Director late-submission regression additionally verifies the same transition after the preview has already parked. |
+| Final working thresholds | Claude and Codex passed all 16 Director threshold replays across tmux and herdr, including the two 18×120 Codex full replays on `cc884c18`. OpenCode and pi passed all 32 idle and working threshold cases, including the OpenCode semicolon replays at 5×120 on `783c5beb`. Hermes TUI stamped the exact thresholds while its foreground command ran on both multiplexers. An existing native queue can consume additional pane rows, so the focused retries started with the native queue empty. The receipts are indexed in `/tmp/cf248-dir-evidence.md`, `/tmp/cf248-rest-thresholds.md`, and `/tmp/cf248-hermes/results.jsonl`. |
+| Standalone exec and automated checks | A standalone Claude exec at 9×80 on each multiplexer queued under `composer_too_small` and settled after growing to 28×120, operation 9 in each v4 matrix database. The final full suite passed 1,593 tests with 11 ignored. All nine Director late-submission tests passed, including single-write delayed rendering and deliberate draft clearance. Clippy and the release and documentation builds passed. |
 
 ---
 
@@ -491,3 +595,7 @@ The existing `director delivery: message <id> uncertain: <cause>` row gains the 
 | 2026-11-27 | Initial draft |
 | 2026-11-27 | Review round 1: rung-based and rung-size criteria; profile-level minimums; `text_top` from the selected `composer.text` rule; stored-text excerpt cut; stall suspension by pane size; Director `composer_too_small` hold and doctor row; `V₀` for `Partial`; durable park (`preview_parked_until`) and typing count (`preview_typings`); typeable-size fixture evidence |
 | 2026-11-27 | Review round 2: `B_full` from the plain limits; Director `composer_too_small` limited to unmatched below-minimum screens; typings counted immediately before the first literal byte; exhausted heads stamped |
+| 2026-11-27 | Step 1 tmux measurements: every composer fitted as bottom-bounded (`anchor`, `rows_below_text` and `text_top` removed); `text_window` replaces `max_text_rows` and `pane_fraction`; per-size `reserved_rows`; `first_row_margin_columns`; per-rule `scroll_marker`; opencode composer-text rule correction; measured values and `B_full` recorded |
+| 2026-11-27 | Step 1 close: confirmed root cause; herdr capture geometry from `viewport_rows` and `HERDR_PANE_CHROME_COLUMNS` replacing the width slack; per-multiplexer slot budget; per-multiplexer fixture sizes; measured `transient_rows`, minimums and rung sizes, with provisional values settled by a new Step 12 working-state task |
+| 2026-11-28 | Step 12 scope: the fixture matrix keeps every multiplexer, size and state and drops the per-rung screens; each typeable cell requires `empty`, `one`, `v0` and `partial`, every other cell one `hold` screen; the matrix applies to the prompt plan only; capture names carry the composer, state and kind |
+| 2026-11-28 | Step 12 measurements: pi `wrap_slack_rows` 1 with the `R − wrap_slack_rows ..= R` provenance range and `reserved_rows` 6 from 7 rows; Hermes `min_columns` 64, classic `reserved_rows` `[[5, 2]]`, `fit_wrap` `char` and a 4-cell first row; new fit fields `carried_space` and `fit_wrap`; measured `transient_rows` 0 for opencode, pi and Hermes classic; per-cell typeability; unreadable partial evidence; herdr scrollbar column; the Hermes TUI working gap |
