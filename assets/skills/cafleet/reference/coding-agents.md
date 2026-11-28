@@ -102,7 +102,7 @@ Sources: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pr
 | `{reviewer_model}` | `gpt-6.2-astra` |
 | `{reviewer_effort}` | `high` |
 | `{other_model}` | `gpt-6.2-sol` |
-| `{other_effort}` | `xhigh` |
+| `{other_effort}` | `medium` |
 
 ### Model catalog
 
