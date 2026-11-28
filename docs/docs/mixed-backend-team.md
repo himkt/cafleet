@@ -63,7 +63,7 @@ The send persists the assignment and reports how the runner delivered its previe
 
 ### Receive results
 
-Each message addressed to the Director arrives in its pane as one `[cafleet msg ID from SENDER TIMESTAMP]` preview, typed by a live member runner of the fleet, oldest first across senders. A preview starts a turn when the Director is idle, and on each one the Director runs its poll once:
+Each message addressed to the Director arrives in its pane as one preview opening with `[cafleet msg ID …]`, typed by a live member runner of the fleet, oldest first across senders. The preview is the full message when the pane fits it, and otherwise a shorter form down to `[cafleet msg ID]` alone ([Pane size](concepts/members.md#pane-size)). A preview starts a turn when the Director is idle, and on each one, whatever its form, the Director runs its poll once:
 
 ```bash
 cafleet message poll 2 --json

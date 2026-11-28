@@ -118,6 +118,7 @@ dependencies = [
  "sha2",
  "signal-hook",
  "tempfile",
+ "unicode-width",
  "vt100",
 ]
 

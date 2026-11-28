@@ -29,7 +29,7 @@ A Director backend needs two capabilities, checked independently: goal lifecycle
 | `hermes` | The TUI client, `hermes chat --tui` | Waits for the end of the turn | Native `/goal` |
 | `pi` | Plain `pi` from the project directory | Waits for the end of the turn | The CAFleet pi extension's `/cafleet-goal` command |
 
-A draft in the Director's composer or an open dialog in its pane holds every preview until you clear the draft or answer the dialog, so keep the composer clear between turns. Keep the Director pane at least 80 columns wide (and, for pi and the Hermes TUI, at least 24 rows tall): a narrower pane can scroll or clip a long preview, which then stays in the composer unsent until you clear it. [Receive results](../mixed-backend-team.md#receive-results) covers the points where the Director polls by hand.
+A draft in the Director's composer or an open dialog in its pane holds every preview until you clear the draft or answer the dialog, so keep the composer clear between turns. Each preview is fitted to the Director pane's current size, so a small pane receives a shorter form that still asks for `message poll`, and a pane too small for any form waits until it grows ([Pane size](members.md#pane-size)); `cafleet doctor` warns about a Director pane below its backend's minimum. A herdr tab that is not on screen keeps the size it last had on screen, so a preview into a hidden Director tab can be shorter than the tab's layout suggests. [Receive results](../mixed-backend-team.md#receive-results) covers the points where the Director polls by hand.
 
 The shared OpenCode background service passes no client environment to plugins, so it is not a supported Director launch.
 
@@ -81,7 +81,7 @@ Evidence of insufficient capability can trigger a replacement with a strictly st
 
 The backends differ in reasoning effort, pane titles and sandbox isolation, as the [backend capabilities table](https://github.com/himkt/cafleet/blob/main/SPEC.md#backend-capabilities) compares. herdr labels every member pane with its member ID and name and tmux titles it, though an agent may retitle a tmux pane; `cafleet member list` shows each member's `window` and `pane_id`.
 
-A backend whose measured plain-input limit is below the longest preview receives long previews by bracketed paste or a short pointer to the poll that reads the full message; the [bundled profile contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the measured values.
+A backend whose measured plain-input limit is below the longest preview receives long previews by bracketed paste or a short pointer to the poll that reads the full message, and every preview is fitted to the pane's size ([Pane size](members.md#pane-size)); the [bundled profile contract](https://github.com/himkt/cafleet/blob/main/SPEC.md#bundled-profiles-and-native-screen-fixtures) owns the measured values.
 
 A Hermes member's session can keep accepted work and background processes running after its pane's client exits. `cafleet member delete` stops that session's work and registered background processes, keeping the member when it cannot verify the stop; CAFleet never touches your Hermes gateway or sessions it does not own.
 

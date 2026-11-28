@@ -268,7 +268,7 @@ The host owns continuation, native tools and user gates; you collect broker, art
 
 ### Director wake
 
-Each `[cafleet msg ID from SENDER TIMESTAMP]` preview that the fleet's member runners type into your pane is a wake; [Director previews](../reference/cli.md#director-previews) owns its form, hold conditions and manual poll points. Previews never start, pause, clear or re-budget a host goal.
+Each preview that the fleet's member runners type into your pane is a wake that calls for one `message poll`, whatever its form, from the full `[cafleet msg ID from SENDER TIMESTAMP] …` line down to a bare `[cafleet msg ID]`; [Director previews](../reference/cli.md#director-previews) owns its form, hold conditions and manual poll points. Previews never start, pause, clear or re-budget a host goal.
 
 1. On each preview, run `cafleet message poll <director-member-id> --json` once, plus the fleet's non-default `--database-url`. A `[]` result means an earlier poll consumed the messages; deduplicate repeated previews by message ID.
 2. Before any other command after a poll, record every returned message's ID, sender, required action and artifact pointers in host-owned state (`message show MESSAGE_ID --json` rereads one), then dispatch ready work. Poll mid-turn as work requires and once before reporting completion.

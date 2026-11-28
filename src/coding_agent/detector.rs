@@ -3,6 +3,7 @@ use crate::coding_agent::AnswerPlan;
 use crate::coding_agent::CodingAgent;
 use crate::coding_agent::catalog::Capture;
 use crate::coding_agent::catalog::ComposerText;
+use crate::coding_agent::catalog::ComposerTextSpec;
 use crate::coding_agent::catalog::CursorRule;
 use crate::coding_agent::catalog::FocusStyle;
 use crate::coding_agent::catalog::MarginRows;
@@ -13,6 +14,9 @@ use crate::coding_agent::catalog::Region;
 use crate::coding_agent::catalog::Rule;
 use crate::coding_agent::catalog::ScreenSelector;
 use crate::coding_agent::catalog::SuggestionStyle;
+use crate::coding_agent::catalog::matches_word_wrapped_rows;
+use crate::coding_agent::geometry::Headroom;
+use crate::coding_agent::geometry::LiveComposer;
 use crate::error::CafleetError;
 use crate::error::Result;
 use crate::runtime::ScreenSnapshot;
@@ -298,6 +302,38 @@ fn captured(
         .cloned()
 }
 type Candidate = (usize, usize, ScreenRegion);
+
+/// The profile's `composer.text` rules, in declaration order.
+fn composer_text_rules<'a>(profile: &'a Profile, spec: &ComposerTextSpec) -> Vec<&'a Rule> {
+    spec.rule_ids
+        .iter()
+        .map(|id| {
+            profile
+                .rules
+                .iter()
+                .find(|rule| &rule.id == id)
+                .expect("validated composer text rule")
+        })
+        .collect()
+}
+
+/// The one rule of `rules` matching `screen`, with its region; `None` when no rule or several
+/// rules match.
+fn selected_composer_rule<'a>(
+    profile: &Profile,
+    rules: &[&'a Rule],
+    screen: &ScreenSnapshot,
+) -> Result<Option<(&'a Rule, ScreenRegion)>> {
+    let lines = ScreenLines::new(screen, profile)?;
+    let mut regions = rules
+        .iter()
+        .filter_map(|rule| match_rule(rule, screen, lines.of(rule)).map(|m| (*rule, m.region)));
+    Ok(match (regions.next(), regions.next()) {
+        (Some(selected), None) => Some(selected),
+        _ => None,
+    })
+}
+
 /// The row after a composer region's last composer row: a `composer_text` region's end-pattern
 /// row is not composer text.
 fn composer_bottom(rule: &Rule, region: ScreenRegion, screen: &ScreenSnapshot) -> Result<u16> {
@@ -309,6 +345,22 @@ fn composer_bottom(rule: &Rule, region: ScreenRegion, screen: &ScreenSnapshot) -
             region.bottom
         },
     )
+}
+
+fn claude_reserved_rows(
+    rule: &Rule,
+    region: ScreenRegion,
+    screen: &ScreenSnapshot,
+) -> Result<Option<u16>> {
+    if composer_bottom(rule, region, screen)? == region.bottom {
+        return Ok(None);
+    }
+    for row in (region.bottom..screen.rows).rev() {
+        if !typed_row(screen, row, &[])?.is_empty() {
+            return Ok(Some(2 + (row + 1 - region.bottom)));
+        }
+    }
+    Ok(Some(2))
 }
 /// Without a cursor, the live composer is the composer region whose composer rows end lowest on
 /// the screen; a composer-shaped region above it belongs to the transcript.
@@ -841,22 +893,8 @@ impl Detector {
         let Some(spec) = &profile.composer_text else {
             return Ok(None);
         };
-        let rules = spec
-            .rule_ids
-            .iter()
-            .map(|id| {
-                profile
-                    .rules
-                    .iter()
-                    .find(|rule| &rule.id == id)
-                    .expect("validated composer text rule")
-            })
-            .collect::<Vec<_>>();
-        let lines = ScreenLines::new(screen, profile)?;
-        let mut regions = rules
-            .iter()
-            .filter_map(|rule| match_rule(rule, screen, lines.of(rule)).map(|m| (rule, m.region)));
-        let (Some((rule, region)), None) = (regions.next(), regions.next()) else {
+        let rules = composer_text_rules(profile, spec);
+        let Some((rule, region)) = selected_composer_rule(profile, &rules, screen)? else {
             return Ok(None);
         };
         let text_bottom = composer_bottom(rule, region, screen)?;
@@ -867,7 +905,73 @@ impl Detector {
         let rows = (region.top..text_bottom)
             .map(|row| typed_row(screen, row, &styles))
             .collect::<Result<Vec<_>>>()?;
-        Ok(spec.read(rule, region, &rows))
+        let window = profile
+            .composer_geometry(&rule.id)
+            .map(|geometry| geometry.visible_text_rows(screen.rows, Headroom::Zero));
+        let codex = self.backend == CodingAgent::Codex && rule.id == "codex-composer-text";
+        let can_mark_scroll = |index| {
+            if !codex {
+                return true;
+            }
+            let row = region.top + u16::try_from(index).expect("text rows fit in u16");
+            screen
+                .painted_cols
+                .checked_sub(1)
+                .and_then(|column| screen.screen.cell(row, column))
+                .is_some_and(|cell| cell.dim() && matches!(cell.contents(), "↑" | "↓"))
+        };
+        Ok(spec.read(
+            rule,
+            region,
+            &rows,
+            text_bottom == screen.rows,
+            window,
+            can_mark_scroll,
+        ))
+    }
+    /// The live size of `screen` and the effective geometry of the one `composer.text` rule
+    /// matching it; `None` when the profile reads no composer text or declares no geometry, or
+    /// when no rule or several rules match.
+    pub(crate) fn composer_geometry(
+        &self,
+        screen: &ScreenSnapshot,
+    ) -> Result<Option<LiveComposer>> {
+        let Some(profile) = &self.profile else {
+            return Ok(None);
+        };
+        let Some(spec) = &profile.composer_text else {
+            return Ok(None);
+        };
+        let rules = composer_text_rules(profile, spec);
+        let Some((rule, region)) = selected_composer_rule(profile, &rules, screen)? else {
+            return Ok(None);
+        };
+        let Some(geometry) = profile.composer_geometry(&rule.id) else {
+            return Ok(None);
+        };
+        let measured_reserved_rows = match self.backend {
+            CodingAgent::Claude => claude_reserved_rows(rule, region, screen)?,
+            _ => None,
+        };
+        Ok(Some(LiveComposer {
+            rows: screen.rows,
+            cols: screen.cols,
+            geometry,
+            wrap: spec.wrap_of(rule),
+            measured_reserved_rows,
+            // Claude can wrap an ellipsis that lands in the last measured text column.
+            wrap_margin_columns: u16::from(self.backend == CodingAgent::Claude),
+            visible_rows_cap: (self.backend == CodingAgent::Codex
+                && rule.id == "codex-composer-text")
+                .then(|| {
+                    // The owned transcript caps the composer at two-thirds of the pane or eight
+                    // rows, including the textarea's top and bottom insets.
+                    let composer_rows = ((u32::from(screen.rows) * 2 / 3) as u16)
+                        .max(8)
+                        .min(screen.rows);
+                    composer_rows.saturating_sub(2)
+                }),
+        }))
     }
     pub(crate) fn observe(&self, screen: &ScreenSnapshot) -> Result<ScreenObservation> {
         self.observe_where(screen, |profile, rule| {
@@ -878,6 +982,46 @@ impl Detector {
                     .any(|cap| cap.rules.contains(&rule.id))
         })
     }
+
+    pub(crate) fn has_queued_preview(
+        &self,
+        screen: &ScreenSnapshot,
+        literal: &str,
+    ) -> Result<bool> {
+        if self.backend != CodingAgent::Claude {
+            return Ok(false);
+        }
+        let lines = clipped_logical_lines(screen, &BTreeMap::new())?;
+        for (index, notice) in lines.iter().enumerate() {
+            if notice.start != notice.end
+                || !matches!(
+                    notice.text.trim_end_matches(' '),
+                    "  ⎿  Queued · ctrl+enter to send now"
+                        | "  ⎿  Queued · ctrl+x ctrl+s to send now"
+                )
+            {
+                continue;
+            }
+            let mut rows = Vec::new();
+            for line in lines[..index].iter().rev() {
+                let text = line.text.trim_end_matches(' ');
+                if let Some(first) = text.strip_prefix("❯ ") {
+                    rows.push(first);
+                    rows.reverse();
+                    if matches_word_wrapped_rows(literal, &rows) {
+                        return Ok(true);
+                    }
+                    break;
+                }
+                let Some(continuation) = text.strip_prefix("  ") else {
+                    break;
+                };
+                rows.push(continuation);
+            }
+        }
+        Ok(false)
+    }
+
     /// Observes a Director screen over `composer_rules` plus every interaction rule.
     pub(crate) fn observe_director(
         &self,
@@ -996,6 +1140,22 @@ pub(crate) mod test_support {
     use crate::runtime::TerminalState;
 
     impl Detector {
+        /// The id of the one `composer.text` rule `screen` selects, or `None` when none or
+        /// several match.
+        pub(crate) fn selected_composer_text_rule(
+            &self,
+            screen: &ScreenSnapshot,
+        ) -> Result<Option<String>> {
+            let Some(profile) = &self.profile else {
+                return Ok(None);
+            };
+            let Some(spec) = &profile.composer_text else {
+                return Ok(None);
+            };
+            let rules = composer_text_rules(profile, spec);
+            Ok(selected_composer_rule(profile, &rules, screen)?.map(|(rule, _)| rule.id.clone()))
+        }
+
         /// Observes `screen` and matches the one `plan` against it; a plan of another backend
         /// or request rule than the observation, which production never offers, matches nothing.
         pub(crate) fn match_answer(
@@ -1304,6 +1464,62 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn codex_scroll_arrows_use_the_faint_gutter_cell() {
+        use crate::coding_agent::CodingAgent;
+        use crate::coding_agent::catalog::{CompareOutcome, ProfileCatalog};
+        use crate::coding_agent::detector::{Detector, test_support::screen_of};
+
+        let detector = Detector::new(ProfileCatalog::bundled(), CodingAgent::Codex, None);
+        let read = |draft: &str, decoration: &str| {
+            let paint = format!("\x1b[?1049h\x1b[20;1H› {draft}{decoration}\x1b[20;7H");
+            detector
+                .composer_text(&screen_of(paint.as_bytes()))
+                .unwrap()
+                .unwrap()
+        };
+        let arrow = read("move ↑", "");
+        assert_eq!(arrow.compare(&["move ↑"]), CompareOutcome::Complete);
+        assert_eq!(arrow.compare(&["move"]), CompareOutcome::Contradicts);
+        for arrow in ['↑', '↓'] {
+            let gutter = format!("\x1b[20;80H\x1b[2m{arrow}\x1b[0m");
+            assert_eq!(
+                read("move", &gutter).compare(&["move"]),
+                CompareOutcome::Partial
+            );
+        }
+    }
+
+    #[test]
+    fn codex_reads_the_scroll_gutter_of_a_narrower_herdr_pty() {
+        use crate::coding_agent::CodingAgent;
+        use crate::coding_agent::catalog::{CompareOutcome, ProfileCatalog};
+        use crate::coding_agent::detector::Detector;
+        use crate::multiplexer::ScreenCapture;
+        use crate::runtime::TerminalState;
+
+        let detector = Detector::new(ProfileCatalog::bundled(), CodingAgent::Codex, None);
+        for (body, expected) in [
+            (
+                format!("{:<79}\x1b[2m↑\x1b[0m\n\n", "› move"),
+                CompareOutcome::Partial,
+            ),
+            (format!("{:<80}\n\n", "› move"), CompareOutcome::Complete),
+        ] {
+            let screen = TerminalState::replay(&ScreenCapture {
+                rows: 12,
+                cols: 122,
+                cursor: None,
+                alternate_screen: None,
+                body,
+            })
+            .unwrap();
+            assert_eq!((screen.cols, screen.painted_cols), (122, 80));
+            let text = detector.composer_text(&screen).unwrap().unwrap();
+            assert_eq!(text.compare(&["move"]), expected);
+        }
+    }
+
     use crate::broker::runtime::InteractionClass;
     use crate::broker::runtime::PermissionDecision;
     use crate::coding_agent::catalog::test_support::synthetic_definitions as definitions;
@@ -6052,6 +6268,71 @@ mod tests {
         }
     }
 
+    mod claude_footer_fit {
+        use crate::coding_agent::catalog::LiteralFraming;
+        use crate::coding_agent::detector::tests::*;
+
+        #[test]
+        fn verified_claude_borders_bound_the_footer_without_increasing_fit() {
+            let cases = [
+                ("normal footer", "───", "mode\r\nstatus", Some(4), 7),
+                ("border without a footer", "───", "", Some(2), 7),
+                (
+                    "three custom rows and mode",
+                    "───",
+                    "custom 0\r\ncustom 1\r\ncustom 2\r\nmode",
+                    Some(6),
+                    5,
+                ),
+                (
+                    "gap above the last nonblank row",
+                    "───",
+                    "custom 0\r\n\r\n\r\nmode",
+                    Some(6),
+                    5,
+                ),
+                (
+                    "eight custom rows",
+                    "───",
+                    "custom 0\r\ncustom 1\r\ncustom 2\r\ncustom 3\r\ncustom 4\r\ncustom 5\r\ncustom 6\r\ncustom 7",
+                    Some(10),
+                    1,
+                ),
+                (
+                    "missing closing border",
+                    "",
+                    "custom 0\r\ncustom 1\r\ncustom 2\r\nmode",
+                    None,
+                    7,
+                ),
+            ];
+            let detector = Detector::new(ProfileCatalog::bundled(), CodingAgent::Claude, None);
+            for (name, border, footer, measured, capacity) in cases {
+                let bytes = format!("\x1b[10;1H───\r\n❯\u{a0}\r\n{border}\r\n{footer}\x1b[11;3H");
+                let live = detector
+                    .composer_geometry(&screen_of(bytes.as_bytes()))
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{name}: the composer selects its text rule"));
+                assert_eq!(live.measured_reserved_rows, measured, "{name}");
+                let fits = |rows: usize| {
+                    live.fits(
+                        &"x".repeat((rows - 1) * 75 + 1),
+                        LiteralFraming::Plain,
+                        Headroom::Transient,
+                    )
+                };
+                assert!(fits(capacity), "{name}: {capacity} rows fit");
+                assert!(!fits(capacity + 1), "{name}: {capacity} rows is the limit");
+            }
+            assert!(
+                detector
+                    .composer_geometry(&screen_of(b""))
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
     mod cursor_free {
         use crate::coding_agent::detector::tests::*;
 
@@ -6303,38 +6584,32 @@ mod tests {
                 }
                 let (detector, rules) = director_detector(backend);
                 let (idle, drafted) = herdr_director_screens(backend);
-                let empty_box = idle
-                    .iter()
-                    .find_map(|id| {
-                        let screen = replay_as_captured(id, |_| {}, None);
-                        let observation = detector.observe_director(&screen, &rules).unwrap();
-                        (observation.kind == ObservationKind::ComposerEmpty).then(|| {
-                            let region = observation.matched_region.expect("an empty region");
-                            fixture_lines(id)[usize::from(region.top)..usize::from(region.bottom)]
-                                .to_vec()
-                        })
-                    })
-                    .unwrap_or_else(|| {
-                        let observed = idle
-                            .iter()
-                            .map(|id| {
-                                let screen = replay_as_captured(id, |_| {}, None);
-                                let observation =
-                                    detector.observe_director(&screen, &rules).unwrap();
-                                format!(
-                                    "{id}: {:?} {} {:?}",
-                                    observation.kind,
-                                    observation.rule_id,
-                                    observation.matched_region
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        panic!("{backend:?}: a cursor-free idle Director screen classifies empty: {observed:?}")
+                let mut empty_boxes = std::collections::BTreeMap::<String, Vec<String>>::new();
+                for id in &idle {
+                    let screen = replay_as_captured(id, |_| {}, None);
+                    let observation = detector.observe_director(&screen, &rules).unwrap();
+                    if observation.kind != ObservationKind::ComposerEmpty {
+                        continue;
+                    }
+                    let Some(rule) = detector.selected_composer_text_rule(&screen).unwrap() else {
+                        continue;
+                    };
+                    let region = observation.matched_region.expect("an empty region");
+                    empty_boxes.entry(rule).or_insert_with(|| {
+                        fixture_lines(id)[usize::from(region.top)..usize::from(region.bottom)]
+                            .to_vec()
                     });
+                }
                 assert!(
                     !drafted.is_empty(),
                     "{backend:?}: a drafted Director screen"
                 );
+                const NO_BOX_OF_ITS_RULE: &str =
+                    "no idle screen of its composer.text rule classifies empty";
+                const BOX_OVERWRITES_THE_DRAFT: &str = "the screen is too short for the box, or an overlaid row shows the drafted literal";
+                let files = crate::coding_agent::catalog::test_support::bundled_files();
+                let mut skipped = Vec::new();
+                let mut paired = Vec::new();
                 for id in drafted {
                     let alone = replay_as_captured(&id, |_| {}, None);
                     assert_ne!(
@@ -6342,6 +6617,37 @@ mod tests {
                         ObservationKind::ComposerEmpty,
                         "{id}: the drafted composer is not empty"
                     );
+                    let Some(empty_box) = detector
+                        .selected_composer_text_rule(&alone)
+                        .unwrap()
+                        .and_then(|rule| empty_boxes.get(&rule))
+                    else {
+                        skipped.push((id, NO_BOX_OF_ITS_RULE));
+                        continue;
+                    };
+                    let records = crate::coding_agent::catalog::test_support::pre_submit_records(
+                        &files[backend.name()]["screens"][&id],
+                    )
+                    .unwrap();
+                    let literal = &records
+                        .iter()
+                        .find(|record| record.operation == ComposerOperation::Prompt)
+                        .unwrap_or_else(|| panic!("{id}: a drafted prompt literal"))
+                        .literal;
+                    let head = literal.trim_start().chars().take(8).collect::<String>();
+                    let lines = fixture_lines(&id);
+                    let overlaid = lines.get(1..=empty_box.len());
+                    if overlaid.is_some_and(|rows| !rows.iter().any(|row| row.contains(&head))) {
+                        paired.push((id, empty_box.clone()));
+                    } else {
+                        skipped.push((id, BOX_OVERWRITES_THE_DRAFT));
+                    }
+                }
+                assert!(
+                    !paired.is_empty(),
+                    "{backend:?}: a drafted Director screen paired with an empty box of its rule; skipped: {skipped:?}"
+                );
+                for (id, empty_box) in paired {
                     let boxed = replay_as_captured(
                         &id,
                         |lines| {
@@ -6358,7 +6664,7 @@ mod tests {
                     assert_ne!(
                         detector.observe_director(&boxed, &rules).unwrap().kind,
                         ObservationKind::ComposerEmpty,
-                        "{id}: an empty-shaped box above the drafted composer"
+                        "{id}: an empty-shaped box {empty_box:?} above the drafted composer"
                     );
                 }
             }
@@ -6452,6 +6758,207 @@ mod tests {
                     case.fixture
                 );
             }
+        }
+    }
+
+    mod composer_geometry {
+        use crate::coding_agent::detector::tests::*;
+        use crate::coding_agent::geometry::Headroom;
+
+        const BOX_EMPTY: &str = "geometry-box-empty";
+        const BOX_TEXT: &str = "geometry-box-text";
+
+        fn box_rule(id: &str, observation: &str, matcher: &str) -> Value {
+            json!({
+                "id":id,"priority":if observation == "composer_text" { 40 } else { 50 },
+                "observation":observation,
+                "region":{"screen":"either","start_pattern":"^> ","end_pattern":"^-- footer$","max_rows":6,"cursor":"any"},
+                "matchers":[{"id":"prompt","scope":"line","pattern":matcher}],
+                "extract":{"operation":null,"choices":[]},
+                "verified_noninteraction":true
+            })
+        }
+
+        /// A `> ` composer above a `-- footer` row whose two rules both read composer text: the
+        /// empty rule fits with a 12-cell margin and the text rule's `text_geometry` narrows it
+        /// to 2 cells.
+        fn box_definition(text_matcher: &str) -> Value {
+            let mut value = definition(Some("0d"), Some("0d"));
+            let mut text = box_rule(BOX_TEXT, "composer_text", text_matcher);
+            text["text_geometry"] = json!({"margin_columns":2});
+            value["codex"]["profile"]["rules"] =
+                json!([box_rule(BOX_EMPTY, "composer_empty", "^> *$"), text]);
+            let composer = &mut value["codex"]["profile"]["capabilities"]["composer"];
+            composer["rule_ids"] = json!([BOX_EMPTY, BOX_TEXT]);
+            composer["text"] = json!({
+                "rule_ids":[BOX_EMPTY, BOX_TEXT],"first_prefix":"^> ","continuation_prefix":"^  ",
+                "wrap":"char","placeholders":[]
+            });
+            composer["geometry"] = json!({
+                "margin_columns":12,"first_row_margin_columns":0,
+                "text_window":{"fraction":0,"offset":0,"min":3},
+                "reserved_rows":{"steps":[[3,2]]},
+                "transient_rows":1,"wrap_slack_rows":0,"carried_space":false,"fit_wrap":"char","collapsed_paste":null,
+                "min_rows":4,"min_columns":20
+            });
+            value
+        }
+
+        fn catalog(text_matcher: &str) -> ProfileCatalog {
+            crate::coding_agent::catalog::test_support::load(&box_definition(text_matcher))
+                .unwrap_or_else(|error| panic!("{}", error.message()))
+        }
+
+        /// A `rows` x `cols` screen holding the composer row `composer` above the footer row.
+        fn box_screen(rows: u16, cols: u16, composer: &str) -> ScreenSnapshot {
+            let mut state = TerminalState::new(TerminalSize { rows, cols }).unwrap();
+            state
+                .feed(
+                    format!(
+                        "\x1b[2J\x1b[{};1H{composer}\x1b[{};1H-- footer",
+                        rows - 1,
+                        rows
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            state.snapshot()
+        }
+
+        struct SizeCase {
+            rows: u16,
+            cols: u16,
+            visible: usize,
+            empty_columns: Option<usize>,
+            text_columns: Option<usize>,
+        }
+
+        const SIZE_CASES: &[SizeCase] = &[
+            SizeCase {
+                rows: 9,
+                cols: 80,
+                visible: 3,
+                empty_columns: Some(68),
+                text_columns: Some(78),
+            },
+            SizeCase {
+                rows: 9,
+                cols: 120,
+                visible: 3,
+                empty_columns: Some(108),
+                text_columns: Some(118),
+            },
+            SizeCase {
+                rows: 12,
+                cols: 80,
+                visible: 3,
+                empty_columns: Some(68),
+                text_columns: Some(78),
+            },
+            SizeCase {
+                rows: 12,
+                cols: 120,
+                visible: 3,
+                empty_columns: Some(108),
+                text_columns: Some(118),
+            },
+            SizeCase {
+                rows: 4,
+                cols: 20,
+                visible: 2,
+                empty_columns: Some(8),
+                text_columns: Some(18),
+            },
+            SizeCase {
+                rows: 5,
+                cols: 40,
+                visible: 3,
+                empty_columns: Some(28),
+                text_columns: Some(38),
+            },
+            SizeCase {
+                rows: 2,
+                cols: 10,
+                visible: 0,
+                empty_columns: None,
+                text_columns: Some(8),
+            },
+        ];
+
+        #[test]
+        fn the_selected_rule_supplies_the_live_size_and_its_effective_geometry() {
+            let catalog = catalog("^> [^ ]");
+            let detector = Detector::new(&catalog, CodingAgent::Codex, Some(VERSION));
+            for case in SIZE_CASES {
+                let size = format!("{}x{}", case.rows, case.cols);
+                for (state, composer, rule, columns) in [
+                    ("empty", "> ", BOX_EMPTY, case.empty_columns),
+                    ("typed", "> abc", BOX_TEXT, case.text_columns),
+                ] {
+                    let label = format!("{state} {size}");
+                    let live = detector
+                        .composer_geometry(&box_screen(case.rows, case.cols, composer))
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("{label}: one composer.text rule matches"));
+                    assert_eq!((live.rows, live.cols), (case.rows, case.cols), "{label}");
+                    assert_eq!(
+                        Some(&live.geometry),
+                        catalog.composer_geometry(CodingAgent::Codex, rule).as_ref(),
+                        "{label}: the {rule} geometry"
+                    );
+                    assert_eq!(
+                        live.geometry.text_columns(live.cols),
+                        columns,
+                        "{label}: text columns"
+                    );
+                    assert_eq!(
+                        live.geometry
+                            .fit_rows("abc", live.cols, LiteralFraming::Plain),
+                        columns.map(|_| 1),
+                        "{label}: a one-row literal"
+                    );
+                }
+                let live = detector
+                    .composer_geometry(&box_screen(case.rows, case.cols, "> "))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    live.geometry.visible_text_rows(live.rows, Headroom::Zero),
+                    case.visible,
+                    "{size}: visible text rows"
+                );
+            }
+        }
+
+        #[test]
+        fn no_geometry_is_selected_when_no_rule_or_several_rules_match() {
+            let unmatched = Detector::new(&catalog("^> [^ ]"), CodingAgent::Codex, Some(VERSION));
+            assert!(
+                unmatched
+                    .composer_geometry(&box_screen(12, 80, "plain output"))
+                    .unwrap()
+                    .is_none(),
+                "no composer.text rule matches"
+            );
+            let ambiguous = Detector::new(&catalog("^>"), CodingAgent::Codex, Some(VERSION));
+            assert!(
+                ambiguous
+                    .composer_geometry(&box_screen(12, 80, "> "))
+                    .unwrap()
+                    .is_none(),
+                "both composer.text rules match"
+            );
+        }
+
+        #[test]
+        fn a_profile_without_composer_text_offers_no_geometry() {
+            let detector = Detector::new(&synthetic_catalog(), CodingAgent::Codex, Some(VERSION));
+            assert!(
+                detector
+                    .composer_geometry(&box_screen(12, 80, "> "))
+                    .unwrap()
+                    .is_none()
+            );
         }
     }
 }

@@ -11,6 +11,7 @@ use crate::broker::stored_enum;
 use crate::coding_agent::AnswerMatch;
 use crate::coding_agent::Detector;
 use crate::coding_agent::ProfileCatalog;
+use crate::coding_agent::geometry::LiveComposer;
 use crate::runtime::*;
 use std::time::Duration;
 use std::time::Instant;
@@ -91,6 +92,10 @@ pub(crate) struct ObservationController {
     diagnostic: Option<String>,
     visibility: Visibility,
     eligibility: InputEligibility,
+    /// The geometry of the composer the latest observation verified empty.
+    live_composer: Option<LiveComposer>,
+    /// The `(rows, cols)` of the latest observed screen.
+    pane_size: Option<(u16, u16)>,
     next_deadline: Option<Instant>,
     started: bool,
     exit: Option<PendingExit>,
@@ -233,6 +238,8 @@ impl ObservationController {
             diagnostic: None,
             visibility: Visibility::Unknown,
             eligibility: InputEligibility::Hold(GateReason::Unknown),
+            live_composer: None,
+            pane_size: None,
             next_deadline: None,
             started: false,
             exit: None,
@@ -502,6 +509,7 @@ impl ObservationController {
         self.diagnostic = Some(reason.as_str().into());
         self.visibility = Visibility::Unknown;
         self.eligibility = InputEligibility::Hold(GateReason::Gap);
+        self.live_composer = None;
         self.next_deadline = None;
         if self.terminal_fenced {
             self.terminal_observation_loss = self
@@ -703,6 +711,7 @@ impl ObservationController {
     ) -> Result<()> {
         let now = self.moment(clock)?;
         self.validate_output(screen)?;
+        self.note_pane_size(screen, &now);
         #[cfg(test)]
         if phase != ObservationPhase::Resize
             && let Some(capture) = &mut self.capture
@@ -740,6 +749,17 @@ impl ObservationController {
             .tracker
             .observe(observed, now.monotonic, &now.observed_at)?;
         self.retain(update)?;
+        if self.eligibility == InputEligibility::Hold(GateReason::Unknown)
+            && observed.kind == crate::coding_agent::ObservationKind::Unknown
+            && self.below_minimum()
+        {
+            self.eligibility = InputEligibility::Hold(GateReason::Geometry);
+        }
+        self.live_composer = if self.eligibility == InputEligibility::ComposerEmpty {
+            self.detector.composer_geometry(screen)?
+        } else {
+            None
+        };
         self.update_request(screen, observed)?;
         self.route(writer, now)
     }
@@ -780,6 +800,7 @@ impl ObservationController {
     ) -> Result<ObservationStatus> {
         let now = self.moment(clock)?;
         self.validate_output(current)?;
+        self.note_pane_size(current, &now);
         #[cfg(test)]
         if let Some(capture) = &mut self.capture {
             capture.observe(current, native_capture::CaptureTrigger::Timer, clock)?;
@@ -946,6 +967,55 @@ impl ObservationController {
         let status = self.status();
         status.retained_draft || self.exit.is_some() || self.gap.is_some()
     }
+    /// The live geometry of the composer the latest observation verified empty, or `None` when
+    /// it verified none or no single `composer.text` rule describes the screen.
+    pub(crate) fn live_composer(&self) -> Option<&LiveComposer> {
+        self.live_composer.as_ref()
+    }
+    /// Whether the latest observed pane is below the profile's minimum size; a profile
+    /// without composer geometry declares no minimum.
+    pub(crate) fn below_minimum(&self) -> bool {
+        self.pane_geometry()
+            .is_some_and(|geometry| geometry.below_minimum)
+    }
+    /// The latest observed pane size against the profile's minimum, or `None` before the
+    /// child's first screen or for a profile without composer geometry.
+    fn pane_geometry(&self) -> Option<PaneGeometry> {
+        let backend = crate::coding_agent::coding_agent(&self.run.backend)
+            .expect("an observed run records a known backend");
+        let (min_rows, min_columns) = self.catalog.composer_minimum(backend)?;
+        let (rows, columns) = self.pane_size.filter(|_| self.started)?;
+        Some(PaneGeometry {
+            rows,
+            columns,
+            min_rows,
+            min_columns,
+            below_minimum: rows < min_rows || columns < min_columns,
+        })
+    }
+    /// Records the screen's size, diagnosing the moment the pane turns below the minimum.
+    fn note_pane_size(&mut self, screen: &ScreenSnapshot, now: &ObservationMoment) {
+        let was_below = self.below_minimum();
+        self.pane_size = Some((screen.rows, screen.cols));
+        if let Some(geometry) = self
+            .pane_geometry()
+            .filter(|geometry| geometry.below_minimum)
+            && !was_below
+        {
+            self.diagnostics.record(
+                storage::RunnerDiagnosticSource::Observation,
+                &format!(
+                    "observation: pane {}x{} below the {} minimum {}x{}",
+                    geometry.rows,
+                    geometry.columns,
+                    self.run.backend,
+                    geometry.min_rows,
+                    geometry.min_columns
+                ),
+                &now.observed_at,
+            );
+        }
+    }
     pub(crate) fn status(&self) -> ObservationStatus {
         ObservationStatus {
             visibility: self.visibility,
@@ -989,6 +1059,7 @@ impl ObservationController {
             },
             writer_diagnostic: state.diagnostic.as_deref().map(storage::diagnostic_text),
             gap_open_since: self.gap.as_ref().map(|gap| gap.started_at.clone()),
+            geometry: self.pane_geometry(),
         }
     }
     #[cfg(test)]
@@ -7555,6 +7626,8 @@ pub(crate) enum GateReason {
     Candidate,
     Interaction,
     Unknown,
+    /// No rule matches a pane below the profile's minimum size.
+    Geometry,
     ObserverUnavailable,
     Gap,
 }
@@ -7575,6 +7648,7 @@ impl GateReason {
             Self::Candidate => "candidate",
             Self::Interaction => "interaction",
             Self::Unknown => "unknown",
+            Self::Geometry => "geometry",
             Self::ObserverUnavailable => "observer_unavailable",
             Self::Gap => "gap",
         }
@@ -7943,6 +8017,18 @@ pub(crate) struct ObservationHealth {
     pub(crate) diagnostic: Option<String>,
     pub(crate) writer_diagnostic: Option<String>,
     pub(crate) gap_open_since: Option<String>,
+    pub(crate) geometry: Option<PaneGeometry>,
+}
+
+/// The live pane size against the profile's minimum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PaneGeometry {
+    pub(crate) rows: u16,
+    pub(crate) columns: u16,
+    pub(crate) min_rows: u16,
+    pub(crate) min_columns: u16,
+    pub(crate) below_minimum: bool,
 }
 
 impl ObservationHealth {
@@ -7978,6 +8064,14 @@ impl ObservationHealth {
             !self.degraded || self.diagnostic.is_some(),
             "degraded health omits its diagnostic",
         )?;
+        if let Some(geometry) = &self.geometry {
+            ensure(
+                geometry.below_minimum
+                    == (geometry.rows < geometry.min_rows
+                        || geometry.columns < geometry.min_columns),
+                "health geometry below_minimum conflicts with its sizes",
+            )?;
+        }
         if self.eligibility == InputEligibility::ComposerEmpty {
             ensure(
                 self.visibility == Visibility::NotVisible
@@ -8865,9 +8959,94 @@ mod tests {
                 "hold:observer_unavailable",
             ),
             (InputEligibility::Hold(GateReason::Gap), "hold:gap"),
+            (
+                InputEligibility::Hold(GateReason::Geometry),
+                "hold:geometry",
+            ),
         ] {
             assert_eq!(eligibility.rendering(), expected, "{eligibility:?}");
         }
+    }
+
+    fn healthy_with(geometry: Option<PaneGeometry>) -> ObservationHealth {
+        ObservationHealth {
+            visibility: Visibility::NotVisible,
+            eligibility: InputEligibility::ComposerEmpty,
+            pending_count: 0,
+            gap_count: 0,
+            degraded: false,
+            diagnostic: None,
+            writer_diagnostic: None,
+            gap_open_since: None,
+            geometry,
+        }
+    }
+
+    fn pane(rows: u16, columns: u16, below_minimum: bool) -> PaneGeometry {
+        PaneGeometry {
+            rows,
+            columns,
+            min_rows: 9,
+            min_columns: 80,
+            below_minimum,
+        }
+    }
+
+    #[test]
+    fn health_geometry_reports_below_minimum_consistent_with_its_sizes() {
+        for (name, geometry, valid) in [
+            ("no profile geometry or no child", None, true),
+            ("at the minimum", Some(pane(9, 80, false)), true),
+            ("above the minimum", Some(pane(24, 120, false)), true),
+            ("rows below the minimum", Some(pane(8, 80, true)), true),
+            ("columns below the minimum", Some(pane(9, 79, true)), true),
+            (
+                "rows below the minimum reported clear",
+                Some(pane(8, 80, false)),
+                false,
+            ),
+            (
+                "columns below the minimum reported clear",
+                Some(pane(30, 40, false)),
+                false,
+            ),
+            (
+                "at the minimum reported below",
+                Some(pane(9, 80, true)),
+                false,
+            ),
+        ] {
+            assert_eq!(healthy_with(geometry).validate().is_ok(), valid, "{name}");
+        }
+    }
+
+    #[test]
+    fn health_geometry_follows_the_gap_start_with_its_ordered_keys() {
+        let value = serde_json::to_value(healthy_with(Some(pane(24, 120, false)))).unwrap();
+        let keys = value.as_object().unwrap().keys().collect::<Vec<_>>();
+        assert_eq!(keys[keys.len() - 2..], ["gap_open_since", "geometry"]);
+        assert_eq!(
+            value["geometry"],
+            serde_json::json!({"rows":24,"columns":120,"min_rows":9,"min_columns":80,"below_minimum":false})
+        );
+        assert_eq!(
+            value["geometry"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            [
+                "rows",
+                "columns",
+                "min_rows",
+                "min_columns",
+                "below_minimum"
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(healthy_with(None)).unwrap()["geometry"],
+            serde_json::Value::Null
+        );
     }
 
     mod observation_contract {

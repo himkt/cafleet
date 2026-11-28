@@ -561,6 +561,7 @@ stored_enum!(test_values InputDisposition, "member_input_operations.disposition"
 stored_enum!(StopCause, "member_input_operations.stop_cause", {
     InteractionCandidate => "interaction_candidate", InteractionOpen => "interaction_open",
     DeadlineExpired => "deadline_expired", LiteralMismatch => "literal_mismatch",
+    ComposerClipped => "composer_clipped", ComposerUnreadable => "composer_unreadable",
     SubmitUnconfirmed => "submit_unconfirmed", ShortWrite => "short_write",
     WriteFailed => "write_failed", RunnerStopped => "runner_stopped"
 });
@@ -573,6 +574,8 @@ impl StopCause {
                 | Self::InteractionOpen
                 | Self::DeadlineExpired
                 | Self::LiteralMismatch
+                | Self::ComposerClipped
+                | Self::ComposerUnreadable
                 | Self::SubmitUnconfirmed
         )
     }

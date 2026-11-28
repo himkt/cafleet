@@ -15,6 +15,7 @@ use crate::coding_agent::coding_agent;
 use crate::config::Settings;
 use crate::error::CafleetError;
 use crate::multiplexer::Multiplexer;
+use crate::multiplexer::layout::ColumnMember;
 use crate::multiplexer::layout::ColumnSide;
 use crate::multiplexer::layout::SlotChoice;
 use crate::multiplexer::layout::WindowOccupancy;
@@ -283,7 +284,10 @@ fn choose_member_slot(
     mux: &dyn Multiplexer,
     fleet_id: i64,
     director: &crate::broker::Placement,
+    creating: CodingAgent,
 ) -> Result<ChosenSlot, CafleetError> {
+    let catalog = ProfileCatalog::bundled();
+    let multiplexer = crate::multiplexer::MuxBackend::parse(&director.backend)?;
     let director_pane = director
         .mux_pane_id
         .clone()
@@ -291,8 +295,23 @@ fn choose_member_slot(
     let director_window = director.concrete_window_id().to_owned();
     let last_window_ordinal = broker::members::last_window_ordinal(conn, fleet_id)?;
     let mut occupied = broker::members::concrete_occupancy(conn, fleet_id)?;
+    let agents = broker::members::concrete_pane_agents(conn, fleet_id)?;
+    let column = |panes: Vec<String>| -> Result<Vec<ColumnMember>, CafleetError> {
+        panes
+            .into_iter()
+            .map(|pane| {
+                let agent = &agents[&pane];
+                let backend =
+                    coding_agent(agent).ok_or_else(|| CafleetError::InvalidStoredValue {
+                        field: "member_placements.coding_agent".into(),
+                        value: agent.clone(),
+                    })?;
+                Ok(ColumnMember { pane, backend })
+            })
+            .collect()
+    };
     let director_members = match occupied.first() {
-        Some(window) if window.window_ordinal == 0 => occupied.remove(0).right,
+        Some(window) if window.window_ordinal == 0 => column(occupied.remove(0).right)?,
         _ => Vec::new(),
     };
     let mut windows = vec![WindowOccupancy {
@@ -307,12 +326,18 @@ fn choose_member_slot(
         right: director_members,
         director_pane: Some(director_pane),
     }];
-    let found_free_slot = |windows: &[WindowOccupancy]| {
-        matches!(
-            choose_slot(fleet_id, windows, last_window_ordinal),
-            SlotChoice::Existing { .. }
+    let choose = |windows: &[WindowOccupancy]| {
+        choose_slot(
+            fleet_id,
+            windows,
+            last_window_ordinal,
+            catalog,
+            creating,
+            multiplexer,
         )
     };
+    let found_free_slot =
+        |windows: &[WindowOccupancy]| matches!(choose(windows), SlotChoice::Existing { .. });
     for window in occupied {
         if found_free_slot(&windows) {
             break;
@@ -325,13 +350,13 @@ fn choose_member_slot(
             window_id: window.mux_window_id,
             window_name: window.mux_window_name,
             height,
-            left: window.left,
-            right: window.right,
+            left: column(window.left)?,
+            right: column(window.right)?,
             director_pane: None,
         });
     }
     Ok(ChosenSlot {
-        choice: choose_slot(fleet_id, &windows, last_window_ordinal),
+        choice: choose(&windows),
         windows,
         last_window_ordinal,
     })
@@ -381,12 +406,18 @@ fn slot_target(slot: &ChosenSlot, session: &str) -> SlotTarget {
                 .iter()
                 .find(|window| window.ordinal == *ordinal)
                 .expect("the chosen slot's window was scanned");
+            let panes = |members: &[ColumnMember]| {
+                members
+                    .iter()
+                    .map(|member| member.pane.clone())
+                    .collect::<Vec<_>>()
+            };
             let (column_panes, other_panes) = match (side, &window.director_pane) {
                 (ColumnSide::Right, Some(director_pane)) => {
-                    (window.right.clone(), vec![director_pane.clone()])
+                    (panes(&window.right), vec![director_pane.clone()])
                 }
-                (ColumnSide::Right, None) => (window.right.clone(), window.left.clone()),
-                (ColumnSide::Left, _) => (window.left.clone(), window.right.clone()),
+                (ColumnSide::Right, None) => (panes(&window.right), panes(&window.left)),
+                (ColumnSide::Left, _) => (panes(&window.left), panes(&window.right)),
             };
             SlotTarget {
                 pane: PaneTarget::Column(ColumnTarget {
@@ -471,6 +502,7 @@ pub(crate) fn create_with_layout_wait(
         &*mux.bounded(crate::time::Deadline::until(deadline)),
         fleet_id,
         &director,
+        backend,
     )?;
     let target = slot_target(&slot, &director.mux_session);
     let hermes = (backend == crate::coding_agent::CodingAgent::Hermes)
@@ -852,7 +884,8 @@ fn observation_json(health: &ObservationHealth) -> Value {
     json!({"visibility":health.visibility.as_str(),"eligibility":health.eligibility.rendering(),
         "degraded":health.degraded,"diagnostic":health.diagnostic,
         "writer_diagnostic":health.writer_diagnostic,"pending_count":health.pending_count,
-        "gap_count":health.gap_count,"gap_open_since":health.gap_open_since})
+        "gap_count":health.gap_count,"gap_open_since":health.gap_open_since,
+        "geometry":health.geometry})
 }
 
 fn diagnostic_json(entry: &RunnerDiagnosticEntry) -> Value {
@@ -866,9 +899,16 @@ pub(crate) fn observation_suffix(probe: &ObservationProbe) -> String {
         ObservationProbe::Failed(_) => " observation=unavailable".to_owned(),
         ObservationProbe::Answered(None) => " observation=pending".to_owned(),
         ObservationProbe::Answered(Some(health)) => format!(
-            " observation={}{}",
+            " observation={}{}{}",
             health.eligibility.rendering(),
-            if health.degraded { " degraded" } else { "" }
+            if health.degraded { " degraded" } else { "" },
+            health
+                .geometry
+                .filter(|geometry| geometry.below_minimum)
+                .map_or_else(String::new, |geometry| format!(
+                    " geometry={}x{} below_minimum",
+                    geometry.rows, geometry.columns
+                ))
         ),
     }
 }
@@ -2426,7 +2466,8 @@ mod tests {
                         "writer_diagnostic",
                         "pending_count",
                         "gap_count",
-                        "gap_open_since"
+                        "gap_open_since",
+                        "geometry"
                     ]
                 );
                 assert_eq!(shown["runtime"]["observation_error"], Value::Null);
@@ -3721,6 +3762,7 @@ mod tests {
         use crate::runtime::observation::GateReason;
         use crate::runtime::observation::InputEligibility;
         use crate::runtime::observation::ObservationHealth;
+        use crate::runtime::observation::PaneGeometry;
         use crate::runtime::observation::Visibility;
         use serde_json::Value;
         use serde_json::json;
@@ -3737,6 +3779,7 @@ mod tests {
                 diagnostic: None,
                 writer_diagnostic: None,
                 gap_open_since: None,
+                geometry: None,
             }
         }
 
@@ -3750,6 +3793,7 @@ mod tests {
                 diagnostic: Some("sink_unavailable".into()),
                 writer_diagnostic: Some("database error: database is locked".into()),
                 gap_open_since: Some(OPENED.into()),
+                geometry: None,
             }
         }
 
@@ -3823,7 +3867,7 @@ mod tests {
                 name: "answered healthy",
                 probe: || ObservationProbe::Answered(Some(healthy())),
                 probe_name: "answered",
-                observation: || json!({"visibility":"not_visible","eligibility":"composer_empty","degraded":false,"diagnostic":null,"writer_diagnostic":null,"pending_count":0,"gap_count":0,"gap_open_since":null}),
+                observation: || json!({"visibility":"not_visible","eligibility":"composer_empty","degraded":false,"diagnostic":null,"writer_diagnostic":null,"pending_count":0,"gap_count":0,"gap_open_since":null,"geometry":null}),
                 error: None,
                 suffix: " observation=composer_empty",
             },
@@ -3831,11 +3875,48 @@ mod tests {
                 name: "answered degraded",
                 probe: || ObservationProbe::Answered(Some(degraded())),
                 probe_name: "answered",
-                observation: || json!({"visibility":"unknown","eligibility":"hold:gap","degraded":true,"diagnostic":"sink_unavailable","writer_diagnostic":"database error: database is locked","pending_count":2,"gap_count":3,"gap_open_since":OPENED}),
+                observation: || json!({"visibility":"unknown","eligibility":"hold:gap","degraded":true,"diagnostic":"sink_unavailable","writer_diagnostic":"database error: database is locked","pending_count":2,"gap_count":3,"gap_open_since":OPENED,"geometry":null}),
                 error: None,
                 suffix: " observation=hold:gap degraded",
             },
+            ShowCase {
+                name: "answered with its pane geometry",
+                probe: || ObservationProbe::Answered(Some(sized(24, 120, false))),
+                probe_name: "answered",
+                observation: || json!({"visibility":"not_visible","eligibility":"composer_empty","degraded":false,"diagnostic":null,"writer_diagnostic":null,"pending_count":0,"gap_count":0,"gap_open_since":null,"geometry":{"rows":24,"columns":120,"min_rows":9,"min_columns":80,"below_minimum":false}}),
+                error: None,
+                suffix: " observation=composer_empty",
+            },
+            ShowCase {
+                name: "answered below the minimum",
+                probe: || ObservationProbe::Answered(Some(below())),
+                probe_name: "answered",
+                observation: || json!({"visibility":"unknown","eligibility":"hold:geometry","degraded":false,"diagnostic":null,"writer_diagnostic":null,"pending_count":0,"gap_count":0,"gap_open_since":null,"geometry":{"rows":5,"columns":40,"min_rows":9,"min_columns":80,"below_minimum":true}}),
+                error: None,
+                suffix: " observation=hold:geometry geometry=5x40 below_minimum",
+            },
         ];
+
+        fn sized(rows: u16, columns: u16, below_minimum: bool) -> ObservationHealth {
+            ObservationHealth {
+                geometry: Some(PaneGeometry {
+                    rows,
+                    columns,
+                    min_rows: 9,
+                    min_columns: 80,
+                    below_minimum,
+                }),
+                ..healthy()
+            }
+        }
+
+        fn below() -> ObservationHealth {
+            ObservationHealth {
+                visibility: Visibility::Unknown,
+                eligibility: InputEligibility::Hold(GateReason::Geometry),
+                ..sized(5, 40, true)
+            }
+        }
 
         #[test]
         fn member_show_runtime_appends_the_probe_keys_for_each_outcome() {
@@ -3873,7 +3954,8 @@ mod tests {
                             "writer_diagnostic",
                             "pending_count",
                             "gap_count",
-                            "gap_open_since"
+                            "gap_open_since",
+                            "geometry"
                         ],
                         "{name}"
                     );

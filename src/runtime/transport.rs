@@ -1089,6 +1089,8 @@ pub(crate) struct ScreenSnapshot {
     pub(crate) title: String,
     pub(crate) rows: u16,
     pub(crate) cols: u16,
+    /// The reported viewport width or the widest source row in a cursorless capture.
+    pub(crate) painted_cols: u16,
     /// `(row, col)`; `None` for a capture whose source exposes no cursor.
     pub(crate) cursor: Option<(u16, u16)>,
     /// `None` for a capture whose source exposes no screen mode.
@@ -1206,9 +1208,15 @@ impl TerminalState {
     /// A fresh terminal of the capture's size with each captured row written at its row
     /// position, carrying exactly the cursor and screen mode the capture reports.
     pub(crate) fn replay(capture: &crate::multiplexer::ScreenCapture) -> Result<ScreenSnapshot> {
+        // A herdr layout can be narrower than the PTY that produced the captured rows.
+        let painted_cols = if capture.cursor.is_none() {
+            capture.widest_row_columns()
+        } else {
+            capture.cols
+        };
         let mut terminal = Self::new(TerminalSize {
             rows: capture.rows,
-            cols: capture.cols,
+            cols: capture.cols.max(painted_cols),
         })?;
         let mut bytes = Vec::new();
         if capture.alternate_screen == Some(true) {
@@ -1227,6 +1235,7 @@ impl TerminalState {
         Ok(ScreenSnapshot {
             cursor: capture.cursor,
             alternate_screen: capture.alternate_screen,
+            painted_cols,
             ..terminal.snapshot()
         })
     }
@@ -1239,6 +1248,7 @@ impl TerminalState {
             title: self.parser.callbacks().title.clone(),
             rows: rows.get(),
             cols: cols.get(),
+            painted_cols: cols.get(),
             cursor: Some(screen.cursor_position()),
             alternate_screen: Some(screen.alternate_screen()),
             screen_seq: self.sequence,
@@ -1601,6 +1611,19 @@ mod tests {
             .unwrap();
             assert_eq!((snapshot.rows, snapshot.cols), (5, 20));
             assert_eq!(rows_of(&snapshot), ["", "first row", "", "last row", ""]);
+        }
+
+        #[test]
+        fn a_herdr_capture_preserves_rows_wider_than_its_layout() {
+            let snapshot = TerminalState::replay(&capture(
+                (3, 5),
+                None,
+                None,
+                "\x1b[2m12345678界\x1b[0m\r\nnext\r\nlast\r\n",
+            ))
+            .unwrap();
+            assert_eq!((snapshot.rows, snapshot.cols), (3, 10));
+            assert_eq!(rows_of(&snapshot), ["12345678界", "next", "last"]);
         }
 
         #[test]

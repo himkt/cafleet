@@ -12,11 +12,14 @@ use crate::coding_agent::ComposerOperation;
 use crate::coding_agent::ProfileCatalog;
 use crate::coding_agent::StageGate;
 use crate::coding_agent::catalog::AnswerKey;
+use crate::coding_agent::catalog::CompareOutcome;
 use crate::coding_agent::coding_agent;
+use crate::coding_agent::geometry::Headroom;
 use crate::db::bounded_by_inherited;
 use crate::db::with_database_budget;
 use crate::error::CafleetError;
 use crate::pane_lock::PaneLock;
+use crate::runtime::preview::RungSelection;
 use crate::runtime::*;
 use crate::time::Deadline;
 use rusqlite::Connection;
@@ -179,6 +182,9 @@ pub(crate) struct InputCoordinator {
     bracketed_paste: bool,
     stall_bound: Duration,
     preview_wait: Option<PreviewWait>,
+    /// The sweep preview held for its composer fit at its last selection, with the reason its
+    /// diagnostic named, so a continuous hold records one diagnostic.
+    preview_hold: Option<(i64, &'static str)>,
     blocked_wait: Option<BlockedWait>,
     diagnostics: crate::runtime::diagnostics::RunnerDiagnostics,
     /// Reads the composer text back for the pre-submit comparison.
@@ -293,6 +299,9 @@ pub(crate) struct QueuedInput {
     /// When this entry last became a head that no interaction blocks; the stall watchdog runs
     /// from here, and an attempt start or a blocking interaction clears it.
     head_since: Option<Instant>,
+    /// The head's literal fit no form of the verified empty composer at its last selection,
+    /// which suspends its stall wait.
+    too_small: bool,
 }
 
 type DeliverySelection = (
@@ -305,6 +314,8 @@ enum DeliveryChoice {
     Ready(DeliverySelection),
     Waiting,
     PlainLimit(String),
+    /// The composer verifies empty but the input fits no form of it, for the named reason.
+    NoFit(&'static str),
 }
 
 struct ComposerInput<'a> {
@@ -440,6 +451,32 @@ enum InputPhase {
     Blocked,
     Closing,
     Verifying,
+    /// A typed preview waits, without the pane lock, for its whole literal to show.
+    Parked,
+}
+
+/// How long a typed preview whose literal the pane clips waits for the literal to show whole.
+pub(crate) const LATE_SUBMISSION_WINDOW: Duration = Duration::from_secs(120);
+const LATE_SUBMISSION_CHECK: Duration = Duration::from_secs(1);
+const LATE_SUBMISSION_ATTEMPT: Duration = Duration::from_secs(5);
+
+/// The outcome of counting a sweep preview's typing before its first literal byte.
+enum TypingCount {
+    /// Counted now or earlier, or not a sweep preview.
+    Counted,
+    /// Another writer holds the pane lock; the count waits for a later pass.
+    LockBusy,
+    /// The typing is refused and the attempt ended with zero bytes.
+    Refused(InputControlReply),
+}
+
+/// A preview's late-submission park: its stop cause and window, kept across a resumed attempt
+/// so a renewed park keeps the original window.
+#[derive(Clone, Copy)]
+struct LateSubmission {
+    cause: storage::StopCause,
+    until: Instant,
+    next_check: Instant,
 }
 
 struct PermissionSelection {
@@ -513,6 +550,9 @@ struct ComposerDelivery {
     literal: String,
     operation: ComposerOperation,
     deferred: Option<DeferredAttempt>,
+    late: Option<LateSubmission>,
+    /// A sweep preview's typing count once this attempt counted its typing.
+    typing: Option<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -525,6 +565,21 @@ struct PostSubmitVerification {
     until: Instant,
     output_seq: u64,
     episode_seq: Option<i64>,
+    queue_literal: Option<String>,
+}
+
+fn composer_stage_text(operation: ComposerOperation, literal: &[u8]) -> Result<[&str; 2]> {
+    let prefix = operation.prefix();
+    let body = literal
+        .strip_prefix(prefix)
+        .ok_or_else(|| error("composer literal stage lacks its operation prefix"))?;
+    let body = body
+        .strip_prefix(PASTE_OPEN)
+        .and_then(|framed| framed.strip_suffix(PASTE_CLOSE))
+        .unwrap_or(body);
+    let body = std::str::from_utf8(body).map_err(|_| error("composer literal is not UTF-8"))?;
+    let prefix = std::str::from_utf8(prefix).expect("operation prefixes are UTF-8");
+    Ok([prefix, body])
 }
 
 impl ComposerDelivery {
@@ -2015,6 +2070,7 @@ impl InputCoordinator {
         observation: &ObservationController,
         deadline: Instant,
     ) -> std::result::Result<Option<InputControlReply>, InputFailure> {
+        let previous_hold = self.preview_hold.take();
         let result = (|| {
             check_deadline(self.services.clock.now(), deadline)?;
             ensure(
@@ -2046,6 +2102,44 @@ impl InputCoordinator {
             if PaneLock::try_acquire(&self.database_url, &self.placement)?.is_none() {
                 return held("pane_input_busy");
             }
+            let parked = with_database_deadline(conn, deadline, |conn| {
+                storage::preview_parked_until(conn, message.message_id)
+            })?;
+            let typings = with_database_deadline(conn, deadline, |conn| {
+                storage::preview_typings(conn, message.message_id)
+            })?;
+            let mut exhausted = (typings >= 2).then_some("typings_exhausted");
+            if let Some(until) = parked {
+                if until > crate::time::format_utc(self.services.clock.wall_now()) {
+                    return held("preview_parked");
+                }
+                with_database_deadline(conn, deadline, |conn| {
+                    storage::clear_preview_park(conn, message.message_id)
+                })?;
+                if exhausted.is_some() {
+                    exhausted = Some(storage::StopCause::RunnerStopped.as_str());
+                } else {
+                    observation.publish_delivery_result(storage::preview_delivery_result_cause(
+                        message.message_id,
+                        storage::DeliveryMethod::Profile,
+                        "unknown",
+                        storage::StopCause::RunnerStopped,
+                    ));
+                }
+            }
+            if let Some(cause) = exhausted {
+                with_database_deadline(conn, deadline, |conn| {
+                    storage::stamp_preview(conn, &self.run.owner(), message.message_id)
+                })?;
+                self.record_diagnostic(
+                    storage::RunnerDiagnosticSource::PreviewSweep,
+                    &format!(
+                        "preview delivery: message {} abandoned after pointer retry: {cause}",
+                        message.message_id
+                    ),
+                );
+                return held("typings_exhausted");
+            }
             let input = ComposerInput {
                 operation: ComposerOperation::Prompt,
                 kind: AttemptKind::Preview {
@@ -2058,6 +2152,24 @@ impl InputCoordinator {
                     DeliveryChoice::Waiting => {
                         self.watch_preview(observation, message.message_id);
                         return held("composer_busy");
+                    }
+                    DeliveryChoice::NoFit(reason) => {
+                        if reason == "composer_too_small" {
+                            self.preview_wait = None;
+                        } else {
+                            self.watch_preview(observation, message.message_id);
+                        }
+                        if previous_hold != Some((message.message_id, reason)) {
+                            self.record_diagnostic(
+                                storage::RunnerDiagnosticSource::PreviewSweep,
+                                &format!(
+                                    "preview delivery: message {} held: {reason}",
+                                    message.message_id
+                                ),
+                            );
+                        }
+                        self.preview_hold = Some((message.message_id, reason));
+                        return held(reason);
                     }
                     DeliveryChoice::PlainLimit(cause) => {
                         return Err(error(format!(
@@ -2098,6 +2210,8 @@ impl InputCoordinator {
                     literal,
                     operation: ComposerOperation::Prompt,
                     deferred: None,
+                    late: None,
+                    typing: None,
                 })),
                 deadline,
                 phase: InputPhase::AwaitReservation,
@@ -2212,6 +2326,7 @@ impl InputCoordinator {
                     )?;
                     match selection {
                         DeliveryChoice::Waiting => Some("composer_busy"),
+                        DeliveryChoice::NoFit(reason) => Some(reason),
                         DeliveryChoice::PlainLimit(cause) => {
                             return Ok(Some(InputControlReply::Submission(
                                 SubmissionResult::rejected_before_write(cause),
@@ -2261,6 +2376,7 @@ impl InputCoordinator {
                             attempt_deadline: None,
                             obstacle: "delivery_budget_exhausted",
                             head_since: None,
+                            too_small: defer_reason == "composer_too_small",
                         });
                         operation
                     }
@@ -2290,8 +2406,10 @@ impl InputCoordinator {
                         SubmissionResult::rejected_before_write(cause),
                     )));
                 }
-                DeliveryChoice::Waiting => {
-                    return Err(error("a busy composer queues the input before selection"));
+                DeliveryChoice::Waiting | DeliveryChoice::NoFit(_) => {
+                    return Err(error(
+                        "a busy or unfitting composer queues the input before selection",
+                    ));
                 }
             };
             self.pending = Some(PendingInput {
@@ -2312,6 +2430,8 @@ impl InputCoordinator {
                     literal: input.literal,
                     operation: composer_operation,
                     deferred: None,
+                    late: None,
+                    typing: None,
                 })),
                 deadline,
                 phase: InputPhase::AwaitReservation,
@@ -2342,6 +2462,12 @@ impl InputCoordinator {
             Some(_) if Self::composer_eligible(observation) => {
                 (storage::DeliveryMethod::Profile, None)
             }
+            Some(_)
+                if observation.status().eligibility
+                    == InputEligibility::Hold(GateReason::Geometry) =>
+            {
+                return Ok(DeliveryChoice::NoFit("composer_too_small"));
+            }
             Some(_) => return Ok(DeliveryChoice::Waiting),
             None => (
                 storage::DeliveryMethod::Fallback,
@@ -2360,12 +2486,44 @@ impl InputCoordinator {
         let mut literal = render(literal);
         let mut framing = crate::coding_agent::catalog::LiteralFraming::Plain;
         if let Some(plan) = &composer {
-            if plan.literal_framing()
+            let bracketed = plan.literal_framing()
                 == crate::coding_agent::catalog::LiteralFraming::BracketedPaste
-                && self.bracketed_paste
-            {
+                && self.bracketed_paste;
+            if bracketed {
                 framing = crate::coding_agent::catalog::LiteralFraming::BracketedPaste;
-            } else if !plan.plain_literal_allowed(&literal) {
+            }
+            if let AttemptKind::Preview { message_id } = kind
+                && method == storage::DeliveryMethod::Profile
+                && self.verified_composer(operation)
+            {
+                let message = with_database_deadline(conn, deadline, |conn| {
+                    crate::broker::get_message(conn, message_id)
+                })?;
+                let counted = self
+                    .pending
+                    .as_ref()
+                    .and_then(PendingInput::composer)
+                    .is_some_and(|composer| composer.typing.is_some());
+                let typings = with_database_deadline(conn, deadline, |conn| {
+                    storage::preview_typings(conn, message_id)
+                })? - u8::from(counted);
+                let allowed = |literal: &str| bracketed || plan.plain_literal_allowed(literal);
+                literal = match crate::runtime::preview::select_rung(
+                    &message,
+                    typings,
+                    observation.live_composer(),
+                    framing,
+                    &allowed,
+                ) {
+                    RungSelection::Selected { literal, .. } => literal,
+                    RungSelection::ComposerTooSmall => {
+                        return Ok(DeliveryChoice::NoFit("composer_too_small"));
+                    }
+                    RungSelection::ComposerGeometryUnavailable => {
+                        return Ok(DeliveryChoice::NoFit("composer_geometry_unavailable"));
+                    }
+                };
+            } else if !bracketed && !plan.plain_literal_allowed(&literal) {
                 let AttemptKind::Preview { message_id } = kind else {
                     return Ok(DeliveryChoice::PlainLimit(
                         plan.plain_limit_refusal(&literal, &self.run.backend),
@@ -2375,6 +2533,19 @@ impl InputCoordinator {
                     crate::broker::get_message(conn, message_id)
                 })?;
                 literal = render(&crate::runtime::preview::pointer_preview_line(&message));
+            }
+            if !matches!(kind, AttemptKind::Preview { .. })
+                && method == storage::DeliveryMethod::Profile
+                && self.verified_composer(operation)
+            {
+                let Some(live) = observation.live_composer() else {
+                    return Ok(DeliveryChoice::NoFit("composer_geometry_unavailable"));
+                };
+                let prefix =
+                    std::str::from_utf8(operation.prefix()).expect("operation prefixes are UTF-8");
+                if !live.fits(&format!("{prefix}{literal}"), framing, Headroom::Transient) {
+                    return Ok(DeliveryChoice::NoFit("composer_too_small"));
+                }
             }
         }
         let stages = if let Some(plan) = &composer {
@@ -2405,6 +2576,11 @@ impl InputCoordinator {
     /// must stop, so fenced recovery settles and publishes the receipt.
     pub(super) fn deferred_failed(&self) -> bool {
         self.deferred_failed
+    }
+
+    /// The deadline of the in-flight attempt, which a late-submission park extends.
+    pub(super) fn pending_deadline(&self) -> Option<Instant> {
+        self.pending.as_ref().map(|pending| pending.deadline)
     }
 
     /// The sweep may start a preview only while no ordinary attempt is active and the FIFO is
@@ -2507,9 +2683,25 @@ impl InputCoordinator {
             record.state == storage::InputState::InProgress,
             "sweep preview state changed",
         )?;
-        if !self.verified_composer(ComposerOperation::Prompt) {
-            storage::stamp_preview(conn, &self.run.owner(), self.sweep_preview_message())?;
+        let message_id = self.sweep_preview_message();
+        let second = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .is_some_and(|composer| composer.typing == Some(2));
+        if !self.verified_composer(ComposerOperation::Prompt) || second {
+            storage::stamp_preview(conn, &self.run.owner(), message_id)?;
         }
+        if second && self.verified_composer(ComposerOperation::Prompt) {
+            self.record_diagnostic(
+                storage::RunnerDiagnosticSource::PreviewSweep,
+                &format!(
+                    "preview delivery: message {message_id} abandoned after pointer retry: {}",
+                    cause.as_str()
+                ),
+            );
+        }
+        storage::clear_preview_park(conn, message_id)?;
         record.state = storage::InputState::Uncertain;
         record.stop_cause = Some(cause);
         Ok(AttemptRecord::ReceiptFree(record))
@@ -2783,11 +2975,12 @@ impl InputCoordinator {
             Some(OrdinaryBlocker::Interaction)
         );
         let blocked = self.blocked_wait.is_some();
+        let below_minimum = observation.below_minimum();
         let stall_bound = self.stall_bound;
         let Some(head) = self.queue.front_mut() else {
             return;
         };
-        if interaction || blocked {
+        if interaction || blocked || below_minimum || head.too_small {
             head.head_since = None;
             head.stalled = false;
             return;
@@ -2810,6 +3003,10 @@ impl InputCoordinator {
     /// has held it for the stall bound.
     fn watch_preview(&mut self, observation: &ObservationController, message_id: i64) {
         let now = self.services.clock.now();
+        if observation.below_minimum() {
+            self.preview_wait = None;
+            return;
+        }
         if self
             .preview_wait
             .as_ref()
@@ -2937,11 +3134,12 @@ impl InputCoordinator {
                         "plain_limit_exceeded",
                     );
                 }
-                DeliveryChoice::Waiting => {
+                waiting @ (DeliveryChoice::Waiting | DeliveryChoice::NoFit(_)) => {
                     let head = self
                         .queue
                         .front_mut()
                         .expect("the waiting queue head remains");
+                    head.too_small = matches!(waiting, DeliveryChoice::NoFit("composer_too_small"));
                     head.attempt_deadline = None;
                     return Ok(());
                 }
@@ -3076,6 +3274,8 @@ impl InputCoordinator {
                     queued: head,
                     obstacle: "delivery_budget_exhausted",
                 }),
+                late: None,
+                typing: None,
             })),
             deadline: attempt_deadline,
             phase: InputPhase::AwaitBeforeWrite,
@@ -3261,6 +3461,7 @@ impl InputCoordinator {
             attempt_deadline: None,
             obstacle: "delivery_budget_exhausted",
             head_since: None,
+            too_small: false,
         });
         Ok(Some(InputControlReply::Submission(self.result(&operation))))
     }
@@ -3679,6 +3880,12 @@ impl InputCoordinator {
                     effective,
                     &mut terminal_bookkeeping,
                 ),
+                InputPhase::Parked => self.parked_turn(
+                    conn,
+                    (transport, observation),
+                    effective,
+                    &mut terminal_bookkeeping,
+                ),
             }
         })();
         let source = match result {
@@ -3752,7 +3959,7 @@ impl InputCoordinator {
             deadline,
         )?;
         let selection = match choice {
-            DeliveryChoice::Waiting => return Ok(None),
+            DeliveryChoice::Waiting | DeliveryChoice::NoFit(_) => return Ok(None),
             DeliveryChoice::PlainLimit(cause) => {
                 let mut rejection = SubmissionResult::rejected_before_write(cause);
                 if let Some(id) = id {
@@ -3971,10 +4178,15 @@ impl InputCoordinator {
     }
 
     /// Before a verified-composer submit key, the composer must render exactly the written
-    /// literal; every other stage, and a run whose profile reads no composer text, passes.
-    fn composer_renders_literal(&self, id: AttemptKey, transport: &Transport) -> Result<bool> {
+    /// literal; otherwise the stop cause its comparison class names. Every other stage, and a
+    /// run whose profile reads no composer text, passes.
+    fn composer_mismatch(
+        &self,
+        id: AttemptKey,
+        transport: &Transport,
+    ) -> Result<Option<storage::StopCause>> {
         let Some(composer) = self.pending.as_ref().and_then(PendingInput::composer) else {
-            return Ok(true);
+            return Ok(None);
         };
         let retained = self.operations.get(&id).expect("pending receipt remains");
         let RetainedSelection::Composer {
@@ -3988,32 +4200,27 @@ impl InputCoordinator {
             || *next_stage <= literal_index
             || !self.verified_composer(composer.operation)
         {
-            return Ok(true);
+            return Ok(None);
         }
-        let prefix = composer.operation.prefix();
-        let literal = &stages[literal_index];
-        let body = literal
-            .strip_prefix(prefix)
-            .ok_or_else(|| error("composer literal stage lacks its operation prefix"))?;
-        let body = body
-            .strip_prefix(PASTE_OPEN)
-            .and_then(|framed| framed.strip_suffix(PASTE_CLOSE))
-            .unwrap_or(body);
-        let body = std::str::from_utf8(body).map_err(|_| error("composer literal is not UTF-8"))?;
-        let prefix = std::str::from_utf8(prefix).expect("operation prefixes are UTF-8");
-        let chunks = [prefix, body]
+        let chunks = composer_stage_text(composer.operation, &stages[literal_index])?
             .into_iter()
             .filter(|chunk| !chunk.is_empty())
             .collect::<Vec<_>>();
-        Ok(self
-            .composer_reader
-            .composer_text(&transport.snapshot())?
-            .is_some_and(|text| text.matches(&chunks)))
+        Ok(
+            match self.composer_reader.composer_text(&transport.snapshot())? {
+                None => Some(storage::StopCause::ComposerUnreadable),
+                Some(text) => match text.compare(&chunks) {
+                    CompareOutcome::Complete => None,
+                    CompareOutcome::Partial => Some(storage::StopCause::ComposerClipped),
+                    CompareOutcome::Contradicts => Some(storage::StopCause::LiteralMismatch),
+                },
+            },
+        )
     }
 
     /// A literal can render after the settle ends, so the composer is re-observed until the
     /// pre-submit window after the settle closes; the attempt deadline closes it earlier, and
-    /// `arm_pending` then records the unmatched literal as `literal_mismatch`.
+    /// `arm_pending` then records the cause of the last comparison.
     fn pre_submit_window_open(&self) -> bool {
         self.pending
             .as_ref()
@@ -4075,13 +4282,15 @@ impl InputCoordinator {
             return Ok(None);
         }
         if let Some(cause) = self.composer_interruption(id, observation)? {
-            let cause = if cause == storage::StopCause::DeadlineExpired
-                && !self.composer_renders_literal(id, transport)?
-            {
-                storage::StopCause::LiteralMismatch
-            } else {
-                cause
+            let cause = match cause {
+                storage::StopCause::DeadlineExpired => {
+                    self.composer_mismatch(id, transport)?.unwrap_or(cause)
+                }
+                cause => cause,
             };
+            if self.parks(cause) {
+                return self.park_preview(conn, cause);
+            }
             *terminal_bookkeeping = true;
             return self.interrupt_composer(conn, id, observation, effective, cause);
         }
@@ -4095,22 +4304,24 @@ impl InputCoordinator {
             return Ok(None);
         }
         let fresh = self.fresh_drain(transport, observation, effective)?;
-        if !self.composer_renders_literal(id, transport)? {
+        if let Some(cause) = self.composer_mismatch(id, transport)? {
             if self.pre_submit_window_open() {
                 return Ok(None);
             }
+            if self.parks(cause) {
+                return self.park_preview(conn, cause);
+            }
             *terminal_bookkeeping = true;
-            return self.interrupt_composer(
-                conn,
-                id,
-                observation,
-                effective,
-                storage::StopCause::LiteralMismatch,
-            );
+            return self.interrupt_composer(conn, id, observation, effective, cause);
         }
         let Some(output_seq) = fresh else {
             return Ok(None);
         };
+        match self.count_preview_typing(conn, effective)? {
+            TypingCount::Counted => {}
+            TypingCount::LockBusy => return Ok(None),
+            TypingCount::Refused(reply) => return Ok(Some(reply)),
+        }
         let retained = self
             .operations
             .get_mut(&id)
@@ -4125,6 +4336,184 @@ impl InputCoordinator {
             effective,
         )?;
         Ok(None)
+    }
+
+    /// Counts a sweep preview's typing once, holding the pane lock, right before its first
+    /// literal byte; a refused typing ends the attempt with zero bytes.
+    fn count_preview_typing(
+        &mut self,
+        conn: &mut Connection,
+        effective: Instant,
+    ) -> Result<TypingCount> {
+        let Some(pending) = self.pending.as_ref() else {
+            return Ok(TypingCount::Counted);
+        };
+        let AttemptKind::Preview { message_id } = pending.request.kind else {
+            return Ok(TypingCount::Counted);
+        };
+        let composer = pending
+            .composer()
+            .expect("a sweep preview is a composer delivery");
+        if composer.typing.is_some() || composer.written_stages > 0 {
+            return Ok(TypingCount::Counted);
+        }
+        if !self.hold_composer_pane()? {
+            return Ok(TypingCount::LockBusy);
+        }
+        let now = crate::time::format_utc(self.services.clock.wall_now());
+        let counted = with_database_deadline(conn, effective, |conn| {
+            storage::count_preview_typing(conn, message_id, &now)
+        })?;
+        let Some(typing) = counted else {
+            self.pending = None;
+            self.operations.remove(&AttemptKey::SweepPreview);
+            return Ok(TypingCount::Refused(InputControlReply::Submission(
+                SubmissionResult::held("preview_typing_refused"),
+            )));
+        };
+        self.pending
+            .as_mut()
+            .and_then(PendingInput::composer_mut)
+            .expect("the counted preview remains")
+            .typing = Some(typing);
+        Ok(TypingCount::Counted)
+    }
+
+    /// Whether a pre-submit window closing with `cause` parks the attempt: only a sweep preview
+    /// on a verified-composer run whose literal the pane clips or hides parks.
+    fn parks(&self, cause: storage::StopCause) -> bool {
+        matches!(
+            cause,
+            storage::StopCause::ComposerClipped | storage::StopCause::ComposerUnreadable
+        ) && self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| matches!(pending.request.kind, AttemptKind::Preview { .. }))
+            && self.verified_composer(ComposerOperation::Prompt)
+    }
+
+    /// Parks the typed preview for late submission: records the park while the pane lock is
+    /// still held, then releases the lock. A renewed park keeps its original window.
+    fn park_preview(
+        &mut self,
+        conn: &mut Connection,
+        cause: storage::StopCause,
+    ) -> Result<Option<InputControlReply>> {
+        let now = self.services.clock.now();
+        let message_id = self.sweep_preview_message();
+        let recorded = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .expect("a parked preview is a composer delivery")
+            .late;
+        let late = match recorded {
+            Some(late) => LateSubmission {
+                next_check: now + LATE_SUBMISSION_CHECK,
+                ..late
+            },
+            None => {
+                let until = crate::time::format_utc(
+                    self.services.clock.wall_now()
+                        + chrono::Duration::from_std(LATE_SUBMISSION_WINDOW)
+                            .expect("the late-submission window is representable"),
+                );
+                if !storage::park_preview(conn, message_id, &until)? {
+                    return self.end_park_consumed(conn, message_id);
+                }
+                LateSubmission {
+                    cause,
+                    until: now + LATE_SUBMISSION_WINDOW,
+                    next_check: now + LATE_SUBMISSION_CHECK,
+                }
+            }
+        };
+        let pending = self.pending.as_mut().expect("the parked preview remains");
+        pending.phase = InputPhase::Parked;
+        pending.deadline = late.until + LATE_SUBMISSION_ATTEMPT;
+        let composer = pending
+            .composer_mut()
+            .expect("a parked preview is a composer delivery");
+        composer.late = Some(late);
+        composer.pane = None;
+        Ok(None)
+    }
+
+    /// Ends a park whose message a poll consumed: no submit key and no uncertain outcome.
+    fn end_park_consumed(
+        &mut self,
+        conn: &mut Connection,
+        message_id: i64,
+    ) -> Result<Option<InputControlReply>> {
+        storage::clear_preview_park(conn, message_id)?;
+        self.record_diagnostic(
+            storage::RunnerDiagnosticSource::PreviewSweep,
+            &format!("preview delivery: message {message_id} park ended: consumed"),
+        );
+        self.pending = None;
+        self.operations.remove(&AttemptKey::SweepPreview);
+        Ok(Some(InputControlReply::Submission(SubmissionResult::held(
+            "consumed",
+        ))))
+    }
+
+    /// Re-reads the parked message and compares the composer once per check interval: a whole
+    /// literal resumes the attempt toward its submit key, and contradicting text, an emptied
+    /// composer or the window's end stops it as uncertain.
+    fn parked_turn(
+        &mut self,
+        conn: &mut Connection,
+        (transport, observation): (&mut Transport, &ObservationController),
+        effective: Instant,
+        terminal_bookkeeping: &mut bool,
+    ) -> Result<Option<InputControlReply>> {
+        let id = self.reserved_attempt()?;
+        let now = self.services.clock.now();
+        let late = self
+            .pending
+            .as_ref()
+            .and_then(PendingInput::composer)
+            .and_then(|composer| composer.late)
+            .expect("a parked preview records its park");
+        if now < late.next_check && now < late.until {
+            return Ok(None);
+        }
+        self.pending
+            .as_mut()
+            .and_then(PendingInput::composer_mut)
+            .and_then(|composer| composer.late.as_mut())
+            .expect("a parked preview records its park")
+            .next_check = now + LATE_SUBMISSION_CHECK;
+        let message_id = self.sweep_preview_message();
+        let message = with_database_deadline(conn, effective, |conn| {
+            crate::broker::get_message(conn, message_id)
+        })?;
+        if message.status != crate::broker::MessageStatus::InputRequired {
+            return self.end_park_consumed(conn, message_id);
+        }
+        let stop = if now >= late.until || Self::composer_eligible(observation) {
+            Some(late.cause)
+        } else {
+            match self.composer_mismatch(id, transport)? {
+                None => {
+                    let pending = self.pending.as_mut().expect("the parked preview remains");
+                    pending.phase = InputPhase::AwaitBeforeWrite;
+                    pending.deadline = now + LATE_SUBMISSION_ATTEMPT;
+                    return Ok(None);
+                }
+                Some(storage::StopCause::LiteralMismatch) => {
+                    Some(storage::StopCause::LiteralMismatch)
+                }
+                Some(_) => None,
+            }
+        };
+        match stop {
+            Some(cause) => {
+                *terminal_bookkeeping = true;
+                self.interrupt_composer(conn, id, observation, effective, cause)
+            }
+            None => Ok(None),
+        }
     }
 
     /// Stops a staged composer delivery; a deferred attempt publishes its partial result
@@ -4379,10 +4768,25 @@ impl InputCoordinator {
             && let Some(composer) = self.pending.as_ref().and_then(PendingInput::composer)
             && self.verified_composer(composer.operation)
         {
+            let before_redraw = transport.snapshot();
+            let queue_literal =
+                if id == AttemptKey::SweepPreview && self.backend == CodingAgent::Claude {
+                    let literal_index =
+                        usize::from(composer.method == storage::DeliveryMethod::Fallback);
+                    let [_, literal] =
+                        composer_stage_text(composer.operation, &composer.stages[literal_index])?;
+                    (!self
+                        .composer_reader
+                        .has_queued_preview(&before_redraw, literal)?)
+                    .then(|| literal.to_owned())
+                } else {
+                    None
+                };
             let verification = PostSubmitVerification {
                 until: self.services.clock.now() + POST_SUBMIT_VERIFICATION,
-                output_seq: transport.snapshot().screen_seq,
+                output_seq: before_redraw.screen_seq,
                 episode_seq: observation.active_episode_seq(),
+                queue_literal,
             };
             let pending = self.pending.as_mut().expect("submitted input remains");
             pending
@@ -4854,13 +5258,26 @@ impl InputCoordinator {
         } else {
             false
         };
+        let status = observation.status();
         let new_interaction = observation.active_episode_seq().is_some_and(|episode| {
             verification
                 .episode_seq
                 .is_none_or(|before| episode > before)
-        }) && observation.status().eligibility
+        }) && status.eligibility
             != InputEligibility::Hold(GateReason::Candidate);
-        if fresh && (Self::composer_eligible(observation) || new_interaction) {
+        let queued = if fresh
+            && status.eligibility == InputEligibility::Hold(GateReason::Unknown)
+            && status.visibility == Visibility::NotVisible
+            && !status.retained_draft
+            && status.diagnostic.is_none()
+            && let Some(literal) = verification.queue_literal.as_deref()
+        {
+            self.composer_reader
+                .has_queued_preview(&transport.snapshot(), literal)?
+        } else {
+            false
+        };
+        if fresh && (Self::composer_eligible(observation) || new_interaction || queued) {
             let operation = with_database_deadline(conn, effective, |conn| {
                 self.validate_live_run(conn)?;
                 self.record_state(
@@ -5074,6 +5491,7 @@ impl InputCoordinator {
             bracketed_paste: false,
             stall_bound: STALL_BOUND,
             preview_wait: None,
+            preview_hold: None,
             blocked_wait: None,
             diagnostics: crate::runtime::diagnostics::RunnerDiagnostics::default(),
         })
@@ -6226,6 +6644,95 @@ mod tests {
                 }
             }
 
+            #[test]
+            fn claude_sweep_preview_confirms_only_its_exact_native_queue_echo() {
+                use crate::runtime::preview::cue_preview_line;
+
+                with_profile_host(
+                    ProfileCatalog::bundled().clone(),
+                    Vec::new(),
+                    HostProfile {
+                        backend: CodingAgent::Claude,
+                        size: TerminalSize { rows: 9, cols: 89 },
+                        screen: "\x1b[?1049h\x1b[6;1H───\r\n❯\u{a0}\r\n───\x1b[7;3H"
+                            .as_bytes()
+                            .to_vec(),
+                        ..HostProfile::metadata()
+                    },
+                    |host| {
+                        host.confirm_submissions = false;
+                        let run = &host.fixture.run;
+                        let message = crate::broker::send_message(
+                            &mut host.fixture.conn,
+                            run.director_member_id,
+                            run.member_id,
+                            "a preview for a busy Claude member",
+                        )
+                        .unwrap();
+                        let literal = cue_preview_line(&message);
+                        let program = [literal.as_bytes(), b"\r"].concat();
+                        host.pty.expect_program(program.clone());
+                        assert!(
+                            host.coordinator
+                                .handle_preview(
+                                    &mut host.fixture.conn,
+                                    &message,
+                                    &host.controller,
+                                    host.until
+                                )
+                                .unwrap()
+                                .is_none()
+                        );
+                        until_written(host, program.len());
+                        assert_eq!(host.pty.written, program);
+
+                        let queued = |echo: &str| {
+                            format!("\x1b[2J\x1b[3;1H❯ {echo}\r\n  ⎿  Queued · ctrl+enter to send now\x1b[6;1H───\r\n❯\u{a0}Press up to edit queued messages\r\n───\x1b[7;3H").into_bytes()
+                        };
+                        for (name, screen) in [
+                            (
+                                "another queued preview",
+                                queued("[cafleet msg 99] unrelated"),
+                            ),
+                            (
+                                "the same ID with different text",
+                                queued(&format!("{literal} edited")),
+                            ),
+                            (
+                                "the retained draft",
+                                format!("\x1b[2J\x1b[6;1H───\r\n❯\u{a0}{literal}\r\n───\x1b[7;10H")
+                                    .into_bytes(),
+                            ),
+                        ] {
+                            host.show(screen);
+                            assert!(
+                                turn(host).is_none(),
+                                "{name}: the sweep remains unconfirmed"
+                            );
+                        }
+                        let (first, rest) = literal.rsplit_once(' ').unwrap();
+                        host.show(queued(&format!("{first}\r\n  {rest}")));
+                        assert_eq!(
+                            host.controller.status().eligibility,
+                            InputEligibility::Hold(GateReason::Unknown)
+                        );
+                        let reply = native_verification_reply(host);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(reply.stage, SubmissionStage::Submitted);
+                        let notified: bool = host
+                            .fixture
+                            .conn
+                            .query_row(
+                                "SELECT notified_at IS NOT NULL FROM messages WHERE message_id=?1",
+                                [message.message_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap();
+                        assert!(notified, "the accepted queue echo stamps the preview");
+                    },
+                );
+            }
+
             /// Sends `body` to the run's member and drives the coordinator's receipt-free sweep
             /// preview of it to its reply, confirming each submit with the idle screen.
             pub(super) fn sweep_preview(
@@ -6255,12 +6762,21 @@ mod tests {
                 (message, reply)
             }
 
+            /// The compact preview with the longest stored excerpt whose literal `fits`.
+            fn longest_compact(
+                message: &crate::broker::MessageRecord,
+                fits: impl Fn(&str) -> bool,
+            ) -> String {
+                (1..=message.text.chars().count())
+                    .rev()
+                    .map(|prefix| crate::runtime::preview::compact_preview_line(message, prefix))
+                    .find(|literal| fits(literal))
+                    .expect("a one-scalar excerpt fits")
+            }
+
             #[test]
-            fn a_sweep_preview_renders_the_pointer_form_over_the_plain_limit_and_the_fallback_clause_without_a_plan()
-             {
-                use crate::runtime::preview::{
-                    canonical_preview_line, fallback_preview_line, pointer_preview_line,
-                };
+            fn a_sweep_preview_renders_the_rung_that_fits_and_the_fallback_clause_without_a_plan() {
+                use crate::runtime::preview::{canonical_preview_line, fallback_preview_line};
                 type Line = fn(&crate::broker::MessageRecord) -> String;
                 /// The case name, its catalog, the message body, the typed line and the bytes
                 /// framing it before and after.
@@ -6272,12 +6788,30 @@ mod tests {
                     &'static [u8],
                     &'static [u8],
                 );
-                let cases: [Case; 2] = [
+                let cases: [Case; 4] = [
                     (
-                        "a preview over the plain limit types its pointer form",
+                        "a preview that fits the pane types its full form",
+                        catalog(),
+                        "w".repeat(1700),
+                        canonical_preview_line,
+                        b"",
+                        b"~",
+                    ),
+                    (
+                        "a preview over the plain limit types its longest compact form within it",
                         configured("plain", json!({"unit":"bytes","max":1024})),
                         "あ".repeat(3000),
-                        pointer_preview_line,
+                        |message| longest_compact(message, |literal| literal.len() <= 1024),
+                        b"",
+                        b"~",
+                    ),
+                    (
+                        "a preview taller than the 24x80 pane types its longest compact form",
+                        catalog(),
+                        "w".repeat(2500),
+                        |message| {
+                            longest_compact(message, |literal| literal.chars().count() <= 24 * 80)
+                        },
                         b"",
                         b"~",
                     ),
@@ -6477,9 +7011,16 @@ mod tests {
             #[test]
             fn positive_short_literal_writes_continue_without_settling_between_chunks() {
                 let literal = "あ".repeat(4000);
-                with_catalog_host(
+                crate::runtime::input::tests::ordinary_prompt::support::with_profile_host(
                     configured("plain", Value::Null),
                     program(&literal, false),
+                    crate::runtime::input::tests::ordinary_prompt::support::HostProfile {
+                        size: TerminalSize {
+                            rows: 110,
+                            cols: 80,
+                        },
+                        ..crate::runtime::input::tests::ordinary_prompt::support::HostProfile::metadata()
+                    },
                     |host| {
                         host.pty.short = Some(1000);
                         start(host, "prompt:long-chunks", &literal);
@@ -7331,15 +7872,59 @@ mod tests {
                     }
                 }
 
+                /// The literal's first twelve scalars on the synthetic composer row.
+                const SHOWN_PREFIX: &str = "Synthetic input: ordinary fix";
+
                 #[test]
-                fn an_unextractable_composer_records_literal_mismatch() {
+                fn each_pre_submit_class_records_its_stop_cause_without_a_submit_key() {
+                    let cases: [(&str, Vec<u8>, storage::StopCause); 3] = [
+                        (
+                            "unrelated output leaves no composer text",
+                            b"\x1b[2J\x1b[1;1Hunrelated output".to_vec(),
+                            storage::StopCause::ComposerUnreadable,
+                        ),
+                        (
+                            "the screen bottom clips the literal's tail",
+                            format!("\x1b[2J\x1b[24;1H{SHOWN_PREFIX}").into_bytes(),
+                            storage::StopCause::ComposerClipped,
+                        ),
+                        (
+                            "a whole composer missing the literal's tail",
+                            format!("\x1b[2J\x1b[23;1H{SHOWN_PREFIX}\r\nState end").into_bytes(),
+                            storage::StopCause::LiteralMismatch,
+                        ),
+                    ];
+                    for (name, screen, cause) in cases {
+                        with_host(|host| {
+                            start(host, "prompt:pre-submit-class", LITERAL);
+                            until_written(host, LITERAL.len());
+                            host.child_output(&screen);
+                            let reply = reply_after(host);
+                            assert_uncertain(host, &reply, cause);
+                            assert_eq!(reply.stage, SubmissionStage::Partial, "{name}");
+                            assert!(host.pty.program.is_empty(), "{name}: no submit key");
+                            assert!(!erased(host), "{name}: nothing is erased");
+                            assert_eq!(host.pty.written, LITERAL.as_bytes(), "{name}");
+                        });
+                    }
+                }
+
+                #[test]
+                fn a_clipped_literal_revealed_within_the_pre_submit_window_is_submitted() {
                     with_host(|host| {
-                        start(host, "prompt:pre-submit-unextractable", LITERAL);
+                        start(host, "prompt:pre-submit-clipped-reveal", LITERAL);
                         until_written(host, LITERAL.len());
-                        host.child_output(b"\x1b[2J\x1b[1;1Hunrelated output");
-                        let reply = reply_after(host);
-                        assert_mismatch_without_submit(host, &reply);
-                        assert_eq!(host.pty.written, LITERAL.as_bytes());
+                        host.child_output(format!("\x1b[2J\x1b[24;1H{SHOWN_PREFIX}").as_bytes());
+                        hold_for(host, crate::runtime::input::PRE_SUBMIT_WINDOW / 2);
+                        host.child_output(
+                            crate::coding_agent::catalog::test_support::synthetic_composer_echo(
+                                LITERAL,
+                            ),
+                        );
+                        let reply = finish(host, true);
+                        assert_eq!(reply.status, SubmissionStatus::Accepted);
+                        assert_eq!(stored(host, &reply).stop_cause, None);
+                        assert_eq!(host.pty.written, encoded());
                     });
                 }
 
@@ -7433,7 +8018,7 @@ mod tests {
                 }
 
                 #[test]
-                fn a_mismatched_preview_is_typed_again_once_the_composer_is_cleared() {
+                fn a_mismatched_preview_is_retyped_as_its_pointer_once_the_composer_is_cleared() {
                     type Clear = fn(&mut Host);
                     let cases: [(&str, Clear); 2] = [
                         ("the user clears the composer", |_| {}),
@@ -7470,14 +8055,22 @@ mod tests {
                             clear(host);
                             host.pty.clear_composer();
                             host.show(SCREEN.to_vec());
-                            host.pty.expect_program(program.clone());
+                            let retry = [
+                                crate::runtime::preview::pointer_preview_line(&message).as_bytes(),
+                                b"~",
+                            ]
+                            .concat();
+                            host.pty.expect_program(retry.clone());
                             let reply = match preview(host, &message) {
                                 Some(reply) => submitted(reply),
                                 None => finish(host, true),
                             };
                             assert_eq!(reply.status, SubmissionStatus::Accepted, "{name}");
-                            assert!(host.pty.written.ends_with(&program), "{name}");
-                            assert_eq!(host.pty.program, std::slice::from_ref(&program), "{name}");
+                            assert!(
+                                host.pty.written.ends_with(&retry),
+                                "{name}: the single retry is the pointer rung"
+                            );
+                            assert_eq!(host.pty.program, std::slice::from_ref(&retry), "{name}");
                         });
                     }
                 }
@@ -9549,6 +10142,356 @@ mod tests {
                         input.delivery_reason.as_deref(),
                         Some("observer_unavailable")
                     );
+                });
+            }
+        }
+
+        mod geometry_hold {
+            use crate::broker::runtime::RunnerDiagnosticSource;
+            use crate::runtime::TerminalSize;
+            use crate::runtime::input::tests::ordinary_prompt::composer_busy::hold_turns;
+            use crate::runtime::input::tests::ordinary_prompt::composer_reliability::finish;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::housekeep;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::queued;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::row;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::stalled_payloads;
+            use crate::runtime::input::tests::ordinary_prompt::deferred_queue::turns_until;
+            use crate::runtime::input::tests::ordinary_prompt::*;
+            use serde_json::json;
+
+            const UNRELATED: &[u8] = b"\x1b[2J\x1b[1;1Hunrelated output";
+            const STALL_BOUND: Duration = Duration::from_secs(2);
+
+            /// The prompt-plan catalog with its composer capability adjusted by `change`.
+            fn composer_catalog(change: impl FnOnce(&mut Value)) -> ProfileCatalog {
+                let mut definition = catalog_definition();
+                change(&mut definition["codex"]["profile"]["capabilities"]["composer"]);
+                prompt_plan_catalog(&definition)
+            }
+
+            /// Ten text columns and, at 24 rows, one visible text row: the literal and every
+            /// preview rung need two, which a 27-row pane gives.
+            fn narrow() -> ProfileCatalog {
+                composer_catalog(|composer| {
+                    composer["geometry"]["margin_columns"] = json!(70);
+                    composer["geometry"]["reserved_rows"] = json!(23);
+                })
+            }
+
+            /// A 30-row minimum, which the 24-row host pane is below.
+            fn tall_minimum() -> ProfileCatalog {
+                composer_catalog(|composer| composer["geometry"]["min_rows"] = json!(30))
+            }
+
+            /// A `composer.text` that reads only typed rows, so the verified empty composer
+            /// selects no rule.
+            fn unselectable() -> ProfileCatalog {
+                composer_catalog(|composer| {
+                    composer["text"]["rule_ids"] =
+                        json!([crate::coding_agent::catalog::test_support::SYNTHETIC_TEXT_RULE]);
+                })
+            }
+
+            fn with_geometry_host(catalog: ProfileCatalog, body: impl FnOnce(&mut Host)) {
+                with_profile_host_until(
+                    catalog,
+                    encoded(),
+                    HostProfile::metadata(),
+                    Instant::now() + Duration::from_secs(60),
+                    |host| {
+                        host.coordinator.set_stall_bound(STALL_BOUND);
+                        body(host);
+                    },
+                );
+            }
+
+            /// Resizes the pane to `rows` x 80 and repaints `screen`.
+            fn resize(host: &mut Host, rows: u16, screen: &[u8]) {
+                host.transport
+                    .resize(&mut host.pty, TerminalSize { rows, cols: 80 })
+                    .unwrap();
+                host.show(screen.to_vec());
+            }
+
+            /// A typed draft in the synthetic composer, which holds it as a non-empty composer.
+            fn draft() -> Vec<u8> {
+                format!(
+                    "\x1b[2J\x1b[23;1H{}\r\nState end",
+                    crate::coding_agent::catalog::test_support::synthetic_composer_line("draft")
+                )
+                .into_bytes()
+            }
+
+            fn message(host: &mut Host, body: &str) -> crate::broker::MessageRecord {
+                let run = host.fixture.run.clone();
+                crate::broker::send_message(
+                    &mut host.fixture.conn,
+                    run.director_member_id,
+                    run.member_id,
+                    body,
+                )
+                .unwrap()
+            }
+
+            fn preview(
+                host: &mut Host,
+                message: &crate::broker::MessageRecord,
+            ) -> Option<InputControlReply> {
+                let until = host.until;
+                host.coordinator
+                    .handle_preview(&mut host.fixture.conn, message, &host.controller, until)
+                    .unwrap()
+            }
+
+            /// The reason the sweep holds `message` for, with zero bytes written.
+            fn held(host: &mut Host, message: &crate::broker::MessageRecord) -> String {
+                let reply = submitted(preview(host, message).expect("a held preview replies"));
+                assert_eq!(reply.status, SubmissionStatus::Held, "{:?}", reply.reason);
+                assert!(
+                    host.pty.offers.is_empty(),
+                    "zero bytes: {:?}",
+                    host.pty.offers
+                );
+                reply.reason.expect("a hold names its reason")
+            }
+
+            fn preview_stalls(host: &mut Host, message_id: i64) -> usize {
+                host.drain();
+                let count: i64 = host
+                    .fixture
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM member_runtime_events WHERE run_id=?1 AND kind='input_delivery_stalled' AND json_extract(payload_json,'$.message_id')=?2",
+                        rusqlite::params![host.fixture.run.run_id, message_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                usize::try_from(count).unwrap()
+            }
+
+            /// The total count of preview-sweep diagnostics reading `message`, buffered or
+            /// flushed.
+            fn sweep_diagnostic_count(host: &Host, message: &str) -> i64 {
+                let buffered: i64 = host
+                    .coordinator
+                    .diagnostics
+                    .snapshot()
+                    .0
+                    .into_iter()
+                    .filter(|entry| {
+                        entry.source == RunnerDiagnosticSource::PreviewSweep
+                            && entry.message == message
+                    })
+                    .map(|entry| entry.count)
+                    .sum();
+                let flushed: i64 = host
+                    .fixture
+                    .conn
+                    .query_row(
+                        "SELECT COALESCE(SUM(count),0) FROM member_runner_diagnostics WHERE run_id=?1 AND source='preview_sweep' AND message=?2",
+                        rusqlite::params![host.fixture.run.run_id, message],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                buffered + flushed
+            }
+
+            /// Repeats the hold past the stall bound.
+            fn hold_past_the_stall_bound(
+                host: &mut Host,
+                message: &crate::broker::MessageRecord,
+                reason: &str,
+            ) {
+                for _ in 0..3 {
+                    assert_eq!(held(host, message), reason);
+                    host.clock.advance(STALL_BOUND);
+                }
+                assert_eq!(held(host, message), reason);
+            }
+
+            #[test]
+            fn an_unmatched_screen_below_the_minimum_holds_for_geometry() {
+                type Case = (
+                    &'static str,
+                    fn() -> ProfileCatalog,
+                    &'static [u8],
+                    InputEligibility,
+                );
+                let cases: [Case; 4] = [
+                    (
+                        "an unmatched screen below the minimum",
+                        tall_minimum,
+                        UNRELATED,
+                        InputEligibility::Hold(GateReason::Geometry),
+                    ),
+                    (
+                        "an unmatched screen at the minimum",
+                        catalog,
+                        UNRELATED,
+                        InputEligibility::Hold(GateReason::Unknown),
+                    ),
+                    (
+                        "an empty composer below the minimum",
+                        tall_minimum,
+                        SCREEN,
+                        InputEligibility::ComposerEmpty,
+                    ),
+                    (
+                        "a draft below the minimum",
+                        tall_minimum,
+                        b"\x1b[2J\x1b[23;1HSynthetic input: draft\r\nState end",
+                        InputEligibility::Hold(GateReason::Unknown),
+                    ),
+                ];
+                for (name, catalog, screen, eligibility) in cases {
+                    with_geometry_host(catalog(), |host| {
+                        host.show(screen.to_vec());
+                        assert_eq!(host.controller.status().eligibility, eligibility, "{name}");
+                    });
+                }
+            }
+
+            #[test]
+            fn a_preview_that_fits_no_rung_holds_without_stalling_and_a_grow_delivers_it() {
+                with_geometry_host(narrow(), |host| {
+                    let message = message(host, "held until the pane grows");
+                    hold_past_the_stall_bound(host, &message, "composer_too_small");
+                    assert_eq!(preview_stalls(host, message.message_id), 0, "no stall wait");
+                    assert_eq!(
+                        sweep_diagnostic_count(
+                            host,
+                            &format!(
+                                "preview delivery: message {} held: composer_too_small",
+                                message.message_id
+                            ),
+                        ),
+                        1,
+                        "one diagnostic per continuous hold"
+                    );
+                    resize(host, 27, SCREEN);
+                    let program = [
+                        crate::runtime::preview::minimal_preview_line(&message).as_bytes(),
+                        b"~",
+                    ]
+                    .concat();
+                    host.pty.expect_program(program.clone());
+                    let reply = match preview(host, &message) {
+                        Some(reply) => submitted(reply),
+                        None => finish(host, true),
+                    };
+                    assert_eq!(reply.status, SubmissionStatus::Accepted);
+                    assert_eq!(
+                        host.pty.written, program,
+                        "the grow delivers the minimal rung"
+                    );
+                });
+            }
+
+            #[test]
+            fn an_unmatched_screen_below_the_minimum_holds_a_preview_without_stalling() {
+                with_geometry_host(tall_minimum(), |host| {
+                    host.show(UNRELATED.to_vec());
+                    let message = message(host, "held behind a short unmatched pane");
+                    for _ in 0..3 {
+                        let _ = held(host, &message);
+                        host.clock.advance(STALL_BOUND);
+                    }
+                    assert_eq!(preview_stalls(host, message.message_id), 0);
+                });
+            }
+
+            #[test]
+            fn a_draft_below_the_minimum_starts_its_stall_wait_only_after_a_grow() {
+                with_geometry_host(tall_minimum(), |host| {
+                    host.show(draft());
+                    let message = message(host, "held behind a draft");
+                    hold_past_the_stall_bound(host, &message, "composer_busy");
+                    assert_eq!(
+                        preview_stalls(host, message.message_id),
+                        0,
+                        "a below-minimum pane suspends the wait"
+                    );
+                    resize(host, 30, &draft());
+                    assert_eq!(held(host, &message), "composer_busy");
+                    host.clock.advance(STALL_BOUND / 2);
+                    assert_eq!(held(host, &message), "composer_busy");
+                    assert_eq!(
+                        preview_stalls(host, message.message_id),
+                        0,
+                        "the wait starts fresh at the grow"
+                    );
+                    host.clock.advance(STALL_BOUND);
+                    assert_eq!(held(host, &message), "composer_busy");
+                    assert_eq!(preview_stalls(host, message.message_id), 1);
+                });
+            }
+
+            #[test]
+            fn a_preview_without_a_selected_rule_holds_and_keeps_its_stall_wait() {
+                with_geometry_host(unselectable(), |host| {
+                    let message = message(host, "held by an undescribed screen");
+                    hold_past_the_stall_bound(host, &message, "composer_geometry_unavailable");
+                    assert!(
+                        sweep_diagnostic_count(
+                            host,
+                            &format!(
+                                "preview delivery: message {} held: composer_geometry_unavailable",
+                                message.message_id
+                            ),
+                        ) > 0,
+                        "the hold is diagnosed"
+                    );
+                    assert_eq!(
+                        preview_stalls(host, message.message_id),
+                        1,
+                        "only a profile correction resolves it, so the wait runs"
+                    );
+                });
+            }
+
+            #[test]
+            fn a_prompt_that_fits_no_composer_queues_without_stalling_and_drains_after_a_grow() {
+                with_geometry_host(narrow(), |host| {
+                    let id = queued(host, host.request("prompt:too-small"), "composer_too_small");
+                    hold_turns(host);
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
+                    for _ in 0..3 {
+                        housekeep(host);
+                        host.clock.advance(STALL_BOUND);
+                    }
+                    housekeep(host);
+                    host.drain();
+                    assert!(stalled_payloads(host, id).is_empty(), "no head stall wait");
+                    resize(host, 27, SCREEN);
+                    turns_until(host, |host| {
+                        matches!(
+                            row(host, id).state,
+                            storage::InputState::Accepted | storage::InputState::Settled
+                        )
+                    });
+                    assert_eq!(
+                        host.pty.stage_bytes(),
+                        vec![LITERAL.as_bytes().to_vec(), b"~".to_vec()]
+                    );
+                    assert_eq!(
+                        row(host, id).defer_reason.as_deref(),
+                        Some("composer_too_small")
+                    );
+                });
+            }
+
+            #[test]
+            fn a_prompt_without_a_selected_rule_queues_under_geometry_unavailable() {
+                with_geometry_host(unselectable(), |host| {
+                    let id = queued(
+                        host,
+                        host.request("prompt:unselectable"),
+                        "composer_geometry_unavailable",
+                    );
+                    hold_turns(host);
+                    assert!(host.pty.offers.is_empty(), "{:?}", host.pty.offers);
+                    assert_eq!(row(host, id).state, storage::InputState::Ready);
                 });
             }
         }

@@ -526,11 +526,90 @@ pub(crate) fn stamp_preview(
             "preview recipient changed",
         )?;
         conn.execute(
-            "UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND notified_at IS NULL",
+            "UPDATE messages SET notified_at=?1, preview_parked_until=NULL WHERE message_id=?2 AND notified_at IS NULL",
             params![now_stamp(), message_id],
         )?;
         Ok(())
     })
+}
+
+/// Parks a typed preview for late submission until `until`; `false` when the message is
+/// already notified or no longer `input_required`.
+pub(crate) fn park_preview(
+    conn: &Connection,
+    message_id: i64,
+    until: &str,
+) -> Result<bool, CafleetError> {
+    let parked = conn.execute(
+        "UPDATE messages SET preview_parked_until=?2 WHERE message_id=?1 AND notified_at IS NULL AND status_state='input_required'",
+        params![message_id, until],
+    )?;
+    Ok(parked == 1)
+}
+
+/// Counts one typing of a preview immediately before its first literal byte, returning the
+/// count it reaches. Only pending, unnotified previews below the typing limit and without
+/// an active park are eligible.
+pub(crate) fn count_preview_typing(
+    conn: &Connection,
+    message_id: i64,
+    now: &str,
+) -> Result<Option<u8>, CafleetError> {
+    let counted = conn
+        .query_row(
+            "UPDATE messages SET preview_typings=preview_typings+1 WHERE message_id=?1 AND status_state='input_required' AND preview_typings<2 AND notified_at IS NULL AND (preview_parked_until IS NULL OR preview_parked_until<=?2) RETURNING preview_typings",
+            params![message_id, now],
+            |row| row.get::<_, u8>(0),
+        )
+        .optional()?;
+    Ok(counted)
+}
+
+/// Releases the reserved count after a proven zero-byte attempt, under the pane input lock.
+pub(crate) fn release_preview_typing(
+    conn: &Connection,
+    message_id: i64,
+    reserved: u8,
+) -> Result<(), CafleetError> {
+    let released = conn.execute(
+        "UPDATE messages SET preview_typings=preview_typings-1 WHERE message_id=?1 AND preview_typings=?2 AND preview_typings>0",
+        params![message_id, reserved],
+    )?;
+    require(
+        released == 1,
+        "preview_typings",
+        "the reserved preview typing count changed under the pane input lock",
+    )
+}
+
+/// How many times a preview has been typed.
+pub(crate) fn preview_typings(conn: &Connection, message_id: i64) -> Result<u8, CafleetError> {
+    Ok(conn.query_row(
+        "SELECT preview_typings FROM messages WHERE message_id=?1",
+        params![message_id],
+        |row| row.get(0),
+    )?)
+}
+
+/// Ends a preview's late-submission park.
+pub(crate) fn clear_preview_park(conn: &Connection, message_id: i64) -> Result<(), CafleetError> {
+    conn.execute(
+        "UPDATE messages SET preview_parked_until=NULL WHERE message_id=?1",
+        params![message_id],
+    )?;
+    Ok(())
+}
+
+/// The end of a preview's late-submission park, or `None` when it is not parked.
+pub(crate) fn preview_parked_until(
+    conn: &Connection,
+    message_id: i64,
+) -> Result<Option<String>, CafleetError> {
+    Ok(conn.query_row(
+        "SELECT preview_parked_until FROM messages WHERE message_id=?1",
+        params![message_id],
+        |row| row.get(0),
+    )?)
 }
 
 /// Stamps a Director preview's `notified_at`; `false` when the column was already set.
@@ -547,7 +626,7 @@ pub(crate) fn stamp_director_preview(
             "director preview recipient changed",
         )?;
         let stamped = conn.execute(
-            "UPDATE messages SET notified_at=?1 WHERE message_id=?2 AND notified_at IS NULL",
+            "UPDATE messages SET notified_at=?1, preview_parked_until=NULL WHERE message_id=?2 AND notified_at IS NULL",
             params![now_stamp(), message_id],
         )?;
         Ok(stamped == 1)
